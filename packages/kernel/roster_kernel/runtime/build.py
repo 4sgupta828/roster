@@ -15,6 +15,8 @@ from roster_kernel.providers.embeddings import (
     OPENAI_EMBED_DIM,
     CassetteEmbedder,
     Embedder,
+    FakeEmbedder,
+    LocalEmbedder,
     OpenAIEmbedder,
 )
 from roster_kernel.providers.llm import CassetteLLM, LLMClient
@@ -68,9 +70,31 @@ def build_llm(*, mode: ProviderMode | str | None = None, cassette_root: Path | N
 def build_embedder(*, mode: ProviderMode | str | None = None, cassette_root: Path | None = None,
                    dim: int = OPENAI_EMBED_DIM) -> Embedder:
     m = resolve_mode(mode)
-    inner = None if m is ProviderMode.REPLAY else OpenAIEmbedder(dim=dim)
+    inner = None if m is ProviderMode.REPLAY else _live_embedder(dim)
     return CassetteEmbedder(inner, cassette_root=cassette_root or default_cassette_root(),
                             namespace="embed", dim=dim, mode=m)
+
+
+def _live_embedder(dim: int) -> Embedder:
+    """The live embedding backend. OpenAI when `OPENAI_API_KEY` is set (production default). Otherwise
+    (a DeepSeek-only deployment — DeepSeek has NO embeddings API) fall back to a KEYLESS embedder so
+    the retrieval plumbing never crashes on a missing key: the local sentence-transformers model when
+    installed (real semantics), else the deterministic hash embedder (no dep, correct dim, but a
+    non-semantic rerank — flagged as degraded). `ROSTER_EMBEDDER` forces a choice: 'openai'|'local'|
+    'hash'."""
+    choice = os.environ.get("ROSTER_EMBEDDER", "").strip().lower()
+    if choice == "openai" or (not choice and os.environ.get("OPENAI_API_KEY")):
+        return OpenAIEmbedder(dim=dim)
+    if choice == "hash":
+        return FakeEmbedder(dim=dim)
+    if choice == "local":
+        return LocalEmbedder()
+    # Auto (no ROSTER_EMBEDDER, no OPENAI_API_KEY): prefer the local model, fall back to hash.
+    try:
+        import sentence_transformers  # noqa: F401  (probe the optional dep without downloading)
+        return LocalEmbedder()
+    except Exception:  # noqa: BLE001
+        return FakeEmbedder(dim=dim)
 
 
 def build_web(*, mode: ProviderMode | str | None = None,
