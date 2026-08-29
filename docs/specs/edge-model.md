@@ -96,3 +96,21 @@ span-gate lives in the extractor, not the store, so structural (non-corpus) edge
   clear comment blockers; make domain defaults required; harden `add_evidence`/`upsert_claim`.
 
 Slice 1 is the current build target.
+
+## Prod verification (2026-08-29)
+Railway project `roster` (id e91515fe-…) + managed Postgres + service `roster-api`
+(https://roster-api-production-3405.up.railway.app), `ROSTER_EDGE_MODEL=true`,
+`ROSTER_LLM_PROVIDER=deepseek` (DeepSeek is a first-class provider — OpenAI-protocol client at
+api.deepseek.com; extraction needs no embeddings). Build note: Railway ignored railway.toml's
+`builder`; a ROOT `Dockerfile` (moved from deploy/) forces Dockerfile mode.
+- **Slice 1 PROD-VERIFIED E2E** (acceptance test met): seeded a small real grounded graph
+  (Stripe/Collison/PayPal) in prod via the store, then live:
+  - `GET /connections?entity=Stripe` → 3 grounded edges, each with a verbatim citation.
+  - `GET /graph/path?from=Stripe&to=Patrick Collison` → 1-hop `has_founder` path + claim_id + citation.
+  - `GET /graph/path?from=Patrick Collison&to=PayPal` → **2-hop grounded path** (Collison ⟵founder⟵
+    Stripe ⟶compared_to⟶ PayPal), every hop citing a quote. "How is X connected to Y", answered grounded.
+- **DeepSeek LLM connectivity VERIFIED** (a live extract call succeeded, no auth/endpoint error).
+- **OUTSTANDING — DeepSeek extraction YIELD:** a 1-block live extraction returned `claims_emitted=0`
+  (dropped pre-entail), i.e. the Claude-tuned extractor's structured output isn't parsing from
+  deepseek-chat yet. Extraction↔DeepSeek format adaptation is a separate task (Slice 3 / ingestion),
+  orthogonal to the edge model. Until then the prod graph is seeded, not LLM-populated.
