@@ -1,0 +1,932 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Roster · Crossviews</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --ground:#0a0d16; --ground-2:#0e1220; --panel:#111627; --panel-2:#0c101c;
+    --line:#212a41; --line-soft:#1a2136;
+    --ink:#e8edf9; --ink-mute:#909bb8; --ink-faint:#5c6688;
+    --company:#ffcf6b; --person:#57d9c4; --category:#b79bff; --investor:#ff8fb3;
+    --accent:#ffcf6b;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+    --display:"Sora","IBM Plex Sans",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0; background:var(--ground); color:var(--ink); font-family:var(--sans);
+    font-size:15px; line-height:1.5; -webkit-font-smoothing:antialiased; overflow:hidden;}
+  a{color:inherit}
+  button{font-family:inherit}
+  .app{display:grid; grid-template-columns:440px 1fr; height:100vh; width:100vw}
+
+  /* ---- LEFT: the designer rail ---- */
+  .rail{background:linear-gradient(180deg,var(--ground-2),var(--ground)); border-right:1px solid var(--line);
+    padding:22px 22px 26px; display:flex; flex-direction:column; gap:20px; overflow-y:auto}
+  .back{font-family:var(--mono); font-size:11.5px; letter-spacing:.05em; color:var(--ink-mute); text-decoration:none;
+    display:inline-flex; align-items:center; gap:6px; width:max-content}
+  .back:hover{color:var(--accent)}
+  .eyebrow{font-family:var(--mono); font-size:11px; letter-spacing:.22em; text-transform:uppercase; color:var(--accent); font-weight:500}
+  h1{font-family:var(--display); font-weight:700; font-size:24px; line-height:1.12; margin:8px 0 0; letter-spacing:-.01em; text-wrap:balance}
+  .thesis{color:var(--ink-mute); font-size:13px; margin-top:9px}
+  .thesis b{color:var(--ink); font-weight:600}
+  .sec-label{font-family:var(--mono); font-size:10.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:9px}
+
+  /* row-axis selector */
+  .axis{display:flex; gap:8px}
+  .axis button{flex:1; background:var(--panel); border:1px solid var(--line-soft); border-radius:10px;
+    padding:10px 6px; color:var(--ink-mute); font-size:13px; cursor:pointer; transition:border-color .15s,color .15s,background .15s;
+    display:flex; flex-direction:column; align-items:center; gap:3px}
+  .axis button .ax-sub{font-family:var(--mono); font-size:9.5px; letter-spacing:.08em; color:var(--ink-faint); text-transform:uppercase}
+  .axis button:hover{border-color:var(--line); color:var(--ink)}
+  .axis button.on{border-color:var(--accent); color:var(--ink); background:linear-gradient(180deg,rgba(255,207,107,.08),transparent)}
+  .axis button.on .ax-sub{color:var(--accent)}
+  .axis button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+  /* category filter */
+  .catwrap{display:flex; flex-direction:column; gap:7px}
+  select.catsel{background:var(--panel); border:1px solid var(--line-soft); border-radius:9px; color:var(--ink);
+    font-family:var(--sans); font-size:13px; padding:9px 10px; width:100%}
+  select.catsel:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+
+  /* the chat */
+  .chat{display:flex; flex-direction:column; gap:10px}
+  .transcript{display:flex; flex-direction:column; gap:9px; max-height:230px; overflow-y:auto; padding-right:2px}
+  .msg{border-radius:10px; padding:9px 12px; font-size:13.5px; line-height:1.45; max-width:94%}
+  .msg.user{align-self:flex-end; background:var(--panel); border:1px solid var(--line-soft)}
+  .msg.bot{align-self:flex-start; background:var(--panel-2); border:1px solid var(--line-soft); border-left:2px solid var(--accent)}
+  .msg.bot.err{border-left-color:var(--investor)}
+  .gaps{align-self:flex-start; max-width:94%; display:flex; flex-direction:column; gap:6px; margin-top:-2px}
+  .gap{font-size:12px; color:var(--ink-mute); background:rgba(255,143,179,.06); border:1px solid rgba(255,143,179,.22);
+    border-radius:8px; padding:7px 10px}
+  .gap b{color:var(--person); font-weight:600}
+  .gap .closest{color:var(--ink-faint)}
+  .thinking{align-self:flex-start; font-family:var(--mono); font-size:11.5px; color:var(--ink-faint); display:flex; align-items:center; gap:8px}
+  .thinking .spin{width:13px;height:13px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+  .chatform{display:flex; gap:8px}
+  .chatform input{flex:1; background:var(--panel); border:1px solid var(--line-soft); border-radius:9px; color:var(--ink);
+    font-family:var(--sans); font-size:13.5px; padding:10px 12px}
+  .chatform input:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+  .chatform button{background:var(--accent); border:none; border-radius:9px; color:#1a1405; font-weight:600; font-size:13px;
+    padding:0 15px; cursor:pointer; transition:opacity .15s}
+  .chatform button:hover{opacity:.9}
+  .chatform button:disabled{opacity:.4; cursor:default}
+
+  /* column picker */
+  .picker{display:flex; flex-direction:column; gap:14px}
+  .dimgrp{display:flex; flex-direction:column; gap:6px}
+  .dimhead{font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); font-weight:500; margin-bottom:1px}
+  .col{display:flex; align-items:center; gap:10px; padding:7px 9px; margin:0 -9px; border-radius:8px; cursor:pointer; transition:background .12s}
+  .col:hover{background:var(--panel)}
+  .col input{accent-color:var(--accent); width:15px; height:15px; flex:none; cursor:pointer}
+  .col .lab{font-size:13.5px; color:var(--ink)}
+  .col .cov{margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--ink-faint); font-variant-numeric:tabular-nums; flex:none}
+  .picker-empty{font-size:12.5px; color:var(--ink-faint)}
+
+  .actions{display:flex; gap:9px; border-top:1px solid var(--line-soft); padding-top:16px; margin-top:auto}
+  .btn{flex:1; border-radius:9px; padding:11px 10px; font-size:13.5px; font-weight:600; cursor:pointer; transition:opacity .15s,border-color .15s}
+  .btn.primary{background:var(--accent); border:none; color:#1a1405}
+  .btn.primary:hover{opacity:.9}
+  .btn.ghost{background:var(--panel); border:1px solid var(--line); color:var(--ink-mute)}
+  .btn.ghost:hover{border-color:var(--accent); color:var(--accent)}
+  .btn:disabled{opacity:.4; cursor:default}
+  .btn:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+  /* ---- RIGHT: the live table ---- */
+  .stage{position:relative; background:var(--ground); display:flex; flex-direction:column; overflow:hidden}
+  .stage-head{padding:20px 26px 14px; border-bottom:1px solid var(--line-soft); display:flex; align-items:baseline; gap:14px; flex-wrap:wrap}
+  .stage-head .st-title{font-family:var(--display); font-weight:600; font-size:16px}
+  .stage-head .st-sub{font-family:var(--mono); font-size:11px; color:var(--ink-faint); letter-spacing:.03em}
+  /* stage-body must be a flex:1 min-height:0 column so the table area can SHRINK below its
+     content height — without min-height:0 the flex item stays content-tall and only
+     horizontal overflow scrolls (the vertical-scroll bug). */
+  #stage-body{flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden}
+  .tablewrap{flex:1; min-height:0; overflow:auto; padding:6px 0}
+  table{border-collapse:separate; border-spacing:0; min-width:100%; font-size:13.5px}
+  thead th{position:sticky; top:0; z-index:2; background:var(--ground-2); text-align:left; padding:12px 16px;
+    font-family:var(--mono); font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-mute);
+    border-bottom:1px solid var(--line); white-space:nowrap}
+  thead th.rowhdr{left:0; z-index:3}
+  tbody th.rowhdr{position:sticky; left:0; z-index:1; background:var(--ground); text-align:left; padding:11px 16px;
+    font-family:var(--display); font-weight:600; font-size:13.5px; color:var(--ink); white-space:nowrap;
+    border-bottom:1px solid var(--line-soft); border-right:1px solid var(--line-soft)}
+  tbody td{padding:9px 16px; border-bottom:1px solid var(--line-soft); vertical-align:top; max-width:340px}
+  tbody tr:hover th.rowhdr, tbody tr:hover td{background:rgba(255,255,255,.015)}
+  td.cell{cursor:pointer; transition:background .12s}
+  td.cell:hover{background:rgba(255,207,107,.06)}
+  td.cell:focus-visible{outline:2px solid var(--accent); outline-offset:-2px}
+  td.empty{color:var(--ink-faint); font-style:italic; cursor:default}
+  td.empty:hover{background:none}
+  .chips{display:flex; flex-wrap:wrap; gap:5px}
+  .chip{background:var(--panel); border:1px solid var(--line-soft); border-radius:14px; padding:2px 9px; font-size:12.5px}
+  .cell-val{display:flex; align-items:center; gap:8px}
+  .cell-val .cite-dot{width:6px; height:6px; border-radius:50%; background:var(--accent); box-shadow:0 0 7px var(--accent); flex:none}
+  .stage-foot{padding:11px 26px; border-top:1px solid var(--line-soft); font-family:var(--mono); font-size:11px;
+    color:var(--ink-faint); letter-spacing:.02em; min-height:38px; display:flex; align-items:center; gap:14px; flex-wrap:wrap}
+
+  .placeholder{flex:1; display:flex; align-items:center; justify-content:center; padding:40px; text-align:center}
+  .placeholder .inner{max-width:420px}
+  .placeholder .big{font-family:var(--display); color:var(--ink-mute); font-size:19px; font-weight:600; display:block; margin-bottom:10px}
+  .placeholder p{color:var(--ink-faint); font-size:13.5px; margin:0}
+  .placeholder.err .big{color:var(--investor)}
+  .placeholder .spin{width:24px;height:24px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;margin:0 auto 16px;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* ---- evidence drawer ---- */
+  .backdrop{position:fixed; inset:0; background:rgba(4,6,12,.55); z-index:40; opacity:0; pointer-events:none; transition:opacity .2s}
+  .backdrop.open{opacity:1; pointer-events:auto}
+  .drawer{position:fixed; top:0; right:0; height:100vh; width:390px; max-width:92vw; z-index:41;
+    background:linear-gradient(180deg,var(--panel-2),var(--ground)); border-left:1px solid var(--line);
+    transform:translateX(100%); transition:transform .22s ease; display:flex; flex-direction:column}
+  .drawer.open{transform:translateX(0)}
+  .drawer-head{padding:22px 22px 16px; border-bottom:1px solid var(--line-soft); display:flex; align-items:flex-start; gap:12px}
+  .drawer-head .dh-body{flex:1; min-width:0}
+  .ev-kind{font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; font-weight:500; color:var(--accent)}
+  .ev-name{font-family:var(--display); font-weight:600; font-size:20px; line-height:1.15; letter-spacing:-.01em; text-wrap:balance; margin-top:3px}
+  .ev-row{font-size:12.5px; color:var(--ink-mute); margin-top:5px}
+  .ev-row b{color:var(--ink); font-weight:600}
+  .drawer-close{background:var(--panel); border:1px solid var(--line); border-radius:8px; color:var(--ink-mute);
+    width:30px; height:30px; font-size:15px; cursor:pointer; flex:none; line-height:1}
+  .drawer-close:hover{border-color:var(--accent); color:var(--accent)}
+  .drawer-body{padding:18px 22px 26px; overflow-y:auto; display:flex; flex-direction:column; gap:11px}
+  .val-line{font-size:14px; color:var(--ink)}
+  .val-line .v{background:var(--panel); border:1px solid var(--line-soft); border-radius:7px; padding:2px 8px; margin:0 3px 4px 0; display:inline-block}
+  .claim{background:var(--panel); border:1px solid var(--line-soft); border-left:2px solid var(--accent); border-radius:9px; padding:10px 12px}
+  .claim .q{font-size:12.5px; color:var(--ink-mute); padding-left:10px; border-left:2px solid var(--line); font-style:italic; line-height:1.5}
+  .claim .q::before{content:"\201C"} .claim .q::after{content:"\201D"}
+  .claim .src{font-family:var(--mono); font-size:10.5px; color:var(--ink-faint); margin-top:8px; word-break:break-all; display:flex; flex-wrap:wrap; gap:4px 10px}
+  .claim .src .tier{color:var(--accent)}
+  .no-cite{font-size:12.5px; color:var(--ink-faint)}
+  .prov-note{font-size:11.5px; color:var(--ink-faint); border-top:1px solid var(--line-soft); padding-top:13px; margin-top:4px}
+  .prov-note b{color:var(--person); font-weight:600}
+
+  /* PastViews trigger + panel */
+  .railtop{display:flex; align-items:center; justify-content:space-between; gap:10px}
+  .pvbtn{background:var(--panel); border:1px solid var(--line); border-radius:8px; color:var(--ink-mute);
+    font-family:var(--mono); font-size:11px; letter-spacing:.04em; padding:6px 11px; cursor:pointer;
+    transition:border-color .15s,color .15s}
+  .pvbtn:hover{border-color:var(--accent); color:var(--accent)}
+  .pvbtn:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .pvpanel{position:fixed; top:0; left:0; height:100vh; width:380px; max-width:92vw; z-index:41;
+    background:linear-gradient(180deg,var(--panel-2),var(--ground)); border-right:1px solid var(--line);
+    transform:translateX(-100%); transition:transform .22s ease; display:flex; flex-direction:column}
+  .pvpanel.open{transform:translateX(0)}
+  .pv-head{padding:22px 22px 16px; border-bottom:1px solid var(--line-soft); display:flex; align-items:flex-start; gap:12px}
+  .pv-title{font-family:var(--display); font-weight:600; font-size:20px; line-height:1.15; margin-top:3px}
+  .pv-sub{font-size:12px; color:var(--ink-mute); margin-top:5px}
+  .pv-body{padding:14px 16px 26px; overflow-y:auto; display:flex; flex-direction:column; gap:8px}
+  .pv-item{display:flex; flex-direction:column; gap:5px; text-align:left; width:100%;
+    background:var(--panel); border:1px solid var(--line-soft); border-left:2px solid var(--accent);
+    border-radius:9px; padding:11px 13px; cursor:pointer; transition:border-color .15s,background .15s}
+  .pv-item:hover{border-color:var(--accent); background:var(--ground-2)}
+  .pv-item:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .pv-item .pv-q{font-family:var(--display); font-weight:600; font-size:14px; color:var(--ink); line-height:1.25}
+  .pv-item .pv-meta{font-family:var(--mono); font-size:10.5px; color:var(--ink-faint); letter-spacing:.03em;
+    display:flex; flex-wrap:wrap; gap:5px 10px; align-items:center}
+  .pv-item .pv-rk{color:var(--accent); text-transform:uppercase; letter-spacing:.08em}
+  .pv-current{border-left-color:var(--person)}
+  .pv-current .pv-rk{color:var(--person)}
+  .pv-empty{color:var(--ink-faint); font-size:12.5px; padding:8px 4px; line-height:1.5}
+
+  /* toast */
+  .toast{position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(20px); z-index:50;
+    background:var(--panel); border:1px solid var(--accent); border-radius:10px; padding:12px 18px; font-size:13px; color:var(--ink);
+    box-shadow:0 8px 30px rgba(0,0,0,.4); opacity:0; pointer-events:none; transition:opacity .2s,transform .2s; max-width:80vw}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+
+  @media (max-width:1080px){
+    body{overflow:auto}
+    .app{grid-template-columns:1fr; height:auto; min-height:100vh}
+    .rail{border-right:none; border-bottom:1px solid var(--line)}
+    .stage{min-height:70vh}
+    .actions{margin-top:16px}
+    .drawer{width:100%; max-width:100%}
+    .pvpanel{width:100%; max-width:100%}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <div class="railtop">
+      <a class="back" href="/">&larr; Roster</a>
+      <button type="button" class="pvbtn" id="pvopen" title="Your saved crossviews">&#9720; PastViews</button>
+    </div>
+    <div>
+      <div class="eyebrow">Crossviews</div>
+      <h1>Design a grounded table</h1>
+      <p class="thesis">Pick a row axis, tell the visualizer what you want, and build a table where
+        <b>every non-empty cell is span-verified</b> &mdash; click any cell to read the exact source quote.
+        Nothing is from memory.</p>
+    </div>
+
+    <div>
+      <div class="sec-label">Rows &mdash; what each row is</div>
+      <div class="axis" id="axis" role="group" aria-label="Row axis">
+        <button type="button" data-rk="company" class="on">Startups<span class="ax-sub">company</span></button>
+        <button type="button" data-rk="person">Founders<span class="ax-sub">person</span></button>
+        <button type="button" data-rk="category">Domains<span class="ax-sub">category</span></button>
+      </div>
+    </div>
+
+    <div class="catwrap" id="catwrap" hidden>
+      <label class="sec-label" for="catsel" style="margin-bottom:0">Filter to a domain (optional)</label>
+      <select class="catsel" id="catsel"><option value="">All domains</option></select>
+    </div>
+
+    <div>
+      <div class="sec-label">Visualizer &mdash; what should this table show?</div>
+      <div class="chat">
+        <div class="transcript" id="transcript" aria-live="polite"></div>
+        <form class="chatform" id="chatform" autocomplete="off">
+          <input id="chatin" type="text" placeholder="What do you want this table to show?" aria-label="Message the visualizer">
+          <button type="submit" id="chatsend">Send</button>
+        </form>
+      </div>
+    </div>
+
+    <div>
+      <div class="sec-label">Columns &mdash; check the grounded fields</div>
+      <div class="picker" id="picker"><div class="picker-empty">Loading grounded columns&hellip;</div></div>
+    </div>
+
+    <div id="sortwrap">
+      <div class="sec-label">Order rows by</div>
+      <div class="axis" id="sortsel" role="group" aria-label="Row order">
+        <button type="button" data-sort="density" class="on">Most data<span class="ax-sub">densest first</span></button>
+        <button type="button" data-sort="az">A&ndash;Z<span class="ax-sub">by name</span></button>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button type="button" class="btn primary" id="buildbtn" disabled>Build table</button>
+      <button type="button" class="btn ghost" id="savebtn" disabled>Save</button>
+    </div>
+  </aside>
+
+  <section class="stage" aria-label="Live grounded table">
+    <div class="stage-head">
+      <span class="st-title" id="st-title">Live grounded table</span>
+      <span class="st-sub" id="st-sub">check columns &middot; build to render</span>
+    </div>
+    <div id="stage-body">
+      <div class="placeholder" id="placeholder">
+        <div class="inner">
+          <span class="big">Your grounded table appears here.</span>
+          <p>Choose a row axis, ask the visualizer or check columns yourself, then <b>Build table</b>.
+             Every non-empty cell will be click-to-source.</p>
+        </div>
+      </div>
+    </div>
+    <div class="stage-foot" id="stage-foot" hidden></div>
+  </section>
+</div>
+
+<div class="backdrop" id="backdrop"></div>
+
+<aside class="pvpanel" id="pvpanel" role="dialog" aria-modal="true" aria-labelledby="pv-title" tabindex="-1">
+  <div class="pv-head">
+    <div>
+      <div class="ev-kind">Your library</div>
+      <div class="pv-title" id="pv-title">PastViews</div>
+      <div class="pv-sub">saved crossviews &mdash; reopen live against the current graph</div>
+    </div>
+    <button type="button" class="drawer-close" id="pv-close" aria-label="Close PastViews">&times;</button>
+  </div>
+  <div class="pv-body" id="pv-list"></div>
+</aside>
+
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="dw-name" tabindex="-1">
+  <div class="drawer-head">
+    <div class="dh-body">
+      <div class="ev-kind" id="dw-kind">Evidence</div>
+      <div class="ev-name" id="dw-name"></div>
+      <div class="ev-row" id="dw-row"></div>
+    </div>
+    <button type="button" class="drawer-close" id="dw-close" aria-label="Close evidence">&times;</button>
+  </div>
+  <div class="drawer-body" id="dw-body"></div>
+</aside>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  var RK_LABEL = {company:"Startups", person:"Founders", category:"Domains"};
+  var MAX_ROWS_CAP = 400;
+
+  var state = {
+    rowKind: "company",
+    categoryNorm: "",
+    catalog: [],          // [{id,label,dimension,coverage,object_kind}]
+    catById: {},
+    categories: [],       // [{object_norm,name,members}]
+    checked: new Set(),
+    transcript: [],       // [{role, text} | {gaps:[...]}]
+    goal: "",             // first user turn = the goal
+    sortMode: "density",  // company rows: 'density' (most data first) | 'az' (by name)
+    grid: null,
+    lastSpec: null,
+    built: false
+  };
+
+  function esc(s){ return (s==null?"":String(s)).replace(/[&<>"]/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]; }); }
+  function $(id){ return document.getElementById(id); }
+
+  // The build-time column kind (the /options catalog omits col_kind, but it's derivable):
+  //   company columns are always 'predicate'; person/category resolve by id where
+  //   object_kind 'entity' -> 'edge', else 'aggregate'.
+  function buildKind(col){
+    if(state.rowKind === "company") return "predicate";
+    return col.object_kind === "entity" ? "edge" : "aggregate";
+  }
+
+  // ---------------- toast ----------------
+  var toastT = null;
+  function toast(msg){
+    var t = $("toast"); t.textContent = msg; t.classList.add("show");
+    if(toastT) clearTimeout(toastT);
+    toastT = setTimeout(function(){ t.classList.remove("show"); }, 4200);
+  }
+
+  // ---------------- row order (density vs A–Z; company only) ----------------
+  function syncSortUI(){
+    // the sort control only applies to company rows (per-company columns); person /
+    // category grids keep their natural order.
+    $("sortwrap").hidden = (state.rowKind !== "company");
+    Array.prototype.forEach.call($("sortsel").children, function(c){
+      c.classList.toggle("on", c.dataset.sort === state.sortMode); });
+  }
+  $("sortsel").addEventListener("click", function(e){
+    var b = e.target.closest("button[data-sort]"); if(!b) return;
+    var mode = b.dataset.sort; if(mode === state.sortMode) return;
+    state.sortMode = mode;
+    syncSortUI();
+    if(state.built && state.checked.size) buildTable();   // re-order live
+  });
+
+  // ---------------- row-axis selector ----------------
+  $("axis").addEventListener("click", function(e){
+    var b = e.target.closest("button[data-rk]"); if(!b) return;
+    var rk = b.dataset.rk; if(rk === state.rowKind) return;
+    state.rowKind = rk;
+    Array.prototype.forEach.call($("axis").children, function(c){
+      c.classList.toggle("on", c.dataset.rk === rk); });
+    // switching axis = a fresh design
+    state.categoryNorm = ""; state.checked = new Set();
+    state.transcript = []; state.goal = ""; state.grid = null; state.built = false;
+    state.sortMode = "density";
+    renderTranscript(); syncButtons(); clearGrid(); syncSortUI();
+    $("catwrap").hidden = (rk !== "company");
+    loadOptions();
+  });
+
+  // ---------------- category filter ----------------
+  $("catsel").addEventListener("change", function(){
+    state.categoryNorm = $("catsel").value || "";
+    // coverage depends on the population -> reload the catalog (keep checks that survive)
+    loadOptions(true);
+  });
+
+  // ---------------- options / column picker ----------------
+  function loadOptions(preserveChecks){
+    var picker = $("picker");
+    picker.innerHTML = '<div class="picker-empty">Loading grounded columns&hellip;</div>';
+    var url = "/crossviews/options?row_kind=" + encodeURIComponent(state.rowKind) +
+              "&category_norm=" + encodeURIComponent(state.categoryNorm);
+    return fetch(url).then(function(r){
+      if(!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function(d){
+      state.catalog = d.columns || [];
+      state.catById = {};
+      state.catalog.forEach(function(c){ state.catById[c.id] = c; });
+      state.categories = d.categories || [];
+      if(!preserveChecks) fillCategories();
+      // drop checks that no longer exist in the catalog
+      var next = new Set();
+      state.checked.forEach(function(id){ if(state.catById[id]) next.add(id); });
+      state.checked = next;
+      renderPicker();
+      syncButtons();
+    }).catch(function(e){
+      picker.innerHTML = '<div class="picker-empty">Could not load columns &mdash; ' + esc(e.message||e) + '</div>';
+    });
+  }
+
+  function fillCategories(){
+    var sel = $("catsel");
+    sel.innerHTML = '<option value="">All domains</option>';
+    (state.categories || []).forEach(function(c){
+      var o = document.createElement("option");
+      o.value = c.object_norm;
+      o.textContent = c.name + " (" + c.members + ")";
+      sel.appendChild(o);
+    });
+    sel.value = state.categoryNorm || "";
+  }
+
+  function renderPicker(){
+    var picker = $("picker");
+    if(!state.catalog.length){
+      picker.innerHTML = '<div class="picker-empty">No grounded columns are available for this row axis yet.</div>';
+      return;
+    }
+    // group by dimension, preserving first-seen order
+    var order = [], groups = {};
+    state.catalog.forEach(function(c){
+      var d = c.dimension || "Other";
+      if(!groups[d]){ groups[d] = []; order.push(d); }
+      groups[d].push(c);
+    });
+    picker.innerHTML = "";
+    order.forEach(function(dim){
+      var g = document.createElement("div"); g.className = "dimgrp";
+      g.innerHTML = '<div class="dimhead">' + esc(dim) + '</div>';
+      groups[dim].forEach(function(c){
+        var id = "col_" + c.id;
+        var lab = document.createElement("label"); lab.className = "col"; lab.setAttribute("for", id);
+        lab.innerHTML =
+          '<input type="checkbox" id="' + esc(id) + '" value="' + esc(c.id) + '"' +
+            (state.checked.has(c.id) ? " checked" : "") + '>' +
+          '<span class="lab">' + esc(c.label) + '</span>' +
+          '<span class="cov">' + esc(c.coverage) + ' rows</span>';
+        lab.querySelector("input").addEventListener("change", function(ev){
+          if(ev.target.checked) state.checked.add(c.id); else state.checked.delete(c.id);
+          syncButtons();
+        });
+        g.appendChild(lab);
+      });
+      picker.appendChild(g);
+    });
+  }
+
+  function syncButtons(){
+    $("buildbtn").disabled = state.checked.size === 0;
+    $("savebtn").disabled = !state.built || !state.grid;
+  }
+
+  // ---------------- the visualizer chat ----------------
+  function renderTranscript(){
+    var el = $("transcript"); el.innerHTML = "";
+    state.transcript.forEach(function(m){
+      if(m.gaps){
+        var wrap = document.createElement("div"); wrap.className = "gaps";
+        m.gaps.forEach(function(g){
+          var closest = (g.closest || []).map(function(id){
+            var c = state.catById[id]; return c ? c.label : id; });
+          var div = document.createElement("div"); div.className = "gap";
+          div.innerHTML = 'We don’t have <b>' + esc(g.requested) + '</b>' +
+            (g.reason ? ' &mdash; ' + esc(g.reason) : '') +
+            (closest.length ? '<div class="closest">closest grounded columns: ' + esc(closest.join(", ")) + '</div>' : '');
+          wrap.appendChild(div);
+        });
+        el.appendChild(wrap);
+      } else {
+        var d = document.createElement("div");
+        d.className = "msg " + (m.role === "user" ? "user" : "bot") + (m.err ? " err" : "");
+        d.textContent = m.text;
+        el.appendChild(d);
+      }
+    });
+    el.scrollTop = el.scrollHeight;
+  }
+
+  var chatBusy = false;
+  $("chatform").addEventListener("submit", function(e){
+    e.preventDefault();
+    var input = $("chatin");
+    var text = input.value.trim();
+    if(!text || chatBusy) return;
+    input.value = "";
+    state.transcript.push({role:"user", text:text});
+    var isFirst = !state.goal;
+    if(isFirst) state.goal = text;
+    renderTranscript();
+    chatBusy = true; $("chatsend").disabled = true;
+    // thinking indicator
+    var tel = $("transcript");
+    var think = document.createElement("div"); think.className = "thinking";
+    think.innerHTML = '<span class="spin"></span> designing columns…';
+    tel.appendChild(think); tel.scrollTop = tel.scrollHeight;
+
+    var body = {
+      row_kind: state.rowKind,
+      goal: state.goal,
+      current_columns: Array.from(state.checked)
+    };
+    if(!isFirst) body.message = text;
+    if(state.categoryNorm) body.category_norm = state.categoryNorm;
+
+    fetch("/crossviews/agent", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)
+    }).then(function(r){
+      if(!r.ok) return r.json().catch(function(){return {};}).then(function(j){
+        throw new Error(j.detail || ("HTTP " + r.status)); });
+      return r.json();
+    }).then(function(d){
+      think.remove();
+      if(d.reply) state.transcript.push({role:"bot", text:d.reply});
+      // refresh the catalog view the agent saw (coverage/labels)
+      if(Array.isArray(d.columns) && d.columns.length){
+        state.catalog = d.columns;
+        state.catById = {}; state.catalog.forEach(function(c){ state.catById[c.id] = c; });
+      }
+      // PRE-CHECK the proposed columns
+      var proposed = (d.proposed_spec && d.proposed_spec.columns) || [];
+      if(proposed.length){
+        var next = new Set();
+        proposed.forEach(function(c){ if(c && c.id) next.add(c.id); });
+        state.checked = next;
+      }
+      if(Array.isArray(d.gaps) && d.gaps.length) state.transcript.push({gaps:d.gaps});
+      renderTranscript(); renderPicker(); syncButtons();
+    }).catch(function(e){
+      think.remove();
+      state.transcript.push({role:"bot", err:true,
+        text:"I couldn’t reach the visualizer just now (" + (e.message||e) + "). You can still pick columns yourself."});
+      renderTranscript();
+    }).then(function(){
+      chatBusy = false; $("chatsend").disabled = false;
+    });
+  });
+
+  // ---------------- build ----------------
+  function currentSpec(){
+    // checked ids, in catalog order, typed for build_grid
+    var cols = state.catalog.filter(function(c){ return state.checked.has(c.id); })
+      .map(function(c){ return {id:c.id, kind:buildKind(c), label:c.label}; });
+    var filters = {};
+    if(state.rowKind === "company" && state.categoryNorm) filters.category_norm = state.categoryNorm;
+    var spec = {row_kind: state.rowKind, filters: filters, columns: cols, cap: MAX_ROWS_CAP};
+    // company rows can be ranked by data density (most-populated first); A–Z is the
+    // store's natural name order (no sort). person/category ignore this.
+    if(state.rowKind === "company" && state.sortMode === "density"){
+      spec.sort = {by: "density", direction: "desc"};
+    }
+    return spec;
+  }
+
+  $("buildbtn").addEventListener("click", function(){ buildTable(); });
+
+  function buildTable(){
+    if(state.checked.size === 0) return;
+    var spec = currentSpec();
+    state.lastSpec = spec;
+    showStage('<div class="placeholder"><div class="inner"><div class="spin"></div>' +
+      '<span class="big">Building grounded table&hellip;</span></div></div>', false);
+    $("st-sub").textContent = "building…";
+    $("buildbtn").disabled = true;
+    fetch("/crossviews/build", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({spec:spec})
+    }).then(function(r){
+      if(!r.ok) return r.json().catch(function(){return {};}).then(function(j){
+        throw new Error(j.detail || ("HTTP " + r.status)); });
+      return r.json();
+    }).then(function(grid){
+      state.grid = grid; state.built = true;
+      renderGrid(grid);
+      syncButtons();
+    }).catch(function(e){
+      state.built = false; state.grid = null;
+      showStage('<div class="placeholder err"><div class="inner">' +
+        '<span class="big">Could not build the table.</span>' +
+        '<p>' + esc(e.message||e) + '</p></div></div>', false);
+      $("st-sub").textContent = "build failed";
+      syncButtons();
+    }).then(function(){
+      $("buildbtn").disabled = state.checked.size === 0;
+    });
+  }
+
+  function showStage(html, footVisible){
+    $("stage-body").innerHTML = html;
+    $("stage-foot").hidden = !footVisible;
+  }
+  function clearGrid(){
+    state.grid = null; state.built = false;
+    showStage('<div class="placeholder"><div class="inner">' +
+      '<span class="big">Your grounded table appears here.</span>' +
+      '<p>Choose a row axis, ask the visualizer or check columns yourself, then <b>Build table</b>. ' +
+      'Every non-empty cell will be click-to-source.</p></div></div>', false);
+    $("st-title").textContent = "Live grounded table";
+    $("st-sub").textContent = "check columns · build to render";
+  }
+
+  function renderGrid(grid){
+    var cols = grid.columns || [];
+    var rows = grid.rows || [];
+    $("st-title").textContent = RK_LABEL[grid.row_kind] || "Table";
+    $("st-sub").textContent = (grid.meta && grid.meta.row_count != null ? grid.meta.row_count : rows.length) +
+      " rows · " + cols.length + " column" + (cols.length === 1 ? "" : "s");
+
+    if(!rows.length){
+      showStage('<div class="placeholder"><div class="inner">' +
+        '<span class="big">No grounded rows matched this spec.</span>' +
+        '<p>Try a different column set, remove the domain filter, or ask the visualizer for help.</p></div></div>', true);
+      renderFoot(grid.meta);
+      return;
+    }
+
+    var wrap = document.createElement("div"); wrap.className = "tablewrap";
+    var table = document.createElement("table");
+
+    var thead = document.createElement("thead");
+    var htr = document.createElement("tr");
+    var rowLabel = grid.row_kind === "person" ? "Founder" : grid.row_kind === "category" ? "Domain" : "Startup";
+    htr.innerHTML = '<th class="rowhdr">' + esc(rowLabel) + '</th>' +
+      cols.map(function(c){ return '<th>' + esc(c.label) + '</th>'; }).join("");
+    thead.appendChild(htr); table.appendChild(thead);
+
+    var tbody = document.createElement("tbody");
+    rows.forEach(function(row){
+      var tr = document.createElement("tr");
+      var th = document.createElement("th"); th.className = "rowhdr"; th.scope = "row";
+      th.textContent = row.name || row.id || "—";
+      tr.appendChild(th);
+      cols.forEach(function(col){
+        var cell = (row.cells || {})[col.id] || {collected:false};
+        var td = document.createElement("td");
+        if(!cell.collected){
+          td.className = "empty"; td.textContent = "not collected";
+        } else {
+          td.className = "cell";
+          td.setAttribute("tabindex", "0");
+          td.setAttribute("role", "button");
+          var cites = (cell.citations || []).length;
+          td.setAttribute("aria-label",
+            col.label + " for " + (row.name||row.id) + " — " + cites + " citation" + (cites===1?"":"s") + ", click to view");
+          var v = cell.value;
+          if(Array.isArray(v)){
+            var chips = document.createElement("div"); chips.className = "chips";
+            v.forEach(function(item){
+              var s = document.createElement("span"); s.className = "chip"; s.textContent = item; chips.appendChild(s);
+            });
+            td.appendChild(chips);
+          } else {
+            var vd = document.createElement("div"); vd.className = "cell-val";
+            var dot = document.createElement("span"); dot.className = "cite-dot";
+            var sp = document.createElement("span"); sp.textContent = (v==null?"":String(v));
+            if(cites) vd.appendChild(dot);
+            vd.appendChild(sp);
+            td.appendChild(vd);
+          }
+          (function(c, colObj, rowObj){
+            function open(){ openDrawer(rowObj, colObj, c); }
+            td.addEventListener("click", open);
+            td.addEventListener("keydown", function(e){
+              if(e.key === "Enter" || e.key === " "){ e.preventDefault(); open(); }
+            });
+          })(cell, col, row);
+        }
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    $("stage-body").innerHTML = ""; $("stage-body").appendChild(wrap);
+    renderFoot(grid.meta);
+  }
+
+  function renderFoot(meta){
+    var foot = $("stage-foot");
+    meta = meta || {};
+    var parts = [];
+    parts.push("showing " + (meta.row_count != null ? meta.row_count : "?") + " rows");
+    if(meta.truncated) parts.push("some rows/cells capped");
+    (meta.notes || []).forEach(function(n){ parts.push(n); });
+    parts.push("every non-empty cell is span-verified — click to read the source");
+    foot.textContent = parts.join("  ·  ");
+    foot.hidden = false;
+  }
+
+  // ---------------- evidence drawer ----------------
+  var lastFocus = null;
+  function openDrawer(row, col, cell){
+    lastFocus = document.activeElement;
+    $("dw-kind").textContent = (col.label || "Column") + " — evidence";
+    $("dw-name").textContent = row.name || row.id || "";
+    $("dw-row").innerHTML = "column <b>" + esc(col.label) + "</b>";
+
+    var body = $("dw-body");
+    var html = "";
+    var v = cell.value;
+    var vals = Array.isArray(v) ? v : (v==null || v==="" ? [] : [v]);
+    if(vals.length){
+      html += '<div class="val-line">' + vals.map(function(x){
+        return '<span class="v">' + esc(x) + '</span>'; }).join("") + '</div>';
+    }
+    var cites = cell.citations || [];
+    if(cites.length){
+      cites.forEach(function(ct){
+        var src = [];
+        if(ct.document_id) src.push('<span>doc ' + esc(ct.document_id) + '</span>');
+        if(ct.block_id != null && ct.block_id !== "") src.push('<span>block ' + esc(ct.block_id) + '</span>');
+        if(ct.authority_tier != null && ct.authority_tier !== "")
+          src.push('<span class="tier">tier ' + esc(ct.authority_tier) + '</span>');
+        html += '<div class="claim">' +
+          (ct.quote ? '<div class="q">' + esc(ct.quote) + '</div>' : '<div class="no-cite">(no quote text on this span)</div>') +
+          (src.length ? '<div class="src">' + src.join("") + '</div>' : '') +
+          '</div>';
+      });
+    } else {
+      html += '<div class="no-cite">This value has no citation span attached.</div>';
+    }
+    html += '<div class="prov-note">Every value here is <b>span-verified</b> to a quote in a source document. ' +
+      'This is a live slice of Roster’s production claim graph.</div>';
+    body.innerHTML = html; body.scrollTop = 0;
+
+    $("pvpanel").classList.remove("open");   // only one side-panel at a time
+    $("backdrop").classList.add("open");
+    var dw = $("drawer"); dw.classList.add("open");
+    dw.focus();
+  }
+  function closeDrawer(){
+    $("backdrop").classList.remove("open");
+    $("drawer").classList.remove("open");
+    if(lastFocus && lastFocus.focus){ lastFocus.focus(); }
+  }
+  $("dw-close").addEventListener("click", closeDrawer);
+
+  // ---------------- PastViews (saved crossviews library) ----------------
+  function closeOverlays(){
+    $("backdrop").classList.remove("open");
+    $("drawer").classList.remove("open");
+    $("pvpanel").classList.remove("open");
+    if(lastFocus && lastFocus.focus){ lastFocus.focus(); }
+  }
+  $("backdrop").addEventListener("click", closeOverlays);
+  document.addEventListener("keydown", function(e){
+    if(e.key === "Escape" && ($("drawer").classList.contains("open") || $("pvpanel").classList.contains("open")))
+      closeOverlays();
+  });
+
+  function fmtDate(iso){
+    try{ var d = new Date(iso);
+      return d.toLocaleDateString(undefined,{month:"short",day:"numeric"}) + " " +
+             d.toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"});
+    }catch(e){ return ""; }
+  }
+  var RK_ROWWORD = {company:"Startups", person:"Founders", category:"Domains"};
+
+  function openPastViews(){
+    lastFocus = document.activeElement;
+    $("backdrop").classList.add("open");
+    $("pvpanel").classList.add("open");
+    $("pvpanel").focus();
+    loadPastViews();
+  }
+  function loadPastViews(){
+    var list = $("pv-list");
+    list.innerHTML = '<div class="pv-empty">Loading your saved crossviews&hellip;</div>';
+    var curSid = new URLSearchParams(location.search).get("session");
+    fetch("/sessions?kind=crossview&limit=100").then(function(r){
+      if(!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function(d){
+      var rows = (d && d.sessions) || [];
+      if(!rows.length){
+        list.innerHTML = '<div class="pv-empty">No saved crossviews yet. Build a table and hit ' +
+          '<b>Save</b> — it will appear here.</div>';
+        return;
+      }
+      list.innerHTML = "";
+      rows.forEach(function(s){
+        // the saved title starts with the row-word ("Startups — …"); derive a row chip
+        var rk = "company";
+        var q = s.question || "Untitled crossview";
+        for(var k in RK_ROWWORD){ if(q.indexOf(RK_ROWWORD[k]) === 0){ rk = k; break; } }
+        var isCur = curSid && s.id === curSid;
+        var it = document.createElement("button");
+        it.type = "button";
+        it.className = "pv-item" + (isCur ? " pv-current" : "");
+        it.innerHTML = '<span class="pv-q">' + esc(q) + '</span>' +
+          '<span class="pv-meta"><span class="pv-rk">' + esc(RK_ROWWORD[rk] || rk) + '</span>' +
+          '<span>' + esc(fmtDate(s.created_at)) + '</span>' +
+          (isCur ? '<span>· open now</span>' : '') + '</span>';
+        it.addEventListener("click", function(){ openPastView(s.id); });
+        list.appendChild(it);
+      });
+    }).catch(function(e){
+      list.innerHTML = '<div class="pv-empty">Could not load PastViews &mdash; ' + esc(e.message||e) + '</div>';
+    });
+  }
+  function openPastView(sid){
+    closeOverlays();
+    try{ history.replaceState(null, "", "/crossviews?session=" + encodeURIComponent(sid)); }catch(e){}
+    reopenSession(sid);
+  }
+  $("pvopen").addEventListener("click", openPastViews);
+  $("pv-close").addEventListener("click", closeOverlays);
+
+  // ---------------- save ----------------
+  $("savebtn").addEventListener("click", function(){
+    if(!state.built || !state.lastSpec) return;
+    var nCols = (state.lastSpec.columns || []).length;
+    var title = RK_LABEL[state.rowKind] + " — " + nCols + " column" + (nCols===1?"":"s") +
+      (state.goal ? ": " + state.goal.slice(0, 80) : "");
+    $("savebtn").disabled = true;
+    fetch("/crossviews/save", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({spec:state.lastSpec, grid:state.grid,
+        transcript:state.transcript, title:title})
+    }).then(function(r){
+      if(!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function(d){
+      if(d.session_id){
+        toast("Saved — reopen it any time from PastViews ⌖");
+        try{ history.replaceState(null, "", "/crossviews?session=" + encodeURIComponent(d.session_id)); }catch(e){}
+        if($("pvpanel").classList.contains("open")) loadPastViews();
+      } else {
+        toast("Saved (no session id returned)");
+      }
+    }).catch(function(e){
+      toast("Could not save: " + (e.message||e));
+    }).then(function(){
+      $("savebtn").disabled = !state.built || !state.grid;
+    });
+  });
+
+  // ---------------- reopen ?session=<id> ----------------
+  function reopenSession(sid){
+    showStage('<div class="placeholder"><div class="inner"><div class="spin"></div>' +
+      '<span class="big">Reopening saved crossview&hellip;</span></div></div>', false);
+    fetch("/sessions/" + encodeURIComponent(sid)).then(function(r){
+      if(!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function(sess){
+      var thread = sess.thread || [];
+      var spec = (thread[0] && thread[0].crossview_spec) || null;
+      if(!spec || !spec.row_kind){ throw new Error("no crossview spec on this session"); }
+      state.rowKind = spec.row_kind;
+      Array.prototype.forEach.call($("axis").children, function(c){
+        c.classList.toggle("on", c.dataset.rk === state.rowKind); });
+      $("catwrap").hidden = (state.rowKind !== "company");
+      state.sortMode = (spec.sort && String(spec.sort.by).toLowerCase() === "density") ? "density" : "az";
+      syncSortUI();
+      state.categoryNorm = (spec.filters && spec.filters.category_norm) || "";
+      var wantIds = (spec.columns || []).map(function(c){ return c.id; }).filter(Boolean);
+      // restore transcript if present
+      var tr = thread[0] && thread[0].crossview_transcript;
+      if(Array.isArray(tr)){ state.transcript = tr; renderTranscript(); }
+      return loadOptions().then(function(){
+        state.checked = new Set(wantIds.filter(function(id){ return state.catById[id]; }));
+        // if the saved spec named columns no longer in the catalog, keep them anyway so the
+        // live rebuild stays faithful to what was saved
+        wantIds.forEach(function(id){ state.checked.add(id); });
+        renderPicker(); syncButtons();
+        // build the spec straight from the saved (typed) columns for a faithful live rebuild
+        state.lastSpec = {row_kind: spec.row_kind, filters: spec.filters || {},
+          columns: spec.columns || [], cap: spec.cap || MAX_ROWS_CAP};
+        if(spec.sort) state.lastSpec.sort = spec.sort;   // preserve density/name ordering
+        return liveRebuild(state.lastSpec);
+      });
+    }).catch(function(e){
+      showStage('<div class="placeholder err"><div class="inner">' +
+        '<span class="big">Could not reopen this crossview.</span>' +
+        '<p>' + esc(e.message||e) + '</p></div></div>', false);
+    });
+  }
+
+  function liveRebuild(spec){
+    $("st-sub").textContent = "rebuilding…";
+    return fetch("/crossviews/build", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({spec:spec})
+    }).then(function(r){
+      if(!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function(grid){
+      state.grid = grid; state.built = true;
+      renderGrid(grid); syncButtons();
+    });
+  }
+
+  // ---------------- boot ----------------
+  syncSortUI();
+  var params = new URLSearchParams(location.search);
+  var sid = params.get("session");
+  if(sid){
+    // load the catalog for the picker AND reopen the saved view
+    reopenSession(sid);
+  } else {
+    // seed the goal-first greeting
+    state.transcript.push({role:"bot",
+      text:"Hi — what do you want this table to show? Tell me the goal (e.g. “funding and traction for AI startups”) and I’ll pick grounded columns."});
+    renderTranscript();
+    loadOptions();
+  }
+})();
+</script>
+</body>
+</html>

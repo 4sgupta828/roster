@@ -1,0 +1,23 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "deploy/Dockerfile"
+
+[deploy]
+startCommand = "bash deploy/start.sh"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+# 1 replica during the ingest-heavy phase: each replica runs its own gap-processor, and two
+# processors draining concurrently double the request rate against rate-limited sources (arXiv 429s).
+# Atomic job claims keep it correct, but a single downloader avoids the double-hammer. Scale back up
+# for serving headroom once bulk ingestion settles.
+numReplicas = 1
+# Deploy-safety for IN-FLIGHT runs: keep the new deploy overlapping briefly, then give the OLD
+# container a drain window long enough for an in-flight research run to FINISH AND PERSIST (the FE
+# recovers the answer via /sessions). History: these keys were once suspected of causing the edge's
+# mid-stream cuts and reverted (b85f423) — the post-revert clean probe PROVED the cuts happen without
+# them (edge closes SSE at ~30-60s regardless; now handled by resumable streams). Their real job is
+# this one: a deploy must not kill a user's running question (the 2026-08-10 12:04 rollout did).
+overlapSeconds = 30
+drainingSeconds = 300

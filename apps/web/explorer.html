@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Roster · Interactive Explorer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --ground:#0a0d16; --ground-2:#0e1220; --panel:#111627; --panel-2:#0c101c;
+    --line:#212a41; --line-soft:#1a2136;
+    --ink:#e8edf9; --ink-mute:#909bb8; --ink-faint:#5c6688;
+    --company:#ffcf6b; --person:#57d9c4; --category:#b79bff; --investor:#ff8fb3;
+    --accent:#ffcf6b;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+    --display:"Sora","IBM Plex Sans",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0; background:var(--ground); color:var(--ink); font-family:var(--sans);
+    font-size:15px; line-height:1.5; -webkit-font-smoothing:antialiased; overflow:hidden;}
+  a{color:inherit}
+  .app{display:grid; grid-template-columns:250px 1fr 460px; height:100vh; width:100vw}
+
+  .rail{background:linear-gradient(180deg,var(--ground-2),var(--ground)); border-right:1px solid var(--line);
+    padding:24px 22px; display:flex; flex-direction:column; gap:22px; overflow-y:auto}
+  .back{font-family:var(--mono); font-size:11.5px; letter-spacing:.05em; color:var(--ink-mute); text-decoration:none;
+    display:inline-flex; align-items:center; gap:6px; width:max-content}
+  .back:hover{color:var(--accent)}
+  .eyebrow{font-family:var(--mono); font-size:11px; letter-spacing:.22em; text-transform:uppercase; color:var(--accent); font-weight:500}
+  h1{font-family:var(--display); font-weight:700; font-size:24px; line-height:1.12; margin:8px 0 0; letter-spacing:-.01em; text-wrap:balance}
+  .thesis{color:var(--ink-mute); font-size:13.5px; margin-top:10px}
+  .thesis b{color:var(--ink); font-weight:600}
+  .stats{display:flex; gap:10px}
+  .stat{flex:1; background:var(--panel); border:1px solid var(--line-soft); border-radius:11px; padding:11px 12px}
+  .stat .n{font-family:var(--display); font-weight:600; font-size:21px; font-variant-numeric:tabular-nums; letter-spacing:-.02em}
+  .stat .l{font-size:10.5px; color:var(--ink-faint); text-transform:uppercase; letter-spacing:.09em; margin-top:2px}
+  .sec-label{font-family:var(--mono); font-size:10.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:2px}
+  .sectors{display:flex; flex-wrap:wrap; gap:6px}
+  .sec-pill{font-family:var(--sans); font-size:12.5px; color:var(--ink-mute); cursor:pointer;
+    background:var(--panel-2); border:1px solid var(--line-soft); border-radius:20px; padding:5px 12px;
+    transition:border-color .15s,color .15s,background .15s}
+  .sec-pill:hover{border-color:var(--line); color:var(--ink)}
+  .sec-pill.on{border-color:var(--accent); color:var(--ground); background:var(--accent); font-weight:600}
+  .sec-pill .sn{font-family:var(--mono); font-size:10.5px; opacity:.7; margin-left:5px}
+  .lenses{display:flex; flex-direction:column; gap:5px}
+  .lens{display:flex; align-items:center; gap:10px; cursor:pointer; padding:8px 10px; border-radius:9px;
+    border:1px solid transparent; background:var(--panel-2); transition:border-color .15s,background .15s}
+  .lens:hover{background:var(--panel)}
+  .lens.on{border-color:var(--accent); background:var(--panel)}
+  .lens .lc{width:9px; height:9px; border-radius:2.5px; flex:none; box-shadow:0 0 8px currentColor}
+  .lens .lnm{font-size:13.5px; color:var(--ink-mute); font-weight:500}
+  .lens.on .lnm{color:var(--ink)}
+  .lens .lct{margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--ink-faint); font-variant-numeric:tabular-nums}
+  .lens-desc{font-size:12px; color:var(--ink-faint); margin:9px 2px 0; line-height:1.4; min-height:16px}
+  .legend{display:flex; flex-direction:column; gap:9px}
+  .lg{display:flex; align-items:center; gap:11px; padding:4px 7px; margin:-4px -7px; border-radius:8px}
+  .lg.off{display:none}
+  .dot{width:11px; height:11px; border-radius:50%; flex:none; box-shadow:0 0 10px currentColor}
+  .lg .nm{font-size:13.5px}
+  .lg .ct{margin-left:auto; font-family:var(--mono); font-size:11.5px; color:var(--ink-faint); font-variant-numeric:tabular-nums}
+  .hint{font-size:12px; color:var(--ink-faint); border-top:1px solid var(--line-soft); padding-top:16px; margin-top:auto}
+  .hint kbd{font-family:var(--mono); font-size:11px; background:var(--panel); border:1px solid var(--line); border-radius:5px; padding:1px 6px; color:var(--ink-mute)}
+
+  .stage{position:relative; overflow:hidden; background:var(--ground)}
+  canvas{display:block; cursor:grab}
+  canvas.grabbing{cursor:grabbing}
+  .stage-tag{position:absolute; left:20px; bottom:16px; font-family:var(--mono); font-size:11px; color:var(--ink-faint); letter-spacing:.04em; pointer-events:none}
+  .crumb{position:absolute; left:20px; top:18px; display:flex; align-items:center; gap:9px; z-index:4;
+    font-family:var(--mono); font-size:12px; color:var(--ink-mute);
+    background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:7px 13px}
+  .crumb b{color:var(--ink); font-weight:600; font-family:var(--display)}
+  .crumb .x{cursor:pointer; color:var(--ink-faint); padding-left:4px; border-left:1px solid var(--line)}
+  .crumb .x:hover{color:var(--accent)}
+  .reset{position:absolute; right:18px; top:18px; font-family:var(--mono); font-size:11px; letter-spacing:.06em; color:var(--ink-mute);
+    background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:7px 12px; cursor:pointer; transition:border-color .15s,color .15s}
+  .reset:hover{border-color:var(--accent); color:var(--accent)}
+  .reset:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .loading{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:5}
+  .load-msg{font-family:var(--mono); font-size:13px; color:var(--ink-mute); text-align:center; letter-spacing:.03em}
+  .load-msg span{color:var(--ink-faint); font-size:11px}
+  .load-msg .spin{width:22px;height:22px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;margin:0 auto 14px;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .evidence{background:linear-gradient(180deg,var(--panel-2),var(--ground)); border-left:1px solid var(--line);
+    padding:24px 22px; overflow-y:auto; display:flex; flex-direction:column; gap:16px}
+  .ev-empty{color:var(--ink-faint); font-size:13.5px; margin-top:8px}
+  .ev-empty .big{font-family:var(--display); color:var(--ink-mute); font-size:16px; font-weight:600; display:block; margin-bottom:8px}
+  .ev-kind{font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; font-weight:500}
+  .ev-name{font-family:var(--display); font-weight:600; font-size:22px; line-height:1.15; letter-spacing:-.01em; text-wrap:balance; margin-top:3px}
+  .ev-id{font-family:var(--mono); font-size:11px; color:var(--ink-faint); margin-top:4px; word-break:break-all}
+  .grp{display:flex; flex-direction:column; gap:9px}
+  .grp>.sec-label{margin-top:6px}
+  .claim{background:var(--panel); border:1px solid var(--line-soft); border-left:2px solid var(--edge-c,var(--line)); border-radius:9px; padding:10px 12px}
+  .claim .pred{font-family:var(--mono); font-size:10.5px; letter-spacing:.06em; color:var(--ink-faint); text-transform:uppercase}
+  .claim .obj{font-size:14px; margin-top:2px; color:var(--ink)}
+  .claim .q{font-size:12px; color:var(--ink-mute); margin-top:7px; padding-left:10px; border-left:2px solid var(--line); font-style:italic; line-height:1.45}
+  .claim .q::before{content:"\201C"} .claim .q::after{content:"\201D"}
+  .facts-h{display:flex; align-items:center; justify-content:space-between; margin:12px 0 8px}
+  .facts-h .ct{font-family:var(--mono); font-size:11px; color:var(--ink-faint)}
+  .cluster{margin:0 0 9px; padding-bottom:9px; border-bottom:1px solid var(--line-soft)}
+  .cluster:last-child{border-bottom:none}
+  .cl-key{font-family:var(--mono); font-size:9.5px; letter-spacing:.13em; text-transform:uppercase;
+    color:var(--ink-faint); margin-bottom:6px}
+  .cl-vals{display:flex; flex-wrap:wrap; gap:6px}
+  .cl-pill{display:inline-flex; align-items:center; gap:6px; background:var(--panel);
+    border:1px solid var(--line-soft); border-radius:7px; padding:4px 10px; font-size:12.5px; color:var(--ink);
+    cursor:pointer} .cl-pill:hover{border-color:var(--line)}
+  .cl-facts{display:flex; flex-direction:column; gap:8px}
+  .cl-fact .cl-fv{font-size:13px; color:var(--ink); font-weight:500; line-height:1.35}
+  .cl-q{font-size:11.5px; color:var(--ink-mute); font-style:italic; margin-top:3px; padding-left:9px;
+    border-left:2px solid var(--line); line-height:1.42}
+  .cl-q::before{content:"\201C"} .cl-q::after{content:"\201D"}
+  .link-pill{display:inline-flex; align-items:center; gap:7px; background:var(--panel); border:1px solid var(--line-soft); border-radius:20px; padding:5px 11px 5px 9px; font-size:13px; cursor:pointer; transition:border-color .15s}
+  .link-pill:hover{border-color:var(--accent)}
+  .link-wrap{display:flex; flex-wrap:wrap; gap:7px}
+  .prov-note{font-size:11.5px; color:var(--ink-faint); border-top:1px solid var(--line-soft); padding-top:13px; margin-top:4px}
+  .prov-note b{color:var(--person); font-weight:600}
+
+  @media (max-width:1080px){
+    body{overflow:auto}
+    .app{grid-template-columns:1fr; height:auto; min-height:100vh}
+    .rail{border-right:none; border-bottom:1px solid var(--line)}
+    .stage{height:64vh; min-height:420px}
+    .evidence{border-left:none; border-top:1px solid var(--line)}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <a class="back" href="/">&larr; Roster</a>
+    <div>
+      <div class="eyebrow">Interactive Explorer</div>
+      <h1>Grounded Startup Graph</h1>
+      <p class="thesis">Every node and edge here was <b>extracted from a source and span-verified</b> &mdash;
+        select anything to read the <b>verbatim quote</b> it rests on. Nothing is from memory.</p>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="n" id="s-ent">&ndash;</div><div class="l">Entities</div></div>
+      <div class="stat"><div class="n" id="s-edge">&ndash;</div><div class="l">Edges</div></div>
+      <div class="stat"><div class="n" id="s-claim">&ndash;</div><div class="l">Cited facts</div></div>
+    </div>
+    <div id="sector-box" hidden>
+      <div class="sec-label">Cluster</div>
+      <div class="sectors" id="sectors"></div>
+    </div>
+    <div>
+      <div class="sec-label">Show companies by</div>
+      <div class="lenses" id="lenses"></div>
+      <p class="lens-desc" id="lens-desc"></p>
+    </div>
+    <div>
+      <div class="sec-label">Shown in this lens</div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="hint"><b style="color:var(--ink-mute)">Click a company</b> to expand its world &middot;
+      switch <b style="color:var(--ink-mute)">lens</b> to change focus &middot; <kbd>scroll</kbd> zoom &middot; drag to pan.</div>
+  </aside>
+
+  <div class="stage">
+    <canvas id="cv"></canvas>
+    <div class="crumb" id="crumb" hidden></div>
+    <button class="reset" id="reset">recenter</button>
+    <div class="stage-tag" id="tag">live from the production claim graph</div>
+    <div class="loading" id="loading"><div class="load-msg"><div class="spin"></div>Loading the graph&hellip;</div></div>
+  </div>
+
+  <aside class="evidence" id="ev">
+    <div class="ev-empty" id="ev-empty">
+      <span class="big">Read the evidence.</span>
+      Pick a company, founder, category, or investor. Its claims appear here &mdash; each with the exact quote
+      from the source document that grounds it.
+    </div>
+  </aside>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  const KIND = {
+    company:{c:"#ffcf6b", label:"Companies"}, person:{c:"#57d9c4", label:"People"},
+    investor:{c:"#ff8fb3", label:"Investors"}, technology:{c:"#7fb5ff", label:"Technologies"},
+    product:{c:"#8fe6a0", label:"Products"}, category:{c:"#b79bff", label:"Categories"},
+    market:{c:"#ffb173", label:"Segments"},
+  };
+  const PRED_LABEL = {
+    operates_in_category:"operates in", has_founder:"founded by", key_person:"key person",
+    has_investor:"backed by", compared_to:"competes with", offers_product:"produces",
+    uses_technology:"uses tech", targets_customer:"targets", ideal_customer_profile:"ICP",
+    claims_differentiator:"differentiator", raised_funding:"funding", revenue:"revenue",
+    traction_metric:"traction", headcount:"headcount", company_location:"location",
+    company_status:"status", business_model:"business model", moat_claim:"moat",
+    customer_evidence:"customer", go_to_market:"go-to-market", risk_factor:"risk",
+  };
+  // canonical dimension order — clusters render in THIS order for EVERY company (stable read).
+  const DIM_ORDER = ["operates in","produces","uses tech","backed by","funding","revenue","traction",
+    "competes with","targets","ICP","customer","founded by","key person","headcount","business model",
+    "go-to-market","moat","differentiator","location","status","risk"];
+
+  function boot(RAW){
+    const nodeById = new Map();
+    function ensure(id, name, kind, claims){
+      let n = nodeById.get(id);
+      if(!n){ n = {id, name:name||id, kind, claims:claims||0, deg:0}; nodeById.set(id,n); }
+      if(name) n.name = name; if(claims) n.claims = claims; return n;
+    }
+    RAW.companies.forEach(c=>ensure(c.id, c.name, "company", c.claims));
+    const links=[];
+    RAW.edges.forEach(e=>{
+      const s=ensure(e.s, e.sname, "company");
+      const kind = KIND[e.okind] ? e.okind : "category";
+      const o=ensure(e.o, e.oname, kind);
+      s.deg++; o.deg++; links.push({s, o, p:e.p});
+    });
+    const values = new Map();
+    RAW.values.forEach(v=>{ if(!values.has(v.s)) values.set(v.s,[]); values.get(v.s).push(v); });
+    const nodes=[...nodeById.values()];
+    nodes.forEach(n=>{ n.r = n.kind==="company" ? 6 + Math.sqrt(Math.max(n.claims,1))*2.1 : 3.4 + Math.min(n.deg,6)*1.15; });
+    // SUBJECT startups (the tracked companies) vs external RIVALS (Google/Microsoft, surfaced only as
+    // competitors). Same kind, but a distinct color so a rival never looks like a portfolio company.
+    const subjectIds=new Set(RAW.companies.map(c=>c.id));
+    const RIVAL="#8b93a7";
+    function isRival(n){ return n.kind==="company" && !subjectIds.has(n.id); }
+    function colOf(n){ return isRival(n) ? RIVAL : KIND[n.kind].c; }
+    nodes.forEach(n=>{ if(isRival(n)) n.r=Math.max(4.5, n.r*0.7); });   // rivals sit smaller than subjects
+
+    document.getElementById("s-ent").textContent = nodes.length;
+    document.getElementById("s-edge").textContent = links.length;
+    let nc=0; values.forEach(a=>nc+=a.length); nc += links.length;
+    document.getElementById("s-claim").textContent = nc;
+
+    // ---- LENSES: focus-area clusters viewed ONE AT A TIME. Companies are the always-on spine;
+    // each lens reveals ONLY that focus area's satellites (never orphans the graph). Clicking a
+    // company drills into its FULL world (all kinds) regardless of lens. ----
+    const LENSES = [
+      {id:"landscape", label:"Landscape", c:"#b79bff", sat:["category"],
+        preds:["operates_in_category","compared_to"],
+        desc:"The space each company plays in, and who it competes with."},
+      {id:"investors", label:"Investors", c:"#ff8fb3", sat:["investor"], preds:["has_investor"],
+        desc:"Who funds whom — shared investors link the companies they back."},
+      {id:"founders", label:"Founders", c:"#57d9c4", sat:["person"], preds:["has_founder","key_person"],
+        desc:"The people who founded each company."},
+      {id:"products", label:"Products & Tech", c:"#7fb5ff", sat:["product","technology","market"],
+        preds:["offers_product","uses_technology","targets_customer","ideal_customer_profile"],
+        desc:"What each company builds, the tech it uses, and who it sells to."},
+    ];
+    let activeLens = LENSES[0];
+    let focusCompany = null;   // a drilled-in company → show its whole world; else lens view
+
+    const counts={}; nodes.forEach(n=>counts[n.kind]=(counts[n.kind]||0)+1);
+    const legendEl=document.getElementById("legend"), descEl=document.getElementById("lens-desc");
+    const lensEl=document.getElementById("lenses");
+    LENSES.forEach(L=>{
+      const nSat = L.sat.length ? L.sat.reduce((a,k)=>a+(counts[k]||0),0) : (counts.company||0);
+      const el=document.createElement("div"); el.className="lens"+(L===activeLens?" on":""); el.dataset.id=L.id;
+      el.innerHTML='<span class="lc" style="background:'+L.c+';color:'+L.c+'"></span>'+
+        '<span class="lnm">'+L.label+'</span><span class="lct">'+nSat+'</span>';
+      el.onclick=function(){ setLens(L); };
+      lensEl.appendChild(el);
+    });
+    function renderLegend(){
+      const kinds=["company"].concat(activeLens.sat);
+      let rows=kinds.map(k=>'<div class="lg"><span class="dot" style="background:'+
+        KIND[k].c+';color:'+KIND[k].c+'"></span><span class="nm">'+
+        (k==="company"?"Tracked companies":KIND[k].label)+
+        '</span><span class="ct">'+(counts[k]||0)+'</span></div>').join("");
+      // rivals (external competitor companies) only surface in the Landscape lens (compared_to)
+      if(activeLens.id==="landscape"){
+        const nr=nodes.filter(isRival).length;
+        if(nr) rows+='<div class="lg"><span class="dot" style="background:'+RIVAL+';color:'+RIVAL+
+          '"></span><span class="nm">External rivals</span><span class="ct">'+nr+'</span></div>';
+      }
+      legendEl.innerHTML=rows;
+    }
+    function setLens(L){
+      activeLens=L; focusCompany=null; selected=null;
+      document.querySelectorAll(".lens").forEach(e=>e.classList.toggle("on", e.dataset.id===L.id));
+      descEl.textContent=L.desc; renderLegend(); updateCrumb(); select(null); reheat(.65);
+    }
+    descEl.textContent=activeLens.desc; renderLegend();
+    // ---- SECTOR picker: view ONE AI cluster at a time. Switching reloads with ?sector= (clean
+    // teardown; avoids duplicate canvas listeners). Hidden until the graph has stamped sectors. ----
+    const secBox=document.getElementById("sector-box"), secEl=document.getElementById("sectors");
+    function labelSector(id){ return (id||"").split("-")
+      .map(w=>w==="ai"?"AI":(w==="and"?"&":w.charAt(0).toUpperCase()+w.slice(1))).join(" "); }
+    if((RAW.sectors||[]).length){
+      secBox.hidden=false;
+      secEl.innerHTML=RAW.sectors.map(s=>'<span class="sec-pill'+(s.id===RAW.sector?" on":"")+
+        '" data-id="'+esc(s.id)+'">'+esc(labelSector(s.id))+'<span class="sn">'+s.n+'</span></span>').join("");
+      secEl.querySelectorAll(".sec-pill").forEach(p=>p.onclick=function(){
+        if(p.dataset.id!==RAW.sector) location.search="?sector="+encodeURIComponent(p.dataset.id); });
+    }
+    // ---- visibility: lens-scoped, or (when drilled in) the focus company's full ego network ----
+    function inLens(kind){ return kind==="company" || activeLens.sat.indexOf(kind)>=0; }
+    function egoTouches(c,l){ return l.s===c || l.o===c; }
+    function nodeVisible(n){
+      if(focusCompany){ return n===focusCompany || links.some(l=>egoTouches(focusCompany,l) && egoTouches(n,l)); }
+      return inLens(n.kind);
+    }
+    function linkVisible(l){
+      if(focusCompany){ return egoTouches(focusCompany,l); }
+      return activeLens.preds.indexOf(l.p)>=0 && inLens(l.s.kind) && inLens(l.o.kind);
+    }
+
+    const cv=document.getElementById("cv"), ctx=cv.getContext("2d");
+    const stage=cv.parentElement;
+    let W=0,H=0; const DPR=Math.min(window.devicePixelRatio||1,2);
+    let view={x:0,y:0,k:1}; let alpha=1;
+    const reduce = matchMedia("(prefers-reduced-motion:reduce)").matches;
+
+    function size(){ W=stage.clientWidth; H=stage.clientHeight; cv.width=W*DPR; cv.height=H*DPR;
+      cv.style.width=W+"px"; cv.style.height=H+"px"; ctx.setTransform(DPR,0,0,DPR,0,0); }
+    nodes.forEach((n,i)=>{ const a=i*2.399963, rad=40+Math.sqrt(i)*24; n.x=Math.cos(a)*rad; n.y=Math.sin(a)*rad; n.vx=0; n.vy=0; });
+
+    let hover=null, selected=null, dragNode=null;
+    function visible(n){ return nodeVisible(n); }   // lens/focus-scoped (defined above)
+    function neighbors(n){ const s=new Set([n]); links.forEach(l=>{ if(l.s===n)s.add(l.o); if(l.o===n)s.add(l.s); }); return s; }
+
+    // DRILL-DOWN uses a STATIC radial layout (no physics): the focused company centered, its
+    // neighbors fanned in a clean ring grouped by kind. Deterministic → zero jitter, reads instantly.
+    function radialLayout(c){
+      c.x=0; c.y=0; c.vx=0; c.vy=0;
+      const nb=[]; links.forEach(l=>{ if(l.s===c) nb.push(l.o); else if(l.o===c) nb.push(l.s); });
+      const uniq=[...new Set(nb)];
+      const order=["person","investor","technology","product","category","market","company"];
+      uniq.sort((a,b)=>(order.indexOf(a.kind)-order.indexOf(b.kind))||a.name.localeCompare(b.name));
+      const N=uniq.length||1, R=Math.max(150, 30*Math.sqrt(N)+96);
+      uniq.forEach((n,i)=>{ const ang=-Math.PI/2 + (i/N)*Math.PI*2;
+        n.x=Math.cos(ang)*R; n.y=Math.sin(ang)*R; n.vx=0; n.vy=0; });
+    }
+
+    function tick(){
+      if(focusCompany) return false;                 // static radial layout — no simulation
+      const rep=1600, spring=.02, springLen=82, center=.006, damp=.85;
+      // Only the CURRENTLY VISIBLE subgraph participates. Repulsion spreads; a HARD collision pass
+      // (position-based) guarantees no two disks overlap → clean spacing that settles fast.
+      for(let i=0;i<nodes.length;i++){ const a=nodes[i]; if(!visible(a)) continue;
+        for(let j=i+1;j<nodes.length;j++){ const b=nodes[j]; if(!visible(b)) continue;
+          let dx=a.x-b.x, dy=a.y-b.y; let d2=dx*dx+dy*dy||1;
+          if(d2<96100){ const d=Math.sqrt(d2), ux=dx/d, uy=dy/d, f=rep/d2;
+            a.vx+=ux*f*alpha; a.vy+=uy*f*alpha; b.vx-=ux*f*alpha; b.vy-=uy*f*alpha;
+            const md=a.r+b.r+12; if(d<md){ const p=(md-d)*0.5; a.x+=ux*p; a.y+=uy*p; b.x-=ux*p; b.y-=uy*p; } } } }
+      links.forEach(l=>{ if(!linkVisible(l)) return; const a=l.s,b=l.o; let dx=b.x-a.x, dy=b.y-a.y; let d=Math.sqrt(dx*dx+dy*dy)||1;
+        const f=(d-springLen)*spring, ux=dx/d, uy=dy/d;
+        a.vx+=ux*f*alpha; a.vy+=uy*f*alpha; b.vx-=ux*f*alpha; b.vy-=uy*f*alpha; });
+      nodes.forEach(n=>{ if(!visible(n)) return; n.vx-=n.x*center*alpha; n.vy-=n.y*center*alpha;
+        if(n!==dragNode){ n.vx*=damp; n.vy*=damp; n.x+=n.vx; n.y+=n.vy; } });
+      alpha*=0.93; return alpha>0.04;                 // decays to rest → loop freezes (no perpetual jitter)
+    }
+
+    function draw(){
+      ctx.clearRect(0,0,W,H); ctx.save();
+      ctx.translate(W/2+view.x, H/2+view.y); ctx.scale(view.k,view.k);
+      const focus = hover||selected; const nb = focus ? neighbors(focus) : null;
+      links.forEach(l=>{ if(!linkVisible(l)) return;
+        const on = !focus || (nb.has(l.s)&&nb.has(l.o));
+        ctx.beginPath(); ctx.moveTo(l.s.x,l.s.y); ctx.lineTo(l.o.x,l.o.y);
+        if(on && focus){ ctx.strokeStyle="rgba(200,214,244,.42)"; ctx.lineWidth=1.1/view.k; }
+        else if(focus){ ctx.strokeStyle="rgba(150,168,210,.05)"; ctx.lineWidth=.8/view.k; }
+        else { ctx.strokeStyle="rgba(150,168,210,.16)"; ctx.lineWidth=.9/view.k; }
+        ctx.stroke(); });
+      nodes.forEach(n=>{ if(!visible(n)) return;
+        const dim = focus && !nb.has(n); const col = colOf(n);
+        ctx.globalAlpha = dim?0.18:1;
+        if(n.kind==="company" || n===focus){ ctx.beginPath(); ctx.arc(n.x,n.y,n.r+(n===focus?7:4),0,7);
+          const g=ctx.createRadialGradient(n.x,n.y,n.r*.4,n.x,n.y,n.r+8);
+          g.addColorStop(0, col+"55"); g.addColorStop(1, col+"00"); ctx.fillStyle=g; ctx.fill(); }
+        ctx.beginPath(); ctx.arc(n.x,n.y,n.r,0,7); ctx.fillStyle=col; ctx.fill();
+        if(n===selected){ ctx.lineWidth=2/view.k; ctx.strokeStyle="#fff"; ctx.stroke(); }
+        ctx.globalAlpha=1;
+        // label EVERY node kind (not just companies) so an investor/tech/product node is
+        // identifiable at a glance; non-company labels are drawn in the kind's color (distinct).
+        const showLabel = (view.k>0.55) || (n.kind!=="company") || (focus && nb.has(n)) || n===focus;
+        if(showLabel){ ctx.globalAlpha = dim?0.25:1;
+          ctx.font = ((n===focus?600:500))+' '+(n.kind==="company"?11:10.5)+'px "IBM Plex Sans",sans-serif';
+          ctx.fillStyle = (n.kind==="company" && !isRival(n)) ? "#e8edf9" : col; ctx.textAlign="center"; ctx.textBaseline="top";
+          const t=n.name.length>26?n.name.slice(0,25)+"…":n.name;
+          ctx.save(); ctx.translate(n.x,n.y); ctx.scale(1/view.k,1/view.k); ctx.fillText(t, 0, n.r*view.k+3); ctx.restore();
+          ctx.globalAlpha=1; }
+      });
+      ctx.restore();
+    }
+    // The render loop PAUSES when the layout is at rest and nothing is being interacted with, then
+    // resumes on any interaction — so a settled graph sits perfectly still (no clunky perpetual drift).
+    let running=false;
+    function loop(){
+      const active=tick(); draw();
+      if(active || hover || dragNode || dragging){ requestAnimationFrame(loop); }
+      else { running=false; }
+    }
+    function kick(){ if(!running){ running=true; requestAnimationFrame(loop); } }
+    function reheat(a){ if(!focusCompany) alpha=Math.max(alpha,a==null?.6:a); kick(); }
+
+    function toWorld(px,py){ return { x:(px-W/2-view.x)/view.k, y:(py-H/2-view.y)/view.k }; }
+    function pick(px,py){ const w=toWorld(px,py); let best=null,bd=1e9;
+      nodes.forEach(n=>{ if(!visible(n))return; const dx=n.x-w.x,dy=n.y-w.y,d=dx*dx+dy*dy, rr=(n.r+6)*(n.r+6);
+        if(d<rr && d<bd){bd=d;best=n;} }); return best; }
+
+    let dragging=false, lastX=0,lastY=0, moved=false;
+    cv.addEventListener("pointerdown",e=>{ cv.setPointerCapture(e.pointerId); lastX=e.offsetX; lastY=e.offsetY; moved=false;
+      const n=pick(e.offsetX,e.offsetY); if(n){ dragNode=n; } else { dragging=true; cv.classList.add("grabbing"); } });
+    cv.addEventListener("pointermove",e=>{
+      if(dragNode){ const w=toWorld(e.offsetX,e.offsetY); dragNode.x=w.x; dragNode.y=w.y; dragNode.vx=0; dragNode.vy=0; reheat(.4); moved=true; return; }
+      if(dragging){ view.x+=e.offsetX-lastX; view.y+=e.offsetY-lastY; lastX=e.offsetX; lastY=e.offsetY; moved=true; return; }
+      const n=pick(e.offsetX,e.offsetY); if(n!==hover){ hover=n; cv.style.cursor=n?"pointer":"grab"; kick(); } });
+    cv.addEventListener("pointerup",e=>{ if(dragNode && !moved) select(dragNode); else if(dragging && !moved) select(null);
+      dragNode=null; dragging=false; cv.classList.remove("grabbing"); });
+    cv.addEventListener("wheel",e=>{ e.preventDefault(); const f=Math.exp(-e.deltaY*0.0012);
+      const nk=Math.min(3.2,Math.max(0.35,view.k*f));
+      const wx=(e.offsetX-W/2-view.x)/view.k, wy=(e.offsetY-H/2-view.y)/view.k;
+      view.k=nk; view.x=e.offsetX-W/2-wx*view.k; view.y=e.offsetY-H/2-wy*view.k; },{passive:false});
+    document.getElementById("reset").onclick=function(){ view={x:0,y:0,k:1}; reheat(.5); };
+
+    const ev=document.getElementById("ev"), crumbEl=document.getElementById("crumb");
+    function esc(s){ return (s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+    function updateCrumb(){
+      if(focusCompany){ crumbEl.hidden=false;
+        crumbEl.innerHTML='focused on <b>'+esc(focusCompany.name)+'</b><span class="x" id="cx">&times; back</span>';
+        crumbEl.querySelector("#cx").onclick=function(ev){ ev.stopPropagation(); select(null); reheat(.6); };
+      } else { crumbEl.hidden=true; crumbEl.innerHTML=""; }
+    }
+    function select(n){
+      selected=n;
+      if(!n){ focusCompany=null; updateCrumb(); ev.innerHTML=document.getElementById("ev-empty").outerHTML; return; }
+      if(n.kind==="company"){ focusCompany=n; radialLayout(n); view={x:0,y:0,k:1}; }   // drill in: clean radial
+      updateCrumb(); kick();
+      const col=colOf(n);
+      let html='<div><div class="ev-kind" style="color:'+col+'">'+esc(isRival(n)?"rival company":n.kind)+'</div>'+
+        '<div class="ev-name">'+esc(n.name)+'</div><div class="ev-id">'+esc(n.id)+'</div></div>';
+      if(n.kind==="company"){
+        // Grounded facts CLUSTERED by dimension: one block per key (e.g. all "backed by" values
+        // together), values as compact chips (entity values clickable). No source quote — saves space.
+        const groups=new Map();
+        function add(dim,item){ if(!groups.has(dim)) groups.set(dim,[]); groups.get(dim).push(item); }
+        links.filter(l=>l.s===n).forEach(l=>add(PRED_LABEL[l.p]||l.p,
+          {val:l.o.name, to:l.o.id, kc:colOf(l.o)}));
+        (values.get(n.id)||[]).forEach(a=>add(PRED_LABEL[a.p]||a.p, {val:a.v, to:"", kc:"", q:a.q||""}));
+        let nfacts=0; groups.forEach(v=>nfacts+=v.length);
+        html+='<div class="facts-h"><span class="sec-label">Grounded facts</span><span class="ct">'+nfacts+'</span></div>';
+        // fixed order first (DIM_ORDER), then any remaining dims not in the list, so every company
+        // reads in the SAME dimension sequence.
+        const ordered=DIM_ORDER.filter(d=>groups.has(d))
+          .concat([...groups.keys()].filter(d=>!DIM_ORDER.includes(d)));
+        ordered.forEach(dim=>{
+          const items=groups.get(dim);
+          html+='<div class="cluster"><div class="cl-key">'+esc(dim)+'</div>';
+          if(items[0].to){   // entity relationships → clickable pills (no per-edge quote in the feed)
+            html+='<div class="cl-vals">'+items.map(it=>
+              '<span class="cl-pill" data-id="'+esc(it.to)+'"><span class="dot" style="width:7px;height:7px;background:'+it.kc+';color:'+it.kc+'"></span>'+esc(it.val)+'</span>').join("")+'</div>';
+          } else {           // value facts → value + its span-verified source quote
+            html+='<div class="cl-facts">'+items.map(it=>
+              '<div class="cl-fact"><div class="cl-fv">'+esc(it.val)+'</div>'+
+              (it.q?'<div class="cl-q">'+esc(it.q)+'</div>':'')+'</div>').join("")+'</div>';
+          }
+          html+='</div>';
+        });
+      } else {
+        const back=links.filter(l=>l.o===n).map(l=>l.s);
+        const rel = n.kind==="person"?"Founder of":n.kind==="investor"?"Backs":
+          isRival(n)?"Competes with":n.kind==="technology"?"Used by":n.kind==="product"?"Offered by":
+          n.kind==="market"?"Targeted by":"Companies here";
+        html+='<div class="grp"><div class="sec-label">'+rel+'</div><div class="link-wrap">'+
+          back.map(s=>'<span class="link-pill" data-id="'+esc(s.id)+'"><span class="dot" style="width:8px;height:8px;background:'+KIND.company.c+';color:'+KIND.company.c+'"></span>'+esc(s.name)+'</span>').join("")+'</div></div>';
+      }
+      html+='<div class="prov-note">Every fact above is <b>span-verified</b> to a quote in a source document. This is a live slice of Roster’s production claim graph.</div>';
+      ev.innerHTML=html;
+      ev.querySelectorAll(".link-pill,.cl-pill").forEach(p=>p.onclick=function(){ const t=nodeById.get(p.dataset.id); if(t){ select(t); reheat(.25); }});
+      ev.scrollTop=0;
+    }
+
+    window.addEventListener("resize",size);
+    size();
+    if(reduce){ for(let i=0;i<300;i++) tick(); alpha=0; draw(); }
+    else { reheat(1); }
+  }
+
+  const load=document.getElementById("loading");
+  const _sec=new URLSearchParams(location.search).get("sector")||"";
+  fetch("/graph/explore?limit=80&sector="+encodeURIComponent(_sec)).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); })
+    .then(function(d){ if(load) load.remove(); boot(d); })
+    .catch(function(e){ if(load) load.innerHTML='<div class="load-msg">Could not load the graph.<br><span>'+e+'</span></div>'; });
+})();
+</script>
+</body>
+</html>

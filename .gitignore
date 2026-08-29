@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Node / web
+node_modules/
+apps/web/dist/
+
+# Data / logs / scratch
+/data/
+/logs/
+tmp/
+*.log
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+data/eval/
+evals/realworld/data/
+
+# Coverage / test artifacts
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Build / packaging
+*.egg
+pip-wheel-metadata/
+.python-version
+
+# Provider cassettes are recorded per-env; keep large recordings out unless intentionally committed
+# evals/cassettes/   # (uncomment to ignore; left tracked so a curated replay set can be committed)

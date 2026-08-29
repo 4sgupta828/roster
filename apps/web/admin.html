@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Roster — Corpus Coverage</title>
+<script>/* apply the app's saved theme before paint (no flash) — Coverage follows the main app's light/dark choice */
+try{var t=localStorage.getItem("roster-theme"); if(t==="dark"||t==="light") document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
+<style>
+  /* DEFAULT = CLINICAL LIGHT — mirrors the main app; dark is opt-in and follows the app's theme choice
+     (shared localStorage key "roster-theme") or the OS preference when no explicit choice was made. */
+  :root{
+    color-scheme:light;
+    --bg:#EEF3F8; --panel:#FFFFFF; --panel2:#F4F8FC; --ink:#132430; --muted:#5A6B7B;
+    --gold:#1568B5; --gold-rgb:21,104,181; --verified:#137A54; --gap:#B26A1E; --hair:#D2DEEA;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+  }
+  :root[data-theme="dark"]{
+    color-scheme:dark;
+    --bg:#060E1B; --panel:#0F1A2C; --panel2:#0C1524; --ink:#ECEBE3; --muted:#8B96A9;
+    --gold:#D3B37C; --gold-rgb:211,179,124; --verified:#57B891; --gap:#D6975A; --hair:#22304A;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#060E1B; --panel:#0F1A2C; --panel2:#0C1524; --ink:#ECEBE3; --muted:#8B96A9;
+    --gold:#D3B37C; --gold-rgb:211,179,124; --verified:#57B891; --gap:#D6975A; --hair:#22304A;
+  }}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.5;
+    font-size:15px;-webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(120% 60% at 85% -10%, rgba(var(--gold-rgb),.06), transparent 60%);}
+  .wrap{max-width:56rem;margin:0 auto;padding:1.5rem 1.15rem 5rem;}
+  header{display:flex;align-items:center;gap:.8rem;padding:.1rem 0 1.2rem;border-bottom:1px solid var(--hair);margin-bottom:1.6rem;flex-wrap:wrap;}
+  .logo{height:52px;width:auto;}
+  h1{font-family:var(--serif);font-size:1.7rem;margin:.2rem 0 .2rem;letter-spacing:-.01em;}
+  .back{margin-left:auto;font-family:var(--mono);font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--muted);text-decoration:none;border:1px solid var(--hair);border-radius:8px;padding:.4rem .8rem;}
+  .back:hover{color:var(--gold);border-color:var(--gold);}
+  h2{font-family:var(--sans);font-size:.72rem;text-transform:uppercase;letter-spacing:.13em;color:var(--gold);
+    margin:2rem 0 .8rem;padding-top:1.3rem;border-top:1px solid var(--hair);display:flex;align-items:center;gap:.5rem;}
+  h2::before{content:"";width:15px;height:2px;background:var(--gold);border-radius:2px;}
+  h2:first-of-type{border-top:none;padding-top:0;margin-top:.5rem;}
+  .totals{display:flex;gap:1.5rem;flex-wrap:wrap;margin:.3rem 0 .5rem;}
+  .stat{background:var(--panel);border:1px solid var(--hair);border-radius:12px;padding:.9rem 1.15rem;}
+  .stat .n{font-family:var(--serif);font-size:1.9rem;color:var(--ink);line-height:1;}
+  .stat .l{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin-top:.35rem;}
+  table{border-collapse:collapse;width:100%;font-size:.9rem;}
+  th{font-family:var(--mono);font-size:.64rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
+    font-weight:660;text-align:left;padding:.5rem .7rem;border-bottom:1.5px solid var(--gold);}
+  td{padding:.55rem .7rem;border-bottom:1px solid var(--hair);vertical-align:top;}
+  tbody tr:last-child td{border-bottom:none;}
+  .tw{overflow-x:auto;}
+  .badge{font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.05em;
+    border-radius:999px;padding:.1rem .5rem;border:1px solid var(--hair);color:var(--muted);}
+  .b-live{color:var(--verified);border-color:var(--verified);}
+  .b-partial{color:var(--gold);border-color:var(--gold);}
+  .b-connector,.b-planned{color:var(--muted);}
+  .num{font-family:var(--mono);color:var(--ink);}
+  .zero{color:var(--muted);}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr));gap:.5rem;}
+  .cgroup{background:var(--panel);border:1px solid var(--hair);border-radius:12px;padding:.8rem .9rem;}
+  .cgroup h3{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 .5rem;}
+  .cgroup .item{display:flex;align-items:center;gap:.5rem;padding:.18rem 0;font-size:.9rem;}
+  .dot{width:7px;height:7px;border-radius:50%;flex:none;}
+  .d-deep{background:var(--verified);} .d-reference{background:var(--gold);}
+  .d-medium{background:#6EA0E0;} .d-shallow{background:var(--gap);} .d-rem{background:var(--muted);opacity:.5;}
+  .depth{font-family:var(--mono);font-size:.6rem;color:var(--muted);margin-left:auto;text-transform:uppercase;}
+  .muted{color:var(--muted);font-size:.85rem;}
+  .note{font-size:.7rem;color:var(--muted);}
+  /* diligence gap cards — the thin-spot / authenticity diagnostic */
+  .gaps{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr));gap:.6rem;margin:.2rem 0 .4rem;}
+  .gc{background:var(--panel);border:1px solid var(--hair);border-radius:12px;padding:.75rem .9rem;position:relative;overflow:hidden;}
+  .gc::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--muted);}
+  .gc.s-red::before{background:#C0392B;} .gc.s-amber::before{background:var(--gap);} .gc.s-green::before{background:var(--verified);}
+  .gc .lab{font-size:.9rem;font-weight:620;color:var(--ink);display:flex;align-items:center;gap:.4rem;}
+  .gc .st{font-family:var(--mono);font-size:.58rem;text-transform:uppercase;letter-spacing:.05em;border-radius:999px;padding:.08rem .45rem;margin-left:auto;}
+  .st.s-red{color:#C0392B;border:1px solid #C0392B;} .st.s-amber{color:var(--gap);border:1px solid var(--gap);}
+  .st.s-green{color:var(--verified);border:1px solid var(--verified);}
+  .gc .cnt{font-family:var(--serif);font-size:1.35rem;color:var(--ink);margin:.25rem 0 .1rem;line-height:1;}
+  .gc .cnt small{font-family:var(--mono);font-size:.62rem;color:var(--muted);}
+  .gc .bar{height:5px;border-radius:3px;background:var(--panel2);border:1px solid var(--hair);overflow:hidden;margin:.35rem 0 .3rem;}
+  .gc .bar>i{display:block;height:100%;border-radius:3px;}
+  .gc.s-red .bar>i{background:#C0392B;} .gc.s-amber .bar>i{background:var(--gap);} .gc.s-green .bar>i{background:var(--verified);}
+  .gc .why{font-size:.72rem;color:var(--muted);line-height:1.35;}
+  .gc .tier{font-family:var(--mono);font-size:.56rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);}
+  .authbar{display:flex;height:14px;border-radius:7px;overflow:hidden;border:1px solid var(--hair);margin:.5rem 0 .3rem;}
+  .authbar>span{height:100%;}
+  .authleg{display:flex;flex-wrap:wrap;gap:.4rem 1rem;font-size:.72rem;color:var(--muted);margin-bottom:.3rem;}
+  .authleg b{color:var(--ink);font-weight:600;} .swatch{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:.3rem;vertical-align:middle;}
+  @media (max-width:560px){ .logo{height:44px;} h1{font-size:1.4rem;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img class="logo" src="/roster-mark.png" alt="Roster" />
+    <h1>Corpus Coverage</h1>
+    <a class="back" href="/">← Research</a>
+  </header>
+  <div id="out"><div class="muted">Loading coverage…</div></div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => { const d=document.createElement("div"); d.textContent=s??""; return d.innerHTML; };
+const fmt = n => (n||0).toLocaleString();
+// (Product settings moved to the ⚙ icon in the main app — this page is coverage only.)
+
+async function load(){
+  let d;
+  try{ d = await (await fetch("/admin/coverage")).json(); }
+  catch(e){ $("#out").innerHTML = `<div class="muted">Couldn't load coverage.</div>`; return; }
+  const live = d.live||{}, plan = d.plan||{};
+  const parts = [];
+
+  // ◉ Pulse — what changed in the corpus (public /pulse/recent; absent when the flag is off)
+  try{
+    const pr = await fetch("/pulse/recent?limit=12");
+    if(pr.ok){
+      const evs = (await pr.json()).events||[];
+      if(evs.length){
+        parts.push(`<h2>◉ What changed recently</h2>` + evs.map(e=>{
+          const what = e.relation === "retracted" ? "RETRACTED"
+                     : e.relation === "superseded_by" ? "SUPERSEDED" : e.relation.toUpperCase();
+          const subj = (e.subjects||[]).join("; ") || e.old_document_id || e.new_document_id || "";
+          return `<div class="item"><span class="dot d-rem"></span>
+            <b>${esc(what)}</b> · ${esc((e.created_at||"").slice(0,10))} — ${esc(subj).slice(0,140)}</div>`;
+        }).join(""));
+      }
+    }
+  }catch(e){}
+
+  // totals
+  const sectors = plan.sectors||{}, planSources = plan.sources||{};
+  parts.push(`<div class="totals">
+    <div class="stat"><div class="n">${fmt(live.total_blocks)}</div><div class="l">Blocks indexed</div></div>
+    <div class="stat"><div class="n">${fmt(live.total_docs)}</div><div class="l">Documents</div></div>
+    <div class="stat"><div class="n">${(sectors.covered||[]).length}</div><div class="l">Sectors covered</div></div>
+    <div class="stat"><div class="n">${Object.keys(live.by_source||{}).length}</div><div class="l">Live sources</div></div>
+  </div>`);
+
+  // ── DILIGENCE COVERAGE — the thin-spot / authenticity diagnostic (computed from by_kind).
+  // Targets are the bar for a SOTA VC-diligence corpus; status = live/target ratio. This is the
+  // scoreboard the ingest campaign moves — funding/patents/news are the near-empty VC-critical axes.
+  const bk = live.by_kind||{};
+  const AXES = [
+    {kinds:["funding"], lab:"Funding / private raises", target:25000, tier:"primary", why:"Rounds, investors, valuations — SEC Form D + YC/Wikidata. The core VC axis."},
+    {kinds:["patent"], lab:"Patents / IP moat", target:10000, tier:"primary", why:"USPTO / PatentsView — defensibility & tech-moat evidence."},
+    {kinds:["news"], lab:"News / market signal", target:15000, tier:"analysis", why:"GDELT reputable tech/business press (TechCrunch, Bloomberg, Reuters…). Recent developments."},
+    {kinds:["social"], lab:"Developer sentiment", target:8000, tier:"signal", why:"HN / Reddit / StackExchange — labeled perception signal, not fact."},
+    {kinds:["paper"], lab:"Peer-reviewed papers", target:30000, tier:"verified", why:"OpenAlex / S2 / Crossref — proven research."},
+    {kinds:["preprint"], lab:"Preprints (frontier)", target:80000, tier:"signal", why:"arXiv — earliest tech signal, unreviewed."},
+    {kinds:["code"], lab:"Code traction", target:30000, tier:"signal", why:"GitHub stars/activity/releases — real adoption."},
+    {kinds:["model"], lab:"Model adoption", target:12000, tier:"signal", why:"Hugging Face hub — model-level adoption signal."},
+    {kinds:["filing"], lab:"SEC filings (public co)", target:150000, tier:"primary", why:"EDGAR 10-K/S-1/8-K — public-company primary record."},
+    {kinds:["reference"], lab:"Reference (WEAK tier)", target:0, tier:"weak", why:"Wikipedia/Wikidata — context only; must never carry a hard claim alone. Watch over-reliance."},
+  ];
+  const stat = (c,t) => t<=0 ? "green" : c>=t*0.75 ? "green" : c>=t*0.25 ? "amber" : "red";
+  const gapCards = AXES.map(a=>{
+    const c = a.kinds.reduce((s,k)=>s+(bk[k]||0),0);
+    const s = a.tier==="weak" ? (c>60000?"amber":"green") : stat(c,a.target);
+    const pct = a.target>0 ? Math.min(100, Math.round(c/a.target*100)) : 100;
+    const goal = a.target>0 ? `<small> / ${fmt(a.target)} target · ${pct}%</small>` : `<small> weak-tier — keep low</small>`;
+    const stTxt = a.tier==="weak" ? (s==="amber"?"watch":"ok") : (s==="red"?"thin":s==="amber"?"building":"strong");
+    return `<div class="gc s-${s}">
+      <div class="lab">${esc(a.lab)}<span class="st s-${s}">${stTxt}</span></div>
+      <div class="cnt">${fmt(c)}${goal}</div>
+      <div class="bar"><i style="width:${pct}%"></i></div>
+      <div class="why">${esc(a.why)} <span class="tier">· ${esc(a.tier)}</span></div></div>`;
+  }).join("");
+  // Authenticity mix — how much of the corpus is authoritative (primary/verified) vs weak-tier.
+  const KTIER = {filing:"primary",patent:"primary",funding:"primary",paper:"verified",preprint:"signal",
+    code:"signal",model:"signal",social:"signal",news:"analysis",reference:"weak",essay:"weak",podcast:"signal",corp_eng:"analysis"};
+  const TCOL = {primary:"#137A54",verified:"#1568B5",analysis:"#6EA0E0",signal:"#B26A1E",weak:"#C0392B"};
+  const tierTot = {}; let tsum=0;
+  for(const [k,v] of Object.entries(bk)){ const t=KTIER[k]||"signal"; tierTot[t]=(tierTot[t]||0)+v; tsum+=v; }
+  const tierOrder = ["primary","verified","analysis","signal","weak"];
+  const authBar = tsum ? `<div class="authbar">` + tierOrder.map(t=>{
+    const v=tierTot[t]||0; if(!v) return ""; return `<span style="width:${(v/tsum*100).toFixed(2)}%;background:${TCOL[t]}" title="${t}: ${fmt(v)}"></span>`;
+  }).join("") + `</div><div class="authleg">` + tierOrder.map(t=>{
+    const v=tierTot[t]||0; if(!v) return ""; return `<span><span class="swatch" style="background:${TCOL[t]}"></span><b>${t}</b> ${(v/tsum*100).toFixed(0)}%</span>`;
+  }).join("") + `</div>` : "";
+  parts.push(`<h2>Diligence coverage — thin spots</h2>
+    <div class="muted" style="margin:-.3rem 0 .7rem">Live block counts on the axes a VC actually diligences, vs a SOTA target. Red = thin (ingest target).</div>
+    <div class="gaps">${gapCards}</div>
+    ${authBar ? `<div class="muted" style="margin-top:.8rem"><b style="color:var(--ink)">Authenticity mix</b> — share of corpus by evidence tier (primary/verified authoritative → weak = encyclopedias/blogs):</div>${authBar}` : ""}`);
+
+  // sources: live ingested counts + declared roadmap. Tier map (matches the vertical authority pyramid).
+  const bs = live.by_source||{};
+  const TIER = {edgar:"primary_filing", openalex:"verified_structured", arxiv:"technical_signal",
+                github:"technical_signal", patentsview:"primary_filing", gdelt:"analysis",
+                hackernews:"sentiment_signal", semantic_scholar:"verified_structured", crossref:"verified_structured"};
+  const liveKeys = Object.keys(bs).sort((a,b)=>(bs[b].blocks||0)-(bs[a].blocks||0));
+  parts.push(`<h2>Sources (live)</h2><div class="tw"><table><thead><tr>
+    <th>Source</th><th>Tier</th><th>Blocks</th><th>Docs</th></tr></thead><tbody>` +
+    liveKeys.map(k=>{const c=bs[k]||{}; return `<tr>
+      <td>${esc(k)}</td><td class="muted">${esc(TIER[k]||"")}</td>
+      <td class="num">${fmt(c.blocks||0)}</td>
+      <td class="num ${c.docs?"":"zero"}">${c.docs?fmt(c.docs):"—"}</td></tr>`;}).join("")
+    + `</tbody></table></div>`);
+  const plannedSrc = (planSources.planned||[]);
+  if(plannedSrc.length) parts.push(`<div class="muted" style="margin:.4rem 0 1rem">Planned sources: ${plannedSrc.map(esc).join(" · ")}</div>`);
+
+  // by content kind (bk already defined above for the diligence-gap diagnostic)
+  if(Object.keys(bk).length){
+    parts.push(`<h2>By content type</h2><div class="tw"><table><thead><tr><th>Kind</th><th>Blocks</th></tr></thead><tbody>` +
+      Object.entries(bk).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${fmt(v)}</td></tr>`).join("") +
+      `</tbody></table></div>`);
+  }
+
+  // by source country (evidence geography — drives country-scoped search)
+  const CLABEL = {US:"United States", global:"Global / shared", "?":"Untagged"};
+  const bc = live.by_country||{};
+  if(Object.keys(bc).length){
+    parts.push(`<h2>By country</h2><div class="tw"><table><thead><tr><th>Country</th><th>Blocks</th></tr></thead><tbody>` +
+      Object.entries(bc).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${esc(CLABEL[k]||k)}</td><td class="num">${fmt(v)}</td></tr>`).join("") +
+      `</tbody></table></div>`);
+  }
+
+  // sectors (subject scope) — covered + planned
+  parts.push(`<h2>Sectors</h2><div class="muted" style="margin-bottom:1rem">Covered: ${(sectors.covered||[]).map(esc).join(", ")||"—"}
+    &nbsp;·&nbsp; Planned: ${(sectors.planned||[]).map(esc).join(", ")||"—"}</div>`);
+  // by sector facet (live)
+  const bsec = live.by_sector||{};
+  if(Object.keys(bsec).length){
+    // Flag thin frontier sectors (<12K blocks, excluding the unstamped bucket) as ingest targets.
+    const THIN = 12000;
+    parts.push(`<h2>By sector</h2>
+      <div class="muted" style="margin:-.3rem 0 .7rem">Frontier sectors under ${fmt(THIN)} blocks are flagged <span class="st s-red" style="padding:.02rem .4rem">thin</span> — the deeptech tranche targets these.</div>
+      <div class="tw"><table><thead><tr><th>Sector</th><th>Blocks</th><th>Status</th></tr></thead><tbody>` +
+      Object.entries(bsec).sort((a,b)=>b[1]-a[1]).map(([k,v])=>{
+        const unstamped = (k==="(none)"||k==="(unknown)");
+        const thin = !unstamped && v<THIN;
+        const badge = unstamped ? `<span class="st s-amber">unstamped</span>` : thin ? `<span class="st s-red">thin</span>` : `<span class="st s-green">ok</span>`;
+        return `<tr><td>${esc(k)}</td><td class="num">${fmt(v)}</td><td>${badge}</td></tr>`;
+      }).join("") +
+      `</tbody></table></div>`);
+  }
+  // corpus health (substance, not just counts)
+  const th = live.text_health||{};
+  if(th.avg_chars!=null){
+    parts.push(`<div class="muted" style="margin:.6rem 0">Corpus health — avg block ${fmt(th.avg_chars)} chars, min ${fmt(th.min_chars)}, ${fmt(th.tiny_blocks||0)} tiny (&lt;40 char) blocks.</div>`);
+  }
+
+  // recent ingest runs (precise per-download record)
+  const runs = live.runs||[];
+  if(runs.length){
+    parts.push(`<h2>Recent downloads</h2><div class="tw"><table><thead><tr>
+      <th>Query</th><th>Per source</th><th>Blocks</th><th>When</th></tr></thead><tbody>` +
+      runs.map(r=>`<tr>
+        <td>${esc(r.condition||"")}</td>
+        <td class="muted">${Object.entries(r.by_source||{}).map(([k,v])=>esc(k)+" "+fmt(v)).join(" · ")||"—"}</td>
+        <td class="num">${fmt(r.total_blocks)}</td>
+        <td class="muted">${r.created_at?new Date(r.created_at).toLocaleString():""}</td></tr>`).join("") +
+      `</tbody></table></div>`);
+  } else {
+    parts.push(`<h2>Recent downloads</h2><div class="muted">No per-download records yet — they appear here as new ingests run. (Existing corpus predates run tracking.)</div>`);
+  }
+
+  $("#out").innerHTML = parts.join("");
+}
+
+function groupGrid(items, withDepth){
+  const groups = {};
+  for(const it of items){ (groups[it.group||"Other"] ||= []).push(it); }
+  return `<div class="grid">` + Object.entries(groups).map(([g,list])=>`
+    <div class="cgroup"><h3>${esc(g)}</h3>` +
+      list.map(it=>`<div class="item">
+        <span class="dot ${withDepth?("d-"+(it.depth||"deep")):"d-rem"}"></span>${esc(it.name)}
+        ${withDepth&&it.depth?`<span class="depth">${esc(it.depth)}</span>`:""}</div>`).join("") +
+    `</div>`).join("") + `</div>`;
+}
+load();
+</script>
+</body>
+</html>

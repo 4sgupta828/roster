@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Roster — Corpus Explorer</title>
+<script>/* apply the app's saved theme before paint (no flash) — mirrors index.html: editorial is the
+   default for new visitors; an explicit saved "light"/"dark" is respected. Shared key "roster-theme". */
+try{var t=localStorage.getItem("roster-theme");
+  if(t==="dark"||t==="editorial") document.documentElement.setAttribute("data-theme",t);
+  else if(t!=="light") document.documentElement.setAttribute("data-theme","editorial");
+}catch(e){ document.documentElement.setAttribute("data-theme","editorial"); }</script>
+<style>
+  /* Palette mirrors the main app (index.html): clinical LIGHT + opt-in DARK + EDITORIAL default. */
+  :root{
+    color-scheme:light;
+    --bg:#EEF3F8; --panel:#FFFFFF; --panel2:#F4F8FC; --ink:#132430; --muted:#5A6B7B;
+    --gold:#1568B5; --gold-rgb:21,104,181; --verified:#137A54; --gap:#B26A1E; --hair:#D2DEEA;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+  }
+  :root[data-theme="dark"]{
+    color-scheme:dark;
+    --bg:#060E1B; --panel:#0F1A2C; --panel2:#0C1524; --ink:#ECEBE3; --muted:#8B96A9;
+    --gold:#D3B37C; --gold-rgb:211,179,124; --verified:#57B891; --gap:#D6975A; --hair:#22304A;
+  }
+  :root[data-theme="editorial"]{
+    color-scheme:light;
+    --bg:#F6F3EA; --panel:#FDFBF5; --panel2:#F0ECE0; --ink:#221D12; --muted:#6E6550;
+    --gold:#8A6A1F; --gold-rgb:138,106,31; --verified:#2E6B4F; --gap:#A05C24; --hair:#DCD4C0;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]):not([data-theme="editorial"]){
+    color-scheme:dark;
+    --bg:#060E1B; --panel:#0F1A2C; --panel2:#0C1524; --ink:#ECEBE3; --muted:#8B96A9;
+    --gold:#D3B37C; --gold-rgb:211,179,124; --verified:#57B891; --gap:#D6975A; --hair:#22304A;
+  }}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.5;
+    font-size:15px;-webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(120% 60% at 85% -10%, rgba(var(--gold-rgb),.06), transparent 60%);}
+  .wrap{max-width:60rem;margin:0 auto;padding:1.5rem 1.15rem 5rem;}
+  header{display:flex;align-items:center;gap:.8rem;padding:.1rem 0 1.2rem;border-bottom:1px solid var(--hair);margin-bottom:1.6rem;flex-wrap:wrap;}
+  .logo{height:52px;width:auto;}
+  .htext{display:flex;flex-direction:column;gap:.15rem;}
+  h1{font-family:var(--serif);font-size:1.7rem;margin:.2rem 0 0;letter-spacing:-.01em;}
+  .subtitle{font-size:.85rem;color:var(--muted);}
+  .back{margin-left:auto;font-family:var(--mono);font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--muted);text-decoration:none;border:1px solid var(--hair);border-radius:8px;padding:.4rem .8rem;align-self:flex-start;}
+  .back:hover{color:var(--gold);border-color:var(--gold);}
+  .muted{color:var(--muted);font-size:.85rem;}
+  .note{font-size:.7rem;color:var(--muted);}
+
+  /* ---- Page-level gate ---- */
+  .gate{background:var(--panel);border:1px solid var(--hair);border-radius:14px;padding:1.4rem 1.4rem 1.5rem;max-width:26rem;margin:1rem auto 0;}
+  .gate h2{font-family:var(--serif);font-size:1.15rem;margin:0 0 .35rem;}
+  .gate p{margin:0 0 1rem;color:var(--muted);font-size:.85rem;line-height:1.45;}
+  .gate .row{display:flex;gap:.5rem;}
+  .gate input{flex:1;font-family:var(--sans);font-size:.9rem;color:var(--ink);background:var(--panel2);
+    border:1px solid var(--hair);border-radius:8px;padding:.55rem .65rem;}
+  .gate input:focus{outline:none;border-color:var(--gold);}
+
+  /* ---- Notice (not enabled / errors) ---- */
+  .notice{background:var(--panel);border:1px solid var(--hair);border-left:3px solid var(--gap);border-radius:12px;
+    padding:1rem 1.15rem;max-width:32rem;margin:1rem auto 0;color:var(--ink);font-size:.9rem;line-height:1.5;}
+  .notice b{color:var(--gap);}
+
+  /* ---- Controls ---- */
+  .controls{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end;margin:.3rem 0 .8rem;}
+  .field{display:flex;flex-direction:column;gap:.25rem;}
+  .field label{font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);}
+  .field input,.field select{font-family:var(--sans);font-size:.85rem;color:var(--ink);background:var(--panel);
+    border:1px solid var(--hair);border-radius:8px;padding:.42rem .55rem;min-width:8rem;}
+  .field input:focus,.field select:focus{outline:none;border-color:var(--gold);}
+  .seg{display:inline-flex;border:1px solid var(--hair);border-radius:8px;overflow:hidden;}
+  .seg button{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.06em;
+    background:var(--panel);color:var(--muted);border:none;padding:.44rem .75rem;cursor:pointer;}
+  .seg button.on{background:var(--gold);color:#fff;}
+  .btn{font-family:var(--mono);font-size:.68rem;text-transform:uppercase;letter-spacing:.06em;cursor:pointer;
+    background:var(--gold);color:#fff;border:1px solid var(--gold);border-radius:8px;padding:.48rem .95rem;}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+  .status{font-size:.82rem;color:var(--muted);margin:.2rem 0 .9rem;min-height:1.1em;}
+  .status.err{color:var(--gap);}
+
+  /* ---- Result cards ---- */
+  .card{background:var(--panel);border:1px solid var(--hair);border-radius:12px;padding:.85rem 1rem;margin-bottom:.8rem;}
+  .card-title{font-family:var(--serif);font-size:1.05rem;line-height:1.3;margin-bottom:.4rem;}
+  .card-title a{color:var(--gold);text-decoration:none;}
+  .card-title a:hover{text-decoration:underline;}
+  .card-title .plain{color:var(--ink);}
+  .src-mark{font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.05em;color:var(--gold);
+    white-space:nowrap;margin-left:.35rem;}
+  .chips{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:.55rem;align-items:center;}
+  .chip{font-family:var(--mono);font-size:.6rem;letter-spacing:.03em;border-radius:999px;padding:.14rem .5rem;
+    border:1px solid var(--hair);color:var(--muted);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;}
+  .chip b{color:var(--ink);font-weight:660;}
+  .block-text{font-size:.9rem;color:var(--ink);white-space:pre-wrap;word-break:break-word;line-height:1.6;
+    max-width:44rem;border-left:2px solid var(--hair);padding-left:.85rem;margin:.2rem 0 .55rem;}
+  .card-actions{display:flex;}
+  .open-btn{font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.05em;cursor:pointer;
+    background:transparent;border:1px solid var(--hair);border-radius:999px;padding:.16rem .6rem;color:var(--gold);}
+  .open-btn:hover{border-color:var(--gold);}
+
+  /* ---- Document modal ---- */
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;
+    padding:2.5rem 1rem;z-index:50;overflow-y:auto;}
+  .modal[hidden]{display:none;}
+  .dialog{background:var(--panel);border:1px solid var(--hair);border-radius:14px;max-width:52rem;width:100%;
+    padding:1.2rem 1.3rem 1.6rem;box-shadow:0 20px 60px rgba(0,0,0,.35);}
+  .dhead{display:flex;align-items:flex-start;gap:.7rem;margin-bottom:.6rem;}
+  .dclose{margin-left:auto;flex:none;font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.05em;
+    cursor:pointer;background:transparent;border:1px solid var(--hair);border-radius:8px;padding:.32rem .7rem;color:var(--muted);}
+  .dclose:hover{color:var(--gold);border-color:var(--gold);}
+  .dtitle-text{font-family:var(--serif);font-size:1.2rem;line-height:1.3;}
+  .dtitle-text a{color:var(--gold);text-decoration:none;} .dtitle-text a:hover{text-decoration:underline;}
+  .dblock{border-top:1px solid var(--hair);padding:.65rem 0;}
+  .dblock:last-child{padding-bottom:0;}
+  .dblock .bid{font-family:var(--mono);font-size:.58rem;color:var(--muted);margin-bottom:.25rem;}
+  @media (max-width:560px){ .logo{height:44px;} h1{font-size:1.4rem;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img class="logo" src="/roster-mark.png" alt="Roster" />
+    <div class="htext">
+      <h1>Corpus Explorer</h1>
+      <div class="subtitle">Search the ingested corpus directly — no answers, the raw sources.</div>
+    </div>
+    <a class="back" href="/">← Research</a>
+  </header>
+
+  <!-- Page-level admin-token gate. Everything below #tool stays hidden until the token verifies. -->
+  <div id="gate" class="gate">
+    <h2>Admin access</h2>
+    <p>This tool is admin-only. Enter the admin token to search the corpus.</p>
+    <div class="row">
+      <input id="pw" type="password" placeholder="admin token" autocomplete="off" />
+      <button type="button" class="btn" id="unlock">Unlock</button>
+    </div>
+    <div class="status" id="gate-status"></div>
+  </div>
+
+  <!-- "Not enabled" notice (shown when the corpus endpoints 404 — no corpus DSN) -->
+  <div id="disabled" class="notice" hidden>
+    <b>Not enabled</b> — Corpus Explorer is not available on this server (no corpus configured).
+  </div>
+
+  <!-- The tool proper — hidden until the token verifies against /admin/corpus/facets. -->
+  <div id="tool" hidden>
+    <div class="controls">
+      <div class="field"><label>Tenant</label><input id="tenant" value="demo" /></div>
+      <div class="field" style="flex:1;min-width:16rem;"><label>Query</label><input id="q" placeholder="keywords…" /></div>
+      <div class="field"><label>Mode</label>
+        <div class="seg" id="mode"><button type="button" data-mode="keyword" class="on">Keyword</button><button type="button" data-mode="semantic">Semantic</button></div>
+      </div>
+      <div class="field"><label>Limit</label><input id="limit" type="number" value="20" min="1" max="100" style="min-width:5rem;" /></div>
+    </div>
+    <div class="controls">
+      <div class="field"><label>source_key</label><select id="f-source_key"><option value="">any</option></select></div>
+      <div class="field"><label>source_kind</label><select id="f-source_kind"><option value="">any</option></select></div>
+      <div class="field"><label>sector</label><select id="f-sector"><option value="">any</option></select></div>
+      <div class="field"><label>country</label><select id="f-source_country"><option value="">any</option></select></div>
+      <div class="field"><label>content_type</label><select id="f-content_type"><option value="">any</option></select></div>
+      <div class="field"><label>year</label><select id="f-year"><option value="">any</option></select></div>
+      <div class="field"><label>&nbsp;</label><button type="button" class="btn" id="search">Search</button></div>
+    </div>
+    <div class="note" style="margin:-.3rem 0 .7rem;">Empty query + filters = browse newest.</div>
+    <div class="status" id="status"></div>
+    <div id="results"></div>
+  </div>
+</div>
+
+<!-- Single-document viewer (all blocks in order) -->
+<div class="modal" id="modal" hidden>
+  <div class="dialog">
+    <div class="dhead">
+      <div id="dtitle" style="flex:1;min-width:0;"></div>
+      <button type="button" class="dclose" id="dclose">✕ close</button>
+    </div>
+    <div id="dbody"></div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+// textContent-based escaper — never inject raw corpus text into innerHTML.
+const esc = s => { const d=document.createElement("div"); d.textContent=s??""; return d.innerHTML; };
+const fmt = n => (n||0).toLocaleString();
+
+// Admin token held in a JS var ONLY (never persisted) and sent as the x-admin-token header on
+// every corpus call. 401 → bad token; 404 → not enabled / no corpus DSN.
+const CE = { tok:"", lastResults:[] };
+// Facet selects populated from /admin/corpus/facets (with per-value counts). STRUCTURAL filters only.
+const FACET_KEYS = ["source_key","source_kind","sector","source_country","content_type","year"];
+
+function setStatus(sel, msg, isErr){
+  const el = $(sel);
+  if(!el) return;
+  el.textContent = msg || "";
+  el.className = "status" + (isErr ? " err" : "");
+}
+
+// Render an external source link only when the url is an http(s) link (guards against
+// javascript: and other schemes). Returns escaped-safe HTML.
+function sourceLink(title, url){
+  const label = title && title.trim() ? title : "(untitled)";
+  const safe = typeof url === "string" && /^https?:\/\//i.test(url);
+  if(safe){
+    return `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(label)}</a>` +
+           `<span class="src-mark">↗ source</span>`;
+  }
+  return `<span class="plain">${esc(label)}</span>`;
+}
+
+async function ceFetch(path, opts){
+  opts = opts || {};
+  const headers = Object.assign({"x-admin-token": CE.tok}, opts.headers || {});
+  const r = await fetch(path, Object.assign({}, opts, {headers}));
+  if(r.status === 401){ const e = new Error("bad admin token"); e.code = 401; throw e; }
+  if(r.status === 404){ const e = new Error("not enabled"); e.code = 404; throw e; }
+  if(!r.ok){
+    let detail = "";
+    try{ detail = (await r.json()).detail || ""; }catch(_e){}
+    const e = new Error(detail || ("request failed (" + r.status + ")")); e.code = r.status; throw e;
+  }
+  return r.json();
+}
+
+function showDisabled(){
+  $("#gate").hidden = true;
+  $("#tool").hidden = true;
+  $("#disabled").hidden = false;
+}
+
+function mode(){
+  const on = document.querySelector("#mode button.on");
+  return on ? on.dataset.mode : "keyword";
+}
+
+function chip(label, val){
+  if(val === undefined || val === null || val === "") return "";
+  return `<span class="chip"><b>${esc(label)}</b> ${esc(String(val))}</span>`;
+}
+
+function provChips(source_key, content_type, f){
+  f = f || {};
+  return [
+    chip("source", source_key),
+    chip("type", content_type),
+    chip("kind", f.source_kind),
+    chip("sector", f.sector),
+    chip("country", f.source_country),
+    chip("year", f.year),
+  ].filter(Boolean).join("");
+}
+
+async function loadFacets(){
+  const tenant = ($("#tenant").value || "demo").trim();
+  const d = await ceFetch("/admin/corpus/facets?tenant=" + encodeURIComponent(tenant));
+  const f = d.facets || {};
+  for(const key of FACET_KEYS){
+    const sel = $("#f-" + key);
+    if(!sel) continue;
+    const prev = sel.value;
+    sel.innerHTML = "";
+    const any = document.createElement("option"); any.value = ""; any.textContent = "any"; sel.appendChild(any);
+    for(const o of (f[key] || [])){
+      const opt = document.createElement("option");
+      opt.value = o.value == null ? "" : String(o.value);
+      opt.textContent = (o.value == null ? "" : String(o.value)) + " (" + fmt(o.count) + ")";
+      sel.appendChild(opt);
+    }
+    sel.value = prev; // keep prior choice if still present
+  }
+}
+
+// ---- Page-level gate: verify the token by calling facets. ----
+async function unlock(){
+  CE.tok = $("#pw").value;
+  if(!CE.tok){ setStatus("#gate-status", "enter the admin token", true); return; }
+  setStatus("#gate-status", "verifying…");
+  try{
+    await loadFacets();          // 401 → bad token; 404 → not enabled
+    $("#gate").hidden = true;
+    $("#tool").hidden = false;
+    setStatus("#status", "");
+  }catch(e){
+    if(e && e.code === 404){ showDisabled(); }
+    else if(e && e.code === 401){ setStatus("#gate-status", "bad admin token", true); }
+    else { setStatus("#gate-status", (e && e.message) || "verification failed", true); }
+  }
+}
+
+async function search(){
+  const tenant = ($("#tenant").value || "demo").trim();
+  const m = mode();
+  const query = $("#q").value.trim();
+  if(m === "semantic" && !query){ setStatus("#status", "semantic mode needs a query", true); return; }
+  const limit = Math.max(1, Math.min(parseInt($("#limit").value || "20", 10) || 20, 100));
+  const filters = {};
+  for(const key of FACET_KEYS){ const v = $("#f-" + key).value; if(v) filters[key] = v; }
+  setStatus("#status", "searching…");
+  $("#results").innerHTML = "";
+  try{
+    const d = await ceFetch("/admin/corpus/search", {
+      method: "POST",
+      headers: {"content-type": "application/json"},
+      body: JSON.stringify({mode: m, query, tenant, limit, filters}),
+    });
+    renderResults(d, query);
+  }catch(e){
+    if(e && e.code === 404){ showDisabled(); }
+    else if(e && e.code === 401){ setStatus("#status", "bad admin token", true); }
+    else { setStatus("#status", (e && e.message) || "search failed", true); }
+  }
+}
+
+function renderResults(d, query){
+  const results = (d && d.results) || [];
+  CE.lastResults = results;
+  const n = (d && d.count) || 0;
+  setStatus("#status", fmt(n) + " block" + (n === 1 ? "" : "s") + " · mode: " + ((d && d.mode) || ""));
+  if(!results.length){
+    $("#results").innerHTML = `<div class="muted">No blocks matched. ` +
+      (query ? `Try a broader query, or clear some filters.` : `Add a query or a filter to browse the newest blocks.`) + `</div>`;
+    return;
+  }
+  $("#results").innerHTML = results.map((r, i) => {
+    const f = r.facets || {};
+    return `<div class="card">
+      <div class="card-title">${sourceLink(r.title, r.url)}</div>
+      <div class="chips">${provChips(r.source_key, r.content_type, f)}</div>
+      <div class="block-text">${esc(r.text || "")}</div>
+      <div class="card-actions"><button type="button" class="open-btn" data-idx="${i}">▸ view all blocks</button></div>
+    </div>`;
+  }).join("");
+  document.querySelectorAll("#results .open-btn").forEach(b => {
+    b.addEventListener("click", () => { const r = CE.lastResults[+b.dataset.idx]; if(r) openDoc(r.document_id); });
+  });
+}
+
+async function openDoc(docId){
+  if(!docId) return;
+  const tenant = ($("#tenant").value || "demo").trim();
+  const modal = $("#modal");
+  $("#dtitle").innerHTML = `<div class="muted">Loading document…</div>`;
+  $("#dbody").innerHTML = "";
+  modal.hidden = false;
+  try{
+    const d = await ceFetch("/admin/corpus/document?document_id=" + encodeURIComponent(docId) + "&tenant=" + encodeURIComponent(tenant));
+    const f = d.facets || {};
+    const nb = d.n_blocks || 0;
+    $("#dtitle").innerHTML =
+      `<div class="dtitle-text">${sourceLink(d.title, d.url)}</div>` +
+      `<div class="chips" style="margin-top:.45rem;">${provChips(d.source_key, d.content_type, f)}</div>` +
+      `<div class="note" style="margin-top:.3rem;">${fmt(nb)} block${nb === 1 ? "" : "s"}${nb >= 2000 ? " (capped at 2000 server-side)" : ""}</div>`;
+    $("#dbody").innerHTML = ((d.blocks) || []).map(b =>
+      `<div class="dblock"><div class="bid">block ${esc(String(b.block_id))}</div>` +
+      `<div class="block-text">${esc(b.text || "")}</div></div>`).join("");
+  }catch(e){
+    $("#dtitle").innerHTML = `<div class="status err">${esc((e && e.message) || "failed to load document")}</div>`;
+  }
+}
+
+function closeModal(){ const m = $("#modal"); if(m) m.hidden = true; }
+
+function init(){
+  $("#unlock").addEventListener("click", unlock);
+  $("#pw").addEventListener("keydown", e => { if(e.key === "Enter") unlock(); });
+  $("#search").addEventListener("click", search);
+  $("#q").addEventListener("keydown", e => { if(e.key === "Enter") search(); });
+  $("#tenant").addEventListener("change", () => { if(!$("#tool").hidden && CE.tok) loadFacets().catch(()=>{}); });
+  document.querySelectorAll("#mode button").forEach(b => b.addEventListener("click", () => {
+    document.querySelectorAll("#mode button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+  }));
+  $("#dclose").addEventListener("click", closeModal);
+  $("#modal").addEventListener("click", e => { if(e.target === $("#modal")) closeModal(); });
+  document.addEventListener("keydown", e => { if(e.key === "Escape" && !$("#modal").hidden) closeModal(); });
+}
+init();
+</script>
+</body>
+</html>

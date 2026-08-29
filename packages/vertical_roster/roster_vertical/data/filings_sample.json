@@ -1,0 +1,29 @@
+[
+  {
+    "cik": "0001900001",
+    "company": "Nimbus AI, Inc.",
+    "form_type": "S-1",
+    "filed": "2025-03-10",
+    "accession": "0001900001-25-000001",
+    "sector": "ai",
+    "sections": {
+      "Business": "Nimbus AI, Inc. develops enterprise agentic-AI software that automates back-office knowledge work. Our platform orchestrates large language models to complete multi-step tasks across a customer's existing systems. As of December 31, 2024 we served 210 enterprise customers, up from 74 a year earlier.",
+      "Risk Factors": "We have a limited operating history and have incurred significant net losses since inception. We depend on a small number of third-party model providers, and an interruption in access to their models, or a material increase in their prices, could harm our business. A significant portion of our revenue is concentrated among our ten largest customers.",
+      "Management's Discussion and Analysis": "Revenue increased to $42.0 million in fiscal 2024 from $18.5 million in fiscal 2023, an increase of 127%. The increase was driven primarily by expansion within existing enterprise customers. Net loss was $30.1 million in fiscal 2024 compared to a net loss of $21.4 million in fiscal 2023.",
+      "Use of Proceeds": "We intend to use the net proceeds of this offering for research and development, expansion of our go-to-market organization, and general corporate purposes."
+    }
+  },
+  {
+    "cik": "0001900002",
+    "company": "Corvus Semiconductors, Inc.",
+    "form_type": "10-K",
+    "filed": "2025-02-20",
+    "accession": "0001900002-25-000004",
+    "sector": "ai",
+    "sections": {
+      "Business": "Corvus Semiconductors designs energy-efficient inference accelerators for AI data centers. Our flagship CV-2 accelerator targets transformer inference workloads.",
+      "Risk Factors": "We rely on a single third-party foundry to manufacture our products. Our largest customer accounted for 38% of revenue in fiscal 2024, and the loss of this customer would materially harm our results.",
+      "Management's Discussion and Analysis": "Revenue was $310.5 million in fiscal 2024 compared to $402.7 million in fiscal 2023, a decrease of 23% driven by a cyclical downturn in data-center capital spending. Gross margin was 54.1%."
+    }
+  }
+]

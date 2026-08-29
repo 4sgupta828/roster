@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Roster · Performance</title>
+<script>try{var t=localStorage.getItem("roster-theme"); if(t==="dark"||t==="light") document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
+<style>
+  :root{
+    --bg:#F7FAFC; --panel:#fff; --panel2:#EEF3F9; --ink:#122032; --muted:#5B6B80;
+    --gold:#1568B5; --gold-rgb:21,104,181; --verified:#137A54; --gap:#B26A1E; --hair:#D2DEEA;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  :root[data-theme="dark"]{ --bg:#0C1420; --panel:#111C2C; --panel2:#16233A; --ink:#E7EEF6; --muted:#8FA2B8;
+    --gold:#D3B37C; --gold-rgb:211,179,124; --verified:#57B891; --gap:#D6975A; --hair:#22304A; }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){ --bg:#0C1420; --panel:#111C2C; --panel2:#16233A;
+    --ink:#E7EEF6; --muted:#8FA2B8; --gold:#D3B37C; --gold-rgb:211,179,124; --verified:#57B891; --gap:#D6975A; --hair:#22304A; }}
+  *{box-sizing:border-box;} body{margin:0;font-family:var(--sans);background:var(--bg);color:var(--ink);
+    padding:1.4rem 1.6rem 4rem;line-height:1.5;}
+  a.back{font-family:var(--mono);font-size:.7rem;text-decoration:none;color:var(--muted);border:1px solid var(--hair);
+    border-radius:999px;padding:.25rem .7rem;} a.back:hover{color:var(--gold);border-color:var(--gold);}
+  .head{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.3rem;}
+  h1{font-size:1.15rem;margin:0;letter-spacing:.02em;} .sub{font-size:.8rem;color:var(--muted);}
+  .win{margin-left:auto;display:inline-flex;border:1px solid var(--hair);border-radius:999px;overflow:hidden;}
+  .win button{font-family:var(--mono);font-size:.7rem;background:transparent;border:0;color:var(--muted);padding:.32rem .8rem;cursor:pointer;}
+  .win button.on{background:var(--gold);color:#fff;}
+  .gate{max-width:22rem;margin:4rem auto;text-align:center;}
+  .gate input{font-size:.95rem;padding:.5rem .8rem;border:1px solid var(--hair);border-radius:8px;background:var(--panel);color:var(--ink);width:100%;}
+  .gate button{margin-top:.7rem;font-family:var(--mono);font-size:.75rem;background:var(--gold);color:#fff;border:0;border-radius:8px;padding:.5rem 1.1rem;cursor:pointer;}
+  h2{font-family:var(--sans);font-size:.68rem;text-transform:uppercase;letter-spacing:.13em;color:var(--gold);
+    display:flex;align-items:center;gap:.5rem;margin:1.6rem 0 .7rem;}
+  h2::before{content:"";width:15px;height:2px;background:var(--gold);border-radius:2px;}
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(9rem,1fr));gap:.7rem;}
+  .card{border:1px solid var(--hair);border-radius:12px;background:var(--panel);padding:.75rem .9rem;}
+  .card .n{font-size:1.5rem;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;}
+  .card .n.warn{color:var(--gap);} .card .n.ok{color:var(--verified);}
+  .card .l{font-family:var(--mono);font-size:.58rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-top:.15rem;}
+  .card .s{font-size:.66rem;color:var(--muted);margin-top:.2rem;}
+  .split{display:flex;height:26px;border-radius:7px;overflow:hidden;border:1px solid var(--hair);margin:.3rem 0 .5rem;}
+  .split span{display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:.6rem;color:#fff;overflow:hidden;white-space:nowrap;}
+  .legend{display:flex;flex-wrap:wrap;gap:.8rem;font-size:.72rem;color:var(--muted);}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:.3rem;vertical-align:-1px;}
+  table{width:100%;border-collapse:collapse;font-size:.8rem;}
+  th{font-family:var(--mono);font-size:.6rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);text-align:left;
+    padding:.4rem .6rem;border-bottom:1.5px solid var(--gold);}
+  td{padding:.4rem .6rem;border-bottom:1px solid var(--hair);font-variant-numeric:tabular-nums;}
+  .twocol{display:grid;grid-template-columns:1fr 1fr;gap:1.4rem;align-items:start;}
+  @media (max-width:640px){ .twocol{grid-template-columns:1fr;} }
+  .pill{font-family:var(--mono);font-size:.62rem;padding:.05rem .45rem;border-radius:999px;border:1px solid var(--hair);}
+  .pill.bad{color:var(--gap);border-color:var(--gap);} .pill.good{color:var(--verified);border-color:var(--verified);}
+  .empty{color:var(--muted);font-size:.85rem;padding:1rem 0;}
+</style>
+</head>
+<body>
+<div id="gate" class="gate" hidden>
+  <div class="sub" style="margin-bottom:.6rem">Admin password</div>
+  <input id="pw" type="password" placeholder="password" autocomplete="current-password"/>
+  <div><button id="pwgo">View performance →</button></div>
+  <div id="pwerr" class="sub" style="color:var(--gap);margin-top:.5rem" hidden>Wrong password.</div>
+</div>
+
+<div id="app" hidden>
+  <div class="head">
+    <a class="back" href="/">← App</a>
+    <div><h1>Performance</h1><div class="sub" id="meta">—</div></div>
+    <div class="win" id="win">
+      <button data-h="24">24h</button><button data-h="168" class="on">7d</button>
+      <button data-h="720">30d</button><button data-h="2160">90d</button>
+    </div>
+  </div>
+  <div id="body"></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let PW = sessionStorage.getItem("roster-admin-pw") || "";
+let HOURS = 168;
+
+async function fetchPerf(){
+  const r = await fetch("/admin/perf-data?hours="+HOURS, {headers:{"x-admin-password":PW}});
+  if(r.status === 401){ throw new Error("401"); }
+  if(!r.ok) throw new Error("HTTP "+r.status);
+  return r.json();
+}
+function ms(v){ if(v==null) return "—"; return v>=1000 ? (v/1000).toFixed(1)+"s" : Math.round(v)+"ms"; }
+function num(v,d){ if(v==null) return "—"; return d!=null ? Number(v).toFixed(d) : Math.round(v); }
+function card(n, label, sub, cls){ return `<div class="card"><div class="n ${cls||''}">${n}</div><div class="l">${label}</div>${sub?`<div class="s">${sub}</div>`:""}</div>`; }
+
+function render(d){
+  $("#meta").textContent = `${d.n||0} Q&A runs · last ${d.window_hours>=24?(d.window_hours/24)+'d':d.window_hours+'h'}`;
+  if(!d.n){ $("#body").innerHTML = `<div class="empty">No runs recorded in this window yet. Ask a few questions (with diagnostics on) and refresh.</div>`; return; }
+  // latency split bar
+  const phases = [["anthropic_ms_avg","LLM (generation)","#1568B5"],["judge_ms_avg","judge","#137A54"],
+    ["retrieval_ms_avg","retrieval","#B26A1E"],["embed_ms_avg","embed","#7c4dff"]];
+  const tot = d.total_ms_avg||1;
+  const known = phases.reduce((a,[k])=>a+(d[k]||0),0);
+  const other = Math.max(0, tot-known);
+  const seg = phases.map(([k,l,c])=>({v:d[k]||0,l,c})).filter(s=>s.v>0).concat(other>0?[{v:other,l:"other",c:"#8FA2B8"}]:[]);
+  const bar = `<div class="split">${seg.map(s=>`<span style="flex:${s.v};background:${s.c}" title="${s.l} ${ms(s.v)}">${s.v/tot>0.09?ms(s.v):""}</span>`).join("")}</div>
+    <div class="legend">${seg.map(s=>`<span><i style="background:${s.c}"></i>${s.l} · ${ms(s.v)}</span>`).join("")}</div>`;
+  const ungr = d.ungrounded||0, cfail = d.compose_fails||0;
+  $("#body").innerHTML = `
+    <h2>Latency (total, wall-clock)</h2>
+    <div class="cards">
+      ${card(ms(d.total_ms_avg),"average")}
+      ${card(ms(d.total_ms_p50),"P50 (median)")}
+      ${card(ms(d.total_ms_p95),"P95","", (d.total_ms_p95>90000?"warn":""))}
+      ${card(ms(d.total_ms_p99),"P99","", (d.total_ms_p99>90000?"warn":""))}
+      ${card(ms(d.total_ms_max),"max")}
+    </div>
+    <h2>Where the time goes (avg per run)</h2>
+    ${bar}
+    <div class="cards" style="margin-top:.6rem">
+      ${card(ms(d.compose_ms_avg),"slowest call","P95 "+ms(d.compose_ms_p95))}
+      ${card(ms(d.extract_ms_avg),"2nd call (extract)")}
+      ${card(num(d.calls_avg,1),"LLM calls / run")}
+      ${card(num(d.tokens_avg),"tokens / run")}
+    </div>
+    <h2>Answer quality signals</h2>
+    <div class="cards">
+      ${card(num(d.claims_avg,1),"claims / answer")}
+      ${card(num(d.rejected_avg,2),"rejected / answer")}
+      ${card(num(d.atoms_avg,1),"atoms gathered")}
+      ${card(num(d.congruence_drops),"congruence drops")}
+      ${card(ungr, "ungrounded runs", "", ungr>0?"warn":"ok")}
+      ${card(cfail, "compose failures", "", cfail>0?"warn":"ok")}
+    </div>
+    <div class="twocol" style="margin-top:1.4rem">
+      <div>
+        <h2>Failure types</h2>
+        ${(d.failures&&d.failures.length)?`<table><thead><tr><th>Stage</th><th>Count</th></tr></thead><tbody>
+          ${d.failures.map(f=>`<tr><td><span class="pill bad">${esc(f.stage)}</span></td><td>${f.n}</td></tr>`).join("")}</tbody></table>`
+          :`<div class="empty">No failures recorded 🎉</div>`}
+      </div>
+      <div>
+        <h2>Stop reasons</h2>
+        <table><thead><tr><th>Reason</th><th>Count</th></tr></thead><tbody>
+          ${(d.stopped_reasons||[]).map(s=>`<tr><td>${esc(s.reason)}</td><td>${s.n}</td></tr>`).join("")}</tbody></table>
+      </div>
+    </div>
+    <h2>Recent runs</h2>
+    <div style="overflow-x:auto"><table><thead><tr><th>When</th><th>Total</th><th>Slowest call</th><th>Judge</th><th>Retrieval</th><th>Calls</th><th>Claims</th><th>Grounded</th><th>Stop</th></tr></thead><tbody>
+      ${(d.recent||[]).map(r=>`<tr>
+        <td>${new Date(r.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
+        <td>${ms(r.total_ms)}</td><td>${ms(r.compose_ms)}</td><td>${ms(r.judge_ms)}</td><td>${ms(r.retrieval_ms)}</td>
+        <td>${r.anthropic_calls??"—"}</td><td>${r.claims??"—"}</td>
+        <td>${r.grounded===false?'<span class="pill bad">no</span>':'<span class="pill good">yes</span>'}</td>
+        <td>${esc(r.stopped_reason||"")}</td></tr>`).join("")}</tbody></table></div>`;
+}
+function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+async function load(){
+  try{
+    const d = await fetchPerf();
+    $("#gate").hidden = true; $("#app").hidden = false;
+    render(d);
+  }catch(e){
+    if(String(e.message)==="401"){ PW=""; sessionStorage.removeItem("roster-admin-pw");
+      $("#app").hidden = true; $("#gate").hidden = false; $("#pwerr").hidden = false; }
+    else { $("#body").innerHTML = `<div class="empty">Couldn't load metrics: ${esc(e.message)}</div>`; }
+  }
+}
+$("#pwgo").addEventListener("click", ()=>{ PW = $("#pw").value.trim(); sessionStorage.setItem("roster-admin-pw", PW); $("#pwerr").hidden=true; load(); });
+$("#pw").addEventListener("keydown", e=>{ if(e.key==="Enter") $("#pwgo").click(); });
+$("#win").querySelectorAll("button").forEach(b=>b.addEventListener("click", ()=>{
+  HOURS = +b.dataset.h; $("#win").querySelectorAll("button").forEach(x=>x.classList.toggle("on", x===b)); load();
+}));
+if(PW) load(); else { $("#gate").hidden = false; }
+</script>
+</body>
+</html>

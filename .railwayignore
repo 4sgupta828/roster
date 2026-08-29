@@ -1,0 +1,10 @@
+/.venv/
+node_modules/
+/data/
+/apps/video/out/
+/.git/
+/evals/cassettes/
+__pycache__/
+*.pyc
+.env.medical
+.env

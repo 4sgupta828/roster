@@ -1,0 +1,22 @@
+[
+  {
+    "id": "2401.00001",
+    "title": "Efficient On-Device Inference for Large Language Models via Structured Sparsity",
+    "authors": ["A. Researcher", "B. Scientist", "C. Engineer"],
+    "categories": ["cs.LG", "cs.CL"],
+    "primary_category": "cs.LG",
+    "published": "2024-01-15",
+    "sector": "ai",
+    "summary": "We present SparseServe, a method for running large language models on consumer hardware. By combining structured 2:4 sparsity with 4-bit quantization, SparseServe achieves a 3.2x inference speedup over the dense FP16 baseline while retaining task accuracy. On the MMLU benchmark, our 7B-parameter model reaches 68.4% accuracy, within 1.1 points of the dense model at one third of the memory footprint. We release the code and quantized weights under a permissive license."
+  },
+  {
+    "id": "2403.04512",
+    "title": "Retrieval-Augmented Generation with Verified Citations",
+    "authors": ["D. Author", "E. Coauthor"],
+    "categories": ["cs.CL", "cs.IR"],
+    "primary_category": "cs.CL",
+    "published": "2024-03-08",
+    "sector": "ai",
+    "summary": "Hallucinated citations remain a barrier to deploying retrieval-augmented generation in high-stakes settings. We introduce a span-verification gate that rejects any generated claim whose supporting quote does not appear verbatim in a retrieved source. On a held-out factual-QA set the gate reduces unsupported claims from 14.2% to 0.4% with a 2.1-point drop in answered-question coverage. The approach is model-agnostic and adds no additional training."
+  }
+]
