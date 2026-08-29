@@ -1243,9 +1243,13 @@ def build_default_service() -> ResearchService:
         # × many legs regressed latency); web-only frees that budget → default 25 for ChatGPT-grade reach.
         max_results=_web_max,
         # venue-authority facets + the corpus embedder: web evidence gets graded and reranked
-        # by the same machinery as corpus evidence (authority tiers, recency, query relevance)
+        # by the same machinery as corpus evidence (authority tiers, recency, query relevance).
         domain_facets=getattr(manifest, "web_domain_facets", None),
-        embedder=embedder)
+        # In WEB-ONLY mode there is no corpus, and a DeepSeek-only deployment has NO embeddings
+        # provider (DeepSeek has no embeddings API). Pass embedder=None so the web source skips the
+        # cosine rerank (WebRetrievalSource falls back to provider rank) instead of crashing on a
+        # missing OPENAI_API_KEY. With a corpus (not web-only) the real embedder is still used.
+        embedder=(None if _web_only else embedder))
 
     persona = manifest.persona.system_prompt() if manifest.persona else \
         "You are an evidence-grounded research agent."
