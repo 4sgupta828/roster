@@ -115,7 +115,7 @@ def _mention_result(*, name: str, kind: str, norm: str, candidates: list[dict]) 
 async def resolve_entity(store, *, name: str, kind: str, tenant_id: str = "demo",
                          strong_ids: dict | None = None, source_key: str = "",
                          context: str = "", llm=None, judge_cache: dict | None = None,
-                         on_new: str = "create") -> dict:
+                         on_new: str = "create", name_is_identity: bool = True) -> dict:
     """Resolve a subject/object MENTION to a CANONICAL `entity_id`.
 
     `on_new` (mention-first ER, default 'create' = byte-identical legacy behavior):
@@ -124,6 +124,12 @@ async def resolve_entity(store, *, name: str, kind: str, tenant_id: str = "demo"
       - 'mention': those SAME cases instead return a MENTION decision (`method='mention'`,
         `entity_id=None`) and create NOTHING — only a STRONG-ID / EXACT-single / CONFIDENT-merge
         promotes to canonical. This is the FRESH-graph contract (resolve-before-mint; zero pollution).
+
+    `name_is_identity` (default True = companies/legacy, byte-identical): whether a NAME alone
+    identifies this kind. False for PEOPLE — a person's name is not an identity (namesakes), so a
+    bare-name exact-norm hit does NOT auto-merge and a bare name never mints a global `kind:norm`
+    node; only a STRONG ID or an evidence-based LLM same-entity judgment resolves a person, else it
+    parks (mention) / splits (per-source unresolved). Strong-id paths are unaffected by this flag.
 
     Returns `{entity_id, is_new, method, candidates}` where `method` is one of
     `strong_id | exact_norm | new | llm_merge | unresolved | mention`. `candidates` is the list of
@@ -175,20 +181,31 @@ async def resolve_entity(store, *, name: str, kind: str, tenant_id: str = "demo"
 
     candidates = await store.find_entities_by_norm(norm, kind, tenant_id=tenant_id) if norm else []
 
-    # 2a) EXACT-NORM single hit → resolve.
-    if len(candidates) == 1:
+    # 2a) EXACT-NORM single hit → resolve — but ONLY when a name identifies this kind (companies).
+    # For people (name_is_identity=False) a single name match is NOT proof of same-person (namesakes):
+    # fall through to the strong-id / LLM-judge / fail-safe path so a merge needs a real anchor.
+    if len(candidates) == 1 and name_is_identity:
         eid = candidates[0]["entity_id"]
         await store.add_alias(name, eid, source=source_key)
         return {"entity_id": eid, "is_new": False, "method": "exact_norm",
                 "candidates": candidates}
 
-    # 2b) 0 candidates → NEW canonical entity (strong id gives a better global key). Under
-    # on_new='mention' a name WITHOUT a strong id is NOT canonicalized (a bare name isn't an
-    # identity) — it becomes a mention; only a strong id anchors a new canonical node.
+    # 2b) 0 candidates → NEW canonical entity. A strong id always anchors a new node. Without one, a
+    # bare name mints a GLOBAL `kind:norm` node ONLY when the name is an identity for this kind
+    # (companies) AND legacy on_new='create'. For people (name_is_identity=False) or the fresh-graph
+    # 'mention' contract, a bare name is NOT an identity — park it (mention) or split it (per-source
+    # unresolved), never a global name node two namesakes would collide onto.
     if not candidates:
-        if not preferred_id and on_new == "mention":
+        if preferred_id:
+            await store.upsert_entity(preferred_id, kind=kind, name=name, tenant_id=tenant_id)
+            await store.add_alias(name, preferred_id, source=source_key)
+            return {"entity_id": preferred_id, "is_new": True, "method": "new", "candidates": []}
+        if on_new == "mention":
             return _mention_result(name=name, kind=kind, norm=norm, candidates=[])
-        new_id = preferred_id or f"{kind}:{norm}"
+        if not name_is_identity:
+            return await _make_unresolved(store, name=name, kind=kind, tenant_id=tenant_id,
+                                          source_key=source_key, norm=norm, candidates=[])
+        new_id = f"{kind}:{norm}"
         await store.upsert_entity(new_id, kind=kind, name=name, tenant_id=tenant_id)
         await store.add_alias(name, new_id, source=source_key)
         return {"entity_id": new_id, "is_new": True, "method": "new", "candidates": []}

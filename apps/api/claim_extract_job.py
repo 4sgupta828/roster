@@ -240,6 +240,7 @@ async def run_claim_extraction(
     predicates: list[dict] | None = None,
     store=None,
     object_policy: str = "create",
+    name_nonidentity_kinds: frozenset[str] = frozenset({"person"}),
 ) -> dict:
     """Scan `rs_block` for `source_keys`, extract typed grounded claims PER BLOCK, resolve
     entities by strong id, and upsert them into the claim graph. Returns a run-summary dict.
@@ -386,9 +387,13 @@ async def run_claim_extraction(
                         # it degrades to a grounded VALUE (the cited name is kept, so the FACT
                         # survives) and is parked in the mention lane for later promotion.
                         from api.canonicalize import resolve_entity as _resolve_entity
+                        # People are name-non-identity (namesakes): a bare person name never mints a
+                        # canonical node / merges — only a strong id or an evidence-based judgment does
+                        # (Slice-2 person identity). Companies keep name_is_identity=True.
                         _r = await _resolve_entity(
                             store, name=obj_name, kind=ekind, tenant_id=tenant_id,
-                            source_key=source_key, on_new="mention")
+                            source_key=source_key, on_new="mention",
+                            name_is_identity=(ekind not in name_nonidentity_kinds))
                         if _r["method"] == "mention":
                             await store.upsert_mention(name=obj_name, kind=ekind,
                                                        tenant_id=tenant_id)

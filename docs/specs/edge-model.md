@@ -71,9 +71,22 @@ span-gate lives in the extractor, not the store, so structural (non-corpus) edge
   Deferred to later slices as designed: colleague_of derivation (Slice 3, needs `works_at`), recursive
   SQL at very large scale (current app-level BFS is fine for existing edge volume), name→entity
   cross-source resolution (Slice 2).
-- **Slice 2 — Person identity unification.** Strong-id namespaces; plumb `strong_ids` into
-  `resolve_entity`; delete global `person:<norm>` merge; `rs_entity_alias` tenant/kind. The
-  correctness foundation for people.
+- **Slice 2 — Person identity unification. ✅ BUILT (branch `edge-model`).** Fixed the namesake
+  bug at the ER chokepoint: `resolve_entity(name_is_identity: bool=True)` — for people (False) a
+  bare-name exact-norm hit NEVER auto-merges and a bare name NEVER mints a global `kind:norm` node;
+  only a STRONG ID (github/orcid/linkedin/wikidata — arbitrary schemes already supported) or an
+  evidence-based LLM same-entity judgment resolves a person, else mention (park) / per-source
+  unresolved (split). Companies keep `name_is_identity=True` (byte-identical). `claim_extract_job`
+  passes `name_is_identity=False` for `name_nonidentity_kinds={"person"}` on the mention path.
+  Verified: 5 held-out adversarial tests (namesake non-merge, strong-id cross-source merge, strong-id
+  beats namesake, company still merges, evidence-LLM-merge still works) + 30 existing canonicalize +
+  claim-extract-job tests green. Bug-fix (Rule 20 exempt); the `name_is_identity` param is the
+  reversible per-kind seam (default = old behavior).
+  Notes: roster must ingest in `object_policy='mention'` (fresh-graph; already test-proven to mint no
+  object nodes) so persons flow through the fixed path (legacy `create`-mode global `person:<norm>`
+  mint is inherited/tested tech behavior, left intact). Person strong-id EMISSION by the extractor is
+  Slice 3 — until then persons fail safe to mentions. `rs_entity_alias` tenant/kind columns deferred
+  (a `/graph/explore` nicety, not a correctness blocker).
 - **Slice 3 — Professional predicates + person-as-subject + temporal.** Vertical professional
   predicate registry; person-subject ingestion path; wire `valid_from/valid_to` end to end.
 - **Slice 4 — Structural-record edge lane.** `evidence_kind='structural_record'` + synthetic stable
