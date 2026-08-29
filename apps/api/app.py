@@ -15,7 +15,7 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -2202,6 +2202,71 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             "sectors": sectors,
             "sector": active_sector,
         }
+
+    @app.get("/graph/path")
+    async def graph_path(from_: str = Query("", alias="from"), to: str = "",
+                         tenant_id: str = "demo", max_depth: int = 4, max_paths: int = 10):
+        """Slice-1 edge model (flag ROSTER_EDGE_MODEL, default OFF): grounded connection PATHS
+        between two entities over the claim graph's active-evidence entity-edges. Returns the
+        resolved endpoints and up to `max_paths` paths, each hop carrying its verbatim citation —
+        the prod-observable acceptance surface for "how is X connected to Y". Read-only; returns
+        `enabled:false` when the flag is off, and empty results (never a 500) when unavailable.
+        `from_` maps to the query param `from` (a Python keyword)."""
+        enabled = os.environ.get("ROSTER_EDGE_MODEL", "").lower() in ("1", "true", "yes")
+        out = {"enabled": enabled, "source": None, "target": None, "paths": []}
+        if not enabled:
+            return out
+        store = _claim_store_cached()
+        if store is None or not from_ or not to:
+            return out
+        try:
+            src = await store.find_entity(from_, tenant_id=tenant_id)
+            tgt = await store.find_entity(to, tenant_id=tenant_id)
+            if not src or not tgt:
+                return {**out, "source": src, "target": tgt}
+            from api.graph_path import Edge, find_paths
+
+            async def _neighbors(eid: str):
+                rows = await store.neighbors(eid, tenant_id=tenant_id)
+                return [Edge(subject_id=r["subject_id"], predicate=r["predicate"],
+                             object_id=r["object_id"], claim_id=r["claim_id"],
+                             citation=r["citation"]) for r in rows]
+
+            paths = await find_paths(_neighbors, src["entity_id"], tgt["entity_id"],
+                                     max_depth=max(1, min(int(max_depth or 4), 5)),
+                                     max_paths=max(1, min(int(max_paths or 10), 25)))
+            return {"enabled": True, "source": src, "target": tgt,
+                    "paths": [p.to_dict() for p in paths]}
+        except Exception:   # noqa: BLE001 — read-only surface must never error the caller
+            return out
+
+    @app.get("/connections")
+    async def connections(entity: str = "", tenant_id: str = "demo", limit: int = 50):
+        """Slice-1 edge model (flag ROSTER_EDGE_MODEL): an entity's 1-hop grounded network — its
+        direct connections with the predicate + verbatim citation per edge. Read-only; `enabled`
+        echoes the resolved flag so the FE renders to match the backend path."""
+        enabled = os.environ.get("ROSTER_EDGE_MODEL", "").lower() in ("1", "true", "yes")
+        out = {"enabled": enabled, "entity": None, "connections": []}
+        if not enabled:
+            return out
+        store = _claim_store_cached()
+        if store is None or not entity:
+            return out
+        try:
+            ent = await store.find_entity(entity, tenant_id=tenant_id)
+            if not ent:
+                return out
+            rows = await store.neighbors(ent["entity_id"], tenant_id=tenant_id,
+                                         cap=max(1, min(int(limit or 50), 200)))
+            conns = []
+            for r in rows:
+                peer = r["object_id"] if r["subject_id"] == ent["entity_id"] else r["subject_id"]
+                conns.append({"peer_id": peer, "predicate": r["predicate"],
+                              "direction": "out" if r["subject_id"] == ent["entity_id"] else "in",
+                              "citation": r["citation"]})
+            return {"enabled": True, "entity": ent, "connections": conns}
+        except Exception:   # noqa: BLE001
+            return out
 
     @app.get("/{name}.png")
     def web_png(name: str):

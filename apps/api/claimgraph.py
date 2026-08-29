@@ -1350,6 +1350,72 @@ class ClaimGraphStore:
             })
         return [by_person[pid] for pid in order]
 
+    async def neighbors(self, entity_id: str, *, tenant_id: str = "demo",
+                        relations: tuple[str, ...] | None = None,
+                        cap: int = 400) -> list[dict]:
+        """Slice-1 edge model: the BIDIRECTIONAL 1-hop grounded edges INCIDENT to `entity_id`
+        (as subject OR object of an active-evidence entity-edge claim). The pathfinder
+        (`api.graph_path.find_paths`) traverses these; the store only reads them.
+
+        Returns `[{subject_id, predicate, object_id, claim_id, citation:{document_id, block_id,
+        quote, authority_tier}}]`. `relations` is an OPTIONAL predicate allowlist (per-intent
+        scoping) — never hardcoded here, so the store stays vocabulary-neutral. Grounding-exclusion:
+        an INNER lateral join on ACTIVE evidence means an edge with no live span never surfaces, and
+        the citation is that claim's winning (highest-authority) evidence. Capped at `cap` edges."""
+        await self.ensure_schema()
+        pool = await self._get_pool()
+        rel_list = list(relations) if relations else None
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT c.subject_id, c.predicate, c.object_entity_id, c.claim_id,
+                          ev.document_id, ev.block_id, ev.quote, ev.authority_tier
+                   FROM rs_claim c
+                   JOIN LATERAL (          -- INNER => grounding-exclusion (active evidence only)
+                       SELECT document_id, block_id, quote, authority_tier
+                       FROM rs_claim_evidence ev
+                       WHERE ev.claim_id = c.claim_id AND ev.evidence_status = 'active'
+                       ORDER BY ev.authority_tier DESC, ev.retrieved_at
+                       LIMIT 1
+                   ) ev ON true
+                   WHERE c.tenant_id = $1
+                     AND c.object_kind = 'entity' AND c.object_entity_id <> ''
+                     AND (c.subject_id = $2 OR c.object_entity_id = $2)
+                     AND c.retracted_at IS NULL AND c.superseded_at IS NULL
+                     AND ($3::text[] IS NULL OR c.predicate = ANY($3))
+                   ORDER BY ev.authority_tier DESC
+                   LIMIT $4""",
+                tenant_id, entity_id, rel_list, cap)
+        return [{
+            "subject_id": r["subject_id"], "predicate": r["predicate"],
+            "object_id": r["object_entity_id"], "claim_id": r["claim_id"],
+            "citation": {"document_id": r["document_id"], "block_id": r["block_id"],
+                         "quote": r["quote"], "authority_tier": r["authority_tier"]},
+        } for r in rows]
+
+    async def find_entity(self, ref: str, *, tenant_id: str = "demo") -> dict | None:
+        """Resolve an entity REFERENCE (an `entity_id`, or a name) to `{entity_id, name, kind}` for
+        the Slice-1 connection endpoints — exact id/name first, then a best-effort name contains.
+        Slice 1 only: real cross-source identity resolution is Slice 2 (strong-id ER). Active only."""
+        ref = (ref or "").strip()
+        if not ref:
+            return None
+        await self.ensure_schema()
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            r = await conn.fetchrow(
+                """SELECT entity_id, name, kind FROM rs_entity
+                   WHERE tenant_id = $1 AND status = 'active'
+                     AND (entity_id = $2 OR lower(name) = lower($2))
+                   ORDER BY (entity_id = $2) DESC LIMIT 1""",
+                tenant_id, ref)
+            if r is None:
+                r = await conn.fetchrow(
+                    """SELECT entity_id, name, kind FROM rs_entity
+                       WHERE tenant_id = $1 AND status = 'active' AND name ILIKE $2
+                       ORDER BY length(name) LIMIT 1""",
+                    tenant_id, f"%{ref}%")
+        return dict(r) if r else None
+
     async def category_member_companies(self, *, category_norm: str,
                                         tenant_id: str = "demo",
                                         cap: int = 8) -> list[dict]:
