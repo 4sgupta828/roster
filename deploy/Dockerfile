@@ -35,7 +35,7 @@ RUN pip install --no-cache-dir "./packages/kernel[serve,postgres]" ./packages/ve
 
 # apps/ is not a pip package; put it on the path. Single vertical per deployment.
 ENV PYTHONPATH=/app/apps \
-    ROSTER_ACTIVE_VERTICAL=tech \
+    ROSTER_ACTIVE_VERTICAL=roster \
     ROSTER_PROVIDER_MODE=live \
     ROSTER_STRUCTURED_ANSWERS=true \
     ROSTER_VIDEO_ENABLED=false \
