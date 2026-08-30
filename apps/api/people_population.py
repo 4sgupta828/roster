@@ -38,6 +38,7 @@ class _FacetParse(BaseModel):
     function: list[str] = []
     metro: list[str] = []
     company: list[str] = []
+    worked_at: list[str] = []
     person: str = ""
     person_context: str = ""
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 # The closed set of facet KEYS the people index filters on. `title` is the raw display; the other keys
 # are the normalized, filterable dimensions. `role` = the functional JOB (what they DO), distinct from
 # `seniority` (the LEVEL) and `function` (the DOMAIN).
-PEOPLE_FACET_KEYS = ("title", "role", "seniority", "function", "metro", "company")
+PEOPLE_FACET_KEYS = ("title", "role", "seniority", "function", "metro", "company", "worked_at")
 
 _ROLE = ("software_engineer", "ml_engineer", "system_architect", "solutions_architect", "data_scientist",
          "data_engineer", "research_scientist", "product_manager", "sre", "security_engineer",
@@ -59,6 +59,10 @@ Normalize synonyms to canonical snake_case values, e.g.:
 - company: a specific employer → its CANONICAL lowercased short name — drop legal suffixes (Inc, LLC,
   Corp, Platforms) and apply known aliases: "Facebook"/"Meta Platforms" → ["meta"]; "Alphabet"/"Google
   LLC" → ["google"]; "Twitter" → ["x"]; "AWS" → ["amazon"]. E.g. "at Stripe" → {{"company": ["stripe"]}}.
+- worked_at (PAST employer / work history — DISTINCT from current company): "worked at Google",
+  "previously at Google", "ex-Google", "formerly at", "used to work at", "alumni of Google" →
+  {{"worked_at": ["google"]}} (same canonicalization as company). "works at" / "at" / "@" = CURRENT →
+  use `company`, NOT `worked_at`.
 
 A single facet may list SEVERAL acceptable values (OR within the key): "Directors or EMs" →
 {{"seniority": ["director", "engineering_manager"]}}.
