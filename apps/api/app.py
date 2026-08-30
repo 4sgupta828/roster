@@ -2314,33 +2314,35 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     res = await answer_people_population(
                         question=body.question, tenant_id=body.tenant_id,
                         store=store, llm=build_llm(mode=resolve_mode()))
+                    # PEOPLE-ONLY product (user directive): NEVER return web/prose on the flag path —
+                    # always a ranked list of people, or an honest empty. A single-person question
+                    # returns just the profile card (GitHub/X/LinkedIn search links); everything else
+                    # returns the enumeration rows or an honest-empty people response.
                     if res.get("kind") == "person":
-                        # SINGLE-PERSON identity: run the normal (web) research for a grounded bio,
-                        # then ATTACH the profile card (explicit GitHub/X/LinkedIn search links) so the
-                        # answer always surfaces the person's profiles even if the web bio is thin.
-                        out = await _do_research(body, token=x_roster_token)
-                        out.people_rows = [res["person_card"]]
-                        return out
-                    if not res.get("not_people_query"):
-                        sid = None
-                        sstore = _store()
-                        if sstore is not None and res.get("answer"):
-                            try:
-                                sid = await sstore.save(
-                                    tenant_id=body.tenant_id, workspace_id=body.workspace_id,
-                                    question=body.question, answer=res["answer"],
-                                    grounded=res["grounded"], claims=[], source_stats={},
-                                    coverage_gaps=[], rejected=0, sources=body.sources,
-                                    user_name=body.user_name, user_email=body.user_email,
-                                    kind="people_population",
-                                    extra={"coverage_basis": res.get("coverage_basis") or {},
-                                           "people_rows": res.get("people_rows") or []})
-                            except Exception:   # noqa: BLE001
-                                sid = None
-                        return ResearchOut(
-                            grounded=res["grounded"], answer=res["answer"], claims=[],
-                            coverage_gaps=[], rejected=0, people_rows=res.get("people_rows") or [],
-                            coverage_basis=res.get("coverage_basis"), session_id=sid)
+                        return ResearchOut(grounded=True, answer="", claims=[], coverage_gaps=[],
+                                           rejected=0, people_rows=[res["person_card"]],
+                                           coverage_basis=None, session_id=None)
+                    answer = res.get("answer") or ("No people matched — name a role, expertise, "
+                                                   "company, or location (e.g. 'ML directors in NYC').")
+                    sid = None
+                    sstore = _store()
+                    if sstore is not None:
+                        try:
+                            sid = await sstore.save(
+                                tenant_id=body.tenant_id, workspace_id=body.workspace_id,
+                                question=body.question, answer=answer,
+                                grounded=res.get("grounded", False), claims=[], source_stats={},
+                                coverage_gaps=[], rejected=0, sources=body.sources,
+                                user_name=body.user_name, user_email=body.user_email,
+                                kind="people_population",
+                                extra={"coverage_basis": res.get("coverage_basis") or {},
+                                       "people_rows": res.get("people_rows") or []})
+                        except Exception:   # noqa: BLE001
+                            sid = None
+                    return ResearchOut(
+                        grounded=res.get("grounded", False), answer=answer, claims=[],
+                        coverage_gaps=[], rejected=0, people_rows=res.get("people_rows") or [],
+                        coverage_basis=res.get("coverage_basis"), session_id=sid)
             return await _do_research(body, token=x_roster_token)
         except CassetteMiss as e:
             raise HTTPException(status_code=503, detail=(

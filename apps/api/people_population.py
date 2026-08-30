@@ -153,6 +153,19 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm)
             "entity_id": r["entity_id"], "name": r["name"],
             "attributes": attrs, "links": links, "citation": cite})
 
+    # RANK toward the query (user: ranked, not neutral): most prominent first by seniority/tier, then a
+    # completeness boost (a contactable, linked profile ranks above a bare one), then name for stability.
+    _RANK = {"c_level": 10, "cto": 10, "distinguished_scientist": 9, "vp": 9, "head": 8, "director": 8,
+             "senior_manager": 7, "engineering_manager": 7, "lead": 6, "principal": 6, "staff": 5,
+             "senior": 4, "researcher": 3, "physician": 3, "mid": 2, "junior": 1, "student": 0}
+
+    def _score(p):
+        sen = next((a["display"] for a in p["attributes"] if a["key"] == "seniority"), "")
+        base = _RANK.get(sen.lower().replace(" ", "_"), 3)
+        return base + min(len(p["links"]), 3) * 0.1   # small boost for a richer/contactable profile
+
+    people_rows.sort(key=lambda p: (-_score(p), p["name"]))
+
     summary = _facet_summary(facets)
     if people_rows:
         lines = [f"Found {len(people_rows)} people matching [{summary}] in Roster's grounded people index.",
