@@ -25,10 +25,12 @@ Output ONLY a compact JSON object mapping facet_key → list of normalized value
 key ONLY if the question constrains it. Valid keys: {", ".join(PEOPLE_FACET_KEYS)}.
 
 Normalize synonyms to canonical snake_case values, e.g.:
-- seniority: "Directors" → ["director"]; "EMs"/"Engineering Managers" → ["engineering_manager"];
-  "VPs" → ["vp"]; "C-suite" → ["c_level"]. A GROUP word maps to the SET of leadership levels:
-  "leaders"/"leadership"/"heads"/"execs" → ["c_level", "vp", "director", "senior_manager",
-  "engineering_manager"]. Examples: {", ".join(_SENIORITY)}.
+- seniority (canonical values): "Directors" → ["director"]; "EMs"/"Engineering Managers" →
+  ["engineering_manager"]; "VPs"/"SVP"/"EVP" → ["vp"]; "C-suite"/"CTO"/"CEO"/"Chief X" → ["c_level"];
+  "Head of X" → ["head"]; "Principal"/"Distinguished"/"Fellow" → ["principal"]. A GROUP word maps to
+  the SET of leadership levels: "leaders"/"leadership"/"heads"/"execs"/"management" → ["c_level", "vp",
+  "director", "head", "senior_manager", "engineering_manager", "principal"]. Examples:
+  {", ".join(_SENIORITY)}.
 - A ranking word ("top", "best", "most senior", "leading") is NOT a facet — DROP it; the results are
   returned unranked. Only translate the actual role/function/place constraints into facets.
 - function: CANONICALIZE the whole AI/ML family to ["machine_learning"] — "ML", "AI", "machine
