@@ -24,7 +24,7 @@ EDGAR issuer truly is the company) — that is S2c's live run + the extractor's 
 gates. We stub the fetchers + extractor (not the S2a ER) precisely to keep this test about
 the pipeline and the ER WIRING.
 
-    ROSTER_CORPUS_DSN=postgresql://strata:strata@localhost:5433/roster_s2b_test \
+    ROSTER_CORPUS_DSN=postgresql://roster:roster@localhost:5433/roster_s2b_test \
       /Users/sgupta/roster/.venv/bin/python -m pytest apps/api/test_multisource_enrich.py -q
 """
 from __future__ import annotations

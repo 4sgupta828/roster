@@ -6,7 +6,7 @@ edge + a category, then asserts the three new store reads (`predicate_coverage`,
 `founder_rows`, `category_member_companies`) AND `build_grid` for all three row_kinds
 produce grounded, cited grids.
 
-    ROSTER_CORPUS_DSN=postgresql://strata:strata@localhost:5433/roster_cv_test \
+    ROSTER_CORPUS_DSN=postgresql://roster:roster@localhost:5433/roster_cv_test \
       /Users/sgupta/roster/.venv/bin/python -m pytest \
         apps/api/test_crossviews_integration.py -q
 

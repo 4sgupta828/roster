@@ -4,7 +4,7 @@ Skipped unless ROSTER_TEST_PG_DSN points at a pgvector-enabled Postgres, so the
 offline suite stays green without a DB. Mirrors the in-memory guarantees against
 the real backend + checks ranking parity.
 
-    ROSTER_TEST_PG_DSN=postgresql://strata:strata@localhost:5433/roster_test \
+    ROSTER_TEST_PG_DSN=postgresql://roster:roster@localhost:5433/roster_test \
       .venv/bin/python -m pytest .../test_postgres.py -q
 
 Each test runs its whole async body in ONE event loop (an asyncpg pool is bound

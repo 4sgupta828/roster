@@ -2,7 +2,7 @@
 
 DB round-trips: skipped unless ROSTER_CORPUS_DSN is set (mirrors the other integration suites).
 
-    ROSTER_CORPUS_DSN=postgresql://strata:strata@localhost:5433/roster_test \
+    ROSTER_CORPUS_DSN=postgresql://roster:roster@localhost:5433/roster_test \
       /Users/sgupta/roster/.venv/bin/python -m pytest apps/api/test_people_population_integration.py -q
 
 Proves the enumeration contract that the failing prod query needs: multi-facet AND across keys, OR

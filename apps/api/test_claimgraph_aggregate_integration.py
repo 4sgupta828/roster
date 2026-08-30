@@ -5,7 +5,7 @@ Skipped unless ROSTER_CORPUS_DSN points at a Postgres (mirrors
 `population_claims`: grounded counts, stale-evidence exclusion, and cap +
 truncation reporting (no silent truncation).
 
-    ROSTER_CORPUS_DSN=postgresql://strata:strata@localhost:5433/roster_test \
+    ROSTER_CORPUS_DSN=postgresql://roster:roster@localhost:5433/roster_test \
       /Users/sgupta/roster/.venv/bin/python -m pytest \
         apps/api/test_claimgraph_aggregate_integration.py -q
 

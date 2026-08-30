@@ -3,7 +3,7 @@
 DB round-trips: skipped unless ROSTER_CORPUS_DSN points at a Postgres (mirrors
 test_claimgraph_integration.py), so the offline suite stays green without a DB.
 
-    ROSTER_CORPUS_DSN=postgresql://strata:strata@localhost:5433/roster_test \
+    ROSTER_CORPUS_DSN=postgresql://roster:roster@localhost:5433/roster_test \
       /Users/sgupta/roster/.venv/bin/python -m pytest apps/api/test_graph_path_integration.py -q
 
 Verifies the parts the pure-logic unit tests (test_graph_path.py) cannot: that `neighbors`

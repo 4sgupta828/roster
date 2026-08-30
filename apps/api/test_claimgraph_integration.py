@@ -3,7 +3,7 @@
 Skipped unless ROSTER_CORPUS_DSN points at a Postgres, so the offline suite stays
 green without a DB (mirrors `roster_kernel/retrieval/test_postgres.py`).
 
-    ROSTER_CORPUS_DSN=postgresql://strata:strata@localhost:5433/roster_test \
+    ROSTER_CORPUS_DSN=postgresql://roster:roster@localhost:5433/roster_test \
       /Users/sgupta/roster/.venv/bin/python -m pytest apps/api/test_claimgraph_integration.py -q
 
 Each test runs its whole async body in ONE event loop (an asyncpg pool is bound to

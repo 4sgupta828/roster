@@ -17,7 +17,7 @@ reasoning LLM call fires. Asserts the grounded end-to-end wiring:
 NO network / NO live LLM — the FAKE llm proves WIRING + the citation gate; real brief
 QUALITY (no uncited proper nouns) is the live eval.
 
-    ROSTER_CORPUS_DSN=postgresql://strata:strata@localhost:5433/roster_test \
+    ROSTER_CORPUS_DSN=postgresql://roster:roster@localhost:5433/roster_test \
       /Users/sgupta/roster/.venv/bin/python -m pytest \
         apps/api/test_diligence_route.py -q
 """
