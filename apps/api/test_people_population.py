@@ -101,3 +101,16 @@ def test_non_people_query_signals_fallthrough():
     out = _run(answer_people_population(question="who is X", tenant_id="demo",
                                        store=_FakeStore([], _STATS), llm=_FakeLLM(_FacetParse())))
     assert out["not_people_query"] is True and out["grounded"] is False
+
+
+def test_research_out_accepts_people_population_result():
+    """Regression: the /research people-route must build a VALID ResearchOut. `rejected` is a required
+    field with no default — omitting it 500s the whole (working) answer at serialization."""
+    from api.app import ResearchOut
+    engine = _run(answer_people_population(question="Directors in ML in Bay Area", tenant_id="demo",
+                                           store=_FakeStore(_ROWS, _STATS),
+                                           llm=_FakeLLM(_FacetParse(seniority=["director"]))))
+    ro = ResearchOut(grounded=engine["grounded"], answer=engine["answer"], claims=[],
+                     coverage_gaps=[], rejected=0, people_rows=engine["people_rows"],
+                     coverage_basis=engine["coverage_basis"], session_id=None)
+    assert ro.grounded is True and ro.people_rows and ro.coverage_basis

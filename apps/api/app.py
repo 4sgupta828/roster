@@ -2332,7 +2332,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                 sid = None
                         return ResearchOut(
                             grounded=res["grounded"], answer=res["answer"], claims=[],
-                            coverage_gaps=[], people_rows=res.get("people_rows") or [],
+                            coverage_gaps=[], rejected=0, people_rows=res.get("people_rows") or [],
                             coverage_basis=res.get("coverage_basis"), session_id=sid)
             return await _do_research(body, token=x_roster_token)
         except CassetteMiss as e:
