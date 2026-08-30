@@ -35,6 +35,7 @@ class _FacetParse(BaseModel):
     role: list[str] = []
     seniority: list[str] = []
     function: list[str] = []
+    industry: list[str] = []
     metro: list[str] = []
     company: list[str] = []
     worked_at: list[str] = []

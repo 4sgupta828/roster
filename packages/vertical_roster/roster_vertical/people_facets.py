@@ -11,7 +11,7 @@ from __future__ import annotations
 # (what they DO), distinct from `seniority` (the LEVEL) and `function` (the DOMAIN). NOTE: `title` is a
 # display-only stored facet (the raw bio) and is DELIBERATELY excluded here — the model kept mis-filing
 # job titles into `title` instead of `role`, so it is not an emit option.
-PEOPLE_FACET_KEYS = ("role", "seniority", "function", "metro", "company", "worked_at")
+PEOPLE_FACET_KEYS = ("role", "seniority", "function", "industry", "metro", "company", "worked_at")
 
 _ROLE = ("software_engineer", "ml_engineer", "system_architect", "solutions_architect", "data_scientist",
          "data_engineer", "research_scientist", "product_manager", "sre", "security_engineer",
@@ -24,6 +24,12 @@ _SENIORITY = ("c_level", "vp", "director", "principal", "senior_manager", "engin
 _FUNCTION = ("machine_learning", "infrastructure", "backend", "frontend", "data", "product",
              "security", "research", "hardware", "design")
 _METRO = ("bay_area", "nyc", "seattle", "boston", "los_angeles", "austin", "london", "remote")
+# Business SECTORS (the employer's industry) — distinct from _FUNCTION (technical domain). ONE
+# canonical value per sector (fintech/payments BOTH canonicalize to `payments`, so the query and the
+# stored ingest share one vocabulary — the normalization-alignment invariant).
+_INDUSTRY = ("payments", "healthcare", "ecommerce", "crypto", "gaming", "adtech",
+             "biotech", "cybersecurity", "automotive", "aerospace_defense", "social_media",
+             "cloud_infrastructure", "edtech")
 
 PEOPLE_FACET_PARSE_PROMPT = f"""You compile a people-search question into a normalized facet filter.
 
@@ -67,6 +73,18 @@ Normalize synonyms to canonical snake_case values, e.g.:
   ["surgery"]; "gastroenterologists" → ["gastroenterology"]; "anesthesiologists" → ["anesthesiology"].
   NEVER emit "research" as a function — "researcher(s)"/"scientist(s)"/"academic(s)" is a ROLE
   (["researcher"]), NOT a function. Examples: {", ".join(_FUNCTION)}.
+- industry (the BUSINESS SECTOR the person's EMPLOYER operates in — distinct from `function`, which
+  is a TECHNICAL domain). Emit this for "<sector> industry / space / sector / companies" phrases and
+  bare sector words: "payment industry"/"payments"/"fintech"/"financial technology"/"payment
+  processing" → ["payments"]; "healthcare industry"/"health tech"/"digital health" → ["healthcare"];
+  "e-commerce"/"online retail" → ["ecommerce"]; "crypto"/"web3"/"blockchain industry" → ["crypto"];
+  "gaming industry"/"video games" → ["gaming"]; "adtech"/"advertising" → ["adtech"]; "biotech"/
+  "biotechnology" → ["biotech"]; "cybersecurity industry" → ["cybersecurity"]; "automotive"/"self-
+  driving" → ["automotive"]; "aerospace"/"defense" → ["aerospace_defense"]; "edtech" → ["edtech"];
+  "social media" → ["social_media"]; "cloud/infrastructure companies" → ["cloud_infrastructure"].
+  A sector word describes WHO the employer is; a `function` describes what the person technically does
+  — "ML engineers in fintech" → {{"role": ["ml_engineer"], "industry": ["payments"]}}. Examples:
+  {", ".join(_INDUSTRY)}.
 - metro: "Bay Area"/"SF"/"San Francisco"/"Silicon Valley"/"Palo Alto" → ["bay_area"];
   "New York" → ["nyc"]. Examples: {", ".join(_METRO)}.
 - company: a specific employer → its CANONICAL lowercased short name — drop legal suffixes (Inc, LLC,
