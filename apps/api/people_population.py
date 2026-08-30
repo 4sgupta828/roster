@@ -16,6 +16,7 @@ code owns the filter, the citation, and the coverage facts. Public-data only.
 from __future__ import annotations
 
 import logging
+import urllib.parse
 
 from pydantic import BaseModel
 
@@ -108,6 +109,16 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm)
             else:
                 attrs.append({"key": f["facet_key"], "display": f["display_value"],
                               "document_id": f["document_id"], "block_id": f["block_id"]})
+        # LinkedIn PROXY: when we have no direct LinkedIn link, synthesize a Google search over the
+        # person's name + role + company that reliably lands on their LinkedIn — a navigation aid
+        # (clearly a SEARCH, not grounded evidence). Skipped when a real LinkedIn link exists.
+        if not any(l["kind"] == "linkedin" for l in links):
+            title_disp = (next((a["display"] for a in attrs if a["key"] == "title"), "")
+                          or next((a["display"] for a in attrs if a["key"] == "seniority"), ""))
+            company_disp = next((a["display"] for a in attrs if a["key"] == "company"), "")
+            terms = " ".join(t for t in [r["name"], title_disp, company_disp, "LinkedIn"] if t)
+            links.append({"kind": "linkedin_search",
+                          "url": "https://www.google.com/search?q=" + urllib.parse.quote(terms)})
         people_rows.append({
             "entity_id": r["entity_id"], "name": r["name"],
             "attributes": attrs, "links": links, "citation": cite})

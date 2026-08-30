@@ -449,6 +449,7 @@
   .ppl-lnk{font-size:.66rem;font-weight:600;text-decoration:none;padding:.14rem .46rem;border-radius:5px;border:1px solid var(--hair);color:var(--faint,#8a93ad);background:rgba(138,147,173,.08);transition:all .12s;line-height:1.3;}
   .ppl-lnk:hover{border-color:currentColor;transform:translateY(-1px);}
   .ppl-lnk.lnk-linkedin{color:#4a9eff;background:rgba(74,158,255,.12);}
+  .ppl-lnk.lnk-linkedin_search{color:#4a9eff;background:transparent;border:1px dashed rgba(74,158,255,.5);}
   .ppl-lnk.lnk-x,.ppl-lnk.lnk-twitter{color:var(--ink);background:rgba(138,147,173,.16);}
   .ppl-lnk.lnk-website,.ppl-lnk.lnk-medium{color:var(--person,#57d9c4);background:rgba(87,217,196,.10);}
   .ppl-lnk.lnk-github{color:var(--gold);background:rgba(var(--gold-rgb,255,207,107),.12);}
@@ -1901,7 +1902,7 @@ function peopleRowsMarkup(data){
       : `<span class="ppl-av ppl-av-ph">${esc((p.name||"?").slice(0,1))}</span>`;
     // Profile links (LinkedIn / X / site / Medium / email) sourced from the person's public profile,
     // plus the GitHub source itself — each a clickable badge. THIS is the engagement surface.
-    const LABEL={linkedin:"in",x:"𝕏",twitter:"𝕏",website:"site",medium:"medium",mastodon:"mastodon",email:"email",github:"github"};
+    const LABEL={linkedin:"in",linkedin_search:"find on LinkedIn ⌕",x:"𝕏",twitter:"𝕏",website:"site",medium:"medium",mastodon:"mastodon",email:"email",github:"github"};
     const badge=(kind,href)=>`<a class="ppl-lnk lnk-${esc(kind)}" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="${esc(href)}">${LABEL[kind]||esc(kind)}</a>`;
     const linkBadges = (url?badge("github",url):"") + (p.links||[]).map(l=>badge(l.kind,l.url)).join("");
     const nameHtml = url

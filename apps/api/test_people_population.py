@@ -7,6 +7,7 @@ covered by test_people_population_integration.py.
 from __future__ import annotations
 
 import asyncio
+import urllib.parse
 from dataclasses import dataclass
 
 from api.people_population import _FacetParse, answer_people_population, parse_people_facets
@@ -86,6 +87,17 @@ def test_answer_grounded_rows_with_citations_and_coverage():
     assert cov["matches_returned"] == 1 and cov["persons_indexed"] == 42
     assert "not_ingested" in cov and "NOT an exhaustive" in cov["population_statement"]
     assert "Dana Director" in out["answer"] and "grounded people index" in out["answer"]
+
+
+def test_linkedin_search_proxy_when_no_direct_link():
+    # A person with no direct LinkedIn link gets a Google-search proxy (name + role) to reach it.
+    out = _run(answer_people_population(question="ML directors", tenant_id="demo",
+                                       store=_FakeStore(_ROWS, _STATS),
+                                       llm=_FakeLLM(_FacetParse(seniority=["director"]))))
+    links = out["people_rows"][0]["links"]
+    proxy = [l for l in links if l["kind"] == "linkedin_search"]
+    assert proxy and "google.com/search" in proxy[0]["url"]
+    assert "Dana" in urllib.parse.unquote(proxy[0]["url"])
 
 
 def test_empty_match_is_honest_not_a_crash():
