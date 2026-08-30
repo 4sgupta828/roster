@@ -27,9 +27,9 @@ _METRO = ("bay_area", "nyc", "seattle", "boston", "los_angeles", "austin", "lond
 # Business SECTORS (the employer's industry) — distinct from _FUNCTION (technical domain). ONE
 # canonical value per sector (fintech/payments BOTH canonicalize to `payments`, so the query and the
 # stored ingest share one vocabulary — the normalization-alignment invariant).
-_INDUSTRY = ("payments", "healthcare", "ecommerce", "crypto", "gaming", "adtech",
+_INDUSTRY = ("payments", "ai", "healthcare", "ecommerce", "crypto", "gaming", "adtech",
              "biotech", "cybersecurity", "automotive", "aerospace_defense", "social_media",
-             "cloud_infrastructure", "edtech")
+             "cloud_infrastructure", "edtech", "media")
 
 PEOPLE_FACET_PARSE_PROMPT = f"""You compile a people-search question into a normalized facet filter.
 
@@ -60,10 +60,19 @@ Normalize synonyms to canonical snake_case values, e.g.:
   {", ".join(_SENIORITY)}.
 - A ranking word ("top", "best", "most senior", "leading") is NOT a facet — DROP it; the results are
   returned unranked. Only translate the actual role/function/place constraints into facets.
-- function (the DOMAIN/field): CANONICALIZE the whole AI/ML family to ["machine_learning"] — "ML",
-  "AI", "machine learning", "AI research", "deep learning", "NLP", "computer vision", "LLMs",
-  "generative AI" all → ["machine_learning"]. "data science"/"analytics" → ["data_science"]; "infra" →
-  ["infrastructure"]; "security" → ["security"]. Map an OCCUPATION word to its field:
+- function (the research FIELD / technical DOMAIN): emit the STANDARD academic snake_case name of the
+  field so it matches the stored concept vocabulary — do NOT collapse a SPECIFIC field into a generic
+  bucket. A specific AI/CS subfield keeps its OWN name: "computer vision"/"vision" → ["computer_vision"];
+  "NLP"/"natural language processing" → ["natural_language_processing"]; "reinforcement learning"/"RL"
+  → ["reinforcement_learning"]; "deep learning" → ["deep_learning"]; "robotics" → ["robotics"];
+  "speech"/"speech recognition" → ["speech_recognition"]; "graphics"/"computer graphics" →
+  ["computer_graphics"]; "cryptography" → ["cryptography"]; "bioinformatics"/"computational biology" →
+  ["bioinformatics"]; "genomics" → ["genomics"]; "quantum computing" → ["quantum_computing"]. Only the
+  GENERIC family words collapse: "machine learning"/"ML" → ["machine_learning"]; "AI"/"artificial
+  intelligence"/"LLMs"/"generative AI"/"foundation models" → ["artificial_intelligence",
+  "machine_learning"] (emit BOTH — either concept may carry the person). "data science"/"analytics" →
+  ["data_science"]; "infra"/"infrastructure" → ["infrastructure"]; "backend" → ["backend"]; "frontend"
+  → ["frontend"]; "security" (engineering) → ["security"]. Map an OCCUPATION word to its field:
   "physicists" → ["physics"]; "biologists" → ["biology"]; "chemists" → ["chemistry"]; "economists" →
   ["economics"]; "neuroscientists" → ["neuroscience"]; "mathematicians" → ["mathematics"];
   "computer scientists" → ["computer_science"]; "medicine"/"medical"/"clinicians" → ["medicine"].
@@ -76,7 +85,10 @@ Normalize synonyms to canonical snake_case values, e.g.:
 - industry (the BUSINESS SECTOR the person's EMPLOYER operates in — distinct from `function`, which
   is a TECHNICAL domain). Emit this for "<sector> industry / space / sector / companies" phrases and
   bare sector words: "payment industry"/"payments"/"fintech"/"financial technology"/"payment
-  processing" → ["payments"]; "healthcare industry"/"health tech"/"digital health" → ["healthcare"];
+  processing" → ["payments"]; "AI companies"/"AI labs"/"AI industry"/"foundation model companies" →
+  ["ai"] (the EMPLOYER is an AI lab — distinct from `function`, the person's technical field);
+  "streaming"/"media companies"/"entertainment industry" → ["media"];
+  "healthcare industry"/"health tech"/"digital health" → ["healthcare"];
   "e-commerce"/"online retail" → ["ecommerce"]; "crypto"/"web3"/"blockchain industry" → ["crypto"];
   "gaming industry"/"video games" → ["gaming"]; "adtech"/"advertising" → ["adtech"]; "biotech"/
   "biotechnology" → ["biotech"]; "cybersecurity industry" → ["cybersecurity"]; "automotive"/"self-
