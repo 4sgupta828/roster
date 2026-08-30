@@ -8,8 +8,13 @@ lives HERE, never in the kernel or the app engine.
 from __future__ import annotations
 
 # The closed set of facet KEYS the people index filters on. `title` is the raw display; the other keys
-# are the normalized, filterable dimensions.
-PEOPLE_FACET_KEYS = ("title", "seniority", "function", "metro", "company")
+# are the normalized, filterable dimensions. `role` = the functional JOB (what they DO), distinct from
+# `seniority` (the LEVEL) and `function` (the DOMAIN).
+PEOPLE_FACET_KEYS = ("title", "role", "seniority", "function", "metro", "company")
+
+_ROLE = ("software_engineer", "ml_engineer", "system_architect", "solutions_architect", "data_scientist",
+         "data_engineer", "research_scientist", "product_manager", "sre", "security_engineer",
+         "designer", "devops_engineer", "engineering_manager", "researcher")
 
 # Illustrative normalized VALUES per key (the LLM normalizes to snake_case; this guides it, it is not
 # an exhaustive enum — new values are allowed as long as they are normalized consistently).
@@ -25,6 +30,11 @@ Output ONLY a compact JSON object mapping facet_key → list of normalized value
 key ONLY if the question constrains it. Valid keys: {", ".join(PEOPLE_FACET_KEYS)}.
 
 Normalize synonyms to canonical snake_case values, e.g.:
+- role (the functional JOB / expertise — WHAT they do, distinct from level and domain): "System
+  Architect" → ["system_architect"]; "Data Scientist" → ["data_scientist"]; "ML Engineer" →
+  ["ml_engineer"]; "Solutions Architect" → ["solutions_architect"]; "Product Manager" →
+  ["product_manager"]; "Research Scientist" → ["research_scientist"]; "SRE" → ["sre"]. Examples:
+  {", ".join(_ROLE)}.
 - seniority (canonical values): "Directors" → ["director"]; "EMs"/"Engineering Managers" →
   ["engineering_manager"]; "VPs"/"SVP"/"EVP" → ["vp"]; "C-suite"/"CTO"/"CEO"/"Chief X" → ["c_level"];
   "Head of X" → ["head"]; "Principal"/"Distinguished"/"Fellow" → ["principal"]. A GROUP word maps to

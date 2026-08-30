@@ -33,6 +33,7 @@ class _FacetParse(BaseModel):
     `person` is set ONLY when the question is about ONE specific named individual (identity/profile),
     with `person_context` carrying any employer/role hints that disambiguate them."""
     title: list[str] = []
+    role: list[str] = []
     seniority: list[str] = []
     function: list[str] = []
     metro: list[str] = []
