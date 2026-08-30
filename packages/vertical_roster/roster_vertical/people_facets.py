@@ -26,7 +26,11 @@ key ONLY if the question constrains it. Valid keys: {", ".join(PEOPLE_FACET_KEYS
 
 Normalize synonyms to canonical snake_case values, e.g.:
 - seniority: "Directors" → ["director"]; "EMs"/"Engineering Managers" → ["engineering_manager"];
-  "VPs" → ["vp"]; "C-suite" → ["c_level"]. Examples: {", ".join(_SENIORITY)}.
+  "VPs" → ["vp"]; "C-suite" → ["c_level"]. A GROUP word maps to the SET of leadership levels:
+  "leaders"/"leadership"/"heads"/"execs" → ["c_level", "vp", "director", "senior_manager",
+  "engineering_manager"]. Examples: {", ".join(_SENIORITY)}.
+- A ranking word ("top", "best", "most senior", "leading") is NOT a facet — DROP it; the results are
+  returned unranked. Only translate the actual role/function/place constraints into facets.
 - function: "ML"/"AI"/"machine learning" → ["machine_learning"]; "infra" → ["infrastructure"];
   "security" → ["security"]. Examples: {", ".join(_FUNCTION)}.
 - metro: "Bay Area"/"SF"/"San Francisco"/"Silicon Valley"/"Palo Alto" → ["bay_area"];
