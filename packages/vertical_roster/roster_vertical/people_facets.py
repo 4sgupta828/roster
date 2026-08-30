@@ -31,8 +31,10 @@ Normalize synonyms to canonical snake_case values, e.g.:
   "engineering_manager"]. Examples: {", ".join(_SENIORITY)}.
 - A ranking word ("top", "best", "most senior", "leading") is NOT a facet — DROP it; the results are
   returned unranked. Only translate the actual role/function/place constraints into facets.
-- function: "ML"/"AI"/"machine learning" → ["machine_learning"]; "infra" → ["infrastructure"];
-  "security" → ["security"]. Examples: {", ".join(_FUNCTION)}.
+- function: CANONICALIZE the whole AI/ML family to ["machine_learning"] — "ML", "AI", "machine
+  learning", "AI research", "deep learning", "NLP", "computer vision", "LLMs", "generative AI",
+  "ML platform" all → ["machine_learning"]. "data science"/"analytics" → ["data_science"]. "infra" →
+  ["infrastructure"]; "security" → ["security"]. Examples: {", ".join(_FUNCTION)}.
 - metro: "Bay Area"/"SF"/"San Francisco"/"Silicon Valley"/"Palo Alto" → ["bay_area"];
   "New York" → ["nyc"]. Examples: {", ".join(_METRO)}.
 - company: a specific employer → its lowercased name, e.g. "at Stripe" → {{"company": ["stripe"]}}.
