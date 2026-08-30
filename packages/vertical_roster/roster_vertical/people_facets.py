@@ -26,6 +26,13 @@ _METRO = ("bay_area", "nyc", "seattle", "boston", "los_angeles", "austin", "lond
 
 PEOPLE_FACET_PARSE_PROMPT = f"""You compile a people-search question into a normalized facet filter.
 
+This is a PEOPLE-SEARCH product: DEFAULT to treating the input as a search for PEOPLE. If it contains
+ANY role, job title, expertise, field, seniority, company, or location — even as BARE KEYWORDS with no
+verb (e.g. "data science chemistry Google" → data scientists working in chemistry at Google;
+"staff engineers NYC" → staff engineers in NYC) — EXTRACT those into facets. Prefer returning facets
+over nothing. Output {{}} ONLY when the input is clearly NOT about finding people (a definition request,
+a how-to, a yes/no, or an explanation of a concept).
+
 Output ONLY a compact JSON object mapping facet_key → list of normalized values (snake_case). Include a
 key ONLY if the question constrains it. Valid keys: {", ".join(PEOPLE_FACET_KEYS)}.
 
