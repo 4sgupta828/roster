@@ -2307,8 +2307,15 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             # an enumeration query (absorbing: no web fallback, an empty match is an honest coverage
             # answer); {} means not-a-people-query → fall through to normal research. Only for fresh
             # questions (no follow-up history), so conversation turns keep the normal path.
-            if people_population_enabled() and not body.history and not body.session_id:
+            if people_population_enabled():
+                # People-only: route EVERY question (including THREADED follow-ups) to the people engine
+                # so it NEVER returns web/prose. The old `not session_id and not history` guard let
+                # threaded questions fall through to _do_research prose — the recurring "still prose" bug.
                 store = _claim_store_cached()
+                if store is None:
+                    return ResearchOut(grounded=False, answer="The people index is unavailable right "
+                                       "now — please retry.", claims=[], coverage_gaps=[], rejected=0,
+                                       people_rows=[], coverage_basis=None)
                 if store is not None:
                     from api.people_population import answer_people_population
                     res = await answer_people_population(
