@@ -2301,55 +2301,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     async def research(body: ResearchIn,
                        x_roster_token: str = Header(default="")) -> ResearchOut:
         try:
-            # PEOPLE-ENUMERATION ROUTE (flag ROSTER_PEOPLE_POPULATION, Rule 20): a fresh "find all
-            # people where…" question is answered by FILTERING the grounded people index, not a web-RAG
-            # sample. The LLM facet-compiler doubles as the router — a non-empty facet filter means it IS
-            # an enumeration query (absorbing: no web fallback, an empty match is an honest coverage
-            # answer); {} means not-a-people-query → fall through to normal research. Only for fresh
-            # questions (no follow-up history), so conversation turns keep the normal path.
-            if people_population_enabled():
-                # People-only: route EVERY question (including THREADED follow-ups) to the people engine
-                # so it NEVER returns web/prose. The old `not session_id and not history` guard let
-                # threaded questions fall through to _do_research prose — the recurring "still prose" bug.
-                store = _claim_store_cached()
-                if store is None:
-                    return ResearchOut(grounded=False, answer="The people index is unavailable right "
-                                       "now — please retry.", claims=[], coverage_gaps=[], rejected=0,
-                                       people_rows=[], coverage_basis=None)
-                if store is not None:
-                    from api.people_population import answer_people_population
-                    res = await answer_people_population(
-                        question=body.question, tenant_id=body.tenant_id,
-                        store=store, llm=build_llm(mode=resolve_mode()))
-                    # PEOPLE-ONLY product (user directive): NEVER return web/prose on the flag path —
-                    # always a ranked list of people, or an honest empty. A single-person question
-                    # returns just the profile card (GitHub/X/LinkedIn search links); everything else
-                    # returns the enumeration rows or an honest-empty people response.
-                    if res.get("kind") == "person":
-                        return ResearchOut(grounded=True, answer="", claims=[], coverage_gaps=[],
-                                           rejected=0, people_rows=[res["person_card"]],
-                                           coverage_basis=None, session_id=None)
-                    answer = res.get("answer") or ("No people matched — name a role, expertise, "
-                                                   "company, or location (e.g. 'ML directors in NYC').")
-                    sid = None
-                    sstore = _store()
-                    if sstore is not None:
-                        try:
-                            sid = await sstore.save(
-                                tenant_id=body.tenant_id, workspace_id=body.workspace_id,
-                                question=body.question, answer=answer,
-                                grounded=res.get("grounded", False), claims=[], source_stats={},
-                                coverage_gaps=[], rejected=0, sources=body.sources,
-                                user_name=body.user_name, user_email=body.user_email,
-                                kind="people_population",
-                                extra={"coverage_basis": res.get("coverage_basis") or {},
-                                       "people_rows": res.get("people_rows") or []})
-                        except Exception:   # noqa: BLE001
-                            sid = None
-                    return ResearchOut(
-                        grounded=res.get("grounded", False), answer=answer, claims=[],
-                        coverage_gaps=[], rejected=0, people_rows=res.get("people_rows") or [],
-                        coverage_basis=res.get("coverage_basis"), session_id=sid)
+            # People routing (flag ROSTER_PEOPLE_POPULATION) now lives INSIDE _do_research — the single
+            # source of truth shared with /research/stream. Both endpoints get the people-only behavior.
             return await _do_research(body, token=x_roster_token)
         except CassetteMiss as e:
             raise HTTPException(status_code=503, detail=(
@@ -2819,6 +2772,51 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     async def _do_research(body: ResearchIn, on_event=None, token: str = "") -> ResearchOut:
         """Shared research core: attachments → ask (optional live on_event) → persist → ResearchOut.
         Raises CassetteMiss / provider errors for the caller to handle."""
+        # PEOPLE-ENUMERATION ROUTE (flag ROSTER_PEOPLE_POPULATION, Rule 20) — the SINGLE source of
+        # truth for people routing, shared by /research AND /research/stream (both funnel through
+        # here; the earlier /research-only fix missed /research/stream, the UI's real endpoint — the
+        # recurring "still prose" bug). On the flag path EVERY question (fresh AND threaded) is
+        # answered by FILTERING the grounded people index — NEVER web/prose: kind='person' → a profile
+        # card; everything else → ranked people_rows or an honest coverage-gap answer.
+        if people_population_enabled():
+            store = _claim_store_cached()
+            if store is None:
+                return ResearchOut(grounded=False, answer="The people index is unavailable right now "
+                                   "— please retry.", claims=[], coverage_gaps=[], rejected=0,
+                                   people_rows=[], coverage_basis=None)
+            from api.people_population import answer_people_population
+            res = await answer_people_population(
+                question=body.question, tenant_id=body.tenant_id,
+                store=store, llm=build_llm(mode=resolve_mode()))
+            if res.get("kind") == "person":
+                if on_event is not None:
+                    await on_event({"type": "people", "count": 1})
+                return ResearchOut(grounded=True, answer="", claims=[], coverage_gaps=[],
+                                   rejected=0, people_rows=[res["person_card"]],
+                                   coverage_basis=None, session_id=None)
+            answer = res.get("answer") or ("No people matched — name a role, expertise, company, "
+                                           "or location (e.g. 'ML directors in NYC').")
+            if on_event is not None:
+                await on_event({"type": "people", "count": len(res.get("people_rows") or [])})
+            sid = None
+            sstore = _store()
+            if sstore is not None:
+                try:
+                    sid = await sstore.save(
+                        tenant_id=body.tenant_id, workspace_id=body.workspace_id,
+                        question=body.question, answer=answer,
+                        grounded=res.get("grounded", False), claims=[], source_stats={},
+                        coverage_gaps=[], rejected=0, sources=body.sources,
+                        user_name=body.user_name, user_email=body.user_email,
+                        kind="people_population",
+                        extra={"coverage_basis": res.get("coverage_basis") or {},
+                               "people_rows": res.get("people_rows") or []})
+                except Exception:   # noqa: BLE001
+                    sid = None
+            return ResearchOut(
+                grounded=res.get("grounded", False), answer=answer, claims=[],
+                coverage_gaps=[], rejected=0, people_rows=res.get("people_rows") or [],
+                coverage_basis=res.get("coverage_basis"), session_id=sid)
         if app.state.service is None:
             app.state.service = build_default_service()
         images, docs, pdfs, attach_notes, previews = None, None, None, [], []

@@ -104,6 +104,61 @@ def test_research_stream_final_returns_people_profiles(monkeypatch) -> None:
     assert final["result"]["people"] == [profile]
 
 
+def test_research_stream_people_population_returns_rows(monkeypatch) -> None:
+    """Held-out regression (Rule 4) for the recurring 'still prose' bug: with
+    ROSTER_PEOPLE_POPULATION on, /research/stream — the UI's REAL endpoint — MUST return grounded
+    people_rows in its final event, NEVER web prose. The earlier fix only patched /research; the bug
+    survived because the UI streams. This pins the streaming path that both endpoints now share
+    (people routing lives in _do_research). The injected service would emit PROSE if the people
+    route were ever bypassed, so a regression fails loudly here."""
+    monkeypatch.setenv("ROSTER_STREAM", "1")
+    monkeypatch.setenv("ROSTER_PEOPLE_POPULATION", "1")
+    monkeypatch.delenv("ROSTER_REASONED_DEFAULT", raising=False)
+
+    import api.app as appmod
+    from api.people_population import _FacetParse
+
+    class _FacetLLM:   # the query-COMPILER: free text → normalized facet filter
+        async def complete(self, *, system, messages, response_format, max_tokens=2048,
+                           temperature=None):
+            return LLMResult(parsed=_FacetParse(role=["software_engineer"], function=["payment"]),
+                             output_tokens=5)
+
+    class _FakeStore:
+        async def people_index_stats(self, *, tenant_id):
+            return {"persons_indexed": 3, "source_documents": 2, "facet_coverage": {}}
+
+        async def enumerate_by_facets(self, facets, *, tenant_id, cap):
+            return [{"entity_id": "github:se1", "name": "Ada Byte", "facets": [
+                {"facet_key": "role", "facet_value_norm": "software_engineer",
+                 "display_value": "Software Engineer", "document_id": "gh1", "block_id": "profile"},
+                {"facet_key": "link_github", "facet_value_norm": "https://github.com/adabyte",
+                 "display_value": "https://github.com/adabyte", "document_id": "gh1",
+                 "block_id": "profile"}]}]
+
+    monkeypatch.setattr(appmod, "build_llm", lambda *a, **k: _FacetLLM())
+
+    class _ProseService:   # would win ONLY if the people route were bypassed (the bug)
+        ui = None
+
+        async def ask(self, **kwargs):
+            return AnswerResult(composed_answer="PROSE ABOUT PAYMENTS", people_profiles=[])
+
+    app = create_app(_ProseService())
+    app.state.claim_store = _FakeStore()          # the slot _claim_store_cached() reads/caches
+    client = TestClient(app)
+    with client.stream("POST", "/research/stream", json={
+            "question": "Software engineers in payment industry", "tenant_id": "demo"}) as resp:
+        assert resp.status_code == 200
+        events = [line.removeprefix("data: ") for line in resp.iter_lines()
+                  if line.startswith("data: ")]
+    final = [json.loads(e) for e in events if json.loads(e).get("type") == "final"][0]
+    res = final["result"]
+    assert len(res["people_rows"]) == 1                       # grounded rows, not prose
+    assert res["people_rows"][0]["name"] == "Ada Byte"
+    assert "PROSE ABOUT PAYMENTS" not in (res.get("answer") or "")   # the prose path never ran
+
+
 def test_tenant_isolation_via_api() -> None:
     # A different tenant sees no evidence → not grounded (no leak).
     client = TestClient(create_app(_service()))
