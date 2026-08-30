@@ -7,10 +7,11 @@ lives HERE, never in the kernel or the app engine.
 """
 from __future__ import annotations
 
-# The closed set of facet KEYS the people index filters on. `title` is the raw display; the other keys
-# are the normalized, filterable dimensions. `role` = the functional JOB (what they DO), distinct from
-# `seniority` (the LEVEL) and `function` (the DOMAIN).
-PEOPLE_FACET_KEYS = ("title", "role", "seniority", "function", "metro", "company", "worked_at")
+# The closed set of facet KEYS the compiler may emit (all filterable). `role` = the functional JOB
+# (what they DO), distinct from `seniority` (the LEVEL) and `function` (the DOMAIN). NOTE: `title` is a
+# display-only stored facet (the raw bio) and is DELIBERATELY excluded here — the model kept mis-filing
+# job titles into `title` instead of `role`, so it is not an emit option.
+PEOPLE_FACET_KEYS = ("role", "seniority", "function", "metro", "company", "worked_at")
 
 _ROLE = ("software_engineer", "ml_engineer", "system_architect", "solutions_architect", "data_scientist",
          "data_engineer", "research_scientist", "product_manager", "sre", "security_engineer",
