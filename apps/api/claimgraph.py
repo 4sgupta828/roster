@@ -280,6 +280,30 @@ CREATE TABLE IF NOT EXISTS rs_mention (
     last_seen    timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ix_rs_mention_norm ON rs_mention (tenant_id, kind, norm);
+
+-- GROUNDED FACET READ-MODEL (people-population enumeration). A materialized projection of the
+-- claim graph's per-attribute VALUE claims into flat, indexed, filterable facet rows — each row
+-- CARRIES the source claim + evidence it was derived from, so a facet-filtered enumeration is still
+-- grounded (the row links back to a span-verified claim). Domain-neutral: `facet_key` values
+-- (title/seniority/function/metro/company/...) are vertical-supplied vocabulary, not kernel semantics.
+-- This is a READ MODEL (option-c per the design panel), NOT a second truth graph — rs_claim remains
+-- authoritative; a projector (or a direct grounded write at seed time) fills this from active claims.
+CREATE TABLE IF NOT EXISTS roster_entity_facet (
+    tenant_id          text NOT NULL DEFAULT 'demo',
+    entity_id          text NOT NULL,           -- the person (rs_entity.entity_id, kind='person')
+    facet_key          text NOT NULL,           -- vertical vocab: title|seniority|function|metro|company
+    facet_value_norm   text NOT NULL,           -- normalized filter value (e.g. 'director','bay_area')
+    display_value      text NOT NULL DEFAULT '',-- human display (e.g. 'Director of Machine Learning')
+    source_claim_id    text NOT NULL DEFAULT '',-- the rs_claim this facet was derived from (grounding)
+    source_document_id text NOT NULL DEFAULT '',-- + the evidence span (document_id, block_id) for citation
+    source_block_id    text NOT NULL DEFAULT '',
+    confidence         real NOT NULL DEFAULT 0,
+    valid_as_of        date,
+    PRIMARY KEY (tenant_id, entity_id, facet_key, facet_value_norm)
+);
+-- Facet-filter index: the hot enumeration path is `WHERE facet_key=$ AND facet_value_norm=$` per facet,
+-- intersected on entity_id — this covers each leg of the intersection.
+CREATE INDEX IF NOT EXISTS ix_roster_facet_kv ON roster_entity_facet (tenant_id, facet_key, facet_value_norm);
 """
 
 # Whitelisted numeric counters finish_run() may update (guards the dynamic SET).
@@ -1415,6 +1439,106 @@ class ClaimGraphStore:
                        ORDER BY length(name) LIMIT 1""",
                     tenant_id, f"%{ref}%")
         return dict(r) if r else None
+
+    async def add_person_facet(self, *, entity_id: str, facet_key: str, facet_value_norm: str,
+                               display_value: str = "", source_claim_id: str = "",
+                               source_document_id: str = "", source_block_id: str = "",
+                               confidence: float = 0.0, valid_as_of=None,
+                               tenant_id: str = "demo") -> None:
+        """Write ONE grounded facet row (people-population read-model). Each facet carries the source
+        claim + evidence span it was derived from, so a facet-filtered enumeration stays grounded.
+        Upsert (idempotent per (tenant,entity,facet_key,value))."""
+        await self.ensure_schema()
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO roster_entity_facet (tenant_id, entity_id, facet_key, facet_value_norm,
+                     display_value, source_claim_id, source_document_id, source_block_id, confidence,
+                     valid_as_of)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                   ON CONFLICT (tenant_id, entity_id, facet_key, facet_value_norm) DO UPDATE SET
+                     display_value = EXCLUDED.display_value, source_claim_id = EXCLUDED.source_claim_id,
+                     source_document_id = EXCLUDED.source_document_id,
+                     source_block_id = EXCLUDED.source_block_id, confidence = EXCLUDED.confidence""",
+                tenant_id, entity_id, facet_key, facet_value_norm, display_value, source_claim_id,
+                source_document_id, source_block_id, float(confidence), valid_as_of)
+
+    async def enumerate_by_facets(self, facets: dict[str, list[str]], *, tenant_id: str = "demo",
+                                  cap: int = 200) -> list[dict]:
+        """The people-enumeration core (LLM-as-query-COMPILER; code owns the filter). `facets` maps a
+        facet_key → list of acceptable normalized values (OR within a key). A person matches when, for
+        EVERY facet_key, it has >= 1 matching facet value (AND across keys). Returns the matched persons
+        with the display + a grounding citation for each queried facet:
+        `[{entity_id, name, facets:[{facet_key, display_value, document_id, block_id, source_claim_id}]}]`
+        (name order, capped). Empty `facets` → [] (no blanket population dump)."""
+        keys = [k for k, v in facets.items() if v]
+        if not keys:
+            return []
+        await self.ensure_schema()
+        pool = await self._get_pool()
+        # Build the per-key OR predicate: (facet_key=$k AND facet_value_norm = ANY($vals)).
+        clauses, args = [], [tenant_id]
+        for k in keys:
+            args.append(k); ki = len(args)
+            args.append(list(facets[k])); vi = len(args)
+            clauses.append(f"(facet_key = ${ki} AND facet_value_norm = ANY(${vi}))")
+        args.append(len(keys)); nkeys_i = len(args)
+        args.append(cap); cap_i = len(args)
+        async with pool.acquire() as conn:
+            # 1) entity_ids matching ALL keys (INTERSECT via count of DISTINCT matched keys == n_keys).
+            ids = await conn.fetch(
+                f"""SELECT f.entity_id
+                    FROM roster_entity_facet f
+                    JOIN rs_entity e ON e.entity_id = f.entity_id AND e.status = 'active'
+                    WHERE f.tenant_id = $1 AND ({' OR '.join(clauses)})
+                    GROUP BY f.entity_id
+                    HAVING count(DISTINCT f.facet_key) = ${nkeys_i}
+                    ORDER BY f.entity_id
+                    LIMIT ${cap_i}""", *args)
+            matched = [r["entity_id"] for r in ids]
+            if not matched:
+                return []
+            # 2) the queried facets (with citation) for each matched person + the person name.
+            rows = await conn.fetch(
+                """SELECT f.entity_id, COALESCE(NULLIF(e.name,''), f.entity_id) AS name,
+                          f.facet_key, f.display_value, f.facet_value_norm,
+                          f.source_document_id, f.source_block_id, f.source_claim_id
+                   FROM roster_entity_facet f
+                   JOIN rs_entity e ON e.entity_id = f.entity_id
+                   WHERE f.tenant_id = $1 AND f.entity_id = ANY($2) AND f.facet_key = ANY($3)
+                   ORDER BY name, f.facet_key""",
+                tenant_id, matched, keys)
+        by_ent: dict[str, dict] = {}
+        order: list[str] = []
+        for r in rows:
+            eid = r["entity_id"]
+            p = by_ent.get(eid)
+            if p is None:
+                p = {"entity_id": eid, "name": r["name"], "facets": []}
+                by_ent[eid] = p; order.append(eid)
+            p["facets"].append({
+                "facet_key": r["facet_key"], "display_value": r["display_value"],
+                "value_norm": r["facet_value_norm"], "document_id": r["source_document_id"],
+                "block_id": r["source_block_id"], "source_claim_id": r["source_claim_id"]})
+        return [by_ent[e] for e in order]
+
+    async def people_index_stats(self, *, tenant_id: str = "demo") -> dict:
+        """Coverage facts for the honest coverage_basis: how many persons the index holds, the distinct
+        source documents behind the facets, and per-facet-key coverage counts. Never implies the index
+        is the whole world — it reports exactly what has been ingested."""
+        await self.ensure_schema()
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            total = await conn.fetchval(
+                "SELECT count(DISTINCT entity_id) FROM roster_entity_facet WHERE tenant_id=$1", tenant_id)
+            nsrc = await conn.fetchval(
+                "SELECT count(DISTINCT source_document_id) FROM roster_entity_facet "
+                "WHERE tenant_id=$1 AND source_document_id <> ''", tenant_id)
+            per_key = await conn.fetch(
+                "SELECT facet_key, count(DISTINCT entity_id) AS n FROM roster_entity_facet "
+                "WHERE tenant_id=$1 GROUP BY facet_key ORDER BY facet_key", tenant_id)
+        return {"persons_indexed": int(total or 0), "source_documents": int(nsrc or 0),
+                "facet_coverage": {r["facet_key"]: int(r["n"]) for r in per_key}}
 
     async def category_member_companies(self, *, category_norm: str,
                                         tenant_id: str = "demo",

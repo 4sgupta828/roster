@@ -602,6 +602,16 @@ def web_only_enabled() -> bool:
     return os.environ.get("ROSTER_WEB_ONLY", "").lower() in ("1", "true", "yes")
 
 
+def people_population_enabled() -> bool:
+    """Flag (default OFF, Rule 20) via ROSTER_PEOPLE_POPULATION: route people-DISCOVERY/enumeration
+    questions ("find all people where role/function/location…") to the grounded people-index engine
+    (answer_people_population) instead of a web-RAG retrieval sample that returns empty. An enumeration
+    query is detected by whether the LLM facet-compiler yields a non-empty facet filter; a non-people
+    question yields {} and falls through to normal research. OFF → the whole path is skipped (no extra
+    LLM call), byte-identical."""
+    return os.environ.get("ROSTER_PEOPLE_POPULATION", "").lower() in ("1", "true", "yes")
+
+
 def enum_entity_probe_enabled() -> bool:
     """Flag (default OFF, Rule 20) via ROSTER_ENUM_ENTITY_PROBE: for an enumerative "table of the main X"
     ask with no user-named items, the derivation ALSO proposes `probe_entities` (candidate row instances)
@@ -1160,6 +1170,8 @@ class Citation(BaseModel):
 class ResearchOut(BaseModel):
     grounded: bool
     answer: str = ""                 # synthesized prose answer, grounded in findings
+    people_rows: list = []           # people-enumeration rows (empty unless ROSTER_PEOPLE_POPULATION routed here)
+    coverage_basis: dict | None = None  # honest coverage facts for a people-enumeration answer (else None)
     claims: list[Citation]           # the verified findings (evidence for the answer)
     coverage_gaps: list[str]
     rejected: int
@@ -2289,6 +2301,39 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     async def research(body: ResearchIn,
                        x_roster_token: str = Header(default="")) -> ResearchOut:
         try:
+            # PEOPLE-ENUMERATION ROUTE (flag ROSTER_PEOPLE_POPULATION, Rule 20): a fresh "find all
+            # people where…" question is answered by FILTERING the grounded people index, not a web-RAG
+            # sample. The LLM facet-compiler doubles as the router — a non-empty facet filter means it IS
+            # an enumeration query (absorbing: no web fallback, an empty match is an honest coverage
+            # answer); {} means not-a-people-query → fall through to normal research. Only for fresh
+            # questions (no follow-up history), so conversation turns keep the normal path.
+            if people_population_enabled() and not body.history and not body.session_id:
+                store = _claim_store_cached()
+                if store is not None:
+                    from api.people_population import answer_people_population
+                    res = await answer_people_population(
+                        question=body.question, tenant_id=body.tenant_id,
+                        store=store, llm=build_llm(mode=resolve_mode()))
+                    if not res.get("not_people_query"):
+                        sid = None
+                        sstore = _store()
+                        if sstore is not None and res.get("answer"):
+                            try:
+                                sid = await sstore.save(
+                                    tenant_id=body.tenant_id, workspace_id=body.workspace_id,
+                                    question=body.question, answer=res["answer"],
+                                    grounded=res["grounded"], claims=[], source_stats={},
+                                    coverage_gaps=[], rejected=0, sources=body.sources,
+                                    user_name=body.user_name, user_email=body.user_email,
+                                    kind="people_population",
+                                    extra={"coverage_basis": res.get("coverage_basis") or {},
+                                           "people_rows": res.get("people_rows") or []})
+                            except Exception:   # noqa: BLE001
+                                sid = None
+                        return ResearchOut(
+                            grounded=res["grounded"], answer=res["answer"], claims=[],
+                            coverage_gaps=[], people_rows=res.get("people_rows") or [],
+                            coverage_basis=res.get("coverage_basis"), session_id=sid)
             return await _do_research(body, token=x_roster_token)
         except CassetteMiss as e:
             raise HTTPException(status_code=503, detail=(
