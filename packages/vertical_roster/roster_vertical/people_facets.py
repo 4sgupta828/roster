@@ -42,9 +42,10 @@ Normalize synonyms to canonical snake_case values, e.g.:
   Architect" → ["system_architect"]; "Data Scientist" → ["data_scientist"]; "ML Engineer" →
   ["ml_engineer"]; "Solutions Architect" → ["solutions_architect"]; "Product Manager" →
   ["product_manager"]; "Research Scientist" → ["research_scientist"]; "SRE" → ["sre"];
-  "researcher(s)"/"scientist(s)"/"academic(s)"/"professor(s)" → ["researcher"]. When the ONLY people
-  word is "researchers at <place/field>", emit role=["researcher"] plus the field/company — do NOT put
-  "research" in function. Examples: {", ".join(_ROLE)}.
+  "researcher(s)"/"scientist(s)"/"academic(s)"/"professor(s)" → ["researcher"];
+  "doctors"/"physicians"/"clinicians" → ["physician"]. When the ONLY people word is "researchers at
+  <place/field>", emit role=["researcher"] plus the field/company — do NOT put "research" in function.
+  Examples: {", ".join(_ROLE)}.
 - seniority (canonical values): "Directors" → ["director"]; "EMs"/"Engineering Managers" →
   ["engineering_manager"]; "VPs"/"SVP"/"EVP" → ["vp"]; "C-suite"/"CTO"/"CEO"/"Chief X" → ["c_level"];
   "Head of X" → ["head"]; "Principal"/"Distinguished"/"Fellow" → ["principal"]. A GROUP word maps to
@@ -59,9 +60,13 @@ Normalize synonyms to canonical snake_case values, e.g.:
   ["infrastructure"]; "security" → ["security"]. Map an OCCUPATION word to its field:
   "physicists" → ["physics"]; "biologists" → ["biology"]; "chemists" → ["chemistry"]; "economists" →
   ["economics"]; "neuroscientists" → ["neuroscience"]; "mathematicians" → ["mathematics"];
-  "computer scientists" → ["computer_science"]; "medicine"/"medical"/"clinicians"/"physicians" →
-  ["medicine"]. NEVER emit "research" as a function — "researcher(s)"/"scientist(s)"/"academic(s)" is a
-  ROLE (["researcher"]), NOT a function. Examples: {", ".join(_FUNCTION)}.
+  "computer scientists" → ["computer_science"]; "medicine"/"medical"/"clinicians" → ["medicine"].
+  MEDICAL SPECIALTY → its field: "cardiologists" → ["cardiovascular_disease"]; "pediatricians" →
+  ["pediatrics"]; "psychiatrists" → ["psychiatry"]; "radiologists" → ["radiology"]; "dermatologists" →
+  ["dermatology"]; "neurologists" → ["neurology"]; "oncologists" → ["hematology_oncology"]; "surgeons" →
+  ["surgery"]; "gastroenterologists" → ["gastroenterology"]; "anesthesiologists" → ["anesthesiology"].
+  NEVER emit "research" as a function — "researcher(s)"/"scientist(s)"/"academic(s)" is a ROLE
+  (["researcher"]), NOT a function. Examples: {", ".join(_FUNCTION)}.
 - metro: "Bay Area"/"SF"/"San Francisco"/"Silicon Valley"/"Palo Alto" → ["bay_area"];
   "New York" → ["nyc"]. Examples: {", ".join(_METRO)}.
 - company: a specific employer → its CANONICAL lowercased short name — drop legal suffixes (Inc, LLC,
