@@ -42,8 +42,12 @@ Normalize synonyms to canonical snake_case values, e.g.:
 A single facet may list SEVERAL acceptable values (OR within the key): "Directors or EMs" →
 {{"seniority": ["director", "engineering_manager"]}}.
 
-If the question is NOT a people-discovery/enumeration query (e.g. "who is X", a single named person, a
-yes/no, a definition), output exactly {{}}.
+If the question is about ONE SPECIFIC NAMED INDIVIDUAL (identity/profile — e.g. "who is Jane Doe",
+"Jane Doe who worked at Acme", "tell me about John Smith the ML director"), do NOT emit facets —
+instead set "person" to their full name and "person_context" to any employer/role hints that
+disambiguate them (e.g. "Tubi, Netflix, ML infrastructure"). Leave the facet lists empty.
+
+If the question is none of these (a definition, a yes/no, not about people), output exactly {{}}.
 
 Question: {{question}}
 JSON:"""

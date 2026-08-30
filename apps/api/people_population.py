@@ -29,35 +29,59 @@ NOT_INGESTED = ["LinkedIn", "X/Twitter", "most company org charts"]
 
 class _FacetParse(BaseModel):
     """Fixed schema for the LLM facet compiler (dynamic dicts don't schema cleanly). Empty lists =
-    the question did not constrain that facet; ALL empty = not a people-enumeration query."""
+    the question did not constrain that facet; ALL empty (and no `person`) = not a people query.
+    `person` is set ONLY when the question is about ONE specific named individual (identity/profile),
+    with `person_context` carrying any employer/role hints that disambiguate them."""
     title: list[str] = []
     seniority: list[str] = []
     function: list[str] = []
     metro: list[str] = []
     company: list[str] = []
+    person: str = ""
+    person_context: str = ""
 
 
-async def parse_people_facets(question: str, llm) -> dict[str, list[str]]:
-    """LLM query-compiler: free-text people question → normalized facet filter. Returns {} when the
-    question is not a people-enumeration query (or on any LLM/parse failure — fail safe, never guess)."""
+async def parse_people_facets(question: str, llm) -> tuple[dict[str, list[str]], str, str]:
+    """LLM query-compiler: free-text people question → (facet filter, person, person_context).
+    `facets` is a normalized enumeration filter (empty when the question is not enumeration); `person`
+    is a single named individual (identity/profile question) with `person_context` disambiguating
+    hints. All empty = not a people query. Fail safe on any LLM/parse failure (never guess)."""
     from roster_vertical.people_facets import PEOPLE_FACET_KEYS, facet_parse_prompt
     try:
         comp = await llm.complete(
-            system="You compile a people-search question into a normalized facet filter. "
-                   "Return only the structured facets; empty if it is not a people-discovery query.",
+            system="You compile a people-search question into normalized facets, OR identify a single "
+                   "named person. Return only the structured object; empty if it is not about people.",
             messages=[{"role": "user", "content": facet_parse_prompt(question)}],
             response_format=_FacetParse, max_tokens=400)
         p = comp.parsed
     except Exception as e:  # noqa: BLE001 — a parse/provider failure must not crash the route
         _log.warning("parse_people_facets failed: %s", e)
-        return {}
+        return {}, "", ""
     out: dict[str, list[str]] = {}
     for k in PEOPLE_FACET_KEYS:
         vals = [str(v).strip().lower().replace(" ", "_")
                 for v in (getattr(p, k, None) or []) if str(v).strip()]
         if vals:
             out[k] = vals
-    return out
+    return out, (getattr(p, "person", "") or "").strip(), (getattr(p, "person_context", "") or "").strip()
+
+
+def build_person_profile_card(name: str, context: str = "") -> dict:
+    """A single-person profile card built from EXPLICIT profile searches — GitHub (direct user search),
+    X (direct search), and LinkedIn (Google search over name + hints, since LinkedIn has no open
+    search). These are navigation aids (searches, clearly labeled), so a person question always
+    surfaces their GitHub / X / LinkedIn even when we hold no stored profile for them yet."""
+    terms = " ".join(t for t in [name, context] if t)
+    g = urllib.parse.quote
+    links = [
+        {"kind": "github_search", "url": "https://github.com/search?q=" + g(terms) + "&type=users"},
+        {"kind": "x_search", "url": "https://x.com/search?q=" + g(terms) + "&f=user"},
+        {"kind": "linkedin_search",
+         "url": "https://www.google.com/search?q=" + g(terms + " site:linkedin.com/in")},
+    ]
+    return {"entity_id": "search:" + name, "name": name,
+            "attributes": ([{"key": "context", "display": context}] if context else []),
+            "links": links, "citation": None}
 
 
 def _facet_summary(facets: dict[str, list[str]]) -> str:
@@ -85,11 +109,16 @@ def _coverage_basis(facets, stats, matches: int) -> dict:
 async def answer_people_population(*, question: str, tenant_id: str, store, llm) -> dict:
     """Answer a people-enumeration question from the grounded people index. Always returns a structured
     result (never raises to the route): a compiled facet filter, grounded rows, and honest coverage."""
-    facets = await parse_people_facets(question, llm)
+    facets, person, ctx = await parse_people_facets(question, llm)
+    if not facets and person:
+        # SINGLE-PERSON identity/profile question — the router runs the web bio and attaches this
+        # profile card (explicit GitHub/X/LinkedIn search links). kind='person'.
+        return {"kind": "person", "not_people_query": False,
+                "person_card": build_person_profile_card(person, ctx)}
     stats = await store.people_index_stats(tenant_id=tenant_id)
     if not facets:
-        # Not a people-enumeration query — signal the router to fall through to normal research.
-        return {"grounded": False, "not_people_query": True, "people_rows": [],
+        # Not a people query at all — signal the router to fall through to normal research.
+        return {"kind": "none", "grounded": False, "not_people_query": True, "people_rows": [],
                 "coverage_basis": None, "answer": ""}
 
     rows = await store.enumerate_by_facets(facets, tenant_id=tenant_id, cap=200)

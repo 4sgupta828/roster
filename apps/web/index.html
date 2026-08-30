@@ -450,6 +450,8 @@
   .ppl-lnk:hover{border-color:currentColor;transform:translateY(-1px);}
   .ppl-lnk.lnk-linkedin{color:#4a9eff;background:rgba(74,158,255,.12);}
   .ppl-lnk.lnk-linkedin_search{color:#4a9eff;background:transparent;border:1px dashed rgba(74,158,255,.5);}
+  .ppl-lnk.lnk-x_search{color:var(--ink);background:transparent;border:1px dashed rgba(160,170,190,.5);}
+  .ppl-lnk.lnk-github_search{color:var(--gold);background:transparent;border:1px dashed rgba(var(--gold-rgb,255,207,107),.5);}
   .ppl-lnk.lnk-x,.ppl-lnk.lnk-twitter{color:var(--ink);background:rgba(138,147,173,.16);}
   .ppl-lnk.lnk-website,.ppl-lnk.lnk-medium{color:var(--person,#57d9c4);background:rgba(87,217,196,.10);}
   .ppl-lnk.lnk-github{color:var(--gold);background:rgba(var(--gold-rgb,255,207,107),.12);}
@@ -1884,6 +1886,7 @@ function esc(s){const d=document.createElement("div");d.textContent=s??"";return
 // profile (the grounding source), with role, function/location chips, and an honest coverage banner.
 function peopleRowsMarkup(data){
   const rows = data.people_rows||[];
+  const isEnum = !!data.coverage_basis;   // enumeration has coverage; a single-person profile does not
   const cb = data.coverage_basis||{};
   const facets = cb.query_facets||{};
   const facetChips = Object.entries(facets).map(([k,v])=>
@@ -1902,7 +1905,7 @@ function peopleRowsMarkup(data){
       : `<span class="ppl-av ppl-av-ph">${esc((p.name||"?").slice(0,1))}</span>`;
     // Profile links (LinkedIn / X / site / Medium / email) sourced from the person's public profile,
     // plus the GitHub source itself — each a clickable badge. THIS is the engagement surface.
-    const LABEL={linkedin:"in",linkedin_search:"find on LinkedIn ⌕",x:"𝕏",twitter:"𝕏",website:"site",medium:"medium",mastodon:"mastodon",email:"email",github:"github"};
+    const LABEL={linkedin:"in",linkedin_search:"find on LinkedIn ⌕",x:"𝕏",x_search:"find on X ⌕",twitter:"𝕏",website:"site",medium:"medium",mastodon:"mastodon",email:"email",github:"github",github_search:"find on GitHub ⌕"};
     const badge=(kind,href)=>`<a class="ppl-lnk lnk-${esc(kind)}" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="${esc(href)}">${LABEL[kind]||esc(kind)}</a>`;
     const linkBadges = (url?badge("github",url):"") + (p.links||[]).map(l=>badge(l.kind,l.url)).join("");
     const nameHtml = url
@@ -1916,11 +1919,10 @@ function peopleRowsMarkup(data){
         ${linkBadges?`<span class="ppl-links">${linkBadges}</span>`:""}
       </span></div>`;
   }).join("");
-  return `<div class="ppl-wrap">
-    <div class="ppl-head"><b>${rows.length}</b> ${rows.length===1?"person":"people"} found${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>
-    ${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}
-    <div class="ppl-grid">${cards}</div>
-  </div>`;
+  const head = isEnum
+    ? `<div class="ppl-head"><b>${rows.length}</b> ${rows.length===1?"person":"people"} found${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}`
+    : `<div class="ppl-head">Profile</div>`;   // single-person profile card (no enumeration coverage)
+  return `<div class="ppl-wrap">${head}<div class="ppl-grid">${cards}</div></div>`;
 }
 
 // [n] AND grouped [n, m, k] citation refs → clickable sups, in ONE pass (a chained second replace
@@ -2501,6 +2503,11 @@ function render(data, target, opts){
   // banner, instead of the plain-text answer wall.
   if(Array.isArray(data.people_rows) && data.people_rows.length){
     parts.push(peopleRowsMarkup(data));
+    // single-person profile card also carries a grounded bio prose (enumeration does not) — show it below
+    if(data.answer && !data.coverage_basis){
+      const bio = STRUCTURED ? mdToHtml(data.answer) : linkCitationRefs(esc(data.answer));
+      parts.push(`<div class="answer${STRUCTURED?" md":""}">${bio}</div>`);
+    }
     LAST = {question:(data.question||CURRENT_Q), answer:data.answer,
             session_id:(data.session_id||data.id||null)};
   } else

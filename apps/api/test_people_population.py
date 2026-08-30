@@ -62,14 +62,28 @@ _ROWS = [
 def test_parse_people_facets_compiles_query():
     llm = _FakeLLM(_FacetParse(seniority=["Director", "Engineering Manager"],
                                function=["machine_learning"], metro=["bay_area"]))
-    facets = _run(parse_people_facets("Directors/EMs in ML in Bay Area", llm))
+    facets, person, ctx = _run(parse_people_facets("Directors/EMs in ML in Bay Area", llm))
     assert facets == {"seniority": ["director", "engineering_manager"],
                       "function": ["machine_learning"], "metro": ["bay_area"]}
+    assert person == ""
 
 
 def test_parse_returns_empty_for_non_people_query_and_on_error():
-    assert _run(parse_people_facets("who is Andrej Karpathy", _FakeLLM(_FacetParse()))) == {}
-    assert _run(parse_people_facets("anything", _FakeLLM(RuntimeError("provider down")))) == {}
+    assert _run(parse_people_facets("what is ML", _FakeLLM(_FacetParse())))[0] == {}
+    assert _run(parse_people_facets("anything", _FakeLLM(RuntimeError("provider down")))) == ({}, "", "")
+
+
+def test_single_person_question_yields_a_profile_card():
+    # A named-person question routes to a profile card with explicit GitHub/X/LinkedIn search links.
+    llm = _FakeLLM(_FacetParse(person="Sandeep Gupta", person_context="Tubi, Netflix, ML"))
+    out = _run(answer_people_population(question="Sandeep Gupta who worked at Tubi, Netflix?",
+                                       tenant_id="demo", store=_FakeStore([], _STATS), llm=llm))
+    assert out["kind"] == "person" and out["not_people_query"] is False
+    card = out["person_card"]
+    kinds = {l["kind"] for l in card["links"]}
+    assert {"github_search", "x_search", "linkedin_search"} <= kinds
+    assert card["name"] == "Sandeep Gupta"
+    assert all("Sandeep" in urllib.parse.unquote(l["url"]) for l in card["links"])
 
 
 def test_answer_grounded_rows_with_citations_and_coverage():

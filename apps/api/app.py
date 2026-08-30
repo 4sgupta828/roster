@@ -2314,6 +2314,13 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     res = await answer_people_population(
                         question=body.question, tenant_id=body.tenant_id,
                         store=store, llm=build_llm(mode=resolve_mode()))
+                    if res.get("kind") == "person":
+                        # SINGLE-PERSON identity: run the normal (web) research for a grounded bio,
+                        # then ATTACH the profile card (explicit GitHub/X/LinkedIn search links) so the
+                        # answer always surfaces the person's profiles even if the web bio is thin.
+                        out = await _do_research(body, token=x_roster_token)
+                        out.people_rows = [res["person_card"]]
+                        return out
                     if not res.get("not_people_query"):
                         sid = None
                         sstore = _store()
