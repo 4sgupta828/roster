@@ -39,7 +39,9 @@ Normalize synonyms to canonical snake_case values, e.g.:
   ["infrastructure"]; "security" → ["security"]. Examples: {", ".join(_FUNCTION)}.
 - metro: "Bay Area"/"SF"/"San Francisco"/"Silicon Valley"/"Palo Alto" → ["bay_area"];
   "New York" → ["nyc"]. Examples: {", ".join(_METRO)}.
-- company: a specific employer → its lowercased name, e.g. "at Stripe" → {{"company": ["stripe"]}}.
+- company: a specific employer → its CANONICAL lowercased short name — drop legal suffixes (Inc, LLC,
+  Corp, Platforms) and apply known aliases: "Facebook"/"Meta Platforms" → ["meta"]; "Alphabet"/"Google
+  LLC" → ["google"]; "Twitter" → ["x"]; "AWS" → ["amazon"]. E.g. "at Stripe" → {{"company": ["stripe"]}}.
 
 A single facet may list SEVERAL acceptable values (OR within the key): "Directors or EMs" →
 {{"seniority": ["director", "engineering_manager"]}}.
