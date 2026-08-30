@@ -33,8 +33,10 @@ Normalize synonyms to canonical snake_case values, e.g.:
 - role (the functional JOB / expertise — WHAT they do, distinct from level and domain): "System
   Architect" → ["system_architect"]; "Data Scientist" → ["data_scientist"]; "ML Engineer" →
   ["ml_engineer"]; "Solutions Architect" → ["solutions_architect"]; "Product Manager" →
-  ["product_manager"]; "Research Scientist" → ["research_scientist"]; "SRE" → ["sre"]. Examples:
-  {", ".join(_ROLE)}.
+  ["product_manager"]; "Research Scientist" → ["research_scientist"]; "SRE" → ["sre"];
+  "researcher(s)"/"scientist(s)"/"academic(s)"/"professor(s)" → ["researcher"]. When the ONLY people
+  word is "researchers at <place/field>", emit role=["researcher"] plus the field/company — do NOT put
+  "research" in function. Examples: {", ".join(_ROLE)}.
 - seniority (canonical values): "Directors" → ["director"]; "EMs"/"Engineering Managers" →
   ["engineering_manager"]; "VPs"/"SVP"/"EVP" → ["vp"]; "C-suite"/"CTO"/"CEO"/"Chief X" → ["c_level"];
   "Head of X" → ["head"]; "Principal"/"Distinguished"/"Fellow" → ["principal"]. A GROUP word maps to
@@ -43,10 +45,15 @@ Normalize synonyms to canonical snake_case values, e.g.:
   {", ".join(_SENIORITY)}.
 - A ranking word ("top", "best", "most senior", "leading") is NOT a facet — DROP it; the results are
   returned unranked. Only translate the actual role/function/place constraints into facets.
-- function: CANONICALIZE the whole AI/ML family to ["machine_learning"] — "ML", "AI", "machine
-  learning", "AI research", "deep learning", "NLP", "computer vision", "LLMs", "generative AI",
-  "ML platform" all → ["machine_learning"]. "data science"/"analytics" → ["data_science"]. "infra" →
-  ["infrastructure"]; "security" → ["security"]. Examples: {", ".join(_FUNCTION)}.
+- function (the DOMAIN/field): CANONICALIZE the whole AI/ML family to ["machine_learning"] — "ML",
+  "AI", "machine learning", "AI research", "deep learning", "NLP", "computer vision", "LLMs",
+  "generative AI" all → ["machine_learning"]. "data science"/"analytics" → ["data_science"]; "infra" →
+  ["infrastructure"]; "security" → ["security"]. Map an OCCUPATION word to its field:
+  "physicists" → ["physics"]; "biologists" → ["biology"]; "chemists" → ["chemistry"]; "economists" →
+  ["economics"]; "neuroscientists" → ["neuroscience"]; "mathematicians" → ["mathematics"];
+  "computer scientists" → ["computer_science"]; "medicine"/"medical"/"clinicians"/"physicians" →
+  ["medicine"]. NEVER emit "research" as a function — "researcher(s)"/"scientist(s)"/"academic(s)" is a
+  ROLE (["researcher"]), NOT a function. Examples: {", ".join(_FUNCTION)}.
 - metro: "Bay Area"/"SF"/"San Francisco"/"Silicon Valley"/"Palo Alto" → ["bay_area"];
   "New York" → ["nyc"]. Examples: {", ".join(_METRO)}.
 - company: a specific employer → its CANONICAL lowercased short name — drop legal suffixes (Inc, LLC,
