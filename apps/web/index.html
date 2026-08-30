@@ -425,6 +425,26 @@
     color:var(--muted);font-weight:660;text-align:left;padding:.5rem .75rem;border-bottom:1.5px solid var(--gold);}
   .answer.md .mdt td{padding:.6rem .75rem;border-bottom:1px solid var(--hair);vertical-align:top;line-height:1.55;}
   .answer.md .mdt tbody tr:last-child td{border-bottom:none;}
+  /* People-enumeration result — enriched, scannable, engagement-first cards (not a wall of text) */
+  .ppl-wrap{margin:.2rem 0 1.4rem;}
+  .ppl-head{font-family:var(--sans);font-size:.95rem;font-weight:600;margin-bottom:.55rem;display:flex;flex-wrap:wrap;gap:.5rem;align-items:baseline;}
+  .ppl-head b{color:var(--gold);font-size:1.15rem;}
+  .ppl-facets{display:inline-flex;gap:.35rem;flex-wrap:wrap;}
+  .ppl-fc{font-size:.64rem;text-transform:uppercase;letter-spacing:.06em;color:var(--faint,#8a93ad);background:rgba(138,147,173,.14);padding:.14rem .42rem;border-radius:4px;}
+  .ppl-cov{font-size:.78rem;line-height:1.5;color:var(--faint,#8a93ad);background:rgba(138,147,173,.08);border-left:2px solid rgba(138,147,173,.45);padding:.5rem .7rem;border-radius:0 6px 6px 0;margin-bottom:.95rem;}
+  .ppl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(258px,1fr));gap:.7rem;}
+  .ppl-card{display:flex;gap:.7rem;align-items:flex-start;text-decoration:none;color:inherit;border:1px solid var(--hair);border-radius:10px;padding:.72rem .82rem;background:var(--card,rgba(127,127,127,.03));transition:border-color .15s,transform .15s,box-shadow .15s;}
+  .ppl-card:hover{border-color:var(--gold);transform:translateY(-1px);box-shadow:0 5px 16px rgba(0,0,0,.14);}
+  .ppl-av{width:40px;height:40px;border-radius:50%;flex:none;object-fit:cover;background:rgba(138,147,173,.18);}
+  .ppl-av-ph{display:flex;align-items:center;justify-content:center;font-family:var(--sans);font-weight:700;color:var(--faint,#8a93ad);font-size:1.05rem;}
+  .ppl-body{display:flex;flex-direction:column;gap:.16rem;min-width:0;}
+  .ppl-name{font-family:var(--sans);font-weight:650;font-size:.95rem;color:var(--ink);display:flex;align-items:center;gap:.28rem;}
+  .ppl-ext{color:var(--gold);font-size:.72em;opacity:.65;}
+  .ppl-card:hover .ppl-ext{opacity:1;}
+  .ppl-title{font-size:.82rem;line-height:1.42;color:var(--ink);opacity:.86;}
+  .ppl-tags{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.16rem;}
+  .ppl-tag{font-size:.64rem;font-weight:600;color:var(--person,#57d9c4);background:rgba(87,217,196,.13);padding:.1rem .42rem;border-radius:4px;}
+  .ppl-src{font-size:.69rem;color:var(--faint,#8a93ad);margin-top:.18rem;opacity:.8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;}
   /* grounded chart (inline SVG) — framed as a figure with a caption + legend */
   .chartfig{margin:1.1rem 0 1.3rem;border:1px solid var(--hair);border-radius:12px;
     padding:.85rem 1rem;background:var(--panel2);}
@@ -1852,6 +1872,41 @@ function applyDisclaimers(){
 }
 
 function esc(s){const d=document.createElement("div");d.textContent=s??"";return d.innerHTML;}
+// People-enumeration result → enriched, engagement-first cards. Each person links to their public
+// profile (the grounding source), with role, function/location chips, and an honest coverage banner.
+function peopleRowsMarkup(data){
+  const rows = data.people_rows||[];
+  const cb = data.coverage_basis||{};
+  const facets = cb.query_facets||{};
+  const facetChips = Object.entries(facets).map(([k,v])=>
+    `<span class="ppl-fc">${esc(k)}: ${esc((v||[]).join(" / "))}</span>`).join("");
+  const cov = esc(cb.population_statement||"");
+  const cards = rows.map(p=>{
+    const url = (p.citation&&p.citation.document_id) || "";
+    const isGh = /github\.com\//.test(url);
+    const av = isGh ? url.replace(/\/+$/,"")+".png" : "";
+    const attr = k => (p.attributes||[]).find(a=>a.key===k) || {};
+    const title = (attr("title").display || attr("seniority").display || "");
+    const tags = (p.attributes||[]).filter(a=>a.key==="function"||a.key==="metro")
+      .map(a=>`<span class="ppl-tag">${esc(a.display)}</span>`).join("");
+    const host = url.replace(/^https?:\/\//,"").replace(/\/+$/,"");
+    const avatar = av
+      ? `<img class="ppl-av" src="${esc(av)}" alt="" loading="lazy" onerror="this.style.display='none'">`
+      : `<span class="ppl-av ppl-av-ph">${esc((p.name||"?").slice(0,1))}</span>`;
+    return `<a class="ppl-card" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${avatar}
+      <span class="ppl-body">
+        <span class="ppl-name">${esc(p.name)}<span class="ppl-ext">↗</span></span>
+        ${title?`<span class="ppl-title">${esc(title)}</span>`:""}
+        ${tags?`<span class="ppl-tags">${tags}</span>`:""}
+        ${host?`<span class="ppl-src">${esc(host)}</span>`:""}
+      </span></a>`;
+  }).join("");
+  return `<div class="ppl-wrap">
+    <div class="ppl-head"><b>${rows.length}</b> ${rows.length===1?"person":"people"} found${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>
+    ${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}
+    <div class="ppl-grid">${cards}</div>
+  </div>`;
+}
 
 // [n] AND grouped [n, m, k] citation refs → clickable sups, in ONE pass (a chained second replace
 // would re-match the [n] text inside the sups the first pass emitted and nest tags).
@@ -2427,6 +2482,13 @@ function render(data, target, opts){
   if(data.resolved_question){
     parts.push(`<div class="rqnote">↳ Interpreted your follow-up as: <b>${esc(data.resolved_question)}</b></div>`);
   }
+  // PEOPLE-ENUMERATION result — enriched cards (name→profile link, role, tags) + honest coverage
+  // banner, instead of the plain-text answer wall.
+  if(Array.isArray(data.people_rows) && data.people_rows.length){
+    parts.push(peopleRowsMarkup(data));
+    LAST = {question:(data.question||CURRENT_Q), answer:data.answer,
+            session_id:(data.session_id||data.id||null)};
+  } else
   // synthesized answer (grounded in the findings) — the hero; [n] refs → findings.
   if(data.answer){
     const html = STRUCTURED
