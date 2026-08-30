@@ -1498,16 +1498,18 @@ class ClaimGraphStore:
             matched = [r["entity_id"] for r in ids]
             if not matched:
                 return []
-            # 2) the queried facets (with citation) for each matched person + the person name.
+            # 2) ALL facets (with citation) for each matched person + the person name. We return every
+            #    facet (not just the queried keys) so DISPLAY facets — title, and `link_*` profile links
+            #    (linkedin/x/website/…) enriched from the source — reach the answer card, each grounded.
             rows = await conn.fetch(
                 """SELECT f.entity_id, COALESCE(NULLIF(e.name,''), f.entity_id) AS name,
                           f.facet_key, f.display_value, f.facet_value_norm,
                           f.source_document_id, f.source_block_id, f.source_claim_id
                    FROM roster_entity_facet f
                    JOIN rs_entity e ON e.entity_id = f.entity_id
-                   WHERE f.tenant_id = $1 AND f.entity_id = ANY($2) AND f.facet_key = ANY($3)
+                   WHERE f.tenant_id = $1 AND f.entity_id = ANY($2)
                    ORDER BY name, f.facet_key""",
-                tenant_id, matched, keys)
+                tenant_id, matched)
         by_ent: dict[str, dict] = {}
         order: list[str] = []
         for r in rows:

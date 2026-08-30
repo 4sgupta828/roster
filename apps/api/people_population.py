@@ -99,12 +99,18 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm)
         # one representative grounded citation per person (first facet carrying a source)
         cite = next(({"document_id": f["document_id"], "block_id": f["block_id"]}
                      for f in r["facets"] if f.get("document_id")), None)
+        # `link_*` facets are the person's OTHER profiles (linkedin/x/website/medium/email), enriched
+        # from the source profile — surfaced as clickable links on the card, not filter attributes.
+        links, attrs = [], []
+        for f in r["facets"]:
+            if f["facet_key"].startswith("link_"):
+                links.append({"kind": f["facet_key"][5:], "url": f["display_value"]})
+            else:
+                attrs.append({"key": f["facet_key"], "display": f["display_value"],
+                              "document_id": f["document_id"], "block_id": f["block_id"]})
         people_rows.append({
             "entity_id": r["entity_id"], "name": r["name"],
-            "attributes": [{"key": f["facet_key"], "display": f["display_value"],
-                            "document_id": f["document_id"], "block_id": f["block_id"]}
-                           for f in r["facets"]],
-            "citation": cite})
+            "attributes": attrs, "links": links, "citation": cite})
 
     summary = _facet_summary(facets)
     if people_rows:
