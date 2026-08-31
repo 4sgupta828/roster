@@ -4698,6 +4698,16 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         except Exception as e:   # noqa: BLE001
             raise HTTPException(status_code=502, detail=f"users query failed: {e}") from e
 
+    @app.get("/admin/people-coverage")
+    async def people_coverage():
+        """Coverage summary for the Coverage page: total people, by-source breakdown, per-dimension
+        coverage, distinct companies, and jobs indexed. What the people/jobs graph actually holds."""
+        store = _claim_store_cached()
+        if store is None:
+            return {"total": 0, "sources": [], "dimensions": [], "distinct_companies": 0,
+                    "jobs": 0, "job_companies": 0}
+        return await store.people_coverage()
+
     @app.get("/admin/perf", response_class=HTMLResponse)
     def perf_page(accept_encoding: str = Header(default="")):
         return _html_response("perf.html", accept_encoding)

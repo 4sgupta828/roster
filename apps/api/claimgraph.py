@@ -1567,6 +1567,43 @@ class ClaimGraphStore:
             return []
         return [dict(r) for r in rows]
 
+    async def people_coverage(self) -> dict:
+        """A coverage summary for the Coverage UI: total people, breakdown by SOURCE (github/openalex/
+        npi/yc/sec/theorg/aifund/ef), and how many people each searchable DIMENSION covers. Honest —
+        exactly what has been ingested."""
+        pool = await self._get_pool()
+        SRC = [("GitHub engineers", "github:%"), ("OpenAlex researchers", "openalex:%"),
+               ("NPI clinicians", "npi:%"), ("YC founders", "yc:%"), ("SEC execs", "sec:%"),
+               ("The Org (business)", "theorg:%"), ("AI Fund founders", "aifund:%"),
+               ("Entrepreneur First", "ef:%"), ("Pear VC", "pear:%"), ("SOSV", "sosv:%")]
+        DIMS = ["role", "seniority", "function", "skill", "industry", "stage", "accelerator",
+                "company", "worked_at", "metro", "country", "link_linkedin"]
+        try:
+            async with pool.acquire() as conn:
+                total = await conn.fetchval("SELECT count(*) FROM rs_entity WHERE kind='person'")
+                sources = []
+                for label, pat in SRC:
+                    n = await conn.fetchval("SELECT count(*) FROM rs_entity WHERE entity_id LIKE $1", pat)
+                    if n:
+                        sources.append({"label": label, "count": int(n)})
+                dims = []
+                for k in DIMS:
+                    n = await conn.fetchval(
+                        "SELECT count(DISTINCT entity_id) FROM roster_entity_facet WHERE facet_key=$1", k)
+                    dims.append({"key": k, "people": int(n or 0)})
+                distinct_co = await conn.fetchval(
+                    "SELECT count(DISTINCT facet_value_norm) FROM roster_entity_facet WHERE facet_key='company'")
+                try:
+                    jobs = await conn.fetchval("SELECT count(*) FROM rs_job")
+                    jobco = await conn.fetchval("SELECT count(DISTINCT company) FROM rs_job")
+                except Exception:
+                    jobs, jobco = 0, 0
+        except Exception:
+            return {"total": 0, "sources": [], "dimensions": [], "distinct_companies": 0, "jobs": 0, "job_companies": 0}
+        return {"total": int(total or 0), "sources": sources, "dimensions": dims,
+                "distinct_companies": int(distinct_co or 0),
+                "jobs": int(jobs or 0), "job_companies": int(jobco or 0)}
+
     async def jobs_stats(self) -> dict:
         pool = await self._get_pool()
         try:

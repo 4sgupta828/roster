@@ -90,13 +90,20 @@ try{var t=localStorage.getItem("roster-theme"); if(t==="dark"||t==="light") docu
   .authleg{display:flex;flex-wrap:wrap;gap:.4rem 1rem;font-size:.72rem;color:var(--muted);margin-bottom:.3rem;}
   .authleg b{color:var(--ink);font-weight:600;} .swatch{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:.3rem;vertical-align:middle;}
   @media (max-width:560px){ .logo{height:44px;} h1{font-size:1.4rem;} }
+  .bignums{display:flex;gap:1.5rem;flex-wrap:wrap;margin:.6rem 0 .4rem;}
+  .bn{min-width:110px;}
+  .bn-n{font-size:1.9rem;font-weight:700;line-height:1;}
+  .bn-l{font-size:.78rem;opacity:.6;margin-top:.2rem;}
+  .dimwrap{display:flex;gap:.4rem;flex-wrap:wrap;}
+  .pill{display:inline-block;padding:.2rem .55rem;border:1px solid rgba(128,128,128,.28);border-radius:999px;font-size:.8rem;}
+  h3{font-size:.95rem;opacity:.85;}
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <img class="logo" src="/roster-mark.png" alt="Roster" />
-    <h1>Corpus Coverage</h1>
+    <h1>Roster Coverage</h1>
     <a class="back" href="/">← Research</a>
   </header>
   <div id="out"><div class="muted">Loading coverage…</div></div>
@@ -108,11 +115,35 @@ const fmt = n => (n||0).toLocaleString();
 // (Product settings moved to the ⚙ icon in the main app — this page is coverage only.)
 
 async function load(){
+  const parts = [];
+
+  // PEOPLE & JOBS coverage — the shadow-LinkedIn graph we've built.
+  try{
+    const pc = await (await fetch("/admin/people-coverage")).json();
+    if(pc && pc.total){
+      const srcRows = (pc.sources||[]).sort((a,b)=>b.count-a.count).map(s=>
+        `<tr><td>${esc(s.label)}</td><td style="text-align:right">${fmt(s.count)}</td></tr>`).join("");
+      const dimRows = (pc.dimensions||[]).filter(x=>x.people).sort((a,b)=>b.people-a.people).map(x=>
+        `<span class="pill">${esc(x.key)}: <b>${fmt(x.people)}</b></span>`).join(" ");
+      parts.push(`<h2>◉ People &amp; Jobs graph</h2>
+        <div class="bignums">
+          <div class="bn"><div class="bn-n">${fmt(pc.total)}</div><div class="bn-l">people</div></div>
+          <div class="bn"><div class="bn-n">${fmt(pc.distinct_companies)}</div><div class="bn-l">companies</div></div>
+          <div class="bn"><div class="bn-n">${fmt(pc.jobs)}</div><div class="bn-l">open jobs</div></div>
+          <div class="bn"><div class="bn-n">${fmt(pc.job_companies)}</div><div class="bn-l">hiring companies</div></div>
+        </div>
+        <h3 style="margin:.8rem 0 .3rem">By source</h3>
+        <div class="tw"><table><thead><tr><th>Source</th><th style="text-align:right">People</th></tr></thead><tbody>${srcRows}</tbody></table></div>
+        <h3 style="margin:1rem 0 .3rem">Searchable dimensions (people with each)</h3>
+        <div class="dimwrap">${dimRows}</div>
+        <hr style="margin:1.4rem 0;opacity:.15">`);
+    }
+  }catch(e){ /* people coverage is best-effort */ }
+
   let d;
   try{ d = await (await fetch("/admin/coverage")).json(); }
-  catch(e){ $("#out").innerHTML = `<div class="muted">Couldn't load coverage.</div>`; return; }
+  catch(e){ if(!parts.length){ $("#out").innerHTML = `<div class="muted">Couldn't load coverage.</div>`; return; } d = {}; }
   const live = d.live||{}, plan = d.plan||{};
-  const parts = [];
 
   // ◉ Pulse — what changed in the corpus (public /pulse/recent; absent when the flag is off)
   try{
