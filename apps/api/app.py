@@ -4318,6 +4318,28 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         return _Resp(content=data, media_type=ctype,
                      headers={"Content-Disposition": f'inline; filename="{safe}"'})
 
+    @app.post("/me/profile/parse-resume")
+    async def me_parse_resume(x_roster_token: str = Header(default="")) -> dict:
+        """Kick off résumé→profile parsing in a SEPARATE process (docling + LLM; heavy, kept off the web
+        process). Returns immediately with status 'pending'; the FE polls GET for the parsed fields."""
+        store, user = await _require_user(x_roster_token)
+        if await store.get_resume(user["id"]) is None:
+            raise HTTPException(status_code=400, detail="upload a résumé first")
+        await store.set_parse_pending(user["id"])
+        import subprocess, sys as _sys
+        try:
+            subprocess.Popen([_sys.executable, "-m", "api.resume_parser", str(user["id"])],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True, env=os.environ.copy())
+        except Exception as e:   # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"could not start parser: {e}") from e
+        return {"status": "pending"}
+
+    @app.get("/me/profile/parse-resume")
+    async def me_parse_status(x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return await store.get_parse(user["id"])
+
     # ---- outreach log (draft + handoff only; Roster never sends on the user's behalf) ----
     @app.post("/me/outreach")
     async def me_add_outreach(body: OutreachIn, x_roster_token: str = Header(default="")) -> dict:

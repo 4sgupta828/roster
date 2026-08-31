@@ -132,6 +132,11 @@ CREATE TABLE IF NOT EXISTS roster_outreach (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_ro_user ON roster_outreach (user_id, created_at DESC);
+-- RÉSUMÉ → PROFILE autofill: docling+LLM parse runs in a SEPARATE process; these columns hold its
+-- status and the suggested fields (the FE prefills the form from parsed_profile for the user to review).
+ALTER TABLE roster_candidate_profile ADD COLUMN IF NOT EXISTS parse_status TEXT;      -- pending|done|failed
+ALTER TABLE roster_candidate_profile ADD COLUMN IF NOT EXISTS parsed_profile JSONB;
+ALTER TABLE roster_candidate_profile ADD COLUMN IF NOT EXISTS parsed_at TIMESTAMPTZ;
 """
 
 _MAX_TOKENS_PER_USER = 10   # prune oldest beyond this (a lost device's token eventually ages out)
@@ -551,6 +556,33 @@ class AccountStore:
             return None
         return (row["resume_name"] or "resume", row["resume_type"] or "application/octet-stream",
                 bytes(row["resume_bytes"]))
+
+    # ---- résumé→profile parse status (the docling+LLM work runs in a SEPARATE process) ----
+    async def set_parse_pending(self, user_id: str) -> None:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            await conn.execute(
+                "UPDATE roster_candidate_profile SET parse_status='pending', parsed_profile=NULL, "
+                "parsed_at=NULL WHERE user_id=$1", user_id)
+
+    async def save_parsed(self, user_id: str, profile: dict, status: str = "done") -> None:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            await conn.execute(
+                "UPDATE roster_candidate_profile SET parse_status=$2, parsed_profile=$3::jsonb, "
+                "parsed_at=now() WHERE user_id=$1", user_id, status, json.dumps(profile or {}))
+
+    async def get_parse(self, user_id: str) -> dict:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT parse_status, parsed_profile, parsed_at FROM roster_candidate_profile WHERE user_id=$1",
+                user_id)
+        if not row:
+            return {"status": None, "profile": {}}
+        return {"status": row["parse_status"],
+                "profile": json.loads(row["parsed_profile"]) if row["parsed_profile"] else {},
+                "at": row["parsed_at"].isoformat() if row["parsed_at"] else None}
 
     # ---- outreach log (Roster never sends; this records what the user drafted/opened for follow-up) ----
     async def add_outreach(self, user_id: str, *, person_ref: str, person_name: str,

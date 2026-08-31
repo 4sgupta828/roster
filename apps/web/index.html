@@ -1644,6 +1644,10 @@
       <div style="font-weight:600;font-size:.85rem;margin-bottom:.3rem;">Résumé</div>
       <div id="resumestatus" style="font-size:.8rem;color:var(--muted);margin-bottom:.3rem;">No résumé uploaded.</div>
       <input type="file" id="resumefile" accept=".pdf,.doc,.docx,.txt" style="font-size:.8rem;" />
+      <div style="margin-top:.4rem;">
+        <button type="button" class="histbtn" id="autofillresume">✨ Autofill from résumé</button>
+        <span id="autofillnote" style="font-size:.78rem;color:var(--muted);margin-left:.4rem;"></span>
+      </div>
     </div>
     <div style="display:flex;gap:.5rem;align-items:center;margin:.6rem 0;">
       <button type="button" class="idgo" id="applysave" style="width:auto;padding:.45rem 1rem;">Save profile</button>
@@ -6320,6 +6324,36 @@ $("#applyclose") && $("#applyclose").addEventListener("click", ()=>{ $("#applymo
 $("#applysave") && $("#applysave").addEventListener("click", saveApplyProfile);
 $("#bookmarklet") && $("#bookmarklet").addEventListener("click", (e)=>{ e.preventDefault();
   alert("Drag this button to your bookmarks bar (don't click it here). Then click it while on a job's application page to autofill."); });
+
+// Autofill the profile FROM the résumé: uploads the file if newly picked, kicks off the separate-process
+// docling+LLM parse, polls, then prefills EMPTY form fields (the user's own typed values always win).
+async function parseResume(){
+  const note = $("#autofillnote");
+  const fi = $("#resumefile");
+  if(fi && fi.files && fi.files[0]){ note.textContent = "Uploading résumé…"; await saveApplyProfile(); }
+  note.textContent = "Reading your résumé… (~15–30s)";
+  try{
+    const r = await fetch("/me/profile/parse-resume", {method:"POST", headers: authHeaders()});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); note.textContent = e.detail || "Upload a résumé first."; return; }
+    let tries = 0;
+    const poll = async ()=>{
+      tries++;
+      let d; try{ d = await (await fetch("/me/profile/parse-resume", {headers: authHeaders()})).json(); }catch(e){ d = {}; }
+      if(d.status === "done"){
+        const parsed = d.profile || {}; let n = 0;
+        APPLY_PROFILE = collectApplyProfile();                 // keep what the user already typed
+        Object.keys(parsed).forEach(k=>{ if(!APPLY_PROFILE[k]){ APPLY_PROFILE[k] = parsed[k]; n++; } });
+        renderApplyForm();
+        note.textContent = n ? `Prefilled ${n} field${n===1?"":"s"} — review, then Save profile.` : "No new fields found in the résumé.";
+        return;
+      }
+      if(d.status === "failed"){ note.textContent = "Couldn't read that résumé — please fill the form manually."; return; }
+      if(tries < 30){ setTimeout(poll, 2000); } else { note.textContent = "Still working — try Autofill again in a moment."; }
+    };
+    setTimeout(poll, 2500);
+  }catch(e){ note.textContent = "Parse failed — try again."; }
+}
+$("#autofillresume") && $("#autofillresume").addEventListener("click", parseResume);
 
 // ---- product settings (⚙, password-gated): live flag toggles served by /admin/settings ----
 const SET_LABELS = {
