@@ -11,7 +11,8 @@ from __future__ import annotations
 # (what they DO), distinct from `seniority` (the LEVEL) and `function` (the DOMAIN). NOTE: `title` is a
 # display-only stored facet (the raw bio) and is DELIBERATELY excluded here — the model kept mis-filing
 # job titles into `title` instead of `role`, so it is not an emit option.
-PEOPLE_FACET_KEYS = ("role", "seniority", "function", "industry", "metro", "company", "worked_at")
+PEOPLE_FACET_KEYS = ("role", "seniority", "function", "industry", "metro", "company", "worked_at",
+                     "country", "state")
 
 _ROLE = ("software_engineer", "ml_engineer", "system_architect", "solutions_architect", "data_scientist",
          "data_engineer", "research_scientist", "product_manager", "sre", "security_engineer",
@@ -99,6 +100,14 @@ Normalize synonyms to canonical snake_case values, e.g.:
   {", ".join(_INDUSTRY)}.
 - metro: "Bay Area"/"SF"/"San Francisco"/"Silicon Valley"/"Palo Alto" → ["bay_area"];
   "New York" → ["nyc"]. Examples: {", ".join(_METRO)}.
+- country (a COUNTRY named in the query — a 2-letter lowercased code): "US"/"USA"/"United States"/
+  "America" → ["us"]; "UK"/"United Kingdom"/"Britain" → ["uk"]; "Germany" → ["de"]; "France" → ["fr"];
+  "India" → ["in"]; "Canada" → ["ca"]; "Japan" → ["jp"]; "China" → ["cn"]; "Ireland" → ["ie"];
+  "Netherlands" → ["nl"]. Emit ONLY when the query explicitly names a country (default scope is applied
+  separately by the app, so do NOT infer a country from a city).
+- state (a US STATE named in the query — its 2-letter lowercased code): "California"/"Calif" → ["ca"];
+  "New York State" → ["ny"]; "Texas" → ["tx"]; "Washington State" → ["wa"]; "Massachusetts" → ["ma"];
+  "Illinois" → ["il"]; "Georgia" → ["ga"]; "Colorado" → ["co"]. A CITY is `metro`, not `state`.
 - company: a specific employer → its CANONICAL lowercased short name — drop legal suffixes (Inc, LLC,
   Corp, Platforms) and apply known aliases: "Facebook"/"Meta Platforms" → ["meta"]; "Alphabet"/"Google
   LLC" → ["google"]; "Twitter" → ["x"]; "AWS" → ["amazon"]. E.g. "at Stripe" → {{"company": ["stripe"]}}.

@@ -39,6 +39,8 @@ class _FacetParse(BaseModel):
     metro: list[str] = []
     company: list[str] = []
     worked_at: list[str] = []
+    country: list[str] = []
+    state: list[str] = []
     person: str = ""
     person_context: str = ""
 
@@ -95,6 +97,7 @@ def _facet_summary(facets: dict[str, list[str]]) -> str:
 def _coverage_basis(facets, stats, matches: int) -> dict:
     return {
         "query_facets": facets,
+        "country_scope": (facets.get("country") or [None])[0],   # resolved geo scope (FE echoes it)
         "matches_returned": matches,
         "persons_indexed": stats.get("persons_indexed", 0),
         "source_documents": stats.get("source_documents", 0),
@@ -108,9 +111,14 @@ def _coverage_basis(facets, stats, matches: int) -> dict:
     }
 
 
-async def answer_people_population(*, question: str, tenant_id: str, store, llm) -> dict:
+async def answer_people_population(*, question: str, tenant_id: str, store, llm,
+                                   scope_country: str = "") -> dict:
     """Answer a people-enumeration question from the grounded people index. Always returns a structured
-    result (never raises to the route): a compiled facet filter, grounded rows, and honest coverage."""
+    result (never raises to the route): a compiled facet filter, grounded rows, and honest coverage.
+
+    `scope_country` (from the top-right selector, flag-gated) HARD-filters results to that country — a
+    `country=<scope>` facet is ANDed in, so people we cannot place there are excluded. A country the
+    query itself names (compiler-parsed) OVERRIDES the selector default."""
     facets, person, ctx = await parse_people_facets(question, llm)
     if not facets and person:
         # SINGLE-PERSON identity/profile question — the router runs the web bio and attaches this
@@ -122,6 +130,10 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm)
         # Not a people query at all — signal the router to fall through to normal research.
         return {"kind": "none", "grounded": False, "not_people_query": True, "people_rows": [],
                 "coverage_basis": None, "answer": ""}
+
+    # GEO SCOPE (flag-gated): inject the selector country UNLESS the query already named one (query wins).
+    if scope_country and not facets.get("country"):
+        facets["country"] = [scope_country]
 
     rows = await store.enumerate_by_facets(facets, tenant_id=tenant_id, cap=200)
     coverage = _coverage_basis(facets, stats, len(rows))

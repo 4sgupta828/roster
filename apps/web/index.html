@@ -1392,7 +1392,18 @@
 <div class="wrap">
   <header>
     <svg class="logo" viewBox="0 0 220 132" role="img" aria-label="Roster"><use href="#roster-logo"/></svg>
-    <button type="button" class="histbtn newbtn" id="newbtn" style="margin-left:auto;">＋ New chat</button>
+    <label id="countryscope" style="margin-left:auto;display:none;align-items:center;gap:6px;font-size:13px;color:var(--muted);" title="Restrict people searches to a country (narrow further by state/city/company in your query)">🌍
+      <select id="countrysel" style="background:var(--card,#fff);color:inherit;border:1px solid var(--line,#ddd);border-radius:8px;padding:4px 8px;font-size:13px;">
+        <option value="us">🇺🇸 US</option>
+        <option value="uk">🇬🇧 UK</option>
+        <option value="ca">🇨🇦 Canada</option>
+        <option value="de">🇩🇪 Germany</option>
+        <option value="fr">🇫🇷 France</option>
+        <option value="in">🇮🇳 India</option>
+        <option value="jp">🇯🇵 Japan</option>
+      </select>
+    </label>
+    <button type="button" class="histbtn newbtn" id="newbtn" style="margin-left:12px;">＋ New chat</button>
     <a class="histbtn" href="/explorer" style="margin-left:0;text-decoration:none;" title="Interactive graph of the grounded claim graph">◍ Explorer</a>
     <a class="histbtn" href="/crossviews" style="margin-left:0;text-decoration:none;" title="Design a grounded cross-view table — every cell click-to-source">◍ Crossviews</a>
     <a class="histbtn" href="/admin" style="margin-left:0;text-decoration:none;">Coverage</a>
@@ -1799,6 +1810,17 @@ async function loadConfig(){
     ACCOUNTS_ENABLED = !!c.accounts_enabled;
     DUEL_ENABLED = !!c.duel_enabled;
     PULSE_ENABLED = !!c.pulse_enabled;
+    // People geo-scope (flag-gated): reveal the top-right country selector, persist the choice, and
+    // ship it on every people query as `country`. Default 'us'. Backend ignores it when the flag is off.
+    try{ window.ROSTER_COUNTRY = localStorage.getItem("roster_country") || "us"; }catch(e){ window.ROSTER_COUNTRY = "us"; }
+    if(c.people_geo_scope_enabled){
+      const cs = document.getElementById("countryscope"), sel = document.getElementById("countrysel");
+      if(cs && sel){
+        cs.style.display = "inline-flex"; sel.value = window.ROSTER_COUNTRY;
+        sel.addEventListener("change", ()=>{ window.ROSTER_COUNTRY = sel.value;
+          try{ localStorage.setItem("roster_country", sel.value); }catch(e){} });
+      }
+    }
     maybeShowPulseBell();
     DYN_ENGINES = !!c.dynamic_engines_enabled;
     if(ACCOUNTS_ENABLED){
@@ -4737,7 +4759,7 @@ async function runPanelTurn(question){
 async function runDuel(question){
   const flip = Math.random() < 0.5;                                     // blinded, randomized arm order
   const arms = flip ? ["reasoned", "standard"] : ["standard", "reasoned"];   // arms[0] = "Answer A"
-  const base = {question, tenant_id: "demo", sources: chosen()};
+  const base = {question, tenant_id: "demo", sources: chosen(), country: (window.ROSTER_COUNTRY||"us")};
   if(EFFORT_ENABLED && EFFORT > 1) base.effort = EFFORT;
   if(ATTACHMENTS.length) base.attachments = ATTACHMENTS.slice();
   if(USER){ base.user_name = USER.name; base.user_email = USER.email; }
@@ -4837,7 +4859,7 @@ async function askQuestion(question, opts){
   // Follow-ups, retries, panel/triage and internal re-entries all skip the duel.
   if(DUEL_ENABLED && !opts.skipDuel && APP_MODE === "qa" && !THREAD.turns.length){ return runDuel(question); }
   const conv = CONV_ENABLED;
-  const payload = {question, tenant_id:"demo", sources: chosen()};
+  const payload = {question, tenant_id:"demo", sources: chosen(), country: (window.ROSTER_COUNTRY||"us")};
   if(EFFORT_ENABLED && EFFORT > 1) payload.effort = EFFORT;
   if(ATTACHMENTS.length) payload.attachments = ATTACHMENTS.slice();
   if(PENDING_INTAKE_TRANSCRIPT && PENDING_INTAKE_TRANSCRIPT.length && !THREAD.turns.length){

@@ -612,6 +612,16 @@ def people_population_enabled() -> bool:
     return os.environ.get("ROSTER_PEOPLE_POPULATION", "").lower() in ("1", "true", "yes")
 
 
+def people_geo_scope_enabled() -> bool:
+    """Flag (default OFF, Rule 20) via ROSTER_PEOPLE_GEO_SCOPE: restrict people searches to ONE country
+    (default 'us'), selectable from the top-right of the UI (echoed back so the FE stays in sync). It is
+    a HARD filter — a country=<scope> facet is ANDed into every people query, so people we cannot place
+    in that country are excluded (honest: we only surface who we can actually locate). A country named
+    IN the query (compiler-parsed) overrides the selector default. OFF → no country filter is injected
+    (byte-identical to today)."""
+    return os.environ.get("ROSTER_PEOPLE_GEO_SCOPE", "").lower() in ("1", "true", "yes")
+
+
 def enum_entity_probe_enabled() -> bool:
     """Flag (default OFF, Rule 20) via ROSTER_ENUM_ENTITY_PROBE: for an enumerative "table of the main X"
     ask with no user-named items, the derivation ALSO proposes `probe_entities` (candidate row instances)
@@ -957,6 +967,7 @@ class ResearchIn(BaseModel):
     audience: str = "clinician"           # "clinician" (default) | "patient"; ignored unless flag on
     mode: str = ""                        # analytical lens, e.g. "acquirer" (M&A); "" = default investor lens
     company: str = ""                     # single-company DILIGENCE subject (name / entity_id); used only by /research/diligence
+    country: str = ""                     # people geo-scope from the top-right selector (default 'us' when the flag is on)
 
 
 class FocusIn(BaseModel):
@@ -1815,6 +1826,7 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             "duel_enabled": live_duel and bool(getattr(svc, "reasoned_answer_format", None)),
             "integrative_enabled": (await _flag_live("integrative_enabled")) and bool(getattr(svc, "integrative_prompt", None)),
             "dynamic_engines_enabled": (await _flag_live("reasoned_default_enabled")) and bool(getattr(svc, "reasoned_answer_format", None)),
+            "people_geo_scope_enabled": people_geo_scope_enabled(),
         }
 
     @app.post("/search")
@@ -2785,9 +2797,12 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                    "— please retry.", claims=[], coverage_gaps=[], rejected=0,
                                    people_rows=[], coverage_basis=None)
             from api.people_population import answer_people_population
+            # GEO SCOPE (flag ROSTER_PEOPLE_GEO_SCOPE, default OFF): restrict to ONE country (selector
+            # default 'us'); a query-named country overrides it inside the engine. OFF → "" = no filter.
+            scope_country = (body.country or "us").strip().lower() if people_geo_scope_enabled() else ""
             res = await answer_people_population(
                 question=body.question, tenant_id=body.tenant_id,
-                store=store, llm=build_llm(mode=resolve_mode()))
+                store=store, llm=build_llm(mode=resolve_mode()), scope_country=scope_country)
             if res.get("kind") == "person":
                 if on_event is not None:
                     await on_event({"type": "people", "count": 1})
