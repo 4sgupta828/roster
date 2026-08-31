@@ -304,6 +304,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     coverage = _coverage_basis(facets, stats, len(rows))
     if relaxed_from:
         coverage["relaxed_from"] = relaxed_from
+    coverage["semantic_used"] = semantic_used   # observability: did embedding ranking engage?
 
     people_rows = []
     for r in rows:
