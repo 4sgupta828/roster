@@ -122,7 +122,8 @@ Normalize synonyms to canonical snake_case values, e.g.:
   "founders backed by <X>" / "<X> portfolio" / "incubated by <X>" to accelerator=[slug]:
   "Y Combinator"/"YC" → ["yc"]; "AIFund"/"AI Fund" → ["ai_fund"]; "Techstars" → ["techstars"];
   "South Park Commons"/"SPC" → ["south_park_commons"]; "Entrepreneur First"/"EF" → ["entrepreneur_first"];
-  "Antler" → ["antler"]; "500 Global"/"500 Startups" → ["500_global"]; "Pioneer" → ["pioneer"].
+  "Antler" → ["antler"]; "500 Global"/"500 Startups" → ["500_global"]; "Pioneer" → ["pioneer"];
+  "Pear"/"Pear VC" → ["pear"]; "SOSV"/"HAX"/"IndieBio" → ["sosv"].
   CRITICAL: "AIFund"/"AI Fund" is the FUND named "AI Fund" → accelerator=["ai_fund"], it is NOT
   industry=["ai"]. A backer name that looks like keywords is still a proper noun — do NOT turn it into
   an industry/function. (A non-accelerator company like "Google" in "Google founders" stays `company`.)
