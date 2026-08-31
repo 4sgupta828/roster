@@ -173,7 +173,27 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         facets["country"] = [scope_country]
 
     rows = await store.enumerate_by_facets(facets, tenant_id=tenant_id, cap=200)
+
+    # GRACEFUL RELAXATION: an over-specific query ANDs to zero (e.g. "engineers content platform at
+    # netflix" → function=content matches nobody, killing an otherwise-valid role+company query). When
+    # the full filter is empty, DROP the soft DESCRIPTIVE facets (function/skill/industry) but KEEP the
+    # hard anchors (company/role/seniority/geo/stage/accelerator) and retry — returning the closest
+    # honest match with a note about what was relaxed, instead of a flat empty.
+    _SOFT = ("function", "skill", "industry")
+    _ANCHOR = ("company", "worked_at", "accelerator", "role", "seniority", "metro", "stage")
+    relaxed_from: list[str] = []
+    if not rows:
+        kept = {k: v for k, v in facets.items() if k not in _SOFT}
+        dropped = [k for k in facets if k in _SOFT]
+        if dropped and any(k in kept for k in _ANCHOR):
+            r2 = await store.enumerate_by_facets(kept, tenant_id=tenant_id, cap=200)
+            if r2:
+                rows, relaxed_from = r2, dropped
+                facets = kept                       # coverage/answer reflect the filter that actually ran
+
     coverage = _coverage_basis(facets, stats, len(rows))
+    if relaxed_from:
+        coverage["relaxed_from"] = relaxed_from
 
     people_rows = []
     for r in rows:
@@ -218,8 +238,10 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
 
     summary = _facet_summary(facets)
     if people_rows:
-        lines = [f"Found {len(people_rows)} people matching [{summary}] in Roster's grounded people index.",
-                 "", coverage["population_statement"], ""]
+        relax_note = (f" (no exact match, so the {', '.join(relaxed_from)} filter"
+                      f"{'s were' if len(relaxed_from) > 1 else ' was'} relaxed)" if relaxed_from else "")
+        lines = [f"Found {len(people_rows)} people matching [{summary}]{relax_note} in Roster's "
+                 f"grounded people index.", "", coverage["population_statement"], ""]
         for i, p in enumerate(people_rows, 1):
             attrs = ", ".join(a["display"] for a in p["attributes"] if a["display"])
             lines.append(f"{i}. {p['name']} — {attrs}")
