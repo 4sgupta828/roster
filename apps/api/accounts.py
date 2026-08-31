@@ -106,6 +106,19 @@ CREATE TABLE IF NOT EXISTS roster_bucket_item (
     UNIQUE (bucket_id, kind, ref_id)
 );
 CREATE INDEX IF NOT EXISTS idx_rbi_bucket ON roster_bucket_item (bucket_id, created_at DESC);
+-- CANDIDATE PROFILE for "smooth apply": one superset profile per user (the union of what ATSes ask),
+-- stored as JSONB so the field set can grow without migrations, plus an optional resume file. Sensitive
+-- fields (work authorization, EEO/demographics) live inside `profile`; the FE keeps demographics OFF by
+-- default and they are only surfaced to an ATS that explicitly asks. PII — never logged.
+CREATE TABLE IF NOT EXISTS roster_candidate_profile (
+    user_id       TEXT PRIMARY KEY,
+    profile       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    resume_name   TEXT,
+    resume_type   TEXT,
+    resume_bytes  BYTEA,
+    resume_at     TIMESTAMPTZ,
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
 
 _MAX_TOKENS_PER_USER = 10   # prune oldest beyond this (a lost device's token eventually ages out)
@@ -479,3 +492,49 @@ class AccountStore:
                    WHERE i.id=$1 AND i.bucket_id=b.id AND b.id=$2 AND b.user_id=$3""",
                 int(item_id), int(bucket_id), user_id)
         return res.endswith(" 1")
+
+    # ---- candidate profile for smooth apply (superset of ATS fields) ----
+    async def get_profile(self, user_id: str) -> dict:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT profile, resume_name, resume_type, resume_at, updated_at "
+                "FROM roster_candidate_profile WHERE user_id=$1", user_id)
+        if not row:
+            return {"profile": {}, "resume": None}
+        return {"profile": json.loads(row["profile"]) if row["profile"] else {},
+                "resume": ({"name": row["resume_name"], "type": row["resume_type"],
+                            "at": row["resume_at"].isoformat() if row["resume_at"] else None}
+                           if row["resume_name"] else None),
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None}
+
+    async def set_profile(self, user_id: str, profile: dict) -> None:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            await conn.execute(
+                """INSERT INTO roster_candidate_profile (user_id, profile, updated_at)
+                   VALUES ($1, $2::jsonb, now())
+                   ON CONFLICT (user_id) DO UPDATE SET profile=EXCLUDED.profile, updated_at=now()""",
+                user_id, json.dumps(profile or {}))
+
+    async def set_resume(self, user_id: str, *, name: str, ctype: str, data: bytes) -> None:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            await conn.execute(
+                """INSERT INTO roster_candidate_profile (user_id, resume_name, resume_type, resume_bytes, resume_at)
+                   VALUES ($1,$2,$3,$4, now())
+                   ON CONFLICT (user_id) DO UPDATE SET resume_name=EXCLUDED.resume_name,
+                     resume_type=EXCLUDED.resume_type, resume_bytes=EXCLUDED.resume_bytes,
+                     resume_at=now(), updated_at=now()""",
+                user_id, name[:200], ctype[:120], data)
+
+    async def get_resume(self, user_id: str) -> "tuple[str, str, bytes] | None":
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT resume_name, resume_type, resume_bytes FROM roster_candidate_profile WHERE user_id=$1",
+                user_id)
+        if not row or not row["resume_bytes"]:
+            return None
+        return (row["resume_name"] or "resume", row["resume_type"] or "application/octet-stream",
+                bytes(row["resume_bytes"]))

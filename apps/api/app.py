@@ -1075,6 +1075,16 @@ class SavedSearchIn(BaseModel):
     mode: str = "research"
 
 
+class ProfileIn(BaseModel):
+    profile: dict                   # the superset candidate profile (free-form; FE defines the fields)
+
+
+class ResumeIn(BaseModel):
+    name: str
+    content_type: str = "application/octet-stream"
+    data_b64: str                   # base64-encoded file bytes (avoids a multipart dependency)
+
+
 class SettingIn(BaseModel):
     key: str
     value: str = ""     # "on" | "off" | "" (empty = follow the env default)
@@ -4254,6 +4264,52 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     async def me_delete_item(bucket_id: int, item_id: int, x_roster_token: str = Header(default="")) -> dict:
         store, user = await _require_user(x_roster_token)
         return {"ok": await store.delete_item(user["id"], bucket_id, item_id)}
+
+    # ---- candidate profile for smooth apply (superset of ATS fields; prefill/autofill only) ----
+    @app.get("/me/profile")
+    async def me_get_profile(x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return await store.get_profile(user["id"])
+
+    @app.put("/me/profile")
+    async def me_set_profile(body: ProfileIn, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        # cap size so the JSONB blob can't be abused; PII stays server-side, never logged
+        import json as _json
+        if len(_json.dumps(body.profile or {})) > 60000:
+            raise HTTPException(status_code=400, detail="profile too large")
+        await store.set_profile(user["id"], body.profile or {})
+        return {"ok": True}
+
+    @app.post("/me/resume")
+    async def me_upload_resume(body: ResumeIn, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        import base64
+        try:
+            data = base64.b64decode(body.data_b64 or "", validate=True)
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid file encoding")
+        if not data:
+            raise HTTPException(status_code=400, detail="empty file")
+        if len(data) > 5 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="resume must be under 5 MB")
+        name = (body.name or "resume")
+        if not name.lower().endswith((".pdf", ".doc", ".docx", ".txt")):
+            raise HTTPException(status_code=400, detail="resume must be PDF, DOC, DOCX, or TXT")
+        await store.set_resume(user["id"], name=name, ctype=body.content_type, data=data)
+        return {"ok": True, "name": name}
+
+    @app.get("/me/resume")
+    async def me_get_resume(x_roster_token: str = Header(default="")):
+        store, user = await _require_user(x_roster_token)
+        got = await store.get_resume(user["id"])
+        from fastapi.responses import Response as _Resp
+        if not got:
+            raise HTTPException(status_code=404, detail="no resume on file")
+        name, ctype, data = got
+        safe = re.sub(r'[^A-Za-z0-9._ -]', "_", name)[:120] or "resume"   # no header injection
+        return _Resp(content=data, media_type=ctype,
+                     headers={"Content-Disposition": f'inline; filename="{safe}"'})
 
     @app.post("/feedback")
     async def post_feedback(body: FeedbackIn, x_roster_token: str = Header(default="")) -> dict:

@@ -1416,6 +1416,7 @@
     <a class="histbtn" href="/crossviews" style="margin-left:0;text-decoration:none;" title="Design a grounded cross-view table — every cell click-to-source">◍ Crossviews</a>
     <a class="histbtn" href="/admin" style="margin-left:0;text-decoration:none;">Coverage</a>
     <button type="button" class="histbtn" id="savedbtn" style="margin-left:0;" hidden title="Your shortlisted people & jobs and saved searches">◈ Saved</button>
+    <button type="button" class="histbtn" id="applybtn" style="margin-left:0;" hidden title="Your apply profile — fill once, autofill any job application">⚑ Apply Profile</button>
     <button type="button" class="histbtn" id="vidbtn" style="margin-left:0;">Videos</button>
     <button type="button" class="histbtn" id="histbtn" style="margin-left:0;">Past Sessions</button>
     <button type="button" class="histbtn setbtn" id="setbtn" style="margin-left:0;" title="Product settings (admin)" aria-label="Product settings">⚙</button>
@@ -1627,6 +1628,32 @@
       <div id="bucketlist"></div>
       <h3 style="margin:1rem 0 .3rem;font-size:.9rem;">Recent searches</h3>
       <div id="searchlist" style="font-size:.85rem;"></div>
+    </div>
+  </div>
+</div>
+<!-- Apply Profile: superset of ATS fields, filled once → autofill any application -->
+<div class="idmodal" id="applymodal" hidden>
+  <div class="idcard" style="max-width:720px;width:94%;text-align:left;max-height:86vh;overflow:auto;">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <h2 style="margin:0;">Apply Profile</h2>
+      <button type="button" class="histbtn" id="applyclose">Close</button>
+    </div>
+    <p style="font-size:.82rem;color:var(--muted);margin:.4rem 0;">Fill this once. Then on any job's application page, click your <b>Roster Autofill</b> bookmark to fill the form — you review &amp; submit. Nothing is sent anywhere automatically.</p>
+    <div id="applyform"></div>
+    <div style="margin:.8rem 0;padding:.6rem;border:1px solid var(--hair);border-radius:8px;">
+      <div style="font-weight:600;font-size:.85rem;margin-bottom:.3rem;">Résumé</div>
+      <div id="resumestatus" style="font-size:.8rem;color:var(--muted);margin-bottom:.3rem;">No résumé uploaded.</div>
+      <input type="file" id="resumefile" accept=".pdf,.doc,.docx,.txt" style="font-size:.8rem;" />
+    </div>
+    <div style="display:flex;gap:.5rem;align-items:center;margin:.6rem 0;">
+      <button type="button" class="idgo" id="applysave" style="width:auto;padding:.45rem 1rem;">Save profile</button>
+      <span id="applysaved" style="font-size:.8rem;color:var(--gold);"></span>
+    </div>
+    <div style="margin-top:.8rem;padding:.6rem;border:1px dashed var(--muted);border-radius:8px;">
+      <div style="font-weight:600;font-size:.85rem;">One-click autofill</div>
+      <p style="font-size:.8rem;color:var(--muted);margin:.3rem 0;">Drag this button to your bookmarks bar. On any application page, click it to autofill from your saved profile.</p>
+      <a id="bookmarklet" href="#" style="display:inline-block;padding:.35rem .8rem;border:1px solid var(--gold);border-radius:6px;color:var(--gold);text-decoration:none;font-weight:600;">⚡ Roster Autofill</a>
+      <div style="font-size:.72rem;color:var(--muted);margin-top:.3rem;">Re-save your profile to refresh the bookmark after edits.</div>
     </div>
   </div>
 </div>
@@ -6011,6 +6038,7 @@ function loggedIn(){ return !!(ACCOUNTS_ENABLED && USER && USER.token); }
 function maybeShowSavedBtn(){
   const on = loggedIn();
   const b = $("#savedbtn"); if(b) b.hidden = !on;
+  const ab = $("#applybtn"); if(ab) ab.hidden = !on;
   document.body.classList.toggle("logged-in", on);
 }
 async function autoSaveSearch(query, mode){
@@ -6120,6 +6148,105 @@ document.addEventListener("click", (e)=>{
   openBucketPicker(btn, {kind:d.kind, ref_id:d.ref, label:d.label,
     payload:{sub:d.sub||"", url:d.url||""}, _btn:btn});
 });
+
+// ===== Apply Profile: superset of ATS fields → one-click autofill bookmarklet =====
+const APPLY_FIELDS = [
+  {title:"Contact", fields:[
+    {k:"first_name",l:"First name"},{k:"last_name",l:"Last name"},{k:"preferred_name",l:"Preferred name"},
+    {k:"email",l:"Email",t:"email"},{k:"phone",l:"Phone",t:"tel"},
+    {k:"city",l:"City"},{k:"region",l:"State / Region"},{k:"country",l:"Country"}]},
+  {title:"Links", fields:[
+    {k:"linkedin",l:"LinkedIn URL"},{k:"github",l:"GitHub URL"},{k:"portfolio_website",l:"Portfolio / Website"}]},
+  {title:"Work", fields:[
+    {k:"current_title",l:"Current title"},{k:"current_company",l:"Current company"},
+    {k:"years_experience",l:"Years of experience"},{k:"cover_letter",l:"Cover letter (default)",t:"textarea"}]},
+  {title:"Education", fields:[
+    {k:"highest_degree",l:"Highest degree"},{k:"school",l:"School"},
+    {k:"field_of_study",l:"Field of study"},{k:"grad_year",l:"Graduation year"}]},
+  {title:"Work authorization", fields:[
+    {k:"us_authorized_to_work",l:"Authorized to work in the US?",t:"yn"},
+    {k:"requires_sponsorship",l:"Require visa sponsorship?",t:"yn"},
+    {k:"visa_status",l:"Visa status (if any)"}]},
+  {title:"Preferences", fields:[
+    {k:"willing_to_relocate",l:"Willing to relocate?",t:"yn"},
+    {k:"remote_preference",l:"Remote preference",t:"select",o:["","Remote","Hybrid","On-site","Flexible"]},
+    {k:"earliest_start_date",l:"Earliest start date"},{k:"notice_period",l:"Notice period"},
+    {k:"desired_salary",l:"Desired salary"},{k:"source",l:"How did you hear about us?"}]},
+  {title:"Voluntary EEO (optional — off by default, only sent when an employer asks)", opt:true, fields:[
+    {k:"gender",l:"Gender"},{k:"race_ethnicity",l:"Race / Ethnicity"},{k:"hispanic_latino",l:"Hispanic/Latino?",t:"yn"},
+    {k:"veteran_status",l:"Veteran status"},{k:"disability_status",l:"Disability status"}]},
+];
+let APPLY_PROFILE = {};
+function renderApplyForm(){
+  const box = $("#applyform"); if(!box) return;
+  box.innerHTML = APPLY_FIELDS.map(sec=>{
+    const inner = sec.fields.map(f=>{
+      const v = APPLY_PROFILE[f.k]||"";
+      const id = "af_"+f.k;
+      let ctrl;
+      if(f.t==="textarea") ctrl = `<textarea id="${id}" rows="3" style="width:100%;">${esc(v)}</textarea>`;
+      else if(f.t==="yn") ctrl = `<select id="${id}" style="width:100%;"><option value=""${v===""?" selected":""}>—</option><option${v==="Yes"?" selected":""}>Yes</option><option${v==="No"?" selected":""}>No</option></select>`;
+      else if(f.t==="select") ctrl = `<select id="${id}" style="width:100%;">${f.o.map(o=>`<option${o===v?" selected":""}>${esc(o)}</option>`).join("")}</select>`;
+      else ctrl = `<input id="${id}" type="${f.t||"text"}" value="${esc(v)}" style="width:100%;" />`;
+      return `<label style="display:block;font-size:.78rem;color:var(--muted);margin:.3rem 0 .1rem;">${esc(f.l)}</label>${ctrl}`;
+    }).join("");
+    return `<details ${sec.opt?"":"open"} style="margin:.5rem 0;border:1px solid var(--hair);border-radius:8px;padding:.5rem;">
+      <summary style="font-weight:600;font-size:.85rem;cursor:pointer;">${esc(sec.title)}</summary>
+      <div style="margin-top:.4rem;display:grid;grid-template-columns:1fr 1fr;gap:.3rem .6rem;">${inner}</div></details>`;
+  }).join("");
+}
+function collectApplyProfile(){
+  const out = {};
+  APPLY_FIELDS.forEach(sec=>sec.fields.forEach(f=>{
+    const el = document.getElementById("af_"+f.k); if(el && (el.value||"").trim()) out[f.k] = el.value.trim();
+  }));
+  return out;
+}
+async function openApply(){
+  if(!loggedIn()) return;
+  $("#applymodal").hidden = false;
+  try{
+    const r = await fetch("/me/profile", {headers: authHeaders()});
+    const d = await r.json(); APPLY_PROFILE = d.profile || {};
+    $("#resumestatus").textContent = d.resume ? `On file: ${d.resume.name}` : "No résumé uploaded.";
+  }catch(e){ APPLY_PROFILE = {}; }
+  renderApplyForm(); refreshBookmarklet();
+}
+async function saveApplyProfile(){
+  APPLY_PROFILE = collectApplyProfile();
+  $("#applysaved").textContent = "Saving…";
+  try{
+    await fetch("/me/profile", {method:"PUT", headers:{"content-type":"application/json", ...authHeaders()},
+      body: JSON.stringify({profile: APPLY_PROFILE})});
+    // resume (optional) — base64 upload
+    const fi = $("#resumefile");
+    if(fi && fi.files && fi.files[0]){
+      const file = fi.files[0];
+      const b64 = await new Promise((res,rej)=>{ const rd=new FileReader();
+        rd.onload=()=>res((rd.result+"").split(",")[1]); rd.onerror=rej; rd.readAsDataURL(file); });
+      const rr = await fetch("/me/resume", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
+        body: JSON.stringify({name:file.name, content_type:file.type||"application/octet-stream", data_b64:b64})});
+      if(rr.ok){ $("#resumestatus").textContent = "On file: "+file.name; fi.value=""; }
+      else { const e=await rr.json().catch(()=>({})); $("#applysaved").textContent = e.detail||"Résumé upload failed"; }
+    }
+    $("#applysaved").textContent = "Saved ✓"; refreshBookmarklet();
+    setTimeout(()=>{ $("#applysaved").textContent=""; }, 2500);
+  }catch(e){ $("#applysaved").textContent = "Save failed"; }
+}
+// The autofill bookmarklet: profile data is INLINED (no token, no network on the ATS page). It walks the
+// current page's fields and fills those it can match by name/label/placeholder. User reviews & submits.
+function refreshBookmarklet(){
+  const a = $("#bookmarklet"); if(!a) return;
+  const P = JSON.stringify(APPLY_PROFILE);
+  const code = "(function(){var P="+P+";var M=[[/first.?name|given.?name|fname/i,'first_name'],[/last.?name|surname|family.?name|lname/i,'last_name'],[/preferred|nick/i,'preferred_name'],[/e.?mail/i,'email'],[/phone|mobile|\\btel\\b/i,'phone'],[/\\bcity\\b/i,'city'],[/state|province|region/i,'region'],[/country/i,'country'],[/linkedin/i,'linkedin'],[/github/i,'github'],[/portfolio|website|personal.?site/i,'portfolio_website'],[/current.?title|job.?title|\\btitle\\b|position|role/i,'current_title'],[/current.?company|employer|company/i,'current_company'],[/years?.?(of.?)?exp/i,'years_experience'],[/cover.?letter/i,'cover_letter'],[/degree/i,'highest_degree'],[/school|university|college/i,'school'],[/field.?of.?study|major/i,'field_of_study'],[/grad.*year|graduation/i,'grad_year'],[/authoriz|eligible.*work|legally/i,'us_authorized_to_work'],[/sponsor/i,'requires_sponsorship'],[/visa/i,'visa_status'],[/relocat/i,'willing_to_relocate'],[/remote|on.?site|hybrid/i,'remote_preference'],[/start.?date|available/i,'earliest_start_date'],[/notice.?period/i,'notice_period'],[/salary|compensation|desired.?pay/i,'desired_salary'],[/how.?did.?you.?hear|referr|source/i,'source'],[/gender/i,'gender'],[/race|ethnic/i,'race_ethnicity'],[/hispanic|latino/i,'hispanic_latino'],[/veteran/i,'veteran_status'],[/disab/i,'disability_status']];function txt(el){var s=[el.name,el.id,el.placeholder,el.getAttribute('aria-label')].join(' ');if(el.labels)for(var i=0;i<el.labels.length;i++)s+=' '+el.labels[i].textContent;var p=el.closest('label');if(p)s+=' '+p.textContent;return s;}function setv(el,v){var pr=el.tagName==='TEXTAREA'?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype;var d=Object.getOwnPropertyDescriptor(pr,'value');if(d&&d.set)d.set.call(el,v);else el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}var n=0;document.querySelectorAll('input,textarea,select').forEach(function(el){var t=(el.type||'').toLowerCase();if(['hidden','password','file','submit','button','image'].indexOf(t)>=0)return;var h=txt(el);for(var i=0;i<M.length;i++){if(M[i][0].test(h)){var v=P[M[i][1]];if(!v)break;if(el.tagName==='SELECT'){for(var j=0;j<el.options.length;j++){if(el.options[j].text.toLowerCase().indexOf((''+v).toLowerCase())>=0||(''+v).toLowerCase().indexOf(el.options[j].text.toLowerCase())>=0){el.selectedIndex=j;el.dispatchEvent(new Event('change',{bubbles:true}));n++;break;}}}else if(t==='checkbox'){if(/^y/i.test(v))if(!el.checked){el.click();n++;}}else if(t==='radio'){var rv=(el.value||'')+' '+txt(el);if(rv.toLowerCase().indexOf((''+v).toLowerCase())>=0){el.click();n++;}}else{setv(el,''+v);n++;}break;}}});alert('Roster Autofill: filled '+n+' fields. Please review everything before submitting.');})();";
+  a.href = "javascript:" + encodeURIComponent(code);
+}
+function maybeShowApplyBtn(){ const b=$("#applybtn"); if(b) b.hidden = !loggedIn(); }
+$("#applybtn") && $("#applybtn").addEventListener("click", openApply);
+$("#applyclose") && $("#applyclose").addEventListener("click", ()=>{ $("#applymodal").hidden = true; });
+$("#applysave") && $("#applysave").addEventListener("click", saveApplyProfile);
+$("#bookmarklet") && $("#bookmarklet").addEventListener("click", (e)=>{ e.preventDefault();
+  alert("Drag this button to your bookmarks bar (don't click it here). Then click it while on a job's application page to autofill."); });
 
 // ---- product settings (⚙, password-gated): live flag toggles served by /admin/settings ----
 const SET_LABELS = {
