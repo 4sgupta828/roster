@@ -108,9 +108,18 @@ The rule, verbatim from the codebase: *the LLM owns meaning, code owns structure
 | BD & fundraising | Relationship intelligence — "who do we know who knows them, and why do we believe it" |
 | Enrichment | A public-data API that ships *sources*, not just fields |
 
-## 11. To understand the space
+## 11. The provocation
 
-Entity resolution / **record linkage** · knowledge-graph construction (bitemporal, append-only) · hybrid retrieval · the people-data landscape (Clearbit, Apollo, People Data Labs) — then ask what changes when *every fact must cite a public source and a false merge is the cardinal sin.*
+> **The people-data industry sells you rows and hides the merges — but the merge is where the truth lives or dies.** One wrong "these two companies are the same" silently corrupts every count you will ever run on that data, and you will *never see it*: the number just comes back clean and wrong. Everyone markets the fabrication risk (the fake person, the invented job). The quiet killer is the **false merge** — an error that doesn't look like an error. Which means the honest metric for a people-data vendor isn't coverage or freshness; it's *precision of identity*, and almost nobody reports it. A provider that won't show you the provenance behind a merge isn't selling you facts. It's selling you confidence in someone else's guesses — and confidence is the one thing a graph should never fabricate.
+
+## 12. Further reading (high-quality references)
+
+- **Fellegi & Sunter (1969)** — "A Theory for Record Linkage." *JASA.* The foundational math of "are these the same entity?"
+- **Christen (2012)** — "Data Matching." *Springer.* The standard reference on entity resolution.
+- **Mudgal et al. (2018)** — "Deep Learning for Entity Matching: A Design Space Exploration." *SIGMOD.*
+- **Konda et al. (2016)** — "Magellan: Toward Building Entity Matching Management Systems." *VLDB.*
+- **Barlaug & Gulla (2021)** — "Neural Networks for Entity Matching: A Survey." *ACM TKDD.*
+- Background: bitemporal / append-only graph modeling · hybrid retrieval · the commercial people-data landscape (Clearbit, Apollo, People Data Labs) — then ask what changes when *every fact must cite a public source and a false merge is the cardinal sin.*
 
 ---
 
