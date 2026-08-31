@@ -42,6 +42,7 @@ class _FacetParse(BaseModel):
     country: list[str] = []
     state: list[str] = []
     stage: list[str] = []
+    accelerator: list[str] = []
     person: str = ""
     person_context: str = ""
 

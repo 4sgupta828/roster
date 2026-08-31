@@ -12,7 +12,7 @@ from __future__ import annotations
 # display-only stored facet (the raw bio) and is DELIBERATELY excluded here — the model kept mis-filing
 # job titles into `title` instead of `role`, so it is not an emit option.
 PEOPLE_FACET_KEYS = ("role", "seniority", "function", "industry", "metro", "company", "worked_at",
-                     "country", "state", "stage")
+                     "country", "state", "stage", "accelerator")
 
 _ROLE = ("software_engineer", "ml_engineer", "system_architect", "solutions_architect", "data_scientist",
          "data_engineer", "research_scientist", "product_manager", "sre", "security_engineer",
@@ -117,6 +117,15 @@ Normalize synonyms to canonical snake_case values, e.g.:
   "founder(s)"/"co-founder(s)" → role=["founder"]. Examples: "CEOs of startups" → {{"seniority":
   ["c_level"], "stage": ["startup"]}}; "CEOs of public companies" → {{"seniority": ["c_level"], "stage":
   ["public"]}}; "startup founders" → {{"role": ["founder"], "stage": ["startup"]}}.
+- accelerator (the INCUBATOR / accelerator / venture-studio / fund that BACKED the founder's startup —
+  a curated proper noun, NOT an industry). Recognize these KNOWN backers and map "<X> founders" /
+  "founders backed by <X>" / "<X> portfolio" / "incubated by <X>" to accelerator=[slug]:
+  "Y Combinator"/"YC" → ["yc"]; "AIFund"/"AI Fund" → ["ai_fund"]; "Techstars" → ["techstars"];
+  "South Park Commons"/"SPC" → ["south_park_commons"]; "Entrepreneur First"/"EF" → ["entrepreneur_first"];
+  "Antler" → ["antler"]; "500 Global"/"500 Startups" → ["500_global"]; "Pioneer" → ["pioneer"].
+  CRITICAL: "AIFund"/"AI Fund" is the FUND named "AI Fund" → accelerator=["ai_fund"], it is NOT
+  industry=["ai"]. A backer name that looks like keywords is still a proper noun — do NOT turn it into
+  an industry/function. (A non-accelerator company like "Google" in "Google founders" stays `company`.)
 - company: a specific employer → its CANONICAL lowercased short name — drop legal suffixes (Inc, LLC,
   Corp, Platforms) and apply known aliases: "Facebook"/"Meta Platforms" → ["meta"]; "Alphabet"/"Google
   LLC" → ["google"]; "Twitter" → ["x"]; "AWS" → ["amazon"]. E.g. "at Stripe" → {{"company": ["stripe"]}}.
