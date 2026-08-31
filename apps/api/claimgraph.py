@@ -1542,6 +1542,41 @@ class ClaimGraphStore:
         return {"persons_indexed": int(total or 0), "source_documents": int(nsrc or 0),
                 "facet_coverage": {r["facet_key"]: int(r["n"]) for r in per_key}}
 
+    async def search_jobs(self, *, terms=None, company=None, location=None, cap: int = 60) -> list[dict]:
+        """Search rs_job (public ATS postings — Greenhouse/Ashby/Lever) by title keywords / company /
+        location; each row carries an apply URL. company/location are AND filters; the title terms must
+        ALL appear (precision). Returns [] if rs_job doesn't exist yet (jobs ingest not run)."""
+        pool = await self._get_pool()
+        conds, args, i = [], [], 1
+        if company:
+            conds.append(f"company = ANY(${i})")
+            args.append([str(c).lower().replace(" ", "_") for c in company]); i += 1
+        if location:
+            conds.append(f"lower(location) ILIKE ${i}"); args.append(f"%{str(location).lower()}%"); i += 1
+        for t in (terms or [])[:4]:
+            t = str(t).strip().lower()
+            if t:
+                conds.append(f"title_norm ILIKE ${i}"); args.append(f"%{t}%"); i += 1
+        where = (" WHERE " + " AND ".join(conds)) if conds else ""
+        sql = (f"SELECT company,title,location,department,url,source FROM rs_job{where} "
+               f"ORDER BY updated_at DESC LIMIT {int(cap)}")
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(sql, *args)
+        except Exception:
+            return []
+        return [dict(r) for r in rows]
+
+    async def jobs_stats(self) -> dict:
+        pool = await self._get_pool()
+        try:
+            async with pool.acquire() as conn:
+                n = await conn.fetchval("SELECT count(*) FROM rs_job")
+                co = await conn.fetchval("SELECT count(DISTINCT company) FROM rs_job")
+        except Exception:
+            return {"jobs": 0, "companies": 0}
+        return {"jobs": int(n or 0), "companies": int(co or 0)}
+
     async def category_member_companies(self, *, category_norm: str,
                                         tenant_id: str = "demo",
                                         cap: int = 8) -> list[dict]:

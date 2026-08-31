@@ -1811,6 +1811,7 @@ async function loadConfig(){
     ACCOUNTS_ENABLED = !!c.accounts_enabled;
     DUEL_ENABLED = !!c.duel_enabled;
     PULSE_ENABLED = !!c.pulse_enabled;
+    window.JOBS_ENABLED = !!c.jobs_enabled;   // jobs mode: route job-intent queries to /jobs
     // People geo-scope (flag-gated): reveal the top-right country selector, persist the choice, and
     // ship it on every people query as `country`. Default 'us'. Backend ignores it when the flag is off.
     try{ window.ROSTER_COUNTRY = localStorage.getItem("roster_country") || "us"; }catch(e){ window.ROSTER_COUNTRY = "us"; }
@@ -1907,6 +1908,35 @@ function applyDisclaimers(){
 function esc(s){const d=document.createElement("div");d.textContent=s??"";return d.innerHTML;}
 // People-enumeration result → enriched, engagement-first cards. Each person links to their public
 // profile (the grounding source), with role, function/location chips, and an honest coverage banner.
+// JOBS MODE: search open roles from public ATS boards and render apply-linked cards.
+async function runJobs(question){
+  const out = $("#out");
+  if(out){ out.hidden = false; out.innerHTML = `<div class="ppl-head">Searching open roles…</div>`; }
+  try{
+    const r = await fetch("/jobs", {method:"POST", headers:{"content-type":"application/json"},
+      body: JSON.stringify({question, tenant_id:"demo"})});
+    const d = await r.json();
+    if(out) out.innerHTML = jobsMarkup(d);
+  }catch(e){ if(out) out.innerHTML = `<div class="pitem-empty">Couldn't load jobs — ${esc(e.message||e)}</div>`; }
+}
+function jobsMarkup(d){
+  const jobs = d.jobs||[], st = d.stats||{}, q = d.query||{};
+  const cards = jobs.map(j=>{
+    const co = esc((j.company||"").replace(/_/g," "));
+    const loc = j.location?`<span class="ppl-tag">${esc(j.location)}</span>`:"";
+    const dept = j.department?`<span class="ppl-tag">${esc(j.department)}</span>`:"";
+    const apply = j.url?`<a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer">Apply ↗</a>`:"";
+    return `<div class="ppl-card"><span class="ppl-body">
+      <span class="ppl-name">${esc(j.title)}</span>
+      <span class="ppl-blurb">${co}${j.source?` · via ${esc(j.source)}`:""}</span>
+      ${loc||dept?`<span class="ppl-tags">${loc}${dept}</span>`:""}
+      ${apply?`<span class="ppl-links">${apply}</span>`:""}</span></div>`;
+  }).join("");
+  const at = (q.company&&q.company.length)?` at ${esc(q.company.join(", ").replace(/_/g," "))}`:"";
+  const head = `<div class="ppl-head"><b>${jobs.length}</b> open role${jobs.length===1?"":"s"}${at}</div>`
+    + `<div class="ppl-cov">◔ Aggregated from public ATS boards (Greenhouse / Ashby / Lever) — ${st.jobs||0} jobs across ${st.companies||0} companies indexed. Each links to the company's apply page.</div>`;
+  return `<div class="ppl-wrap">${head}<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.</div>'}</div></div>`;
+}
 function peopleRowsMarkup(data){
   const rows = data.people_rows||[];
   const isEnum = !!data.coverage_basis;   // enumeration has coverage; a single-person profile does not
@@ -4849,6 +4879,11 @@ async function askQuestion(question, opts){
     return;
   }
   CURRENT_Q = question;
+  // JOBS MODE (flag): a job-intent query ("… jobs/roles/positions/hiring/careers …") searches open
+  // roles from public ATS boards and renders apply-linked job cards instead of a people/research answer.
+  if(typeof JOBS_ENABLED!=="undefined" && JOBS_ENABLED && /\b(jobs?|roles?|positions?|openings?|hiring|careers?|vacanc)\b/i.test(question)){
+    return runJobs(question);
+  }
   // Fresh-question refinement (no thread history, no attachments). Skipped when re-entering from a chip.
   if(REFINE_ENABLED && !opts.skipRefine && !THREAD.turns.length && !ATTACHMENTS.length){
     go.disabled = true; go.classList.add("loading");

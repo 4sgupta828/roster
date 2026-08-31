@@ -622,6 +622,12 @@ def people_geo_scope_enabled() -> bool:
     return os.environ.get("ROSTER_PEOPLE_GEO_SCOPE", "").lower() in ("1", "true", "yes")
 
 
+def jobs_enabled() -> bool:
+    """Flag (default OFF, Rule 20) via ROSTER_JOBS: the JOBS MODE — search open roles aggregated from
+    public ATS boards (Greenhouse/Ashby/Lever) in `rs_job`, each with an apply link. 404 when off."""
+    return os.environ.get("ROSTER_JOBS", "").lower() in ("1", "true", "yes")
+
+
 def enum_entity_probe_enabled() -> bool:
     """Flag (default OFF, Rule 20) via ROSTER_ENUM_ENTITY_PROBE: for an enumerative "table of the main X"
     ask with no user-named items, the derivation ALSO proposes `probe_entities` (candidate row instances)
@@ -1827,6 +1833,7 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             "integrative_enabled": (await _flag_live("integrative_enabled")) and bool(getattr(svc, "integrative_prompt", None)),
             "dynamic_engines_enabled": (await _flag_live("reasoned_default_enabled")) and bool(getattr(svc, "reasoned_answer_format", None)),
             "people_geo_scope_enabled": people_geo_scope_enabled(),
+            "jobs_enabled": jobs_enabled(),
         }
 
     @app.post("/search")
@@ -2323,6 +2330,27 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 "cassettes first.")) from e
         except Exception as e:   # provider errors (auth, credits, rate limit, timeout)
             raise HTTPException(status_code=502, detail=f"provider error: {e}") from e
+
+    @app.post("/jobs")
+    async def jobs(body: ResearchIn) -> dict:
+        """JOBS MODE (flag ROSTER_JOBS): search open roles aggregated from public ATS boards
+        (Greenhouse/Ashby/Lever) — LLM parses the query into company/title-keywords/location, code
+        filters `rs_job`, each result carries an apply link. 404 when off."""
+        if not jobs_enabled():
+            raise HTTPException(status_code=404, detail="jobs mode not enabled")
+        store = _claim_store_cached()
+        if store is None:
+            return {"jobs": [], "count": 0, "query": {}, "stats": {"jobs": 0, "companies": 0}}
+        from api.people_population import parse_job_query
+        try:
+            q = await parse_job_query(body.question, build_llm(mode=resolve_mode()))
+        except Exception:   # noqa: BLE001
+            q = {"company": [], "title_keywords": [], "location": ""}
+        rows = await store.search_jobs(
+            terms=q.get("title_keywords") or [], company=q.get("company") or None,
+            location=(q.get("location") or None), cap=80)
+        stats = await store.jobs_stats()
+        return {"jobs": rows, "count": len(rows), "query": q, "stats": stats}
 
     @app.post("/research/focus")
     async def research_focus(body: FocusIn, x_roster_token: str = Header(default="")) -> dict:

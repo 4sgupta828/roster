@@ -73,6 +73,38 @@ async def parse_people_facets(question: str, llm) -> tuple[dict[str, list[str]],
     return out, (getattr(p, "person", "") or "").strip(), (getattr(p, "person_context", "") or "").strip()
 
 
+class _JobParse(BaseModel):
+    """LLM parse of a JOB search → filters over the public-postings table. `title_keywords` are words
+    that would actually appear IN a job TITLE (so 'ML engineer' → ['machine learning','engineer'], not
+    'ml_engineer'); `company` is the employer; `location` is a city/region or 'remote'."""
+    company: list[str] = []
+    title_keywords: list[str] = []
+    location: str = ""
+
+
+async def parse_job_query(question: str, llm) -> dict:
+    """Free-text job search → {company, title_keywords, location}. Fail safe to keyword-only on error."""
+    prompt = (
+        "Parse this JOB SEARCH into a JSON object. `company` = the employer(s), canonical lowercased "
+        "short name (Stripe→stripe, Meta→meta) or []. `title_keywords` = the words that would appear IN "
+        "the job TITLE, expanded to how titles are really written (e.g. 'ML engineer'→['machine "
+        "learning','engineer']; 'SWE'→['software','engineer']; 'PM'→['product','manager']; 'sales "
+        "roles'→['sales']; 'designer'→['designer']). `location` = a city/region if named, or 'remote', "
+        "else ''. Keep title_keywords to the 1-3 essential words. JSON only.\n\nJob search: " + question)
+    try:
+        comp = await llm.complete(
+            system="You parse a job-search query into structured filters. Return only the object.",
+            messages=[{"role": "user", "content": prompt}],
+            response_format=_JobParse, max_tokens=250)
+        p = comp.parsed
+        return {"company": [str(x).strip().lower().replace(" ", "_") for x in (p.company or []) if str(x).strip()],
+                "title_keywords": [str(x).strip().lower() for x in (p.title_keywords or []) if str(x).strip()],
+                "location": (p.location or "").strip()}
+    except Exception as e:  # noqa: BLE001
+        _log.warning("parse_job_query failed: %s", e)
+        return {"company": [], "title_keywords": [w for w in question.lower().split() if len(w) > 2][:3], "location": ""}
+
+
 def build_person_profile_card(name: str, context: str = "") -> dict:
     """A single-person profile card built from EXPLICIT profile searches — GitHub (direct user search),
     X (direct search), and LinkedIn (Google search over name + hints, since LinkedIn has no open
