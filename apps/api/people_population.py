@@ -124,9 +124,12 @@ def build_person_profile_card(name: str, context: str = "") -> dict:
 
 
 def _person_blurb(attrs: list[dict]) -> str:
-    """A mini-resume for the person, synthesized from their GROUNDED facets: the stored bio (title) when
-    it is substantial, otherwise a one-line summary composed from seniority/role/company/function/skills/
-    accelerator. No new facts are invented — every part comes from a stored facet."""
+    """A COMPREHENSIVE mini-resume, assembled from every pertinent GROUNDED facet — what the person is,
+    what they do, their expertise, their career history, and their context — led by their own bio when
+    we have one. No facts are invented; every clause comes from a stored facet.
+
+    Shape: "<Seniority Role> at <Company> — <bio in their own words> — Focus: <fields> · Skills: <tech>
+    · Previously: <past employers> · <accelerator-backed> · <stage> · <industry> · <location>"."""
     def g(key):
         return next((a["display"] for a in attrs if a["key"] == key and a.get("display")), "")
     def gall(key):
@@ -137,24 +140,42 @@ def _person_blurb(attrs: list[dict]) -> str:
                 seen.add(d.lower()); out.append(d)
         return out
     bio = g("title")
-    if bio and len(bio) >= 45:
-        return bio                              # a real source bio — the best blurb
     sen, role, comp = g("seniority"), g("role"), g("company")
-    funcs, skills, accel = gall("function"), gall("skill"), g("accelerator")
-    parts = []
-    lead = " ".join(dict.fromkeys(x for x in [sen, role] if x))   # dedupe "Founder Founder"
-    if lead:
-        parts.append(lead + (f" at {comp}" if comp else ""))
+    funcs, skills, past = gall("function"), gall("skill"), gall("worked_at")
+    accel, stage, industry = g("accelerator"), g("stage"), g("industry")
+    metro = g("metro")
+
+    segs: list[str] = []
+    headline = " ".join(dict.fromkeys(x for x in [sen, role] if x))    # dedupe "Founder Founder"
+    if headline and comp:
+        segs.append(f"{headline} at {comp}")
+    elif headline:
+        segs.append(headline)
     elif comp:
-        parts.append(f"at {comp}")
+        segs.append(f"At {comp}")
+    if bio and len(bio) >= 25:                # the person's own words — the richest signal
+        segs.append(bio)
+    tail: list[str] = []
     if funcs:
-        parts.append("focus: " + ", ".join(funcs[:3]))
+        tail.append("Focus: " + ", ".join(funcs[:4]))
     if skills:
-        parts.append("skills: " + ", ".join(skills[:4]))
+        tail.append("Skills: " + ", ".join(skills[:6]))
+    if past:
+        tail.append("Previously: " + ", ".join(past[:4]))
+    ctx = []
     if accel:
-        parts.append("backed by " + accel)
-    blurb = " · ".join(parts)
-    return (bio + " · " + blurb).strip(" ·") if bio else blurb   # short bio + structured tail
+        ctx.append(f"{accel}-backed")
+    if stage:
+        ctx.append(stage)
+    if industry:
+        ctx.append(industry)
+    if metro:
+        ctx.append(metro)
+    if ctx:
+        tail.append(" · ".join(ctx))
+    if tail:
+        segs.append(" · ".join(tail))
+    return " — ".join(segs) or bio
 
 
 def _facet_summary(facets: dict[str, list[str]]) -> str:
