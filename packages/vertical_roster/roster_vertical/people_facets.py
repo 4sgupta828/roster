@@ -82,8 +82,11 @@ Normalize synonyms to canonical snake_case values, e.g.:
   ["dermatology"]; "neurologists" → ["neurology"]; "oncologists" → ["hematology_oncology"]; "surgeons" →
   ["surgery"]; "gastroenterologists" → ["gastroenterology"]; "anesthesiologists" → ["anesthesiology"].
   NEVER emit "research" as a function — "researcher(s)"/"scientist(s)"/"academic(s)" is a ROLE
-  (["researcher"]), NOT a function. BUSINESS FUNCTIONS (the non-technical roles that run a company) are
-  ALSO `function` values: "sales"/"salespeople"/"account executives"/"revenue"/"GTM" → ["sales"];
+  (["researcher"]), NOT a function. BUSINESS FUNCTIONS (the non-technical areas that run a company) are
+  ALWAYS `function` values, NEVER a `role`: "sales leaders at Stripe" → {{"function": ["sales"],
+  "seniority": ["c_level","vp","director","head"], "company": ["stripe"]}} — do NOT emit role=["sales"];
+  "salespeople"/"marketers"/"recruiters"/"marketing team" are `function`, not `role`. The values:
+  "sales"/"salespeople"/"account executives"/"revenue"/"GTM" → ["sales"];
   "marketing"/"growth"/"brand"/"comms"/"PR" → ["marketing"]; "recruiters"/"recruiting"/"talent" →
   ["recruiting"]; "business development"/"BD"/"partnerships"/"corporate development" →
   ["business_development"]; "finance"/"accounting" → ["finance"]; "HR"/"people ops"/"human resources" →
