@@ -1778,6 +1778,7 @@ async function loadConfig(){
           DUEL_ENABLED = !!f.duel_enabled;
           ACCOUNTS_ENABLED = !!f.accounts_enabled;
           DYN_ENGINES = !!f.dynamic_engines_enabled;
+          window.JOBS_ENABLED = !!f.jobs_enabled;   // hot-apply so job-intent routing works THIS load
           PULSE_ENABLED = !!f.pulse_enabled; maybeShowPulseBell();
         })
         .catch(()=>{});
@@ -4881,7 +4882,7 @@ async function askQuestion(question, opts){
   CURRENT_Q = question;
   // JOBS MODE (flag): a job-intent query ("… jobs/roles/positions/hiring/careers …") searches open
   // roles from public ATS boards and renders apply-linked job cards instead of a people/research answer.
-  if(typeof JOBS_ENABLED!=="undefined" && JOBS_ENABLED && /\b(jobs?|roles?|positions?|openings?|hiring|careers?|vacanc)\b/i.test(question)){
+  if(window.JOBS_ENABLED && /\b(jobs?|roles?|positions?|openings?|hiring|careers?|vacanc)\b/i.test(question)){
     return runJobs(question);
   }
   // Fresh-question refinement (no thread history, no attachments). Skipped when re-entering from a chip.
