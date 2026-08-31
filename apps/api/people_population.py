@@ -115,7 +115,11 @@ async def parse_job_query(question: str, llm) -> dict:
     """Free-text job search → {company, title_keywords, location}. Fail safe to keyword-only on error."""
     prompt = (
         "Parse this JOB SEARCH into a JSON object. `company` = the employer(s), canonical lowercased "
-        "short name (Stripe→stripe, Meta→meta) or []. `title_keywords` = the words that would appear IN "
+        "short name (Stripe→stripe, Meta→meta) or []. A GROUP or CATEGORY is NOT a company: expand a "
+        "well-known group to its member companies (big tech→['google','meta','amazon','microsoft',"
+        "'apple','nvidia']; FAANG→['meta','apple','amazon','netflix','google']); for a vague category "
+        "(startups, enterprises, fintech companies) leave company=[] and let ranking handle it — never "
+        "emit the group phrase itself as a company. `title_keywords` = the words that would appear IN "
         "the job TITLE, expanded to how titles are really written (e.g. 'ML engineer'→['machine "
         "learning','engineer']; 'SWE'→['software','engineer']; 'PM'→['product','manager']; 'sales "
         "roles'→['sales']; 'designer'→['designer']). `location` = a city/region if named, or 'remote', "
