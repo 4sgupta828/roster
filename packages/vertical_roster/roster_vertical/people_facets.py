@@ -12,7 +12,7 @@ from __future__ import annotations
 # display-only stored facet (the raw bio) and is DELIBERATELY excluded here — the model kept mis-filing
 # job titles into `title` instead of `role`, so it is not an emit option.
 PEOPLE_FACET_KEYS = ("role", "seniority", "function", "industry", "metro", "company", "worked_at",
-                     "country", "state", "stage", "accelerator")
+                     "country", "state", "stage", "accelerator", "skill")
 
 _ROLE = ("software_engineer", "ml_engineer", "system_architect", "solutions_architect", "data_scientist",
          "data_engineer", "research_scientist", "product_manager", "sre", "security_engineer",
@@ -127,6 +127,14 @@ Normalize synonyms to canonical snake_case values, e.g.:
   CRITICAL: "AIFund"/"AI Fund" is the FUND named "AI Fund" → accelerator=["ai_fund"], it is NOT
   industry=["ai"]. A backer name that looks like keywords is still a proper noun — do NOT turn it into
   an industry/function. (A non-accelerator company like "Google" in "Google founders" stays `company`.)
+- skill (a specific TECHNOLOGY / programming language / framework / tool the person works with — NOT a
+  research field). Emit the lowercased snake_case tech name: "CUDA" → ["cuda"]; "Kubernetes"/"k8s" →
+  ["kubernetes"]; "PyTorch" → ["pytorch"]; "TensorFlow" → ["tensorflow"]; "React" → ["react"]; "Rust" →
+  ["rust"]; "Go"/"Golang" → ["go"]; "Python" → ["python"]; "C++" → ["cpp"]; "TypeScript" →
+  ["typescript"]; "Kafka" → ["kafka"]; "Terraform" → ["terraform"]; "Solidity" → ["solidity"]. A
+  concrete tech/language/framework is a `skill`, NEVER a `function` (a broad field) — "CUDA engineers" →
+  {{"role": ["software_engineer"], "skill": ["cuda"]}}; "Rust developers at Stripe" → {{"role":
+  ["software_engineer"], "skill": ["rust"], "company": ["stripe"]}}.
 - company: a specific employer → its CANONICAL lowercased short name — drop legal suffixes (Inc, LLC,
   Corp, Platforms) and apply known aliases: "Facebook"/"Meta Platforms" → ["meta"]; "Alphabet"/"Google
   LLC" → ["google"]; "Twitter" → ["x"]; "AWS" → ["amazon"]. E.g. "at Stripe" → {{"company": ["stripe"]}}.
