@@ -87,8 +87,11 @@ Normalize synonyms to canonical snake_case values, e.g.:
   "seniority": ["c_level","vp","director","head"], "company": ["stripe"]}} — do NOT emit role=["sales"];
   "salespeople"/"marketers"/"recruiters"/"marketing team" are `function`, not `role`. The values:
   "sales"/"salespeople"/"account executives"/"revenue"/"GTM" → ["sales"];
-  "marketing"/"growth"/"brand"/"comms"/"PR" → ["marketing"]; "recruiters"/"recruiting"/"talent" →
-  ["recruiting"]; "business development"/"BD"/"partnerships"/"corporate development" →
+  "marketing"/"growth"/"brand"/"comms"/"PR" → ["marketing"]; ANY recruiting/hiring INTENT →
+  ["recruiting"] — "recruiters"/"recruiting"/"talent"/"talent acquisition"/"sourcers"/"technical
+  recruiters"/"who does hiring"/"who hires"/"people who recruit" all → function=["recruiting"] (NEVER
+  role=["recruiter"]/["sourcer"] — understand the intent, don't invent a role); "business
+  development"/"BD"/"partnerships"/"corporate development" →
   ["business_development"]; "finance"/"accounting" → ["finance"]; "HR"/"people ops"/"human resources" →
   ["human_resources"]; "operations"/"ops"/"bizops" → ["operations"]; "legal"/"counsel"/"compliance" →
   ["legal"]; "customer success"/"support"/"CX" → ["customer_success"]. Examples: {", ".join(_FUNCTION)}.

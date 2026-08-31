@@ -174,22 +174,29 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
 
     rows = await store.enumerate_by_facets(facets, tenant_id=tenant_id, cap=200)
 
-    # GRACEFUL RELAXATION: an over-specific query ANDs to zero (e.g. "engineers content platform at
-    # netflix" → function=content matches nobody, killing an otherwise-valid role+company query). When
-    # the full filter is empty, DROP the soft DESCRIPTIVE facets (function/skill/industry) but KEEP the
-    # hard anchors (company/role/seniority/geo/stage/accelerator) and retry — returning the closest
-    # honest match with a note about what was relaxed, instead of a flat empty.
-    _SOFT = ("function", "skill", "industry")
-    _ANCHOR = ("company", "worked_at", "accelerator", "role", "seniority", "metro", "stage")
+    # GRACEFUL PROGRESSIVE RELAXATION: an over-specific query ANDs to zero (e.g. "sales GTM leaders in
+    # California" → state=ca matches no business person; "engineers content platform at netflix" →
+    # function=content matches nobody). When the full filter is empty, relax in TIERS — drop the sparse
+    # GEO narrowing FIRST (least semantic), then skill, then function/industry — keeping the meaning
+    # (a sales/engineer intent) as long as possible, and never relaxing down to a geo/country-only
+    # filter (which would return "everyone"). Returns the closest honest match + a note of what relaxed.
+    _TIERS = [("metro", "state"), ("skill",), ("function", "industry")]
+    _GEO_ONLY = {"country", "state", "metro"}
     relaxed_from: list[str] = []
     if not rows:
-        kept = {k: v for k, v in facets.items() if k not in _SOFT}
-        dropped = [k for k in facets if k in _SOFT]
-        if dropped and any(k in kept for k in _ANCHOR):
+        kept, dropped = dict(facets), []
+        for tier in _TIERS:
+            drop_now = [k for k in tier if k in kept]
+            if not drop_now:
+                continue
+            for k in drop_now:
+                kept.pop(k, None); dropped.append(k)
+            if not any(k not in _GEO_ONLY for k in kept):     # nothing meaningful left → stop
+                break
             r2 = await store.enumerate_by_facets(kept, tenant_id=tenant_id, cap=200)
             if r2:
-                rows, relaxed_from = r2, dropped
-                facets = kept                       # coverage/answer reflect the filter that actually ran
+                rows, relaxed_from, facets = r2, list(dropped), kept
+                break
 
     coverage = _coverage_basis(facets, stats, len(rows))
     if relaxed_from:
