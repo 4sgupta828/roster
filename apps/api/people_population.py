@@ -15,8 +15,11 @@ code owns the filter, the citation, and the coverage facts. Public-data only.
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import urllib.parse
+import urllib.request
 
 from pydantic import BaseModel
 
@@ -46,6 +49,32 @@ class _FacetParse(BaseModel):
     skill: list[str] = []
     person: str = ""
     person_context: str = ""
+
+
+def semantic_enabled() -> bool:
+    """Flag (default OFF, Rule 20): DEEP semantic search — filter by ALL facets (attributes), then rank
+    by OpenAI-embedding similarity (the eigen/noesis typed-block pattern). OFF or no OPENAI_API_KEY →
+    the exact facet path (byte-identical)."""
+    return (os.environ.get("ROSTER_SEMANTIC", "").lower() in ("1", "true", "yes")
+            and bool(os.environ.get("OPENAI_API_KEY")))
+
+
+def embed_query(text: str) -> str | None:
+    """Embed the query with text-embedding-3-small → a pgvector literal '[...]'. None on any failure
+    (the caller falls back to the exact facet path). Never raises to the route."""
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key or not (text or "").strip():
+        return None
+    try:
+        body = json.dumps({"model": "text-embedding-3-small", "input": [text[:2000]]}).encode()
+        req = urllib.request.Request("https://api.openai.com/v1/embeddings", data=body,
+            headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            v = json.load(r)["data"][0]["embedding"]
+        return "[" + ",".join(f"{x:.6f}" for x in v) + "]"
+    except Exception as e:  # noqa: BLE001
+        _log.warning("embed_query failed: %s", e)
+        return None
 
 
 async def parse_people_facets(question: str, llm) -> tuple[dict[str, list[str]], str, str]:
@@ -225,7 +254,28 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     if scope_country and not facets.get("country"):
         facets["country"] = [scope_country]
 
-    rows = await store.enumerate_by_facets(facets, tenant_id=tenant_id, cap=200)
+    # DEEP SEMANTIC SEARCH (flag ROSTER_SEMANTIC): filter by ALL facets (attributes), THEN rank by
+    # OpenAI-embedding similarity — the eigen/noesis typed-block pattern (attributes filter, meaning
+    # ranks). qvec None (flag off / no key / embed failure) → the exact facet path (byte-identical).
+    qvec = embed_query(question) if semantic_enabled() else None
+    real_facets = [k for k in facets if k not in ("country", "state", "metro")]
+    semantic_used = False
+    if qvec and real_facets:                     # HYBRID: attribute-filter → semantic-rank within it
+        cand = await store.enumerate_by_facets(facets, tenant_id=tenant_id, cap=1000)
+        ids = await store.semantic_people(qvec, candidate_ids=[r["entity_id"] for r in cand], cap=200)
+        rows = await store.people_by_ids(ids, tenant_id=tenant_id) if ids else cand[:200]
+        semantic_used = bool(ids)
+    elif qvec:                                   # VIBE query (only geo / no attributes): pure semantic + geo
+        ids = await store.semantic_people(qvec, cap=500)
+        cand = await store.people_by_ids(ids, tenant_id=tenant_id)
+        geo = {k: set(facets[k]) for k in ("country", "state", "metro") if facets.get(k)}
+        def _geo_ok(r):
+            return all(any(f["facet_key"] == k and f["value_norm"] in vals for f in r["facets"])
+                       for k, vals in geo.items())
+        rows = [r for r in cand if _geo_ok(r)][:200]
+        semantic_used = bool(rows)
+    else:
+        rows = await store.enumerate_by_facets(facets, tenant_id=tenant_id, cap=200)
 
     # GRACEFUL PROGRESSIVE RELAXATION: an over-specific query ANDs to zero (e.g. "sales GTM leaders in
     # California" → state=ca matches no business person; "engineers content platform at netflix" →
@@ -294,7 +344,8 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         base = _RANK.get(sen.lower().replace(" ", "_"), 3)
         return base + min(len(p["links"]), 3) * 0.1   # small boost for a richer/contactable profile
 
-    people_rows.sort(key=lambda p: (-_score(p), p["name"]))
+    if not semantic_used:            # semantic search already ranked by query relevance — keep that order
+        people_rows.sort(key=lambda p: (-_score(p), p["name"]))
 
     summary = _facet_summary(facets)
     if people_rows:

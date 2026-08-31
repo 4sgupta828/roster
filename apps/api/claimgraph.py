@@ -1604,6 +1604,68 @@ class ClaimGraphStore:
                 "distinct_companies": int(distinct_co or 0),
                 "jobs": int(jobs or 0), "job_companies": int(jobco or 0)}
 
+    async def people_by_ids(self, entity_ids, *, tenant_id: str = "demo") -> list[dict]:
+        """Fetch people (with ALL their facets) for a given ORDERED list of entity_ids, preserving that
+        order — the same row shape enumerate_by_facets returns, so the pure-semantic path renders cards
+        identically. Used when semantic search supplies the ranking (no facet-narrowed candidate set)."""
+        if not entity_ids:
+            return []
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT f.entity_id, COALESCE(NULLIF(e.name,''), f.entity_id) AS name,
+                          f.facet_key, f.display_value, f.facet_value_norm,
+                          f.source_document_id, f.source_block_id, f.source_claim_id
+                   FROM roster_entity_facet f JOIN rs_entity e ON e.entity_id = f.entity_id
+                   WHERE f.tenant_id = $1 AND f.entity_id = ANY($2)""", tenant_id, list(entity_ids))
+        by_ent: dict[str, dict] = {}
+        for r in rows:
+            p = by_ent.get(r["entity_id"])
+            if p is None:
+                p = {"entity_id": r["entity_id"], "name": r["name"], "facets": []}
+                by_ent[r["entity_id"]] = p
+            p["facets"].append({
+                "facet_key": r["facet_key"], "display_value": r["display_value"],
+                "value_norm": r["facet_value_norm"], "document_id": r["source_document_id"],
+                "block_id": r["source_block_id"], "source_claim_id": r["source_claim_id"]})
+        return [by_ent[e] for e in entity_ids if e in by_ent]   # preserve semantic rank order
+
+    async def semantic_people(self, qvec: str, *, candidate_ids=None, cap: int = 200) -> list[str]:
+        """Rank people by cosine similarity to the query embedding. If candidate_ids is given (the
+        facet-filtered set), rank WITHIN it (hybrid: exact filter + semantic order); else pure-semantic
+        over everyone (a 'vibe' query). Returns entity_ids best-first. [] if no vectors yet."""
+        pool = await self._get_pool()
+        try:
+            async with pool.acquire() as conn:
+                if candidate_ids:
+                    rows = await conn.fetch(
+                        "SELECT entity_id FROM rs_person_vec WHERE entity_id = ANY($1) "
+                        "ORDER BY embedding <=> $2::vector LIMIT $3", list(candidate_ids), qvec, int(cap))
+                else:
+                    rows = await conn.fetch(
+                        "SELECT entity_id FROM rs_person_vec ORDER BY embedding <=> $1::vector LIMIT $2",
+                        qvec, int(cap))
+        except Exception:
+            return []
+        return [r["entity_id"] for r in rows]
+
+    async def semantic_jobs(self, qvec: str, *, company=None, cap: int = 80) -> list[dict]:
+        """Rank jobs by cosine similarity to the query embedding (optionally within a company set)."""
+        pool = await self._get_pool()
+        conds, args, i = ["embedding IS NOT NULL"], [], 1
+        if company:
+            conds.append(f"company = ANY(${i})"); args.append([str(c).lower().replace(' ', '_') for c in company]); i += 1
+        args.append(qvec); qi = i; i += 1
+        args.append(int(cap))
+        sql = (f"SELECT company,title,location,department,url,source FROM rs_job "
+               f"WHERE {' AND '.join(conds)} ORDER BY embedding <=> ${qi}::vector LIMIT ${i}")
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(sql, *args)
+        except Exception:
+            return []
+        return [dict(r) for r in rows]
+
     async def jobs_stats(self) -> dict:
         pool = await self._get_pool()
         try:

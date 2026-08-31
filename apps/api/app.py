@@ -2341,16 +2341,22 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         store = _claim_store_cached()
         if store is None:
             return {"jobs": [], "count": 0, "query": {}, "stats": {"jobs": 0, "companies": 0}}
-        from api.people_population import parse_job_query
+        from api.people_population import parse_job_query, semantic_enabled, embed_query
         try:
             q = await parse_job_query(body.question, build_llm(mode=resolve_mode()))
         except Exception:   # noqa: BLE001
             q = {"company": [], "title_keywords": [], "location": ""}
-        rows = await store.search_jobs(
-            terms=q.get("title_keywords") or [], company=q.get("company") or None,
-            location=(q.get("location") or None), cap=80)
+        # SEMANTIC (flag): rank jobs by embedding similarity (optionally within the company filter);
+        # else the exact title-keyword filter. Semantic understands 'jobs building ML infra', etc.
+        qvec = embed_query(body.question) if semantic_enabled() else None
+        if qvec:
+            rows = await store.semantic_jobs(qvec, company=(q.get("company") or None), cap=80)
+        else:
+            rows = await store.search_jobs(
+                terms=q.get("title_keywords") or [], company=q.get("company") or None,
+                location=(q.get("location") or None), cap=80)
         stats = await store.jobs_stats()
-        return {"jobs": rows, "count": len(rows), "query": q, "stats": stats}
+        return {"jobs": rows, "count": len(rows), "query": q, "semantic": bool(qvec), "stats": stats}
 
     @app.post("/research/focus")
     async def research_focus(body: FocusIn, x_roster_token: str = Header(default="")) -> dict:
