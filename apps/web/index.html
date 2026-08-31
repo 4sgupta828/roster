@@ -1910,15 +1910,20 @@ function esc(s){const d=document.createElement("div");d.textContent=s??"";return
 // People-enumeration result → enriched, engagement-first cards. Each person links to their public
 // profile (the grounding source), with role, function/location chips, and an honest coverage banner.
 // JOBS MODE: search open roles from public ATS boards and render apply-linked cards.
+// Returns true if jobs mode HANDLED the query; false (404 / error) → let research handle it. This is
+// config-INDEPENDENT (doesn't depend on window.JOBS_ENABLED having loaded) so job routing is robust
+// even for a stale cached config: /jobs 404s when the flag is off, and we fall through to research.
 async function runJobs(question){
+  let r;
+  try{ r = await fetch("/jobs", {method:"POST", headers:{"content-type":"application/json"},
+      body: JSON.stringify({question, tenant_id:"demo"})}); }
+  catch(e){ return false; }
+  if(!r || r.status === 404) return false;
   const out = $("#out");
-  if(out){ out.hidden = false; out.innerHTML = `<div class="ppl-head">Searching open roles…</div>`; }
-  try{
-    const r = await fetch("/jobs", {method:"POST", headers:{"content-type":"application/json"},
-      body: JSON.stringify({question, tenant_id:"demo"})});
-    const d = await r.json();
-    if(out) out.innerHTML = jobsMarkup(d);
-  }catch(e){ if(out) out.innerHTML = `<div class="pitem-empty">Couldn't load jobs — ${esc(e.message||e)}</div>`; }
+  if(out){ out.hidden = false;
+    try{ out.innerHTML = jobsMarkup(await r.json()); }
+    catch(e){ out.innerHTML = `<div class="pitem-empty">Couldn't load jobs — ${esc(e.message||e)}</div>`; } }
+  return true;
 }
 function jobsMarkup(d){
   const jobs = d.jobs||[], st = d.stats||{}, q = d.query||{};
@@ -4882,8 +4887,8 @@ async function askQuestion(question, opts){
   CURRENT_Q = question;
   // JOBS MODE (flag): a job-intent query ("… jobs/roles/positions/hiring/careers …") searches open
   // roles from public ATS boards and renders apply-linked job cards instead of a people/research answer.
-  if(window.JOBS_ENABLED && /\b(jobs?|roles?|positions?|openings?|hiring|careers?|vacanc)\b/i.test(question)){
-    return runJobs(question);
+  if((/\b(jobs?|hiring|openings?|positions?|careers?|vacanc|apply)\b|\bopen roles?\b/i.test(question)) && await runJobs(question)){
+    return;   // jobs mode handled it; otherwise fall through to people/research
   }
   // Fresh-question refinement (no thread history, no attachments). Skipped when re-entering from a chip.
   if(REFINE_ENABLED && !opts.skipRefine && !THREAD.turns.length && !ATTACHMENTS.length){
