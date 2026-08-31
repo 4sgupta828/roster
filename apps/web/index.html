@@ -443,6 +443,7 @@
   .ppl-ext{color:var(--gold);font-size:.72em;opacity:.6;}
   .ppl-name:hover .ppl-ext{opacity:1;}
   .ppl-title{font-size:.82rem;line-height:1.42;color:var(--ink);opacity:.86;}
+  .ppl-blurb{display:block;font-size:.82rem;line-height:1.45;color:var(--ink);opacity:.82;margin:.15rem 0;}
   .ppl-tags{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.16rem;}
   .ppl-tag{font-size:.64rem;font-weight:600;color:var(--person,#57d9c4);background:rgba(87,217,196,.13);padding:.1rem .42rem;border-radius:4px;}
   .ppl-links{display:flex;flex-wrap:wrap;gap:.32rem;margin-top:.32rem;}
@@ -1936,7 +1937,7 @@ function peopleRowsMarkup(data){
     return `<div class="ppl-card">${avatar}
       <span class="ppl-body">
         ${nameHtml}
-        ${title?`<span class="ppl-title">${esc(title)}</span>`:""}
+        ${p.blurb?`<span class="ppl-blurb">${esc(p.blurb)}</span>`:(title?`<span class="ppl-title">${esc(title)}</span>`:"")}
         ${tags?`<span class="ppl-tags">${tags}</span>`:""}
         ${linkBadges?`<span class="ppl-links">${linkBadges}</span>`:""}
       </span></div>`;

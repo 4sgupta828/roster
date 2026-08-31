@@ -91,6 +91,40 @@ def build_person_profile_card(name: str, context: str = "") -> dict:
             "links": links, "citation": None}
 
 
+def _person_blurb(attrs: list[dict]) -> str:
+    """A mini-resume for the person, synthesized from their GROUNDED facets: the stored bio (title) when
+    it is substantial, otherwise a one-line summary composed from seniority/role/company/function/skills/
+    accelerator. No new facts are invented — every part comes from a stored facet."""
+    def g(key):
+        return next((a["display"] for a in attrs if a["key"] == key and a.get("display")), "")
+    def gall(key):
+        seen, out = set(), []
+        for a in attrs:
+            d = a.get("display")
+            if a["key"] == key and d and d.lower() not in seen:
+                seen.add(d.lower()); out.append(d)
+        return out
+    bio = g("title")
+    if bio and len(bio) >= 45:
+        return bio                              # a real source bio — the best blurb
+    sen, role, comp = g("seniority"), g("role"), g("company")
+    funcs, skills, accel = gall("function"), gall("skill"), g("accelerator")
+    parts = []
+    lead = " ".join(dict.fromkeys(x for x in [sen, role] if x))   # dedupe "Founder Founder"
+    if lead:
+        parts.append(lead + (f" at {comp}" if comp else ""))
+    elif comp:
+        parts.append(f"at {comp}")
+    if funcs:
+        parts.append("focus: " + ", ".join(funcs[:3]))
+    if skills:
+        parts.append("skills: " + ", ".join(skills[:4]))
+    if accel:
+        parts.append("backed by " + accel)
+    blurb = " · ".join(parts)
+    return (bio + " · " + blurb).strip(" ·") if bio else blurb   # short bio + structured tail
+
+
 def _facet_summary(facets: dict[str, list[str]]) -> str:
     parts = [f"{k}∈{{{', '.join(v)}}}" if len(v) > 1 else f"{k}={v[0]}"
              for k, v in facets.items()]
@@ -166,7 +200,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             links.append({"kind": "linkedin_search",
                           "url": "https://www.google.com/search?q=" + urllib.parse.quote(terms)})
         people_rows.append({
-            "entity_id": r["entity_id"], "name": r["name"],
+            "entity_id": r["entity_id"], "name": r["name"], "blurb": _person_blurb(attrs),
             "attributes": attrs, "links": links, "citation": cite})
 
     # RANK toward the query (user: ranked, not neutral): most prominent first by seniority/tier, then a

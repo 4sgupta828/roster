@@ -82,7 +82,13 @@ Normalize synonyms to canonical snake_case values, e.g.:
   ["dermatology"]; "neurologists" → ["neurology"]; "oncologists" → ["hematology_oncology"]; "surgeons" →
   ["surgery"]; "gastroenterologists" → ["gastroenterology"]; "anesthesiologists" → ["anesthesiology"].
   NEVER emit "research" as a function — "researcher(s)"/"scientist(s)"/"academic(s)" is a ROLE
-  (["researcher"]), NOT a function. Examples: {", ".join(_FUNCTION)}.
+  (["researcher"]), NOT a function. BUSINESS FUNCTIONS (the non-technical roles that run a company) are
+  ALSO `function` values: "sales"/"salespeople"/"account executives"/"revenue"/"GTM" → ["sales"];
+  "marketing"/"growth"/"brand"/"comms"/"PR" → ["marketing"]; "recruiters"/"recruiting"/"talent" →
+  ["recruiting"]; "business development"/"BD"/"partnerships"/"corporate development" →
+  ["business_development"]; "finance"/"accounting" → ["finance"]; "HR"/"people ops"/"human resources" →
+  ["human_resources"]; "operations"/"ops"/"bizops" → ["operations"]; "legal"/"counsel"/"compliance" →
+  ["legal"]; "customer success"/"support"/"CX" → ["customer_success"]. Examples: {", ".join(_FUNCTION)}.
 - industry (the BUSINESS SECTOR the person's EMPLOYER operates in — distinct from `function`, which
   is a TECHNICAL domain). Emit this for "<sector> industry / space / sector / companies" phrases and
   bare sector words: "payment industry"/"payments"/"fintech"/"financial technology"/"payment
