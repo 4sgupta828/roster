@@ -1657,6 +1657,19 @@
     </div>
   </div>
 </div>
+<!-- Reach out: draft a message → hand off to whatever channel the person shared (no auto-send) -->
+<div class="idmodal" id="reachmodal" hidden>
+  <div class="idcard" style="max-width:560px;width:94%;text-align:left;">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <h2 style="margin:0;">Reach out to <span id="reachname"></span></h2>
+      <button type="button" class="histbtn" id="reachclose">Close</button>
+    </div>
+    <p style="font-size:.78rem;color:var(--muted);margin:.3rem 0;">Write your message, then pick a channel. Roster opens it (and copies your text) so you send it yourself — no account or subscription needed. Nothing is sent automatically.</p>
+    <textarea id="reachmsg" rows="6" style="width:100%;font-size:.9rem;"></textarea>
+    <div id="reachchannels" style="margin:.5rem 0;"></div>
+    <div id="reachnote" style="font-size:.8rem;color:var(--gold);min-height:1em;"></div>
+  </div>
+</div>
 <!-- bucket picker popover (opened by a card's ＋ Save) -->
 <div id="bucketpick" hidden style="position:fixed;z-index:9999;background:var(--bg,#fff);border:1px solid var(--muted,#ccc);border-radius:8px;padding:.5rem;box-shadow:0 6px 24px rgba(0,0,0,.18);min-width:220px;max-height:300px;overflow:auto;">
   <div style="font-size:.72rem;color:var(--muted);margin-bottom:.3rem;">Save to bucket</div>
@@ -2046,10 +2059,15 @@ function peopleRowsMarkup(data){
     // Name links to a real profile: the citation URL if it is one, else the person's best public
     // link (LinkedIn/X/GitHub, server-ordered). Never a bare provenance tag. Plain text if neither.
     const profileUrl = citeUrl || ((p.links&&p.links[0]&&p.links[0].url)||"");
-    const saveBtn = `<button type="button" class="rsave" data-kind="person" data-ref="${esc(p.entity_id||p.name||"")}" data-label="${esc(p.name||"")}" data-sub="${esc((p.blurb||"").slice(0,140))}" data-url="${esc(profileUrl||"")}" title="Save to a bucket">＋ Save</button>`;
+    const ref = p.entity_id||p.name||"";
+    // stash the person's channels so the outreach composer can look them up by ref
+    window.PEOPLE_INDEX = window.PEOPLE_INDEX || {};
+    window.PEOPLE_INDEX[ref] = {name:p.name||"", blurb:p.blurb||"", links:(p.links||[]), github:(isGh?citeUrl:"")};
+    const saveBtn = `<button type="button" class="rsave" data-kind="person" data-ref="${esc(ref)}" data-label="${esc(p.name||"")}" data-sub="${esc((p.blurb||"").slice(0,140))}" data-url="${esc(profileUrl||"")}" title="Save to a bucket">＋ Save</button>`;
+    const reachBtn = `<button type="button" class="rsave rmsg" data-ref="${esc(ref)}" title="Reach out on their shared channels">✉ Reach out</button>`;
     const nameHtml = (profileUrl
       ? `<a class="ppl-name" href="${esc(profileUrl)}" target="_blank" rel="noopener noreferrer">${esc(p.name)}<span class="ppl-ext">↗</span></a>`
-      : `<span class="ppl-name">${esc(p.name)}</span>`) + saveBtn;
+      : `<span class="ppl-name">${esc(p.name)}</span>`) + saveBtn + reachBtn;
     return `<div class="ppl-card">${avatar}
       <span class="ppl-body">
         ${nameHtml}
@@ -6143,11 +6161,66 @@ document.addEventListener("click", (e)=>{   // dismiss picker on outside click
 // delegated: any card's ＋ Save button opens the picker with that card's item payload
 document.addEventListener("click", (e)=>{
   const btn = e.target.closest(".rsave"); if(!btn) return;
+  if(btn.classList.contains("rmsg")) return;   // ✉ Reach out is handled below, not the bucket picker
   e.preventDefault(); e.stopPropagation();
   const d = btn.dataset;
   openBucketPicker(btn, {kind:d.kind, ref_id:d.ref, label:d.label,
     payload:{sub:d.sub||"", url:d.url||""}, _btn:btn});
 });
+
+// ===== Reach out: draft + hand off to the person's shared channels (Roster never sends) =====
+let REACH_REF="", REACH_PERSON=null, REACH_CHANNELS=[];
+function channelsFor(p){
+  const out=[], by=k=>(p.links||[]).find(l=>l.kind===k);
+  const email=by("email"); if(email){ out.push({kind:"email",label:"✉ Email",addr:(email.url||"").replace(/^mailto:/,""),type:"mailto"}); }
+  const li=by("linkedin"), lis=by("linkedin_search");
+  if(li) out.push({kind:"linkedin",label:"in LinkedIn",url:li.url,type:"open"});
+  else if(lis) out.push({kind:"linkedin",label:"in Find on LinkedIn",url:lis.url,type:"open"});
+  const x=by("x")||by("twitter"); if(x) out.push({kind:"x",label:"𝕏 X / Twitter",url:x.url,type:"open"});
+  const gh=p.github||((by("github")||{}).url); if(gh) out.push({kind:"github",label:"GitHub",url:gh,type:"open"});
+  const web=by("website"); if(web) out.push({kind:"website",label:"Website",url:web.url,type:"open"});
+  const med=by("medium"); if(med) out.push({kind:"medium",label:"Medium",url:med.url,type:"open"});
+  const mas=by("mastodon"); if(mas) out.push({kind:"mastodon",label:"Mastodon",url:mas.url,type:"open"});
+  return out;
+}
+function renderReachChannels(){
+  REACH_CHANNELS = channelsFor(REACH_PERSON||{});
+  const box = $("#reachchannels");
+  if(!REACH_CHANNELS.length){ box.innerHTML = "<div style='color:var(--muted);font-size:.82rem;'>No shared channels found for this person yet.</div>"; return; }
+  box.innerHTML = REACH_CHANNELS.map((ch,i)=>`<button type="button" class="idgo reach-ch" data-i="${i}" style="width:auto;padding:.35rem .7rem;margin:.2rem .3rem .2rem 0;">${esc(ch.label)}</button>`).join("");
+}
+function openReach(ref){
+  if(!loggedIn()){ $("#idmodal").hidden = false; return; }
+  const p = (window.PEOPLE_INDEX||{})[ref]; if(!p) return;
+  REACH_REF = ref; REACH_PERSON = p;
+  $("#reachname").textContent = p.name || "this person";
+  const first = (p.name||"").trim().split(/\s+/)[0] || "there";
+  const me = (USER&&USER.name)?USER.name:"";
+  $("#reachmsg").value = `Hi ${first},\n\n\n\n`+(me?`Best,\n${me}`:"");
+  $("#reachnote").textContent = "";
+  renderReachChannels();
+  $("#reachmodal").hidden = false;
+}
+async function doReach(ch){
+  const msg = $("#reachmsg").value || "";
+  if(ch.type==="mailto"){
+    window.open(`mailto:${ch.addr}?subject=${encodeURIComponent("Hello")}&body=${encodeURIComponent(msg)}`);
+    $("#reachnote").textContent = "Opened your email client with the message.";
+  } else {
+    try{ await navigator.clipboard.writeText(msg); }catch(e){}
+    window.open(ch.url, "_blank", "noopener");
+    $("#reachnote").textContent = `Message copied — paste it in the ${ch.label.replace(/^\S+\s/,"")} tab that just opened.`;
+  }
+  try{ await fetch("/me/outreach", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
+    body: JSON.stringify({person_ref:REACH_REF, person_name:(REACH_PERSON||{}).name||"", channel:ch.kind, message:msg})}); }catch(e){}
+}
+document.addEventListener("click", (e)=>{
+  const rb = e.target.closest(".rmsg");
+  if(rb){ e.preventDefault(); e.stopPropagation(); openReach(rb.dataset.ref); return; }
+  const cb = e.target.closest(".reach-ch");
+  if(cb){ const ch = REACH_CHANNELS[+cb.dataset.i]; if(ch) doReach(ch); }
+});
+$("#reachclose") && $("#reachclose").addEventListener("click", ()=>{ $("#reachmodal").hidden = true; });
 
 // ===== Apply Profile: superset of ATS fields → one-click autofill bookmarklet =====
 const APPLY_FIELDS = [

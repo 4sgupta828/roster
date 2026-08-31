@@ -1085,6 +1085,13 @@ class ResumeIn(BaseModel):
     data_b64: str                   # base64-encoded file bytes (avoids a multipart dependency)
 
 
+class OutreachIn(BaseModel):
+    person_ref: str
+    person_name: str = ""
+    channel: str                    # email | linkedin | x | github | website | medium | other
+    message: str = ""
+
+
 class SettingIn(BaseModel):
     key: str
     value: str = ""     # "on" | "off" | "" (empty = follow the env default)
@@ -4310,6 +4317,21 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         safe = re.sub(r'[^A-Za-z0-9._ -]', "_", name)[:120] or "resume"   # no header injection
         return _Resp(content=data, media_type=ctype,
                      headers={"Content-Disposition": f'inline; filename="{safe}"'})
+
+    # ---- outreach log (draft + handoff only; Roster never sends on the user's behalf) ----
+    @app.post("/me/outreach")
+    async def me_add_outreach(body: OutreachIn, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        if not (body.person_ref or "").strip():
+            raise HTTPException(status_code=400, detail="person_ref required")
+        await store.add_outreach(user["id"], person_ref=body.person_ref, person_name=body.person_name,
+                                 channel=body.channel or "other", message=body.message)
+        return {"ok": True}
+
+    @app.get("/me/outreach")
+    async def me_list_outreach(x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return {"outreach": await store.list_outreach(user["id"])}
 
     @app.post("/feedback")
     async def post_feedback(body: FeedbackIn, x_roster_token: str = Header(default="")) -> dict:

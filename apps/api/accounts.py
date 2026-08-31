@@ -119,6 +119,19 @@ CREATE TABLE IF NOT EXISTS roster_candidate_profile (
     resume_at     TIMESTAMPTZ,
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- OUTREACH LOG: a record each time the user drafts/opens a message to someone via a channel (email/
+-- linkedin/x/github/…). Roster never sends on their behalf — this just tracks who they contacted for
+-- follow-up. person_ref = the person's entity_id.
+CREATE TABLE IF NOT EXISTS roster_outreach (
+    id           BIGSERIAL PRIMARY KEY,
+    user_id      TEXT NOT NULL,
+    person_ref   TEXT NOT NULL,
+    person_name  TEXT,
+    channel      TEXT NOT NULL,
+    message      TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ro_user ON roster_outreach (user_id, created_at DESC);
 """
 
 _MAX_TOKENS_PER_USER = 10   # prune oldest beyond this (a lost device's token eventually ages out)
@@ -538,3 +551,23 @@ class AccountStore:
             return None
         return (row["resume_name"] or "resume", row["resume_type"] or "application/octet-stream",
                 bytes(row["resume_bytes"]))
+
+    # ---- outreach log (Roster never sends; this records what the user drafted/opened for follow-up) ----
+    async def add_outreach(self, user_id: str, *, person_ref: str, person_name: str,
+                           channel: str, message: str) -> None:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            await conn.execute(
+                "INSERT INTO roster_outreach (user_id, person_ref, person_name, channel, message) "
+                "VALUES ($1,$2,$3,$4,$5)",
+                user_id, person_ref[:200], (person_name or "")[:300], channel[:32], (message or "")[:4000])
+
+    async def list_outreach(self, user_id: str, *, limit: int = 200) -> list[dict]:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, person_ref, person_name, channel, message, created_at FROM roster_outreach "
+                "WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2", user_id, int(limit))
+        return [{"id": r["id"], "person_ref": r["person_ref"], "person_name": r["person_name"],
+                 "channel": r["channel"], "message": r["message"],
+                 "at": r["created_at"].isoformat()} for r in rows]
