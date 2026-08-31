@@ -1952,9 +1952,13 @@ function peopleRowsMarkup(data){
     `<span class="ppl-fc">${esc(k)}: ${esc((v||[]).join(" / "))}</span>`).join("");
   const cov = esc(cb.population_statement||"");
   const cards = rows.map(p=>{
-    const url = (p.citation&&p.citation.document_id) || "";
-    const isGh = /github\.com\//.test(url);
-    const av = isGh ? url.replace(/\/+$/,"")+".png" : "";
+    // citation.document_id is a SOURCE token — sometimes a full URL (github.com/…), sometimes a
+    // bare provenance tag ("yc", "openalex"). Only an absolute http(s) URL may become an href;
+    // a bare tag as href resolves to a broken same-origin path (e.g. /yc → 404).
+    const cite = (p.citation&&p.citation.document_id) || "";
+    const citeUrl = /^https?:\/\//i.test(cite) ? cite : "";
+    const isGh = /github\.com\//.test(citeUrl);
+    const av = isGh ? citeUrl.replace(/\/+$/,"")+".png" : "";
     const attr = k => (p.attributes||[]).find(a=>a.key===k) || {};
     const title = (attr("title").display || attr("seniority").display || "");
     const tags = (p.attributes||[]).filter(a=>a.key==="function"||a.key==="metro")
@@ -1966,9 +1970,12 @@ function peopleRowsMarkup(data){
     // plus the GitHub source itself — each a clickable badge. THIS is the engagement surface.
     const LABEL={linkedin:"in",linkedin_search:"find on LinkedIn ⌕",x:"𝕏",x_search:"find on X ⌕",twitter:"𝕏",website:"site",medium:"medium",mastodon:"mastodon",email:"email",github:"github",github_search:"find on GitHub ⌕"};
     const badge=(kind,href)=>`<a class="ppl-lnk lnk-${esc(kind)}" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="${esc(href)}">${LABEL[kind]||esc(kind)}</a>`;
-    const linkBadges = (url?badge("github",url):"") + (p.links||[]).map(l=>badge(l.kind,l.url)).join("");
-    const nameHtml = url
-      ? `<a class="ppl-name" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(p.name)}<span class="ppl-ext">↗</span></a>`
+    const linkBadges = (isGh?badge("github",citeUrl):"") + (p.links||[]).map(l=>badge(l.kind,l.url)).join("");
+    // Name links to a real profile: the citation URL if it is one, else the person's best public
+    // link (LinkedIn/X/GitHub, server-ordered). Never a bare provenance tag. Plain text if neither.
+    const profileUrl = citeUrl || ((p.links&&p.links[0]&&p.links[0].url)||"");
+    const nameHtml = profileUrl
+      ? `<a class="ppl-name" href="${esc(profileUrl)}" target="_blank" rel="noopener noreferrer">${esc(p.name)}<span class="ppl-ext">↗</span></a>`
       : `<span class="ppl-name">${esc(p.name)}</span>`;
     return `<div class="ppl-card">${avatar}
       <span class="ppl-body">
