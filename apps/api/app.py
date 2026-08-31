@@ -1045,12 +1045,34 @@ class TriageIn(BaseModel):
 
 
 class RegisterIn(BaseModel):
-    name: str
     email: str
+    password: str = ""              # >=12 chars (enforced server-side); '' = legacy token-only register
+    name: str = ""                  # optional; defaults to the email local-part when blank
     profession: str = ""            # self-declared (Physician / NP-PA / Pharmacist / Student / …)
     country: str = ""
     npi: str = ""                   # optional (US) — structurally verified against the CMS registry
     disclaimer_ack: bool = False    # the attestation from the identity gate
+
+
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+
+class BucketIn(BaseModel):
+    name: str
+
+
+class BucketItemIn(BaseModel):
+    kind: str                       # 'person' | 'job'
+    ref_id: str
+    label: str = ""
+    payload: dict | None = None
+
+
+class SavedSearchIn(BaseModel):
+    query: str
+    mode: str = "research"
 
 
 class SettingIn(BaseModel):
@@ -4111,20 +4133,127 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=503, detail="no account store configured (ROSTER_CORPUS_DSN)")
         if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", body.email or ""):
             raise HTTPException(status_code=400, detail="invalid email")
-        if len((body.name or "").strip()) < 2:
-            raise HTTPException(status_code=400, detail="name required")
+        # SECURITY: register ALWAYS requires a >=12-char password, and REJECTS an email that already
+        # has an account. (The store's upsert-on-email would otherwise let anyone re-claim an existing
+        # account by email without proving the password — account takeover. Returning users sign in.)
+        if len(body.password or "") < 12:
+            raise HTTPException(status_code=400, detail="password must be at least 12 characters")
+        if await store.email_exists(body.email):
+            raise HTTPException(status_code=409,
+                                detail="an account with that email already exists — please sign in")
+        from api.accounts import hash_password
+        pw_hash, pw_salt = hash_password(body.password)
+        name = (body.name or "").strip() or (body.email.split("@")[0] if body.email else "")
         npi_ok = False
         if body.npi.strip():
             from api.accounts import verify_npi
             npi_ok = await verify_npi(body.npi)
         try:
             user, token = await store.register(
-                email=body.email, name=body.name, profession=body.profession[:80],
+                email=body.email, name=name, profession=body.profession[:80],
                 country=body.country[:40], npi=body.npi.strip()[:16], npi_verified=npi_ok,
-                disclaimer_ack=body.disclaimer_ack)
+                disclaimer_ack=body.disclaimer_ack, pw_hash=pw_hash, pw_salt=pw_salt)
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"registration failed: {e}") from e
         return {"user": user, "token": token}
+
+    @app.post("/auth/login")
+    async def auth_login(body: LoginIn) -> dict:
+        """Sign in with email + password → a fresh per-device bearer token (stored by the FE)."""
+        if not accounts_enabled():
+            raise HTTPException(status_code=404, detail="accounts are not enabled")
+        store = _accounts()
+        if store is None:
+            raise HTTPException(status_code=503, detail="no account store configured")
+        try:
+            res = await store.login(email=body.email, password=body.password)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"login failed: {e}") from e
+        if res is None:
+            raise HTTPException(status_code=401, detail="incorrect email or password")
+        user, token = res
+        return {"user": user, "token": token}
+
+    @app.post("/auth/logout")
+    async def auth_logout(x_roster_token: str = Header(default="")) -> dict:
+        if accounts_enabled():
+            store = _accounts()
+            if store is not None:
+                await store.logout(x_roster_token)
+        return {"ok": True}
+
+    async def _require_user(x_roster_token: str):
+        """Shared guard for /me* routes: valid token → user dict, else 401 (or 404 when off)."""
+        if not accounts_enabled():
+            raise HTTPException(status_code=404, detail="accounts are not enabled")
+        store = _accounts()
+        if store is None:
+            raise HTTPException(status_code=503, detail="no account store configured")
+        user = await store.user_by_token(x_roster_token)
+        if user is None:
+            raise HTTPException(status_code=401, detail="sign in first")
+        return store, user
+
+    @app.get("/me")
+    async def me(x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return {"user": user}
+
+    # ---- saved searches ----
+    @app.get("/me/searches")
+    async def me_searches(x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return {"searches": await store.list_searches(user["id"])}
+
+    @app.post("/me/searches")
+    async def me_add_search(body: SavedSearchIn, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        await store.add_search(user["id"], body.query, body.mode)
+        return {"ok": True}
+
+    # ---- shortlist buckets ----
+    @app.get("/me/buckets")
+    async def me_buckets(x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return {"buckets": await store.list_buckets(user["id"])}
+
+    @app.post("/me/buckets")
+    async def me_create_bucket(body: BucketIn, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        if not (body.name or "").strip():
+            raise HTTPException(status_code=400, detail="name required")
+        return await store.create_bucket(user["id"], body.name)
+
+    @app.delete("/me/buckets/{bucket_id}")
+    async def me_delete_bucket(bucket_id: int, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return {"ok": await store.delete_bucket(user["id"], bucket_id)}
+
+    @app.get("/me/buckets/{bucket_id}/items")
+    async def me_bucket_items(bucket_id: int, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        items = await store.list_items(user["id"], bucket_id)
+        if items is None:
+            raise HTTPException(status_code=404, detail="bucket not found")
+        return {"items": items}
+
+    @app.post("/me/buckets/{bucket_id}/items")
+    async def me_add_item(bucket_id: int, body: BucketItemIn, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        if body.kind not in ("person", "job"):
+            raise HTTPException(status_code=400, detail="kind must be person or job")
+        if not (body.ref_id or "").strip():
+            raise HTTPException(status_code=400, detail="ref_id required")
+        ok = await store.add_item(user["id"], bucket_id, kind=body.kind, ref_id=body.ref_id,
+                                  label=body.label, payload=body.payload)
+        if not ok:
+            raise HTTPException(status_code=404, detail="bucket not found")
+        return {"ok": True}
+
+    @app.delete("/me/buckets/{bucket_id}/items/{item_id}")
+    async def me_delete_item(bucket_id: int, item_id: int, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return {"ok": await store.delete_item(user["id"], bucket_id, item_id)}
 
     @app.post("/feedback")
     async def post_feedback(body: FeedbackIn, x_roster_token: str = Header(default="")) -> dict:

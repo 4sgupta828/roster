@@ -74,6 +74,38 @@ CREATE TABLE IF NOT EXISTS roster_user_pref (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (user_id, key)
 );
+-- PASSWORD auth (additive, nullable so pre-existing token-only users are untouched): PBKDF2-HMAC-
+-- SHA256, per-user salt, both stored as hex text. Verified constant-time; never logged.
+ALTER TABLE roster_user ADD COLUMN IF NOT EXISTS pw_hash TEXT;
+ALTER TABLE roster_user ADD COLUMN IF NOT EXISTS pw_salt TEXT;
+-- SAVED SEARCHES: a signed-in user's query history (auto-recorded by the FE on each search).
+CREATE TABLE IF NOT EXISTS roster_saved_search (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    query       TEXT NOT NULL,
+    mode        TEXT NOT NULL DEFAULT 'research',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_rss_user ON roster_saved_search (user_id, created_at DESC);
+-- SHORTLIST BUCKETS: custom named buckets to collect people & jobs across searches.
+CREATE TABLE IF NOT EXISTS roster_bucket (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_rb_user ON roster_bucket (user_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS roster_bucket_item (
+    id          BIGSERIAL PRIMARY KEY,
+    bucket_id   BIGINT NOT NULL REFERENCES roster_bucket(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL,            -- 'person' | 'job'
+    ref_id      TEXT NOT NULL,            -- entity_id (person) or job id
+    label       TEXT,                     -- display name captured at save time
+    payload     JSONB,                    -- snapshot (blurb/url/etc) so it survives source drift
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (bucket_id, kind, ref_id)
+);
+CREATE INDEX IF NOT EXISTS idx_rbi_bucket ON roster_bucket_item (bucket_id, created_at DESC);
 """
 
 _MAX_TOKENS_PER_USER = 10   # prune oldest beyond this (a lost device's token eventually ages out)
@@ -83,6 +115,28 @@ _NPI_API = "https://npiregistry.cms.hhs.gov/api/?version=2.1&number="
 
 def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+import hmac as _hmac   # noqa: E402
+
+_PBKDF2_ITER = 240_000
+
+
+def hash_password(password: str) -> tuple[str, str]:
+    """(pw_hash_hex, pw_salt_hex) via PBKDF2-HMAC-SHA256, 240k iters, 16-byte random salt."""
+    salt = secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _PBKDF2_ITER)
+    return dk.hex(), salt.hex()
+
+
+def verify_password(password: str, pw_hash_hex: str, pw_salt_hex: str) -> bool:
+    """Constant-time verify. Always runs the KDF (caller passes a dummy salt for unknown users)."""
+    try:
+        salt = bytes.fromhex(pw_salt_hex or "00" * 16)
+    except ValueError:
+        salt = b"\x00" * 16
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _PBKDF2_ITER)
+    return _hmac.compare_digest(dk.hex(), pw_hash_hex or "")
 
 
 async def verify_npi(npi: str) -> bool:
@@ -130,11 +184,20 @@ class AccountStore:
             await conn.execute(_DDL)
         self._ready = True
 
+    async def email_exists(self, email: str) -> bool:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            return bool(await conn.fetchval(
+                "SELECT 1 FROM roster_user WHERE vertical=$1 AND email=$2",
+                self._vertical, email.lower().strip()))
+
     async def register(self, *, email: str, name: str, profession: str = "", country: str = "",
-                       npi: str = "", npi_verified: bool = False,
-                       disclaimer_ack: bool = False) -> tuple[dict[str, Any], str]:
+                       npi: str = "", npi_verified: bool = False, disclaimer_ack: bool = False,
+                       pw_hash: str = "", pw_salt: str = "") -> tuple[dict[str, Any], str]:
         """Upsert-on-email; rotates the token every call (re-registering re-claims the account —
-        acceptable at alpha, see module docstring). Returns (public user dict, RAW token — shown once)."""
+        acceptable at alpha, see module docstring). Password (optional) is stored only when supplied,
+        and never overwritten with blanks on a later token-only re-register. Returns (public user
+        dict, RAW token — shown once)."""
         await self._ensure()
         pool = await self._get_pool()
         token = secrets.token_urlsafe(32)
@@ -142,18 +205,22 @@ class AccountStore:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """INSERT INTO roster_user (id, vertical, email, name, profession, country, npi,
-                                            npi_verified, token_hash, disclaimer_ack_at)
-                   VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,''),$8,$9, CASE WHEN $10 THEN now() END)
+                                            npi_verified, token_hash, disclaimer_ack_at, pw_hash, pw_salt)
+                   VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,''),$8,$9, CASE WHEN $10 THEN now() END,
+                           NULLIF($11,''), NULLIF($12,''))
                    ON CONFLICT (vertical, email) DO UPDATE SET
                      name=EXCLUDED.name, profession=EXCLUDED.profession, country=EXCLUDED.country,
                      npi=COALESCE(EXCLUDED.npi, roster_user.npi),
                      npi_verified=(roster_user.npi_verified OR EXCLUDED.npi_verified),
                      token_hash=EXCLUDED.token_hash,
                      disclaimer_ack_at=COALESCE(roster_user.disclaimer_ack_at, EXCLUDED.disclaimer_ack_at),
+                     pw_hash=COALESCE(EXCLUDED.pw_hash, roster_user.pw_hash),
+                     pw_salt=COALESCE(EXCLUDED.pw_salt, roster_user.pw_salt),
                      last_seen=now()
                    RETURNING id, email, name, profession, country, npi_verified, created_at""",
                 uid, self._vertical, email.lower().strip(), name.strip(), profession.strip(),
-                country.strip(), npi.strip(), npi_verified, _hash(token), disclaimer_ack)
+                country.strip(), npi.strip(), npi_verified, _hash(token), disclaimer_ack,
+                pw_hash, pw_salt)
         # PER-DEVICE: this registration's token is ADDED to the user's active set (the legacy
         # column above still rotates for back-compat, but auth checks this table first — so the
         # previous device's token, if it's in the table, keeps working).
@@ -285,3 +352,130 @@ class AccountStore:
                 """INSERT INTO roster_user_pref (user_id, key, value) VALUES ($1,$2,$3)
                    ON CONFLICT (user_id, key) DO UPDATE SET value=EXCLUDED.value,
                    updated_at=now()""", user_id, key[:64], (value or "")[:200])
+
+    # ---- password login (email + password → fresh per-device token) ----
+    async def login(self, *, email: str, password: str) -> tuple[dict[str, Any], str] | None:
+        """Verify email+password (constant-time) and issue a new token. None on bad credentials or
+        an account with no password set (token-only legacy user). Never logs the password."""
+        await self._ensure()
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """SELECT id, email, name, profession, country, npi_verified, pw_hash, pw_salt
+                   FROM roster_user WHERE vertical=$1 AND email=$2""",
+                self._vertical, email.lower().strip())
+        # run the KDF even when the user is unknown / passwordless to avoid timing enumeration
+        ok = verify_password(password, (row["pw_hash"] if row else "") or "",
+                             (row["pw_salt"] if row else "") or "")
+        if not row or not row["pw_hash"] or not ok:
+            return None
+        token = secrets.token_urlsafe(32)
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO roster_user_token (token_hash, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING",
+                _hash(token), row["id"])
+            await conn.execute(
+                """DELETE FROM roster_user_token WHERE user_id=$1 AND token_hash NOT IN (
+                     SELECT token_hash FROM roster_user_token WHERE user_id=$1
+                     ORDER BY created_at DESC LIMIT $2)""", row["id"], _MAX_TOKENS_PER_USER)
+            await conn.execute("UPDATE roster_user SET last_seen=now() WHERE id=$1", row["id"])
+        user = {"id": row["id"], "email": row["email"], "name": row["name"],
+                "profession": row["profession"], "country": row["country"], "verified": row["npi_verified"]}
+        return user, token
+
+    async def logout(self, token: str) -> None:
+        if not token:
+            return
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            await conn.execute("DELETE FROM roster_user_token WHERE token_hash=$1", _hash(token))
+
+    # ---- saved searches ----
+    async def add_search(self, user_id: str, query: str, mode: str = "research") -> None:
+        q = (query or "").strip()
+        if not q:
+            return
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            last = await conn.fetchval(
+                "SELECT query FROM roster_saved_search WHERE user_id=$1 ORDER BY created_at DESC LIMIT 1",
+                user_id)
+            if last != q[:2000]:   # skip consecutive duplicate re-runs
+                await conn.execute(
+                    "INSERT INTO roster_saved_search (user_id, query, mode) VALUES ($1,$2,$3)",
+                    user_id, q[:2000], (mode or "research")[:24])
+
+    async def list_searches(self, user_id: str, *, limit: int = 200) -> list[dict]:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, query, mode, created_at FROM roster_saved_search "
+                "WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2", user_id, int(limit))
+        return [{"id": r["id"], "query": r["query"], "mode": r["mode"],
+                 "at": r["created_at"].isoformat()} for r in rows]
+
+    # ---- shortlist buckets ----
+    async def list_buckets(self, user_id: str) -> list[dict]:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT b.id, b.name, b.created_at, count(i.id) n
+                   FROM roster_bucket b LEFT JOIN roster_bucket_item i ON i.bucket_id=b.id
+                   WHERE b.user_id=$1 GROUP BY b.id ORDER BY b.created_at DESC""", user_id)
+        return [{"id": r["id"], "name": r["name"], "count": r["n"],
+                 "at": r["created_at"].isoformat()} for r in rows]
+
+    async def create_bucket(self, user_id: str, name: str) -> dict:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            bid = await conn.fetchval(
+                "INSERT INTO roster_bucket (user_id, name) VALUES ($1,$2) RETURNING id",
+                user_id, (name or "").strip()[:120])
+        return {"id": bid, "name": (name or "").strip()[:120], "count": 0}
+
+    async def delete_bucket(self, user_id: str, bucket_id: int) -> bool:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            res = await conn.execute(
+                "DELETE FROM roster_bucket WHERE id=$1 AND user_id=$2", int(bucket_id), user_id)
+        return res.endswith(" 1")
+
+    async def _owns_bucket(self, conn, user_id: str, bucket_id: int) -> bool:
+        return bool(await conn.fetchval(
+            "SELECT 1 FROM roster_bucket WHERE id=$1 AND user_id=$2", int(bucket_id), user_id))
+
+    async def list_items(self, user_id: str, bucket_id: int) -> list[dict] | None:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            if not await self._owns_bucket(conn, user_id, bucket_id):
+                return None
+            rows = await conn.fetch(
+                "SELECT id, kind, ref_id, label, payload, created_at FROM roster_bucket_item "
+                "WHERE bucket_id=$1 ORDER BY created_at DESC", int(bucket_id))
+        return [{"id": r["id"], "kind": r["kind"], "ref_id": r["ref_id"], "label": r["label"],
+                 "payload": json.loads(r["payload"]) if r["payload"] else None,
+                 "at": r["created_at"].isoformat()} for r in rows]
+
+    async def add_item(self, user_id: str, bucket_id: int, *, kind: str, ref_id: str,
+                       label: str = "", payload: dict | None = None) -> bool:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            if not await self._owns_bucket(conn, user_id, bucket_id):
+                return False
+            await conn.execute(
+                """INSERT INTO roster_bucket_item (bucket_id, kind, ref_id, label, payload)
+                   VALUES ($1,$2,$3,$4,$5)
+                   ON CONFLICT (bucket_id, kind, ref_id)
+                   DO UPDATE SET label=EXCLUDED.label, payload=EXCLUDED.payload""",
+                int(bucket_id), kind, ref_id[:200], (label or "")[:300],
+                json.dumps(payload) if payload else None)
+        return True
+
+    async def delete_item(self, user_id: str, bucket_id: int, item_id: int) -> bool:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            res = await conn.execute(
+                """DELETE FROM roster_bucket_item i USING roster_bucket b
+                   WHERE i.id=$1 AND i.bucket_id=b.id AND b.id=$2 AND b.user_id=$3""",
+                int(item_id), int(bucket_id), user_id)
+        return res.endswith(" 1")

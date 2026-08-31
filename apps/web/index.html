@@ -89,6 +89,13 @@
     cursor:pointer;background:transparent;border:1px solid var(--hair);border-radius:8px;
     padding:.34rem .7rem;color:var(--muted);text-transform:uppercase;}
   .histbtn:hover{color:var(--ink);border-color:var(--muted);}
+  .rsave{display:none;cursor:pointer;background:transparent;border:1px solid var(--hair);border-radius:6px;
+    font-size:.7rem;padding:.1rem .4rem;color:var(--muted);margin-left:.4rem;}
+  body.logged-in .rsave{display:inline-flex;}
+  .rsave:hover{color:var(--ink);border-color:var(--muted);}
+  .rsave.saved{color:var(--gold);border-color:rgba(var(--gold-rgb),.5);}
+  #bucketpick .pickrow{cursor:pointer;padding:.28rem .3rem;border-radius:6px;font-size:.82rem;}
+  #bucketpick .pickrow:hover{background:var(--hair);}
   .newbtn{color:var(--gold);border-color:rgba(var(--gold-rgb),.5);}
   .newbtn:hover{color:var(--on-accent);background:var(--gold);border-color:var(--gold);}
 
@@ -1408,6 +1415,7 @@
     <a class="histbtn" href="/explorer" style="margin-left:0;text-decoration:none;" title="Interactive graph of the grounded claim graph">◍ Explorer</a>
     <a class="histbtn" href="/crossviews" style="margin-left:0;text-decoration:none;" title="Design a grounded cross-view table — every cell click-to-source">◍ Crossviews</a>
     <a class="histbtn" href="/admin" style="margin-left:0;text-decoration:none;">Coverage</a>
+    <button type="button" class="histbtn" id="savedbtn" style="margin-left:0;" hidden title="Your shortlisted people & jobs and saved searches">◈ Saved</button>
     <button type="button" class="histbtn" id="vidbtn" style="margin-left:0;">Videos</button>
     <button type="button" class="histbtn" id="histbtn" style="margin-left:0;">Past Sessions</button>
     <button type="button" class="histbtn setbtn" id="setbtn" style="margin-left:0;" title="Product settings (admin)" aria-label="Product settings">⚙</button>
@@ -1576,8 +1584,12 @@
     <svg class="idlogo" viewBox="0 0 220 132" role="img" aria-label="Roster"><use href="#roster-logo"/></svg>
     <h2>Welcome to Roster</h2>
     <p>Tell us who you are, so your questions are saved to your name.</p>
-    <input id="idname" type="text" placeholder="Full name" autocomplete="name" />
+    <input id="idname" type="text" placeholder="Full name (optional)" autocomplete="name" />
     <input id="idemail" type="email" placeholder="Email" autocomplete="email" />
+    <input id="idpassword" type="password" placeholder="Password (min 12 characters)" autocomplete="current-password" hidden />
+    <div class="idtoggle" id="idtoggle" hidden style="font-size:.8rem;margin:.2rem 0 .1rem;">
+      <a href="#" id="idswitch" style="color:var(--accent,#6a5acd);text-decoration:none;">Already have an account? Sign in</a>
+    </div>
     <div class="idextra" id="idextra" hidden>
       <select id="idprof" aria-label="Profession">
         <option value="">Profession…</option>
@@ -1597,6 +1609,34 @@
     <div class="iderr" id="iderr"></div>
     <div class="iddisc" id="iddisc" hidden></div>
     <button type="button" class="idgo" id="idgo">I understand — continue</button>
+  </div>
+</div>
+
+<!-- Saved: shortlist buckets (people & jobs) + saved searches -->
+<div class="idmodal" id="savedmodal" hidden>
+  <div class="idcard" style="max-width:640px;width:92%;text-align:left;max-height:82vh;overflow:auto;">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <h2 style="margin:0;">Your Roster</h2>
+      <button type="button" class="histbtn" id="savedclose">Close</button>
+    </div>
+    <div id="savedbody" style="margin-top:.6rem;">
+      <div style="display:flex;gap:.4rem;margin:.4rem 0;">
+        <input id="newbucket" type="text" placeholder="New bucket name (e.g. ML hires)" style="flex:1;" />
+        <button type="button" class="idgo" id="newbucketgo" style="width:auto;padding:.4rem .8rem;">Add bucket</button>
+      </div>
+      <div id="bucketlist"></div>
+      <h3 style="margin:1rem 0 .3rem;font-size:.9rem;">Recent searches</h3>
+      <div id="searchlist" style="font-size:.85rem;"></div>
+    </div>
+  </div>
+</div>
+<!-- bucket picker popover (opened by a card's ＋ Save) -->
+<div id="bucketpick" hidden style="position:fixed;z-index:9999;background:var(--bg,#fff);border:1px solid var(--muted,#ccc);border-radius:8px;padding:.5rem;box-shadow:0 6px 24px rgba(0,0,0,.18);min-width:220px;max-height:300px;overflow:auto;">
+  <div style="font-size:.72rem;color:var(--muted);margin-bottom:.3rem;">Save to bucket</div>
+  <div id="pickrows"></div>
+  <div style="display:flex;gap:.3rem;margin-top:.4rem;">
+    <input id="pickname" type="text" placeholder="New bucket…" style="flex:1;font-size:.8rem;" />
+    <button type="button" id="pickadd" class="histbtn">＋</button>
   </div>
 </div>
 
@@ -1827,13 +1867,16 @@ async function loadConfig(){
     maybeShowPulseBell();
     DYN_ENGINES = !!c.dynamic_engines_enabled;
     if(ACCOUNTS_ENABLED){
-      const ex = $("#idextra"); if(ex) ex.hidden = false;   // reveal profession/NPI/country in the gate
+      const pw = $("#idpassword"); if(pw) pw.hidden = false;   // reveal password (register/sign-in)
+      const tg = $("#idtoggle"); if(tg) tg.hidden = false;
+      if(typeof updateAuthUI === "function") updateAuthUI();
       // an existing local-only user predates accounts → ask them to register once (prefilled)
       if(USER && USER.email && !USER.token){
         if(USER.name) $("#idname").value = USER.name;
         if(USER.email) $("#idemail").value = USER.email;
         $("#idmodal").hidden = false;
       }
+      if(USER && USER.token && typeof maybeShowSavedBtn === "function") maybeShowSavedBtn();
     }
     PANEL_SPECIALISTS = c.panel_specialists || [];
     PANEL_EXAMPLES = c.panel_examples || [];
@@ -1932,8 +1975,10 @@ function jobsMarkup(d){
     const loc = j.location?`<span class="ppl-tag">${esc(j.location)}</span>`:"";
     const dept = j.department?`<span class="ppl-tag">${esc(j.department)}</span>`:"";
     const apply = j.url?`<a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer">Apply ↗</a>`:"";
+    const jref = j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||""));
+    const jsave = `<button type="button" class="rsave" data-kind="job" data-ref="${esc(String(jref))}" data-label="${esc(j.title||"")}" data-sub="${esc(((j.company||"").replace(/_/g," "))+(j.location?" · "+j.location:""))}" data-url="${esc(j.url||"")}" title="Save to a bucket">＋ Save</button>`;
     return `<div class="ppl-card"><span class="ppl-body">
-      <span class="ppl-name">${esc(j.title)}</span>
+      <span class="ppl-name">${esc(j.title)}</span>${jsave}
       <span class="ppl-blurb">${co}${j.source?` · via ${esc(j.source)}`:""}</span>
       ${loc||dept?`<span class="ppl-tags">${loc}${dept}</span>`:""}
       ${apply?`<span class="ppl-links">${apply}</span>`:""}</span></div>`;
@@ -1974,9 +2019,10 @@ function peopleRowsMarkup(data){
     // Name links to a real profile: the citation URL if it is one, else the person's best public
     // link (LinkedIn/X/GitHub, server-ordered). Never a bare provenance tag. Plain text if neither.
     const profileUrl = citeUrl || ((p.links&&p.links[0]&&p.links[0].url)||"");
-    const nameHtml = profileUrl
+    const saveBtn = `<button type="button" class="rsave" data-kind="person" data-ref="${esc(p.entity_id||p.name||"")}" data-label="${esc(p.name||"")}" data-sub="${esc((p.blurb||"").slice(0,140))}" data-url="${esc(profileUrl||"")}" title="Save to a bucket">＋ Save</button>`;
+    const nameHtml = (profileUrl
       ? `<a class="ppl-name" href="${esc(profileUrl)}" target="_blank" rel="noopener noreferrer">${esc(p.name)}<span class="ppl-ext">↗</span></a>`
-      : `<span class="ppl-name">${esc(p.name)}</span>`;
+      : `<span class="ppl-name">${esc(p.name)}</span>`) + saveBtn;
     return `<div class="ppl-card">${avatar}
       <span class="ppl-body">
         ${nameHtml}
@@ -4892,6 +4938,7 @@ async function askQuestion(question, opts){
     return;
   }
   CURRENT_Q = question;
+  autoSaveSearch(question, "search");   // signed-in → record to the user's search history (fire-and-forget)
   // JOBS MODE (flag): a job-intent query ("… jobs/roles/positions/hiring/careers …") searches open
   // roles from public ATS boards and renders apply-linked job cards instead of a people/research answer.
   if((/\b(jobs?|hiring|openings?|positions?|careers?|vacanc|apply)\b|\bopen roles?\b/i.test(question)) && await runJobs(question)){
@@ -5902,35 +5949,177 @@ function initIdentity(){
     $("#idmodal").hidden = false; setTimeout(()=>$("#idname").focus(), 60);
   }
 }
+// AUTH: register (create account w/ password) vs login (returning user). Password >=12 is enforced
+// server-side too; the FE check is just a fast affordance. authHeaders() attaches the bearer token.
+let AUTH_MODE = "register";
+function authHeaders(){ return (USER && USER.token) ? {"X-Roster-Token": USER.token} : {}; }
+function updateAuthUI(){
+  if(!ACCOUNTS_ENABLED) return;
+  const go = $("#idgo"), sw = $("#idswitch"), nm = $("#idname");
+  if(go) go.textContent = (AUTH_MODE === "login") ? "Sign in" : "Create account";
+  if(sw) sw.textContent = (AUTH_MODE === "login") ? "New here? Create an account" : "Already have an account? Sign in";
+  if(nm) nm.hidden = (AUTH_MODE === "login");   // name only matters when creating an account
+}
+{
+  const sw = $("#idswitch");
+  if(sw) sw.addEventListener("click", (e)=>{ e.preventDefault();
+    AUTH_MODE = (AUTH_MODE === "login") ? "register" : "login"; $("#iderr").textContent = ""; updateAuthUI(); });
+}
 $("#idgo").addEventListener("click", async ()=>{
   const name = $("#idname").value.trim(), email = $("#idemail").value.trim();
-  if(name.length < 2){ $("#iderr").textContent = "Please enter your name."; return; }
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ $("#iderr").textContent = "Please enter a valid email."; return; }
-  // clicking "I understand — continue" is the attestation: record acceptance of the disclaimer terms
-  USER = {name, email, disclaimer_ack: true, disclaimer_ack_at: new Date().toISOString()};
-  // accounts flag on → register server-side (free account tier). Fail-open: a registration
-  // error never blocks use — the local identity still works; they can re-try from the gate later.
+
+  // ---- accounts ON: password register / login (the primary path for Roster) ----
   if(ACCOUNTS_ENABLED){
-    const btn = $("#idgo"), was = btn.textContent; btn.textContent = "Registering…"; btn.disabled = true;
+    const password = ($("#idpassword").value || "");
+    if(password.length < 12){ $("#iderr").textContent = "Password must be at least 12 characters."; return; }
+    const btn = $("#idgo"), was = btn.textContent; btn.textContent = "…"; btn.disabled = true;
+    $("#iderr").textContent = "";
     try{
-      const r = await fetch("/auth/register", {method:"POST", headers:{"content-type":"application/json"},
-        body: JSON.stringify({name, email, profession: ($("#idprof")||{}).value || "",
-          country: ($("#idcountry")||{}).value || "", npi: (($("#idnpi")||{}).value || "").trim(),
-          disclaimer_ack: true})});
-      if(r.ok){
-        const d = await r.json();
-        USER.token = d.token; USER.verified = !!(d.user && d.user.verified);
-        USER.profession = (d.user && d.user.profession) || "";
+      const url = (AUTH_MODE === "login") ? "/auth/login" : "/auth/register";
+      const body = (AUTH_MODE === "login") ? {email, password} : {email, password, name};
+      const r = await fetch(url, {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(body)});
+      if(!r.ok){
+        let msg = (AUTH_MODE === "login") ? "Incorrect email or password." : "Could not create account.";
+        try{ const e = await r.json(); if(e && e.detail) msg = e.detail; }catch(_){}
+        $("#iderr").textContent = msg; btn.textContent = was; btn.disabled = false; return;
       }
-    }catch(e){ /* offline/server issue — proceed local-only */ }
+      const d = await r.json();
+      USER = {name: (d.user && d.user.name) || name || email.split("@")[0], email,
+              token: d.token, verified: !!(d.user && d.user.verified),
+              disclaimer_ack: true, disclaimer_ack_at: new Date().toISOString()};
+    }catch(e){ $("#iderr").textContent = "Network error — try again."; btn.textContent = was; btn.disabled = false; return; }
     btn.textContent = was; btn.disabled = false;
+    localStorage.setItem("roster_user", JSON.stringify(USER));
+    $("#idmodal").hidden = true;
+    maybeShowPulseBell(); maybeShowSavedBtn();
+    if(PULSE_REAUTH && USER && USER.token){ PULSE_REAUTH = false; openPulsePage(); }
+    return;
   }
+
+  // ---- accounts OFF: legacy local identity (name + email, no password) ----
+  if(name.length < 2){ $("#iderr").textContent = "Please enter your name."; return; }
+  USER = {name, email, disclaimer_ack: true, disclaimer_ack_at: new Date().toISOString()};
   localStorage.setItem("roster_user", JSON.stringify(USER));
   $("#idmodal").hidden = true;
-  maybeShowPulseBell();          // token may have just landed — arm the Pulse bell
-  if(PULSE_REAUTH && USER && USER.token){ PULSE_REAUTH = false; openPulsePage(); }
+  maybeShowPulseBell();
 });
 $("#idmodal").addEventListener("keydown", e=>{ if(e.key==="Enter") $("#idgo").click(); });
+
+// ===== Accounts: saved searches + shortlist buckets =====
+function loggedIn(){ return !!(ACCOUNTS_ENABLED && USER && USER.token); }
+function maybeShowSavedBtn(){
+  const on = loggedIn();
+  const b = $("#savedbtn"); if(b) b.hidden = !on;
+  document.body.classList.toggle("logged-in", on);
+}
+async function autoSaveSearch(query, mode){
+  if(!loggedIn() || !query) return;
+  try{ await fetch("/me/searches", {method:"POST",
+    headers:{"content-type":"application/json", ...authHeaders()},
+    body: JSON.stringify({query, mode: mode||"research"})}); }catch(e){}
+}
+// ---- Saved panel ----
+async function openSaved(){
+  if(!loggedIn()) return;
+  $("#savedmodal").hidden = false;
+  await renderBuckets(); await renderSearches();
+}
+async function renderBuckets(){
+  const el = $("#bucketlist"); el.innerHTML = "<div style='color:var(--muted);font-size:.82rem;'>Loading…</div>";
+  try{
+    const r = await fetch("/me/buckets", {headers: authHeaders()});
+    const d = await r.json(); const bs = d.buckets||[];
+    if(!bs.length){ el.innerHTML = "<div style='color:var(--muted);font-size:.82rem;'>No buckets yet — create one above, then use ＋ Save on any person or job.</div>"; return; }
+    el.innerHTML = bs.map(b=>`<div class="bkt" data-id="${b.id}" style="border:1px solid var(--hair);border-radius:8px;padding:.5rem;margin:.35rem 0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <b style="cursor:pointer;" class="bkt-toggle">${esc(b.name)} <span style="color:var(--muted);font-weight:400;">(${b.count})</span></b>
+        <button class="histbtn bkt-del" data-id="${b.id}" title="Delete bucket">✕</button>
+      </div><div class="bkt-items" hidden style="margin-top:.4rem;"></div></div>`).join("");
+  }catch(e){ el.innerHTML = "<div style='color:var(--muted)'>Could not load buckets.</div>"; }
+}
+async function renderSearches(){
+  const el = $("#searchlist");
+  try{
+    const r = await fetch("/me/searches", {headers: authHeaders()});
+    const d = await r.json(); const ss = d.searches||[];
+    el.innerHTML = ss.length ? ss.slice(0,40).map(s=>`<div class="srow" data-q="${esc(s.query)}" style="cursor:pointer;padding:.2rem 0;color:var(--muted);">↻ ${esc(s.query)}</div>`).join("")
+      : "<div style='color:var(--muted)'>No searches yet.</div>";
+  }catch(e){ el.innerHTML = ""; }
+}
+async function loadItems(bktEl){
+  const id = bktEl.dataset.id, box = bktEl.querySelector(".bkt-items");
+  box.innerHTML = "Loading…";
+  try{
+    const r = await fetch(`/me/buckets/${id}/items`, {headers: authHeaders()});
+    const d = await r.json(); const items = d.items||[];
+    box.innerHTML = items.length ? items.map(it=>{
+      const p = it.payload||{}; const url = p.url||"";
+      const title = url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(it.label||it.ref_id)} ↗</a>` : esc(it.label||it.ref_id);
+      return `<div style="display:flex;justify-content:space-between;gap:.5rem;padding:.2rem 0;font-size:.82rem;">
+        <span>${it.kind==="job"?"💼":"👤"} ${title}${p.sub?` <span style='color:var(--muted)'>— ${esc(p.sub)}</span>`:""}</span>
+        <button class="histbtn item-del" data-b="${id}" data-i="${it.id}">✕</button></div>`;
+    }).join("") : "<div style='color:var(--muted);font-size:.8rem;'>Empty.</div>";
+  }catch(e){ box.innerHTML = ""; }
+}
+$("#savedbtn") && $("#savedbtn").addEventListener("click", openSaved);
+$("#savedclose") && $("#savedclose").addEventListener("click", ()=>{ $("#savedmodal").hidden = true; });
+$("#newbucketgo") && $("#newbucketgo").addEventListener("click", async ()=>{
+  const name = $("#newbucket").value.trim(); if(!name) return;
+  await fetch("/me/buckets", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({name})});
+  $("#newbucket").value = ""; await renderBuckets();
+});
+$("#bucketlist") && $("#bucketlist").addEventListener("click", async (e)=>{
+  const del = e.target.closest(".bkt-del"), tog = e.target.closest(".bkt-toggle"), idel = e.target.closest(".item-del");
+  if(del){ if(confirm("Delete this bucket and its items?")){ await fetch(`/me/buckets/${del.dataset.id}`, {method:"DELETE", headers: authHeaders()}); await renderBuckets(); } return; }
+  if(idel){ await fetch(`/me/buckets/${idel.dataset.b}/items/${idel.dataset.i}`, {method:"DELETE", headers: authHeaders()}); const bk = idel.closest(".bkt"); await loadItems(bk); return; }
+  if(tog){ const bk = tog.closest(".bkt"); const box = bk.querySelector(".bkt-items"); box.hidden = !box.hidden; if(!box.hidden) await loadItems(bk); }
+});
+$("#searchlist") && $("#searchlist").addEventListener("click", (e)=>{
+  const row = e.target.closest(".srow"); if(!row) return;
+  $("#savedmodal").hidden = true; const box = $("#q"); if(box){ box.value = row.dataset.q; box.focus(); }
+});
+
+// ---- Bucket picker popover (from a card's ＋ Save) ----
+let PICK_ITEM = null;
+function openBucketPicker(anchor, item){
+  if(!loggedIn()){ $("#idmodal").hidden = false; return; }
+  PICK_ITEM = item;
+  const pop = $("#bucketpick"); const r = anchor.getBoundingClientRect();
+  pop.style.left = Math.min(r.left, window.innerWidth-240)+"px";
+  pop.style.top = (r.bottom+6)+"px"; pop.hidden = false;
+  const rows = $("#pickrows"); rows.innerHTML = "Loading…";
+  fetch("/me/buckets", {headers: authHeaders()}).then(r=>r.json()).then(d=>{
+    const bs = d.buckets||[];
+    rows.innerHTML = bs.length ? bs.map(b=>`<div class="pickrow" data-id="${b.id}">${esc(b.name)} <span style='color:var(--muted)'>(${b.count})</span></div>`).join("")
+      : "<div style='color:var(--muted);font-size:.78rem;'>No buckets — name one below.</div>";
+  }).catch(()=>{ rows.innerHTML = ""; });
+}
+async function addToBucket(bucketId){
+  if(!PICK_ITEM) return;
+  await fetch(`/me/buckets/${bucketId}/items`, {method:"POST",
+    headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(PICK_ITEM)});
+  $("#bucketpick").hidden = true;
+  if(PICK_ITEM._btn){ PICK_ITEM._btn.classList.add("saved"); PICK_ITEM._btn.textContent = "✓ Saved"; }
+}
+$("#pickrows") && $("#pickrows").addEventListener("click", (e)=>{ const row = e.target.closest(".pickrow"); if(row) addToBucket(row.dataset.id); });
+$("#pickadd") && $("#pickadd").addEventListener("click", async ()=>{
+  const name = $("#pickname").value.trim(); if(!name) return;
+  const r = await fetch("/me/buckets", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({name})});
+  const b = await r.json(); $("#pickname").value = ""; if(b && b.id) addToBucket(b.id);
+});
+document.addEventListener("click", (e)=>{   // dismiss picker on outside click
+  const pop = $("#bucketpick"); if(pop.hidden) return;
+  if(!pop.contains(e.target) && !e.target.closest(".rsave")) pop.hidden = true;
+});
+// delegated: any card's ＋ Save button opens the picker with that card's item payload
+document.addEventListener("click", (e)=>{
+  const btn = e.target.closest(".rsave"); if(!btn) return;
+  e.preventDefault(); e.stopPropagation();
+  const d = btn.dataset;
+  openBucketPicker(btn, {kind:d.kind, ref_id:d.ref, label:d.label,
+    payload:{sub:d.sub||"", url:d.url||""}, _btn:btn});
+});
 
 // ---- product settings (⚙, password-gated): live flag toggles served by /admin/settings ----
 const SET_LABELS = {
@@ -6165,6 +6354,7 @@ $("#grclose").addEventListener("click", () => { $("#graphmodal").hidden = true; 
 $("#graphmodal").addEventListener("click", e => { if(e.target === $("#graphmodal")) $("#graphmodal").hidden = true; });
 
 initIdentity();
+maybeShowSavedBtn();   // reveal ◈ Saved + enable ＋ Save on cards when already signed in
 function routeHash(){    // #s/<id> → Q&A answer/thread · #p/<id> → panel session page · #sessions/#panel
   const mp = location.hash.match(/^#p\/(.+)$/);
   const m = location.hash.match(/^#s\/(.+)$/);
