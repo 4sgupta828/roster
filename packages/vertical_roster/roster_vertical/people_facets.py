@@ -111,9 +111,12 @@ Normalize synonyms to canonical snake_case values, e.g.:
 - stage (the EMPLOYER's company STAGE — NOT an industry): "startup"/"startups"/"early-stage"/"seed"/
   "pre-seed"/"YC companies"/"early stage" → ["startup"]; "public companies"/"publicly traded"/"Fortune
   500"/"big tech"/"large enterprise"/"public company" → ["public"]. IMPORTANT: "startup"/"startups" is a
-  STAGE, NEVER an `industry` — do NOT emit industry=["startups"] (there is no such sector). "CEOs of
-  startups" → {{"role": ["founder"], "seniority": ["c_level"], "stage": ["startup"]}} (a startup CEO is a
-  founder; the stage carries "startup").
+  STAGE, NEVER an `industry` — do NOT emit industry=["startups"] (there is no such sector). "CEO"/"chief
+  executive"/"chief X officer" is a LEVEL → seniority=["c_level"], NOT a role — do NOT emit
+  role=["founder"] for a CEO (a public-company CEO is usually NOT a founder). Only the word
+  "founder(s)"/"co-founder(s)" → role=["founder"]. Examples: "CEOs of startups" → {{"seniority":
+  ["c_level"], "stage": ["startup"]}}; "CEOs of public companies" → {{"seniority": ["c_level"], "stage":
+  ["public"]}}; "startup founders" → {{"role": ["founder"], "stage": ["startup"]}}.
 - company: a specific employer → its CANONICAL lowercased short name — drop legal suffixes (Inc, LLC,
   Corp, Platforms) and apply known aliases: "Facebook"/"Meta Platforms" → ["meta"]; "Alphabet"/"Google
   LLC" → ["google"]; "Twitter" → ["x"]; "AWS" → ["amazon"]. E.g. "at Stripe" → {{"company": ["stripe"]}}.
