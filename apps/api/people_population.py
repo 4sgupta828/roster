@@ -41,6 +41,7 @@ class _FacetParse(BaseModel):
     worked_at: list[str] = []
     country: list[str] = []
     state: list[str] = []
+    stage: list[str] = []
     person: str = ""
     person_context: str = ""
 

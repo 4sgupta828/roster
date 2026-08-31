@@ -12,7 +12,7 @@ from __future__ import annotations
 # display-only stored facet (the raw bio) and is DELIBERATELY excluded here — the model kept mis-filing
 # job titles into `title` instead of `role`, so it is not an emit option.
 PEOPLE_FACET_KEYS = ("role", "seniority", "function", "industry", "metro", "company", "worked_at",
-                     "country", "state")
+                     "country", "state", "stage")
 
 _ROLE = ("software_engineer", "ml_engineer", "system_architect", "solutions_architect", "data_scientist",
          "data_engineer", "research_scientist", "product_manager", "sre", "security_engineer",
@@ -108,6 +108,12 @@ Normalize synonyms to canonical snake_case values, e.g.:
 - state (a US STATE named in the query — its 2-letter lowercased code): "California"/"Calif" → ["ca"];
   "New York State" → ["ny"]; "Texas" → ["tx"]; "Washington State" → ["wa"]; "Massachusetts" → ["ma"];
   "Illinois" → ["il"]; "Georgia" → ["ga"]; "Colorado" → ["co"]. A CITY is `metro`, not `state`.
+- stage (the EMPLOYER's company STAGE — NOT an industry): "startup"/"startups"/"early-stage"/"seed"/
+  "pre-seed"/"YC companies"/"early stage" → ["startup"]; "public companies"/"publicly traded"/"Fortune
+  500"/"big tech"/"large enterprise"/"public company" → ["public"]. IMPORTANT: "startup"/"startups" is a
+  STAGE, NEVER an `industry` — do NOT emit industry=["startups"] (there is no such sector). "CEOs of
+  startups" → {{"role": ["founder"], "seniority": ["c_level"], "stage": ["startup"]}} (a startup CEO is a
+  founder; the stage carries "startup").
 - company: a specific employer → its CANONICAL lowercased short name — drop legal suffixes (Inc, LLC,
   Corp, Platforms) and apply known aliases: "Facebook"/"Meta Platforms" → ["meta"]; "Alphabet"/"Google
   LLC" → ["google"]; "Twitter" → ["x"]; "AWS" → ["amazon"]. E.g. "at Stripe" → {{"company": ["stripe"]}}.
