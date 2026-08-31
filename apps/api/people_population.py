@@ -180,7 +180,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     # GEO narrowing FIRST (least semantic), then skill, then function/industry — keeping the meaning
     # (a sales/engineer intent) as long as possible, and never relaxing down to a geo/country-only
     # filter (which would return "everyone"). Returns the closest honest match + a note of what relaxed.
-    _TIERS = [("metro", "state"), ("skill",), ("function", "industry")]
+    _TIERS = [("industry", "metro", "state"), ("skill",), ("function",)]
     _GEO_ONLY = {"country", "state", "metro"}
     relaxed_from: list[str] = []
     if not rows:
