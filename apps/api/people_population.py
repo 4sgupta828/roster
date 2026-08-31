@@ -179,7 +179,12 @@ def _person_blurb(attrs: list[dict]) -> str:
     metro = g("metro")
 
     segs: list[str] = []
-    headline = " ".join(dict.fromkeys(x for x in [sen, role] if x))    # dedupe "Founder Founder"
+    # 'Mid'/'Junior'/'Entry' are noise as a headline word (and read as a fake title, e.g. "Mid at Acme").
+    # Only surface seniority when it's a DISTINGUISHING level; otherwise lead with the role/company.
+    _GENERIC_SEN = {"mid", "mid_level", "midlevel", "junior", "entry", "entry_level",
+                    "ic", "individual_contributor", ""}
+    sen_disp = "" if sen.lower().replace(" ", "_").replace("-", "_") in _GENERIC_SEN else sen
+    headline = " ".join(dict.fromkeys(x for x in [sen_disp, role] if x))    # dedupe "Founder Founder"
     if headline and comp:
         segs.append(f"{headline} at {comp}")
     elif headline:

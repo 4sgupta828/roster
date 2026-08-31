@@ -10,14 +10,14 @@
      Dark is opt-in via the bottom-left toggle. */
   :root{
     color-scheme:light;
-    --bg:#EEF3F8; --panel:#FFFFFF; --panel2:#F4F8FC; --ink:#132430; --muted:#5A6B7B;
-    --gold:#1568B5; --gold-strong:#0F5497; --gold-rgb:21,104,181; --verified:#137A54; --gap:#B26A1E;
-    --on-accent:#FFFFFF; --on-accent-rgb:255,255,255;   /* white text on the blue accent */
-    --hair:#D2DEEA; --hair-soft:rgba(19,36,48,.06);
-    --hl-f:17,122,84; --hl-r:176,120,40; --hl-k:37,99,175;   /* darker tints stay legible on white */
+    --bg:#F7F8FB; --panel:#FFFFFF; --panel2:#F1F3F9; --ink:#0E1726; --muted:#5B6675;
+    --gold:#4F46E5; --gold-strong:#4338CA; --gold-rgb:79,70,229; --verified:#0E9F6E; --gap:#C2701C;
+    --on-accent:#FFFFFF; --on-accent-rgb:255,255,255;   /* white text on the indigo accent */
+    --hair:#E4E7EE; --hair-soft:rgba(14,23,38,.05);
+    --hl-f:14,159,110; --hl-r:194,112,28; --hl-k:79,70,229;   /* darker tints stay legible on white */
     /* chart series colors — theme-tuned, validated (lightness band, chroma, CVD ΔE, contrast vs
        --panel2) so series stay tellable-apart in every theme; series 2-3 also carry a hatch texture */
-    --chart1:#1568B5; --chart2:#137A54; --chart3:#A4581B;
+    --chart1:#4F46E5; --chart2:#0E9F6E; --chart3:#A4581B;
     /* visual-diagram role palette: 6 tones, each a light node FILL (vzNf) + a strong same-hue BORDER
        (vzNs). Explicit pairs (not color-mix) so every browser/theme renders identically; labels stay
        --ink for AA contrast on the fill. Nodes colored by structure; edges stay calm gray. */
@@ -30,12 +30,12 @@
   /* DARK theme — the original branded look; opt-in. */
   :root[data-theme="dark"]{
     color-scheme:dark;
-    --bg:#060E1B; --panel:#0F1A2C; --panel2:#0C1524; --ink:#ECEBE3; --muted:#8B96A9;
-    --gold:#D3B37C; --gold-strong:#E7CB93; --gold-rgb:211,179,124; --verified:#57B891; --gap:#D6975A;
-    --on-accent:#1A1206; --on-accent-rgb:26,18,6;
-    --hair:#22304A; --hair-soft:rgba(255,255,255,.06);
-    --hl-f:87,184,145; --hl-r:211,179,124; --hl-k:110,160,224;
-    --chart1:#BA852B; --chart2:#2E9268; --chart3:#B5622F;
+    --bg:#0A0F1E; --panel:#131C30; --panel2:#0F1728; --ink:#EAECF2; --muted:#8B96A9;
+    --gold:#818CF8; --gold-strong:#A5B0FF; --gold-rgb:129,140,248; --verified:#4ADE9E; --gap:#E0A55E;
+    --on-accent:#0B1020; --on-accent-rgb:11,16,32;
+    --hair:#26314C; --hair-soft:rgba(255,255,255,.06);
+    --hl-f:74,222,158; --hl-r:224,165,94; --hl-k:129,140,248;
+    --chart1:#818CF8; --chart2:#4ADE9E; --chart3:#E0A55E;
     --vz0f:#12233E; --vz0s:#5F9BEE; --vz1f:#0F2A22; --vz1s:#4FC49A; --vz2f:#2E2114; --vz2s:#DB9B4F;
     --vz3f:#211A38; --vz3s:#AB8DF0; --vz4f:#301525; --vz4s:#ED6BA7; --vz5f:#0C2A30; --vz5s:#4FBAD0;
   }
@@ -85,17 +85,31 @@
   .vertical{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;
     letter-spacing:.14em;color:var(--gold);border:1px solid var(--hair);
     border-radius:999px;padding:.16rem .6rem;background:rgba(var(--gold-rgb),.06);}
-  .histbtn{margin-left:auto;font-family:var(--mono);font-size:.7rem;letter-spacing:.04em;
-    cursor:pointer;background:transparent;border:1px solid var(--hair);border-radius:8px;
-    padding:.34rem .7rem;color:var(--muted);text-transform:uppercase;}
-  .histbtn:hover{color:var(--ink);border-color:var(--muted);}
-  .rsave{display:none;cursor:pointer;background:transparent;border:1px solid var(--hair);border-radius:6px;
-    font-size:.7rem;padding:.1rem .4rem;color:var(--muted);margin-left:.4rem;}
-  body.logged-in .rsave{display:inline-flex;}
-  .rsave:hover{color:var(--ink);border-color:var(--muted);}
-  .rsave.saved{color:var(--gold);border-color:rgba(var(--gold-rgb),.5);}
-  #bucketpick .pickrow{cursor:pointer;padding:.28rem .3rem;border-radius:6px;font-size:.82rem;}
-  #bucketpick .pickrow:hover{background:var(--hair);}
+  .histbtn{margin-left:auto;font-family:var(--sans);font-size:.8rem;font-weight:550;letter-spacing:0;
+    cursor:pointer;background:transparent;border:1px solid var(--hair);border-radius:9px;
+    padding:.38rem .8rem;color:var(--muted);transition:all .13s;}
+  .histbtn:hover{color:var(--ink);border-color:var(--muted);background:var(--panel2);}
+  /* People / Jobs segmented mode toggle — one click, no ambiguity */
+  .pjmode{display:inline-flex;gap:.22rem;background:var(--panel2);border:1px solid var(--hair);
+    border-radius:999px;padding:.22rem;margin:0 0 1.05rem;}
+  .pjbtn{font-family:var(--sans);font-size:.87rem;font-weight:600;cursor:pointer;border:0;
+    background:transparent;color:var(--muted);padding:.42rem 1.15rem;border-radius:999px;transition:all .16s;}
+  .pjbtn:hover{color:var(--ink);}
+  .pjbtn.on{background:var(--gold);color:var(--on-accent);box-shadow:0 2px 9px -2px rgba(var(--gold-rgb),.55);}
+  /* card action cluster — hover-revealed icon buttons (★ save / ✉ reach out) */
+  .ppl-card{position:relative;}
+  .ppl-acts{position:absolute;top:.5rem;right:.5rem;display:none;gap:.28rem;opacity:0;transition:opacity .15s;}
+  body.logged-in .ppl-acts{display:flex;}
+  .ppl-card:hover .ppl-acts,.ppl-acts:focus-within{opacity:1;}
+  @media(hover:none){.ppl-acts{opacity:.9;}}
+  .rsave{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;
+    border-radius:8px;border:1px solid var(--hair);background:var(--panel);color:var(--muted);cursor:pointer;
+    font-size:.9rem;line-height:1;transition:all .13s;}
+  .rsave:hover{color:var(--gold);border-color:var(--gold);transform:translateY(-1px);
+    box-shadow:0 3px 11px -3px rgba(var(--gold-rgb),.55);}
+  .rsave.saved{color:var(--gold);border-color:var(--gold);background:rgba(var(--gold-rgb),.13);}
+  #bucketpick .pickrow{cursor:pointer;padding:.32rem .4rem;border-radius:7px;font-size:.82rem;}
+  #bucketpick .pickrow:hover{background:var(--panel2);}
   .newbtn{color:var(--gold);border-color:rgba(var(--gold-rgb),.5);}
   .newbtn:hover{color:var(--on-accent);background:var(--gold);border-color:var(--gold);}
 
@@ -1411,14 +1425,11 @@
         <option value="jp">🇯🇵 Japan</option>
       </select>
     </label>
-    <button type="button" class="histbtn newbtn" id="newbtn" style="margin-left:12px;">＋ New chat</button>
-    <a class="histbtn" href="/explorer" style="margin-left:0;text-decoration:none;" title="Interactive graph of the grounded claim graph">◍ Explorer</a>
-    <a class="histbtn" href="/crossviews" style="margin-left:0;text-decoration:none;" title="Design a grounded cross-view table — every cell click-to-source">◍ Crossviews</a>
-    <a class="histbtn" href="/admin" style="margin-left:0;text-decoration:none;">Coverage</a>
+    <button type="button" class="histbtn newbtn" id="newbtn" style="margin-left:12px;">＋ New search</button>
     <button type="button" class="histbtn" id="savedbtn" style="margin-left:0;" hidden title="Your shortlisted people & jobs and saved searches">◈ Saved</button>
     <button type="button" class="histbtn" id="applybtn" style="margin-left:0;" hidden title="Your apply profile — fill once, autofill any job application">⚑ Apply Profile</button>
-    <button type="button" class="histbtn" id="vidbtn" style="margin-left:0;">Videos</button>
-    <button type="button" class="histbtn" id="histbtn" style="margin-left:0;">Past Sessions</button>
+    <a class="histbtn" href="/admin" style="margin-left:0;text-decoration:none;">Coverage</a>
+    <button type="button" class="histbtn" id="histbtn" style="margin-left:0;">History</button>
     <button type="button" class="histbtn setbtn" id="setbtn" style="margin-left:0;" title="Product settings (admin)" aria-label="Product settings">⚙</button>
     <button type="button" class="histbtn pulsebtn" id="pulsebell" style="margin-left:0;" hidden
             title="Evidence changes on your watched topics" aria-label="Pulse inbox">◉ Pulse<span class="pbadge" id="pbadge" hidden></span></button>
@@ -1426,7 +1437,11 @@
             title="Every concept Roster has explained — searchable, each linking to its related concepts" aria-label="All Concepts">✦ Concepts</button>
   </header>
 
-  <h1 id="heading">What does the evidence show?</h1>
+  <h1 id="heading">Who are you looking for?</h1>
+  <div class="pjmode" id="pjmode" role="tablist" aria-label="Search mode">
+    <button type="button" class="pjbtn on" data-pj="people" role="tab" aria-selected="true">👤 People</button>
+    <button type="button" class="pjbtn" data-pj="jobs" role="tab" aria-selected="false">💼 Jobs</button>
+  </div>
   <div class="modeswitch" id="modeswitch">
     <div class="modeseg" role="tablist" aria-label="Answer mode">
       <button type="button" class="mbtn" data-mode="triage" role="tab" aria-selected="false" hidden>◍ Guided</button>
@@ -1820,6 +1835,19 @@ let REASONING_ENABLED = false;  // reasoning-read interpretation + confidence la
 let ASK_PANEL_ENABLED = false;  // AI expert panel (Alpha)
 let TRIAGE_ENABLED = false;     // guided-intake / triage mode (clarify → route)
 let ACCOUNTS_ENABLED = false;   // accounts + per-answer feedback (W-taxonomy)
+let SEARCH_MODE = "people";     // People/Jobs toggle — explicit routing, no keyword guessing
+const PJ_COPY = {
+  people: {h:"Who are you looking for?",  ph:"Search people — e.g. senior ML engineers at Stripe, or “someone who can scale ML infra at an early-stage startup”"},
+  jobs:   {h:"What role are you looking for?", ph:"Search jobs — e.g. remote backend roles at big tech, or “design jobs that involve research”"},
+};
+function setSearchMode(m){
+  SEARCH_MODE = (m === "jobs") ? "jobs" : "people";
+  document.querySelectorAll("#pjmode .pjbtn").forEach(b=>{
+    const on = b.dataset.pj === SEARCH_MODE; b.classList.toggle("on", on); b.setAttribute("aria-selected", on);
+  });
+  const h = document.getElementById("heading"); if(h) h.textContent = PJ_COPY[SEARCH_MODE].h;
+  const q = document.getElementById("q"); if(q) q.setAttribute("placeholder", PJ_COPY[SEARCH_MODE].ph);
+}
 let DUEL_ENABLED = false;       // A/B duel: fresh questions run standard + reasoned engines, user votes
 let PULSE_ENABLED = false;      // Evidence Pulse: watches, inbox, answer-integrity banners
 let DYN_ENGINES = false;         // dynamic engine selection on (powers AUTOMATIC engine routing)
@@ -2020,9 +2048,9 @@ function jobsMarkup(d){
     const dept = j.department?`<span class="ppl-tag">${esc(j.department)}</span>`:"";
     const apply = j.url?`<a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer">Apply ↗</a>`:"";
     const jref = j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||""));
-    const jsave = `<button type="button" class="rsave" data-kind="job" data-ref="${esc(String(jref))}" data-label="${esc(j.title||"")}" data-sub="${esc(((j.company||"").replace(/_/g," "))+(j.location?" · "+j.location:""))}" data-url="${esc(j.url||"")}" title="Save to a bucket">＋ Save</button>`;
-    return `<div class="ppl-card"><span class="ppl-body">
-      <span class="ppl-name">${esc(j.title)}</span>${jsave}
+    const jsave = `<div class="ppl-acts"><button type="button" class="rsave" data-kind="job" data-ref="${esc(String(jref))}" data-label="${esc(j.title||"")}" data-sub="${esc(((j.company||"").replace(/_/g," "))+(j.location?" · "+j.location:""))}" data-url="${esc(j.url||"")}" title="Save to a shortlist">☆</button></div>`;
+    return `<div class="ppl-card">${jsave}<span class="ppl-body">
+      <span class="ppl-name">${esc(j.title)}</span>
       <span class="ppl-blurb">${co}${j.source?` · via ${esc(j.source)}`:""}</span>
       ${loc||dept?`<span class="ppl-tags">${loc}${dept}</span>`:""}
       ${apply?`<span class="ppl-links">${apply}</span>`:""}</span></div>`;
@@ -2049,7 +2077,8 @@ function peopleRowsMarkup(data){
     const isGh = /github\.com\//.test(citeUrl);
     const av = isGh ? citeUrl.replace(/\/+$/,"")+".png" : "";
     const attr = k => (p.attributes||[]).find(a=>a.key===k) || {};
-    const title = (attr("title").display || attr("seniority").display || "");
+    const senD = attr("seniority").display||"";                       // skip bare 'Mid'/'Junior' — reads as a fake title
+    const title = (attr("title").display || attr("role").display || (/^(mid|junior|entry)/i.test(senD)?"":senD) || "");
     const tags = (p.attributes||[]).filter(a=>a.key==="function"||a.key==="metro")
       .map(a=>`<span class="ppl-tag">${esc(a.display)}</span>`).join("");
     const avatar = av
@@ -2067,12 +2096,13 @@ function peopleRowsMarkup(data){
     // stash the person's channels so the outreach composer can look them up by ref
     window.PEOPLE_INDEX = window.PEOPLE_INDEX || {};
     window.PEOPLE_INDEX[ref] = {name:p.name||"", blurb:p.blurb||"", links:(p.links||[]), github:(isGh?citeUrl:"")};
-    const saveBtn = `<button type="button" class="rsave" data-kind="person" data-ref="${esc(ref)}" data-label="${esc(p.name||"")}" data-sub="${esc((p.blurb||"").slice(0,140))}" data-url="${esc(profileUrl||"")}" title="Save to a bucket">＋ Save</button>`;
-    const reachBtn = `<button type="button" class="rsave rmsg" data-ref="${esc(ref)}" title="Reach out on their shared channels">✉ Reach out</button>`;
+    const saveBtn = `<button type="button" class="rsave" data-kind="person" data-ref="${esc(ref)}" data-label="${esc(p.name||"")}" data-sub="${esc((p.blurb||"").slice(0,140))}" data-url="${esc(profileUrl||"")}" title="Save to a shortlist">☆</button>`;
+    const reachBtn = `<button type="button" class="rsave rmsg" data-ref="${esc(ref)}" title="Reach out on their shared channels">✉</button>`;
+    const acts = `<div class="ppl-acts">${saveBtn}${reachBtn}</div>`;
     const nameHtml = (profileUrl
       ? `<a class="ppl-name" href="${esc(profileUrl)}" target="_blank" rel="noopener noreferrer">${esc(p.name)}<span class="ppl-ext">↗</span></a>`
-      : `<span class="ppl-name">${esc(p.name)}</span>`) + saveBtn + reachBtn;
-    return `<div class="ppl-card">${avatar}
+      : `<span class="ppl-name">${esc(p.name)}</span>`);
+    return `<div class="ppl-card">${acts}${avatar}
       <span class="ppl-body">
         ${nameHtml}
         ${p.blurb?`<span class="ppl-blurb">${esc(p.blurb)}</span>`:(title?`<span class="ppl-title">${esc(title)}</span>`:"")}
@@ -4987,11 +5017,13 @@ async function askQuestion(question, opts){
     return;
   }
   CURRENT_Q = question;
-  autoSaveSearch(question, "search");   // signed-in → record to the user's search history (fire-and-forget)
-  // JOBS MODE (flag): a job-intent query ("… jobs/roles/positions/hiring/careers …") searches open
-  // roles from public ATS boards and renders apply-linked job cards instead of a people/research answer.
-  if((/\b(jobs?|hiring|openings?|positions?|careers?|vacanc|apply)\b|\bopen roles?\b/i.test(question)) && await runJobs(question)){
-    return;   // jobs mode handled it; otherwise fall through to people/research
+  autoSaveSearch(question, SEARCH_MODE);   // signed-in → record to the user's search history (fire-and-forget)
+  // EXPLICIT mode: the People/Jobs toggle decides routing — no keyword guessing. Jobs → ATS search;
+  // People → the grounded people index (server routes it). (Legacy keyword fallback kept for safety.)
+  if(SEARCH_MODE === "jobs"){ await runJobs(question); return; }
+  if(SEARCH_MODE !== "people" &&
+     (/\b(jobs?|hiring|openings?|positions?|careers?|vacanc|apply)\b|\bopen roles?\b/i.test(question)) && await runJobs(question)){
+    return;
   }
   // Fresh-question refinement (no thread history, no attachments). Skipped when re-entering from a chip.
   if(REFINE_ENABLED && !opts.skipRefine && !THREAD.turns.length && !ATTACHMENTS.length){
@@ -5949,7 +5981,7 @@ async function openSessionById(id){
     showSessionDetail(row, [...slist.querySelectorAll(".srow")].find(b=>b.dataset.id===id) || null);
   }catch(e){}
 }
-$("#vidbtn").addEventListener("click", openVideos);
+$("#vidbtn") && $("#vidbtn").addEventListener("click", openVideos);
 $("#vback").addEventListener("click", closeVideos);
 $("#vlclose").addEventListener("click", closeLight);
 $("#vlight").addEventListener("click", e=>{ if(e.target === vlight) closeLight(); });
@@ -6150,7 +6182,7 @@ async function addToBucket(bucketId){
   await fetch(`/me/buckets/${bucketId}/items`, {method:"POST",
     headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(PICK_ITEM)});
   $("#bucketpick").hidden = true;
-  if(PICK_ITEM._btn){ PICK_ITEM._btn.classList.add("saved"); PICK_ITEM._btn.textContent = "✓ Saved"; }
+  if(PICK_ITEM._btn){ PICK_ITEM._btn.classList.add("saved"); PICK_ITEM._btn.textContent = "★"; PICK_ITEM._btn.title = "Saved ✓"; }
 }
 $("#pickrows") && $("#pickrows").addEventListener("click", (e)=>{ const row = e.target.closest(".pickrow"); if(row) addToBucket(row.dataset.id); });
 $("#pickadd") && $("#pickadd").addEventListener("click", async ()=>{
@@ -6589,6 +6621,8 @@ $("#graphmodal").addEventListener("click", e => { if(e.target === $("#graphmodal
 
 initIdentity();
 maybeShowSavedBtn();   // reveal ◈ Saved + enable ＋ Save on cards when already signed in
+document.querySelectorAll("#pjmode .pjbtn").forEach(b=> b.addEventListener("click", ()=> setSearchMode(b.dataset.pj)));
+setSearchMode("people");   // initial heading + placeholder (People by default)
 function routeHash(){    // #s/<id> → Q&A answer/thread · #p/<id> → panel session page · #sessions/#panel
   const mp = location.hash.match(/^#p\/(.+)$/);
   const m = location.hash.match(/^#s\/(.+)$/);
