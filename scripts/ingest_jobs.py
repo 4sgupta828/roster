@@ -125,7 +125,7 @@ _FETCHERS = {"greenhouse": fetch_greenhouse, "lever": fetch_lever, "ashby": fetc
 # --workday-file (company<TAB>host<TAB>wd<TAB>tenant<TAB>site).
 WORKDAY_TENANTS: list[tuple[str, str, str, str, str]] = [
     ("NVIDIA", "nvidia", "5", "nvidia", "NVIDIAExternalCareerSite"),
-    ("Salesforce", "salesforce", "1", "salesforce", "External_Career_Site"),
+    ("Salesforce", "salesforce", "12", "salesforce", "External_Career_Site"),
     ("Workday", "workday", "5", "workday", "Workday"),
     ("Adobe", "adobe", "5", "adobe", "external_experienced"),
     ("Dell", "dell", "1", "dell", "External"),
