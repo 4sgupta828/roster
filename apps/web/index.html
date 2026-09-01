@@ -2059,6 +2059,9 @@ const PJ_COPY = {
 };
 let PEOPLE_CTX = null;          // People-tab conversation: accumulated facet filter — follow-ups NARROW it
 let JOBS_CTX = null;            // Jobs-tab conversation: accumulated job query — follow-ups NARROW it
+let TAB_THREADS = {};           // per-tab CONVERSATION state: People and Q&A each keep their OWN thread —
+//                                 a Q&A question must never append onto a People search's thread (the
+//                                 cross-tab mixing that made questions/answers 'disappear')
 let MODE_VIEWS = {};            // per-mode result snapshot {html, hidden} — each tab keeps ITS OWN
 //                                 last result: switching away hides it, switching back restores it,
 //                                 "＋ New search" clears all (the user-specified tab semantics).
@@ -2066,12 +2069,25 @@ function setSearchMode(m){
   const nm = PJ_COPY[m] ? m : "people";
   const outEl = document.getElementById("out");
   const prev = SEARCH_MODE;
-  const switching = outEl && nm !== prev;
-  if(switching){
-    MODE_VIEWS[prev] = {html: outEl.innerHTML, hidden: outEl.hidden};
-    const v = MODE_VIEWS[nm];
-    outEl.innerHTML = (v && v.html) || "";
-    outEl.hidden = v ? !!v.hidden : true;
+  if(outEl && nm !== prev){
+    // Park the OUTGOING tab: Jobs keeps a rendered-html snapshot (one-shot results); People and
+    // Q&A each keep their OWN conversation THREAD — asking in one tab never appends to another's.
+    if(prev === "jobs"){
+      MODE_VIEWS.jobs = {html: outEl.innerHTML, hidden: outEl.hidden};
+    } else {
+      TAB_THREADS[prev] = THREAD;
+    }
+    SEARCH_MODE = nm;                     // set BEFORE rendering the incoming tab
+    if(nm === "jobs"){
+      const v = MODE_VIEWS.jobs;
+      outEl.innerHTML = (v && v.html) || "";
+      outEl.hidden = v ? !!v.hidden : true;
+      document.body.classList.remove("chatting");
+    } else {
+      THREAD = TAB_THREADS[nm] || {session_id: null, turns: []};
+      TAB_THREADS[nm] = THREAD;
+      renderThread();                     // that tab's own turns, or a clean landing
+    }
   }
   SEARCH_MODE = nm;   // validate against the known modes (not a people/jobs binary)
   document.querySelectorAll("#pjmode .pjbtn").forEach(b=>{
@@ -4107,9 +4123,9 @@ async function loadSharedSession(id){
     CURRENT_Q = row.question;
     const thread = row.thread || [];
     if(CONV_ENABLED && thread.length){          // resume the shared conversation (continuable)
+      if(typeof setSearchMode === "function") setSearchMode("qa");   // switch FIRST (parks other tabs)
       THREAD = {session_id:id, turns:thread.slice()};
       q.value=""; q.style.height="auto"; q.setAttribute("placeholder","");
-      if(typeof setSearchMode === "function") setSearchMode("qa");   // a thread lives in the Q&A tab
       renderThread(); loadSuggestions();
     } else {
       q.value = row.question; autoGrow();
@@ -5988,7 +6004,7 @@ function wireEngineHops(root, t){
 
 function newConversation(){
   THREAD = {session_id:null, turns:[]};
-  MODE_VIEWS = {};                     // "＋ New search" wipes every tab's remembered result
+  MODE_VIEWS = {}; TAB_THREADS = {};   // "＋ New search" wipes every tab's remembered result/thread
   PEOPLE_CTX = null; JOBS_CTX = null;  // …and both tabs' refinement conversations start fresh
   GUIDED_REFINED = false;
   document.body.classList.remove("chatting"); out.style.paddingBottom = "";   // back to landing layout
@@ -6325,9 +6341,9 @@ function sessionWhereNext(sdbody, row, turns){
   const wr = document.createElement("div"); wr.innerHTML = wm;
   sdbody.appendChild(wr);
   const seed = ()=>{
-    THREAD = {session_id: row.id, turns: (row.thread && row.thread.length ? row.thread : [row]).slice()};
     closeSessions();
-    if(typeof setSearchMode === "function") setSearchMode("qa");   // continue in the Q&A tab
+    if(typeof setSearchMode === "function") setSearchMode("qa");   // switch FIRST (parks other tabs)
+    THREAD = {session_id: row.id, turns: (row.thread && row.thread.length ? row.thread : [row]).slice()};
     q.value=""; q.style.height="auto"; renderThread();
   };
   wr.querySelectorAll(".hopchip").forEach(b=>b.addEventListener("click", ()=>{
@@ -6394,9 +6410,9 @@ function buildSessionActions(box, row, firstTurn, firstAns, rowEl){
   if(rt) rt.addEventListener("click", ()=>retryDeeper(firstTurn.question||row.question, nextEf));
   const ct = box.querySelector("#sa-cont");
   if(ct) ct.addEventListener("click", ()=>{
-    THREAD = {session_id: row.id, turns: (row.thread && row.thread.length ? row.thread : [row]).slice()};
     closeSessions();
-    if(typeof setSearchMode === "function") setSearchMode("qa");   // continue in the Q&A tab
+    if(typeof setSearchMode === "function") setSearchMode("qa");   // switch FIRST (parks other tabs)
+    THREAD = {session_id: row.id, turns: (row.thread && row.thread.length ? row.thread : [row]).slice()};
     q.value=""; q.style.height="auto"; q.setAttribute("placeholder","");
     renderThread(); window.scrollTo({top:0}); q.focus();
   });
