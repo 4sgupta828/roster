@@ -2159,7 +2159,8 @@ function jobsMarkup(d){
       ${apply?`<span class="ppl-links">${apply}</span>`:""}</span></div>`;
   }).join("");
   const at = (q.company&&q.company.length)?` at ${esc(q.company.join(", ").replace(/_/g," "))}`:"";
-  const intentHtml = d.intent ? `<div class="ppl-cov" style="border-left-color:var(--gold);">🧭 ${esc(d.intent)}${(d.query_angles&&d.query_angles.length>1)?` <span style="color:var(--muted)">· searched ${d.query_angles.length} angles</span>`:""}</div>` : "";
+  const angleChips = (d.query_angles&&d.query_angles.length>1) ? `<div style="margin-top:.4rem;display:flex;flex-wrap:wrap;gap:.3rem;">${d.query_angles.map(a=>`<span class="ppl-tag">${esc(a)}</span>`).join("")}</div>` : "";
+  const intentHtml = (d.agentic && (d.intent||angleChips)) ? `<div class="ppl-cov" style="border-left-color:var(--gold);background:rgba(var(--gold-rgb),.06);"><b>⚡ Smart search</b>${d.intent?` — ${esc(d.intent)}`:""}${angleChips}</div>` : "";
   const head = `<div class="ppl-head"><b>${jobs.length}</b> open role${jobs.length===1?"":"s"}${at}${d.agentic?` <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">⚡ smart search</span>`:""}</div>`
     + intentHtml
     + `<div class="ppl-cov">◔ Aggregated from public ATS boards — ${st.jobs||0} jobs across ${st.companies||0} companies indexed. Each links to the company's apply page.</div>`;
@@ -5854,20 +5855,22 @@ async function loadSessionList(){
     slist.innerHTML = sessions.map(s=>{
       const who = s.user_name || s.user_email;
       const isPanel = s.kind === "panel";
-      return `<button class="srow" data-id="${esc(s.id)}" data-kind="${esc(s.kind||"research")}">
-        <div class="sq">${isPanel?'<span class="skind">◈ Panel</span> ':""}${esc(s.question)}</div>
+      const k = s.kind||"research";
+      const rerun = (k==="jobs"||k==="people_population");
+      return `<button class="srow" data-id="${esc(s.id)}" data-kind="${esc(k)}" data-q="${esc(s.question)}">
+        <div class="sq">${isPanel?'<span class="skind">◈ Panel</span> ':""}${k==="jobs"?'<span class="skind">💼</span> ':(k==="people_population"?'<span class="skind">👤</span> ':"")}${esc(s.question)}</div>
         <div class="sm">
           ${who?`<span class="swho">${esc(who)}</span>`:""}
-          ${s.grounded?'<span class="sg">✓ grounded</span>':'<span>ungrounded</span>'}
+          ${rerun?'<span class="sg">↻ re-run</span>':(s.grounded?'<span class="sg">✓ grounded</span>':'<span>ungrounded</span>')}
           ${s.has_video?"<span>🎬 video</span>":""}
-          ${s.n_attach?`<span>📎 ${s.n_attach}</span>`:""}
           <span>${new Date(s.created_at).toLocaleDateString()}</span>
         </div></button>`;
     }).join("");
-    slist.querySelectorAll(".srow").forEach(b=>b.addEventListener("click",()=>selectSession(b)));
-    // desktop split previews the most recent by default (panels now render in-pane too, so no redirect)
-    const first = slist.querySelector(".srow");
+    slist.querySelectorAll(".srow").forEach(b=>b.addEventListener("click",()=>onSessionClick(b)));
+    // desktop split previews the most recent RESEARCH answer; job/people searches re-run on click instead
+    const first = [...slist.querySelectorAll(".srow")].find(b=>b.dataset.kind!=="jobs"&&b.dataset.kind!=="people_population");
     if(first && !isMobileSess()) selectSession(first);
+    else if(!isMobileSess()) sdetail.innerHTML = `<div class="splaceholder">Click a past search to re-run it and see live results.</div>`;
   }catch(e){ slist.innerHTML = `<div class="sempty">Couldn't load sessions.</div>`; }
 }
 function showSessionDetail(row, rowEl){
@@ -6037,6 +6040,19 @@ function retryDeeper(question, ef){
   q.value = question; q.style.height="auto"; q.style.height = q.scrollHeight+"px";
   askQuestion(question, {skipDuel:true});   // an effort retry re-runs ONE engine, not a fresh duel
   window.scrollTo({top:0});
+}
+// Job/people searches store only a summary, so opening one RE-RUNS it (live cards); research answers
+// are captured in full and render from the stored session.
+function onSessionClick(rowEl){
+  const kind = rowEl.dataset.kind, q = rowEl.dataset.q || "";
+  if((kind === "jobs" || kind === "people_population") && q){
+    closeSessions();
+    if(typeof setSearchMode === "function") setSearchMode(kind === "jobs" ? "jobs" : "people");
+    const box = $("#q"); if(box){ box.value = q; }
+    askQuestion(q);
+    return;
+  }
+  selectSession(rowEl);
 }
 async function selectSession(rowEl){
   sdetail.innerHTML = `<div class="status">Loading…</div>`;
