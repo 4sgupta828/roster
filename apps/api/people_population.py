@@ -303,6 +303,102 @@ async def build_candidate_brief(resume_text: str, profile: dict, llm) -> dict | 
         return None
 
 
+class _ApplyReq(BaseModel):
+    requirement: str = ""      # a concrete requirement/skill the JD asks for
+    evidence: str = ""         # the candidate's supporting experience FROM THE RÉSUMÉ ('' if none)
+    verdict: str = "gap"       # strong | partial | gap
+
+
+class _ApplyAnalysis(BaseModel):
+    role_title: str = ""
+    company: str = ""
+    fit_score: int = 0                     # honest 0–100
+    fit_summary: str = ""                  # one-line honest verdict
+    requirements: list[_ApplyReq] = []     # the match table
+    lead_with: list[str] = []              # real strengths to emphasize when applying
+    gaps: list[str] = []                   # honest missing pieces (+ how to address)
+    how_to_apply: list[str] = []           # tactical advice
+    resume_tips: list[str] = []            # grounded edits (re-emphasize REAL experience; never invent)
+
+
+def _resume_text_of(profile: dict, resume_text: str) -> str:
+    t = (resume_text or "").strip() or str(profile.get("_resume_text") or "")
+    if not t:
+        wh = profile.get("work_history") if isinstance(profile.get("work_history"), list) else []
+        t = (str(profile.get("summary", "")) + "\n" +
+             "\n".join(f"{w.get('title','')} @ {w.get('company','')}: {w.get('description','')}"
+                       for w in wh if isinstance(w, dict)))
+    return t.strip()
+
+
+async def build_apply_analysis(jd_text: str, profile: dict, resume_text: str, llm) -> dict | None:
+    """Grounded APPLY analysis: read the JD + the candidate's résumé and lay out an honest fit table
+    (each JD requirement × the candidate's real evidence × a verdict), what to lead with, honest gaps,
+    how to apply best, and résumé tuning that ONLY re-surfaces REAL experience (never fabricates).
+    LLM-owned (Rule 18); grounded in the two documents. None on any error/insufficient input."""
+    jd = (jd_text or "").strip()
+    rt = _resume_text_of(profile, resume_text)
+    if len(jd) < 40 or len(rt) < 40 or llm is None:
+        return None
+    try:
+        comp = await llm.complete(
+            system=(
+                "You are an expert career coach and technical recruiter helping THIS candidate decide how "
+                "to apply to THIS role. Read the JOB DESCRIPTION and the CANDIDATE RÉSUMÉ and produce an "
+                "HONEST, GROUNDED fit analysis so the candidate can focus on what matters. For each key "
+                "requirement in the JD, set `evidence` to the candidate's supporting experience DRAWN FROM "
+                "THE RÉSUMÉ (paraphrase real roles/achievements) and a `verdict`: 'strong' (clear match), "
+                "'partial' (adjacent/some), or 'gap' (not shown). NEVER fabricate — if the résumé doesn't "
+                "show it, verdict='gap' and evidence=''. fit_score: an honest 0–100. lead_with: the real "
+                "strengths to emphasize. gaps: honest missing pieces and how to address them. how_to_apply: "
+                "tactical advice for THIS application. resume_tips: concrete edits that ONLY re-emphasize, "
+                "reorder, or surface the candidate's REAL experience for this role — never invent anything. "
+                "Ground every statement in the two documents."),
+            messages=[{"role": "user", "content": f"JOB DESCRIPTION:\n{jd[:9000]}\n\nCANDIDATE RÉSUMÉ:\n{rt[:9000]}"}],
+            response_format=_ApplyAnalysis, max_tokens=1600)
+        a = comp.parsed
+        reqs = [{"requirement": r.requirement, "evidence": r.evidence,
+                 "verdict": (r.verdict if r.verdict in ("strong", "partial", "gap") else "gap")}
+                for r in (a.requirements or []) if r.requirement][:14]
+        return {"role_title": a.role_title, "company": a.company,
+                "fit_score": max(0, min(100, int(a.fit_score or 0))), "fit_summary": a.fit_summary,
+                "requirements": reqs, "lead_with": a.lead_with[:6], "gaps": a.gaps[:6],
+                "how_to_apply": a.how_to_apply[:6], "resume_tips": a.resume_tips[:8]}
+    except Exception as e:   # noqa: BLE001
+        _log.warning("build_apply_analysis failed: %s", e)
+        return None
+
+
+class _CoverLetter(BaseModel):
+    cover_letter: str = ""
+
+
+async def build_cover_letter(jd_text: str, profile: dict, resume_text: str, llm, note: str = "") -> str | None:
+    """Draft a concise, GENUINE cover letter — grounded in the résumé, nothing fabricated. Generated only
+    on explicit candidate request. Returns the letter text (None on error/insufficient input)."""
+    jd = (jd_text or "").strip()
+    rt = _resume_text_of(profile, resume_text)
+    if len(jd) < 40 or len(rt) < 40 or llm is None:
+        return None
+    name = str(profile.get("full_name") or profile.get("name") or "").strip()
+    try:
+        comp = await llm.complete(
+            system=(
+                "Write a concise, genuine cover letter (~250–320 words, first person, professional but warm) "
+                "for THIS candidate applying to THIS role, in the `cover_letter` field. Ground EVERY claim in "
+                "the candidate's résumé — nothing fabricated or exaggerated. Connect their real experience to "
+                "the role's actual needs, express sincere interest, keep it specific (no generic filler). If a "
+                "candidate note is provided, weave it in. No bracketed placeholders."),
+            messages=[{"role": "user", "content":
+                       f"CANDIDATE NAME: {name}\nCANDIDATE NOTE: {note[:500]}\n\nJOB DESCRIPTION:\n{jd[:9000]}"
+                       f"\n\nCANDIDATE RÉSUMÉ:\n{rt[:9000]}"}],
+            response_format=_CoverLetter, max_tokens=900)
+        return (comp.parsed.cover_letter or "").strip() or None
+    except Exception as e:   # noqa: BLE001
+        _log.warning("build_cover_letter failed: %s", e)
+        return None
+
+
 def _person_row_from_facets(r: dict) -> dict:
     """Build a people-card row (same shape as answer_people_population) from a people_by_ids row."""
     facets = r["facets"]

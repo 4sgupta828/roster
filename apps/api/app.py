@@ -701,6 +701,13 @@ def _resume_fingerprint(profile: dict) -> str:
     return hashlib.sha256(t.encode()).hexdigest()[:32] if t.strip() else ""
 
 
+def apply_assist_enabled() -> bool:
+    """Flag (default OFF, Rule 20) via ROSTER_APPLY_ASSIST: the Apply Assistant — a grounded JD×résumé
+    fit table (what matches / what doesn't), how-to-apply advice, honest résumé tuning (no fabrication),
+    and an on-approval cover letter. 404 when off."""
+    return os.environ.get("ROSTER_APPLY_ASSIST", "").lower() in ("1", "true", "yes")
+
+
 def recruiter_match_enabled() -> bool:
     """Flag (default OFF, Rule 20) via ROSTER_RECRUITER_MATCH: when ON, résumé→jobs matching first builds
     an LLM 'recruiter brief' (recency-weighted last 3–5y; technical skills / breadth / leadership /
@@ -1994,6 +2001,7 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             "jd_exclude_source_co_enabled": jd_exclude_source_co_enabled(),
             "people_semantic_first_enabled": _people_semantic_first_enabled(),
             "recruiter_match_enabled": recruiter_match_enabled(),
+            "apply_assist_enabled": apply_assist_enabled(),
         }
 
     @app.post("/search")
@@ -4824,6 +4832,52 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             "min_salary": cur.get("min_salary") or None,
         }
         return {"config": config, "brief": brief}
+
+    async def _apply_jd_and_profile(store, user, body: dict):
+        """Shared: resolve the JD text (from job_url via the SSRF-guarded fetcher, or pasted
+        job_description) + the user's merged résumé profile. Raises 400 with a clear message on failure."""
+        jd = str(body.get("job_description") or "").strip()
+        if not jd and body.get("job_url"):
+            jd = await asyncio.to_thread(_fetch_jd_text, str(body["job_url"]))
+            if len(jd) < 40:
+                raise HTTPException(status_code=400,
+                    detail="Couldn't read that job link — paste the description text instead.")
+        if len(jd) < 40:
+            raise HTTPException(status_code=400, detail="Provide a job link or paste the description.")
+        saved = (await store.get_profile(user["id"])).get("profile") or {}
+        parsed = (await store.get_parse(user["id"])).get("profile") or {}
+        return jd, {**parsed, **saved}
+
+    @app.post("/me/apply-analysis")
+    async def me_apply_analysis(body: dict, x_roster_token: str = Header(default="")) -> dict:
+        """APPLY ASSISTANT (flag ROSTER_APPLY_ASSIST): read the job (link or pasted) + the user's résumé
+        → grounded fit table (each requirement × the candidate's real evidence × verdict), what to lead
+        with, honest gaps, how to apply, and résumé tips (no fabrication). 404 when off."""
+        if not apply_assist_enabled():
+            raise HTTPException(status_code=404, detail="apply assistant not enabled")
+        store, user = await _require_user(x_roster_token)
+        jd, profile = await _apply_jd_and_profile(store, user, body)
+        from api.people_population import build_apply_analysis
+        a = await build_apply_analysis(jd, profile, profile.get("_resume_text", ""), build_llm(mode=resolve_mode()))
+        if not a:
+            raise HTTPException(status_code=400,
+                detail="Add or parse a résumé first, and make sure the job link/description is readable.")
+        return a
+
+    @app.post("/me/apply-analysis/cover-letter")
+    async def me_apply_cover_letter(body: dict, x_roster_token: str = Header(default="")) -> dict:
+        """Draft a grounded cover letter for THIS job — generated only on the candidate's explicit
+        request (approval in the UI). Nothing fabricated. 404 when off."""
+        if not apply_assist_enabled():
+            raise HTTPException(status_code=404, detail="apply assistant not enabled")
+        store, user = await _require_user(x_roster_token)
+        jd, profile = await _apply_jd_and_profile(store, user, body)
+        from api.people_population import build_cover_letter
+        cl = await build_cover_letter(jd, profile, profile.get("_resume_text", ""),
+                                      build_llm(mode=resolve_mode()), note=str(body.get("note") or ""))
+        if not cl:
+            raise HTTPException(status_code=400, detail="Couldn't draft a letter — check the résumé + job text.")
+        return {"cover_letter": cl}
 
     @app.get("/me/history")
     async def me_history(q: str = "", kind: str = "", x_roster_token: str = Header(default="")) -> dict:
