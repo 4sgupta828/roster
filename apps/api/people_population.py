@@ -1115,6 +1115,25 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     if scope_country and not facets.get("country"):
         facets["country"] = [scope_country]
 
+    async def _enum_recall(fs: dict, cap: int = 200):
+        """AND-enumerate with RECALL-PRESERVING country semantics: an entity with NO country facet
+        is KEPT unless known-foreign (semantic-first's rule). Requiring the country KEY silently
+        excluded almost every match — 'worked at Apple' collapsed to 1 row because most Apple
+        alumni carry no country facet (session b5353056). A country/geo-only filter stays strict
+        (never 'everyone')."""
+        want = set(fs.get("country") or [])
+        rest = {k: v for k, v in fs.items() if k != "country"}
+        if not want or not rest:
+            return await store.enumerate_by_facets(fs, tenant_id=tenant_id, cap=cap)
+        rows_ = await store.enumerate_by_facets(rest, tenant_id=tenant_id, cap=max(cap, 1000))
+        out = []
+        for r in rows_:
+            cv = {(f.get("value_norm") or "") for f in r["facets"] if f["facet_key"] == "country"}
+            cv.discard("")
+            if not cv or (cv & want):    # unknown country keeps the person (recall)
+                out.append(r)
+        return out[:cap]
+
     # DEEP SEMANTIC SEARCH (flag ROSTER_SEMANTIC): filter by ALL facets (attributes), THEN rank by
     # OpenAI-embedding similarity — the eigen/noesis typed-block pattern (attributes filter, meaning
     # ranks). qvec None (flag off / no key / embed failure) → the exact facet path (byte-identical).
@@ -1152,7 +1171,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         rows = ranked[:200]
         semantic_used = semantic_first = bool(rows)
     elif qvec and real_facets:                   # HYBRID: attribute-filter → semantic-rank within it
-        cand = await store.enumerate_by_facets(facets, tenant_id=tenant_id, cap=1000)
+        cand = await _enum_recall(facets, cap=1000)
         ids = await store.semantic_people(qvec, candidate_ids=[r["entity_id"] for r in cand], cap=200)
         rows = await store.people_by_ids(ids, tenant_id=tenant_id) if ids else cand[:200]
         semantic_used = bool(ids)
@@ -1166,7 +1185,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         rows = [r for r in cand if _geo_ok(r)][:200]
         semantic_used = bool(rows)
     else:
-        rows = await store.enumerate_by_facets(facets, tenant_id=tenant_id, cap=200)
+        rows = await _enum_recall(facets, cap=200)
 
     # GRACEFUL PROGRESSIVE RELAXATION: an over-specific query ANDs to zero (e.g. "sales GTM leaders in
     # California" → state=ca matches no business person; "engineers content platform at netflix" →
@@ -1187,7 +1206,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                 kept.pop(k, None); dropped.append(k)
             if not any(k not in _GEO_ONLY for k in kept):     # nothing meaningful left → stop
                 break
-            r2 = await store.enumerate_by_facets(kept, tenant_id=tenant_id, cap=200)
+            r2 = await _enum_recall(kept, cap=200)
             if r2:
                 rows, relaxed_from, facets = r2, list(dropped), kept
                 break

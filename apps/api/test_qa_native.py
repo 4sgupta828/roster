@@ -600,3 +600,40 @@ def test_primary_role_leads_the_ranking(monkeypatch):
     names = [p["name"] for p in res["people_rows"]]
     assert names[0] == "Dana DS", names          # primary data scientist leads
     assert set(names[1:]) == {"Sam SWE", "Mia ML"}
+
+
+def test_geo_scope_keeps_unknown_country_people(monkeypatch):
+    """The injected geo-scope country must not require the country FACET: an Apple alum with no
+    country tag stays in the results; a known-foreign one drops (session b5353056)."""
+    from roster_kernel.providers.llm import LLMResult
+    from api.people_population import _FacetParse, answer_people_population
+
+    class _LLM:
+        async def complete(self, *, system, messages, response_format, max_tokens=2048,
+                           temperature=None):
+            return LLMResult(parsed=_FacetParse(worked_at=["apple"]), output_tokens=5)
+
+    def _p(eid, name, country=None):
+        fs = [{"facet_key": "worked_at", "facet_value_norm": "apple", "value_norm": "apple",
+               "display_value": "Apple", "document_id": "d", "block_id": "b"}]
+        if country:
+            fs.append({"facet_key": "country", "facet_value_norm": country, "value_norm": country,
+                       "display_value": country.upper(), "document_id": "d", "block_id": "b"})
+        return {"entity_id": eid, "name": name, "facets": fs}
+
+    class _Store:
+        async def people_index_stats(self, *, tenant_id):
+            return {"persons_indexed": 9, "source_documents": 3, "facet_coverage": {}}
+
+        async def enumerate_by_facets(self, facets, *, tenant_id, cap):
+            assert "country" not in facets          # country never hard-gates the enumeration
+            return [_p("a", "US Alum", "us"), _p("b", "Untagged Alum"), _p("c", "DE Alum", "de")]
+
+    import asyncio
+    monkeypatch.delenv("ROSTER_SEMANTIC", raising=False)
+    monkeypatch.delenv("ROSTER_PEOPLE_SEMANTIC_FIRST", raising=False)
+    res = asyncio.get_event_loop().run_until_complete(answer_people_population(
+        question="people who worked at Apple", tenant_id="demo", store=_Store(), llm=_LLM(),
+        scope_country="us"))
+    names = {p["name"] for p in res["people_rows"]}
+    assert names == {"US Alum", "Untagged Alum"}    # unknown kept, known-foreign dropped
