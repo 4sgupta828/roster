@@ -357,9 +357,15 @@ async def build_apply_analysis(jd_text: str, profile: dict, resume_text: str, ll
             messages=[{"role": "user", "content": f"JOB DESCRIPTION:\n{jd[:9000]}\n\nCANDIDATE RÉSUMÉ:\n{rt[:9000]}"}],
             response_format=_ApplyAnalysis, max_tokens=1600)
         a = comp.parsed
-        reqs = [{"requirement": r.requirement, "evidence": r.evidence,
-                 "verdict": (r.verdict if r.verdict in ("strong", "partial", "gap") else "gap")}
-                for r in (a.requirements or []) if r.requirement][:14]
+        reqs = []
+        for r in (a.requirements or []):
+            if not r.requirement:
+                continue
+            v = r.verdict if r.verdict in ("strong", "partial", "gap") else "gap"
+            # CODE-enforce the grounding invariant: a 'gap' carries NO evidence, even if the model
+            # attached some — so the "no fabricated evidence" promise doesn't rest on the prompt alone.
+            reqs.append({"requirement": r.requirement, "evidence": ("" if v == "gap" else r.evidence), "verdict": v})
+        reqs = reqs[:14]
         return {"role_title": a.role_title, "company": a.company,
                 "fit_score": max(0, min(100, int(a.fit_score or 0))), "fit_summary": a.fit_summary,
                 "requirements": reqs, "lead_with": a.lead_with[:6], "gaps": a.gaps[:6],

@@ -1203,6 +1203,12 @@ class MatchPeopleIn(BaseModel):        # recruiter reverse-match: JD → candida
     allow_source_company: bool = False   # recruiter opt-in: include people at the JD's hiring company
 
 
+class ApplyIn(BaseModel):                  # Apply Assistant — length-capped to bound LLM input + memory
+    job_url: str = Field(default="", max_length=2000)
+    job_description: str = Field(default="", max_length=40000)
+    note: str = Field(default="", max_length=2000)
+
+
 class MatchIn(BaseModel):
     locations: list[str] = []
     remote: bool = False
@@ -2679,24 +2685,40 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         return StreamingResponse(gen(), media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"})
 
-    def _fetch_jd_text(url: str) -> str:
-        """Fetch a JD page and strip it to text. SSRF-guarded: http(s) only, and the resolved host must
-        be a PUBLIC address (blocks localhost / private / link-local / internal). Size + time bounded."""
-        import urllib.parse, urllib.request, socket, ipaddress, re as _re
-        u = (url or "").strip()
-        pr = urllib.parse.urlparse(u)
+    def _url_is_public(u: str) -> bool:
+        """SSRF gate for ONE url: http(s) only, and EVERY resolved IP must be public (blocks localhost /
+        private / link-local / reserved / multicast — incl. cloud metadata 169.254.169.254)."""
+        import urllib.parse, socket, ipaddress
+        pr = urllib.parse.urlparse((u or "").strip())
         if pr.scheme not in ("http", "https") or not pr.hostname:
-            return ""
+            return False
         try:
             for res in socket.getaddrinfo(pr.hostname, None):
                 ip = ipaddress.ip_address(res[4][0])
                 if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-                    return ""
+                    return False
         except Exception:
+            return False
+        return True
+
+    def _fetch_jd_text(url: str) -> str:
+        """Fetch a JD page and strip it to text. SSRF-guarded: http(s) only, and the resolved host must
+        be PUBLIC — re-validated on EVERY redirect hop (a public URL can't 302 to localhost/metadata).
+        Size + time bounded."""
+        import urllib.request, re as _re
+        u = (url or "").strip()
+        if not _url_is_public(u):
             return ""
+        # Redirect handler that re-runs the SSRF gate on each hop; an unsafe target aborts the fetch.
+        class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                if not _url_is_public(newurl):
+                    return None   # block the redirect (urllib raises → caught below → "")
+                return super().redirect_request(req, fp, code, msg, headers, newurl)
         try:
+            opener = urllib.request.build_opener(_GuardedRedirect)
             req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0 (roster JD fetch)"})
-            with urllib.request.urlopen(req, timeout=12) as r:
+            with opener.open(req, timeout=12) as r:
                 raw = r.read(2_000_000).decode("utf-8", "ignore")
         except Exception:
             return ""
@@ -4833,23 +4855,24 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         }
         return {"config": config, "brief": brief}
 
-    async def _apply_jd_and_profile(store, user, body: dict):
+    async def _apply_jd_and_profile(store, user, body: "ApplyIn"):
         """Shared: resolve the JD text (from job_url via the SSRF-guarded fetcher, or pasted
         job_description) + the user's merged résumé profile. Raises 400 with a clear message on failure."""
-        jd = str(body.get("job_description") or "").strip()
-        if not jd and body.get("job_url"):
-            jd = await asyncio.to_thread(_fetch_jd_text, str(body["job_url"]))
+        jd = (body.job_description or "").strip()
+        if not jd and body.job_url:
+            jd = await asyncio.to_thread(_fetch_jd_text, body.job_url)
             if len(jd) < 40:
                 raise HTTPException(status_code=400,
                     detail="Couldn't read that job link — paste the description text instead.")
         if len(jd) < 40:
             raise HTTPException(status_code=400, detail="Provide a job link or paste the description.")
+        jd = jd[:20000]   # bound a pasted JD at ingress (the LLM slice is 9k; this caps the in-memory copy)
         saved = (await store.get_profile(user["id"])).get("profile") or {}
         parsed = (await store.get_parse(user["id"])).get("profile") or {}
         return jd, {**parsed, **saved}
 
     @app.post("/me/apply-analysis")
-    async def me_apply_analysis(body: dict, x_roster_token: str = Header(default="")) -> dict:
+    async def me_apply_analysis(body: ApplyIn, x_roster_token: str = Header(default="")) -> dict:
         """APPLY ASSISTANT (flag ROSTER_APPLY_ASSIST): read the job (link or pasted) + the user's résumé
         → grounded fit table (each requirement × the candidate's real evidence × verdict), what to lead
         with, honest gaps, how to apply, and résumé tips (no fabrication). 404 when off."""
@@ -4865,7 +4888,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         return a
 
     @app.post("/me/apply-analysis/cover-letter")
-    async def me_apply_cover_letter(body: dict, x_roster_token: str = Header(default="")) -> dict:
+    async def me_apply_cover_letter(body: ApplyIn, x_roster_token: str = Header(default="")) -> dict:
         """Draft a grounded cover letter for THIS job — generated only on the candidate's explicit
         request (approval in the UI). Nothing fabricated. 404 when off."""
         if not apply_assist_enabled():
@@ -4874,7 +4897,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         jd, profile = await _apply_jd_and_profile(store, user, body)
         from api.people_population import build_cover_letter
         cl = await build_cover_letter(jd, profile, profile.get("_resume_text", ""),
-                                      build_llm(mode=resolve_mode()), note=str(body.get("note") or ""))
+                                      build_llm(mode=resolve_mode()), note=(body.note or ""))
         if not cl:
             raise HTTPException(status_code=400, detail="Couldn't draft a letter — check the résumé + job text.")
         return {"cover_letter": cl}
