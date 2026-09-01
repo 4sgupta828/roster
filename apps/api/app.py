@@ -1902,6 +1902,7 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
         live_duel = await _flag_live("duel_enabled")
         ui = getattr(svc, "ui", None)
         from api.video import video_enabled
+        from api.people_population import people_semantic_first_enabled as _people_semantic_first_enabled
         console = ui.console() if ui and hasattr(ui, "console") else {}
         return {
             "vertical": getattr(svc, "vertical_name", ""),
@@ -1968,6 +1969,7 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             "jobs_enabled": jobs_enabled(),
             "eigen_qa_enabled": eigen_qa_enabled(),
             "jd_exclude_source_co_enabled": jd_exclude_source_co_enabled(),
+            "people_semantic_first_enabled": _people_semantic_first_enabled(),
         }
 
     @app.post("/search")

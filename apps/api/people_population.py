@@ -60,6 +60,17 @@ def semantic_enabled() -> bool:
             and bool(os.environ.get("OPENAI_API_KEY")))
 
 
+def people_semantic_first_enabled() -> bool:
+    """Flag (default OFF, Rule 20): SEMANTIC-FIRST people retrieval. Rank ALL people by query→profile
+    embedding similarity; apply ONLY country as a hard filter (drop just the known-foreign — unknown
+    keeps the person), and treat every other parsed facet (skill/function/role/metro/…) as a SOFT
+    boost, never a hard gate. This is the match_jd_people philosophy applied to free-text people
+    search — the fix for a query compressing into a sparse hard facet and strangling recall (the
+    'ML Feature Engineering' → 7 generic SWEs miss). OFF → the existing facet-filter-first path
+    (byte-identical). Needs an embedding, so effectively also requires OPENAI_API_KEY."""
+    return os.environ.get("ROSTER_PEOPLE_SEMANTIC_FIRST", "").lower() in ("1", "true", "yes")
+
+
 def embed_query(text: str) -> str | None:
     """Embed the query with text-embedding-3-small → a pgvector literal '[...]'. None on any failure
     (the caller falls back to the exact facet path). Never raises to the route."""
@@ -598,10 +609,35 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     # DEEP SEMANTIC SEARCH (flag ROSTER_SEMANTIC): filter by ALL facets (attributes), THEN rank by
     # OpenAI-embedding similarity — the eigen/noesis typed-block pattern (attributes filter, meaning
     # ranks). qvec None (flag off / no key / embed failure) → the exact facet path (byte-identical).
-    qvec = embed_query(question) if semantic_enabled() else None
+    qvec = embed_query(question) if (semantic_enabled() or people_semantic_first_enabled()) else None
     real_facets = [k for k in facets if k not in ("country", "state", "metro")]
     semantic_used = False
-    if qvec and real_facets:                     # HYBRID: attribute-filter → semantic-rank within it
+    semantic_first = False
+    sf_sim: dict = {}                            # entity_id -> similarity (semantic-first → match_pct)
+    if qvec and people_semantic_first_enabled():
+        # SEMANTIC-FIRST (flag): meaning leads. Rank ALL people by query→profile similarity; the ONLY
+        # hard filter is country (drop just the known-foreign — an unknown country keeps the person, so
+        # a sparse facet never strangles recall). Every parsed facet (skill/function/role/metro/…) is a
+        # SOFT boost, not a gate — the fix for a query compressing into a sparse hard facet.
+        scored = await store.match_people_scored(qvec, cap=500)
+        sf_sim = {c["entity_id"]: c["sim"] for c in scored}
+        cand = await store.people_by_ids([c["entity_id"] for c in scored], tenant_id=tenant_id)
+        want_country = set(facets.get("country") or [])
+        boost = {k: set(v) for k, v in facets.items() if k != "country"}     # soft-boost facets
+        ranked = []
+        for r in cand:
+            if want_country:
+                cvals = [f["value_norm"] for f in r["facets"] if f["facet_key"] == "country"]
+                if cvals and not (set(cvals) & want_country):
+                    continue                     # KNOWN-foreign → drop; unknown country → keep (recall)
+            rf = {(f["facet_key"], f["value_norm"]) for f in r["facets"]}
+            nb = sum(1 for k, vals in boost.items() for v in vals if (k, v) in rf)
+            r["_sf"] = sf_sim.get(r["entity_id"], 0.0) + 0.03 * min(nb, 4)   # similarity + soft boost
+            ranked.append(r)
+        ranked.sort(key=lambda r: -r["_sf"])
+        rows = ranked[:200]
+        semantic_used = semantic_first = bool(rows)
+    elif qvec and real_facets:                   # HYBRID: attribute-filter → semantic-rank within it
         cand = await store.enumerate_by_facets(facets, tenant_id=tenant_id, cap=1000)
         ids = await store.semantic_people(qvec, candidate_ids=[r["entity_id"] for r in cand], cap=200)
         rows = await store.people_by_ids(ids, tenant_id=tenant_id) if ids else cand[:200]
@@ -646,6 +682,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     if relaxed_from:
         coverage["relaxed_from"] = relaxed_from
     coverage["semantic_used"] = semantic_used   # observability: did embedding ranking engage?
+    coverage["semantic_first"] = semantic_first  # observability: semantic-first (facets soft) vs facet-gated
 
     people_rows = []
     for r in rows:
@@ -675,6 +712,12 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             "entity_id": r["entity_id"], "name": r["name"], "blurb": _person_blurb(attrs),
             "attributes": attrs, "links": links, "citation": cite})
 
+    if semantic_first:                            # surface the relevance score on each card (like JD-match)
+        for p in people_rows:
+            s = sf_sim.get(p["entity_id"])
+            if s is not None:
+                p["match_pct"] = max(1, min(99, round(s * 100)))
+
     # RANK toward the query (user: ranked, not neutral): most prominent first by seniority/tier, then a
     # completeness boost (a contactable, linked profile ranks above a bare one), then name for stability.
     _RANK = {"c_level": 10, "cto": 10, "distinguished_scientist": 9, "vp": 9, "head": 8, "director": 8,
@@ -693,8 +736,14 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     if people_rows:
         relax_note = (f" (no exact match, so the {', '.join(relaxed_from)} filter"
                       f"{'s were' if len(relaxed_from) > 1 else ' was'} relaxed)" if relaxed_from else "")
-        lines = [f"Found {len(people_rows)} people matching [{summary}]{relax_note} in Roster's "
-                 f"grounded people index.", "", coverage["population_statement"], ""]
+        # SEMANTIC-FIRST leads by relevance to the query itself (facets were soft boosts, not a gate),
+        # so the honest lead line says so instead of implying a hard facet match.
+        if semantic_first:
+            lead = f"Top {len(people_rows)} people by relevance to “{question}” in Roster's grounded people index."
+        else:
+            lead = (f"Found {len(people_rows)} people matching [{summary}]{relax_note} in Roster's "
+                    f"grounded people index.")
+        lines = [lead, "", coverage["population_statement"], ""]
         for i, p in enumerate(people_rows, 1):
             attrs = ", ".join(a["display"] for a in p["attributes"] if a["display"])
             lines.append(f"{i}. {p['name']} — {attrs}")
