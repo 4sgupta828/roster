@@ -5870,13 +5870,53 @@ async function loadSessionList(){
     // desktop split previews the most recent RESEARCH answer; job/people searches re-run on click instead
     const first = [...slist.querySelectorAll(".srow")].find(b=>b.dataset.kind!=="jobs"&&b.dataset.kind!=="people_population");
     if(first && !isMobileSess()) selectSession(first);
-    else if(!isMobileSess()) sdetail.innerHTML = `<div class="splaceholder">Click a past search to re-run it and see live results.</div>`;
+    else if(!isMobileSess()) sdetail.innerHTML = `<div class="splaceholder">Click a past search to view its stored results.</div>`;
   }catch(e){ slist.innerHTML = `<div class="sempty">Couldn't load sessions.</div>`; }
 }
+// A past jobs/people search renders its STORED result rows (never re-runs the search). The rows
+// were persisted on the session's turn-0 extra at save time (extra.jobs / extra.people_rows).
+function renderSearchSessionDetail(row, rowEl, t0){
+  if(rowEl){ slist.querySelectorAll(".srow").forEach(r=>r.removeAttribute("aria-current")); rowEl.setAttribute("aria-current","true"); }
+  const who = row.user_name || row.user_email;
+  const isJobs = t0.kind === "jobs";
+  let body;
+  if(isJobs){
+    const jobs = t0.jobs || [];
+    body = jobs.length
+      ? jobsMarkup({jobs, query: t0.query || {}, stats: {}})
+      : `<div class="empty">This search's results weren't stored. Re-run it from the search box to see current openings.</div>`;
+  } else {
+    const rows = t0.people_rows || [];
+    body = rows.length
+      ? peopleRowsMarkup({people_rows: rows, coverage_basis: t0.coverage_basis || {query_facets:{}, population_statement:""}})
+      : `<div class="empty">This search's results weren't stored. Re-run it from the search box to see current people.</div>`;
+  }
+  const rerun = `<button type="button" class="srerun" data-q="${esc(row.question)}" data-mode="${isJobs?"jobs":"people"}"
+      style="margin-top:.6rem;font-size:.8rem;">↻ Run this search again</button>`;
+  sdetail.innerHTML = `<div class="sqhead">
+      <div class="qhrow"><div class="qq">${esc(row.question)}</div></div>
+      <div class="qm">${who?`Searched by <b>${esc(row.user_name||"")}</b>${row.user_email?" · "+esc(row.user_email):""} · `:""}${fmtDate(row.created_at)} · stored results</div>
+    </div><div id="sdbody">${body}${rerun}</div>`;
+  const sd = $("#sdbody");
+  // Wire the ☆ save-to-shortlist buttons on the stored cards (same handler as live results).
+  if(typeof wireSaveButtons === "function") wireSaveButtons(sd);
+  const rb = sd.querySelector(".srerun");
+  if(rb) rb.addEventListener("click", ()=>{
+    closeSessions();
+    if(typeof setSearchMode === "function") setSearchMode(rb.dataset.mode);
+    const box = $("#q"); if(box){ box.value = rb.dataset.q; }
+    askQuestion(rb.dataset.q);
+  });
+  sdetail.scrollTop = 0;
+  if(isMobileSess()){ sessionsEl.dataset.view = "detail"; setSback("← Sessions"); }
+}
+
 function showSessionDetail(row, rowEl){
   if(rowEl){ slist.querySelectorAll(".srow").forEach(r=>r.removeAttribute("aria-current")); rowEl.setAttribute("aria-current","true"); }
   CURRENT_Q = row.question;
   if(isPanelRow(row)){ renderPanelSessionDetail(row); return; }   // panel session renders IN the pane, like Q&A
+  const t0 = (row.thread && row.thread[0]) || row;
+  if(t0.kind === "jobs" || t0.kind === "people_population"){ renderSearchSessionDetail(row, rowEl, t0); return; }
 
   const who = row.user_name || row.user_email;
   // Render the WHOLE conversation (all follow-up turns), not just the first answer.
@@ -6041,17 +6081,11 @@ function retryDeeper(question, ef){
   askQuestion(question, {skipDuel:true});   // an effort retry re-runs ONE engine, not a fresh duel
   window.scrollTo({top:0});
 }
-// Job/people searches store only a summary, so opening one RE-RUNS it (live cards); research answers
-// are captured in full and render from the stored session.
+// Every past session opens to its STORED content: jobs/people render their saved result cards,
+// research answers render the captured answer. Nothing re-runs on click (a ↻ button re-runs on demand).
 function onSessionClick(rowEl){
-  const kind = rowEl.dataset.kind, q = rowEl.dataset.q || "";
-  if((kind === "jobs" || kind === "people_population") && q){
-    closeSessions();
-    if(typeof setSearchMode === "function") setSearchMode(kind === "jobs" ? "jobs" : "people");
-    const box = $("#q"); if(box){ box.value = q; }
-    askQuestion(q);
-    return;
-  }
+  // Clicking a past session SHOWS its stored results — it never re-launches the search.
+  // (jobs/people sessions render their stored rows in showSessionDetail; Q&A renders its answer.)
   selectSession(rowEl);
 }
 async function selectSession(rowEl){

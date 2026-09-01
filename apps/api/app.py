@@ -2409,7 +2409,11 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         if store is None:
             return {"jobs": [], "count": 0, "query": {}, "stats": {"jobs": 0, "companies": 0}}
 
-        async def _save_job_session(count: int, qdesc: dict):
+        async def _save_job_session(rows: list, qdesc: dict):
+            # Store the actual job rows on the session so History can SHOW the stored results
+            # on click (never re-run the search). Cap the stored payload so a huge result set
+            # doesn't bloat the row.
+            count = len(rows)
             try:
                 sstore = _store()
                 if sstore is not None:
@@ -2418,7 +2422,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         question=body.question, answer=f"Found {count} open role{'' if count==1 else 's'}{at}.",
                         grounded=bool(count), claims=[], source_stats={}, coverage_gaps=[], rejected=0,
                         sources=body.sources, user_name=body.user_name, user_email=body.user_email,
-                        kind="jobs", extra={"jobs_count": count})
+                        kind="jobs", extra={"jobs_count": count, "jobs": list(rows[:60]), "query": qdesc})
             except Exception:   # noqa: BLE001
                 pass
 
@@ -2432,7 +2436,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 res["agentic"] = True
                 res["query"] = {}
                 res["stats"] = await store.jobs_stats()
-                await _save_job_session(res["count"], {})
+                await _save_job_session(res.get("jobs") or [], {})
                 return res
             except Exception as e:   # noqa: BLE001 — fall through to direct search on any failure
                 _log = __import__("logging").getLogger("api.jobs")
@@ -2453,7 +2457,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 terms=q.get("title_keywords") or [], company=q.get("company") or None,
                 location=(q.get("location") or None), cap=80)
         stats = await store.jobs_stats()
-        await _save_job_session(len(rows), q)   # JOB searches appear in the user's private History
+        await _save_job_session(rows, q)   # JOB searches appear in the user's private History
         return {"jobs": rows, "count": len(rows), "query": q, "semantic": bool(qvec), "stats": stats}
 
     def _fetch_jd_text(url: str) -> str:
@@ -2477,10 +2481,27 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 raw = r.read(2_000_000).decode("utf-8", "ignore")
         except Exception:
             return ""
-        raw = _re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", raw)
-        text = _re.sub(r"(?s)<[^>]+>", " ", raw)
-        text = _re.sub(r"&[a-z#0-9]+;", " ", text)
-        return _re.sub(r"\s+", " ", text).strip()[:8000]
+        import json as _json
+        def _strip(s):
+            s = _re.sub(r"(?s)<[^>]+>", " ", s or "")
+            s = _re.sub(r"&(?:#\d+|#x[0-9a-f]+|[a-z]+);", " ", s, flags=_re.I)
+            return _re.sub(r"\s+", " ", s).strip()
+        # 1) PREFER schema.org JobPosting ld+json — embedded by Ashby/Greenhouse/Lever & most career
+        #    pages even when the visible page is JS-rendered (so a raw fetch would otherwise see nothing).
+        for m in _re.finditer(r'(?is)<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', raw):
+            try:
+                data = _json.loads(m.group(1).strip())
+            except Exception:
+                continue
+            items = data if isinstance(data, list) else ([data] + (data.get("@graph", []) if isinstance(data, dict) else []))
+            for d in items:
+                if isinstance(d, dict) and str(d.get("@type", "")).lower().endswith("jobposting"):
+                    text = _strip((d.get("title") or "") + ". " + (d.get("description") or ""))
+                    if len(text) >= 40:
+                        return text[:8000]
+        # 2) fallback: strip the whole HTML (works for server-rendered JD pages)
+        raw2 = _re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", raw)
+        return _strip(raw2)[:8000]
 
     @app.post("/match-people")
     async def match_people(body: MatchPeopleIn) -> dict:
