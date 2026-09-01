@@ -1431,15 +1431,14 @@
 <body>
 <!-- Roster mark as a themed SVG (adapts to light/dark via CSS vars) — reused in the header + welcome modal -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><symbol id="roster-logo" viewBox="0 0 220 132">
-  <!-- open ring: gap upper-right for the breakout arrow, subtle gap left at the origin dot -->
-  <path d="M120.1 15.0 A27 27 0 0 0 83.1 42.4" fill="none" stroke="var(--gold)" stroke-width="2.4" stroke-linecap="round"/>
-  <path d="M85.1 50.6 A27 27 0 0 0 136.6 35.3" fill="none" stroke="var(--gold)" stroke-width="2.4" stroke-linecap="round"/>
-  <!-- rising S-wave from the dot up into the breakout arrow -->
-  <path d="M84 46 C94 34 104 34 110 41 C116 48 122 34 132 20" fill="none" stroke="var(--gold)" stroke-width="2.4" stroke-linecap="round"/>
-  <path d="M132 20 l-10 1 M132 20 l-1 10" fill="none" stroke="var(--gold)" stroke-width="2.4" stroke-linecap="round"/>
-  <circle cx="84" cy="46" r="3.1" fill="var(--gold)"/>
+  <!-- People × Jobs mark: a person beside a briefcase -->
+  <circle cx="86" cy="30" r="8.5" fill="none" stroke="var(--gold)" stroke-width="3"/>
+  <path d="M72 52 a14 14 0 0 1 28 0" fill="none" stroke="var(--gold)" stroke-width="3" stroke-linecap="round"/>
+  <rect x="112" y="30" width="34" height="23" rx="4" fill="none" stroke="var(--gold)" stroke-width="3"/>
+  <path d="M122 30 v-3.5 a3 3 0 0 1 3-3 h8 a3 3 0 0 1 3 3 V30" fill="none" stroke="var(--gold)" stroke-width="3" stroke-linecap="round"/>
+  <path d="M112 39.5 h34" stroke="var(--gold)" stroke-width="3"/>
   <text x="110" y="92" text-anchor="middle" font-family="var(--serif)" font-size="27" letter-spacing="7" fill="var(--ink)">ROSTER</text>
-  <text x="110" y="111" text-anchor="middle" font-family="var(--sans)" font-size="7.4" letter-spacing="3" fill="var(--gold)">DISCOVER · UNDERSTAND · ACT</text>
+  <text x="110" y="110" text-anchor="middle" font-family="var(--sans)" font-size="7" letter-spacing="4" fill="var(--gold)">PEOPLE × JOBS</text>
 </symbol></svg>
 <button type="button" class="themebtn" id="themebtn" aria-label="Switch color theme" title="Switch between dark and light theme">☀ Light</button>
 <div class="wrap">
@@ -1534,16 +1533,6 @@
   </form>
 
   <section id="out" aria-live="polite">
-    <div class="motto">
-      <div class="mstep"><b>Discover</b>
-        <svg class="micon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div>
-      <i></i>
-      <div class="mstep"><b>Understand</b>
-        <svg class="micon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-4 10.5c.7.8 1 1.6 1 2.5h6c0-.9.3-1.7 1-2.5A6 6 0 0 0 12 3z"/></svg></div>
-      <i></i>
-      <div class="mstep"><b>Act</b>
-        <svg class="micon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><circle cx="12" cy="12" r="0.7" fill="currentColor"/></svg></div>
-    </div>
   </section>
   <!-- Expert Panel body — lives in the SAME shell as Q&A (shared header + heading + mode switch +
        intake box). Mode is driven by body[data-mode]; the panel phase by body[data-panel]. -->

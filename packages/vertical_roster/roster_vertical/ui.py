@@ -33,20 +33,12 @@ class TechUI:
 
     def console(self):
         return {
-            "heading": "What does the evidence say?",
-            "placeholder": "Ask a tech / startup / market diligence question…",
+            "heading": "Who are you looking for?",
+            "placeholder": "Search people or jobs…",
             "disclaimer": {
-                "gate": ("Roster is a research tool for investors and analysts. It finds and summarizes "
-                         "published evidence — filings, patents, papers, code, and news — for "
-                         "informational purposes only. It is NOT investment advice, not a recommendation "
-                         "to buy or sell, and not a substitute for independent professional judgment or "
-                         "your own diligence. Answers are AI-generated and may be incomplete, out of date, "
-                         "or wrong; always verify against the cited primary sources. By continuing you "
-                         "accept sole responsibility for how you use the information."),
-                "footer": ("For informational purposes only — not investment advice. Verify every answer "
-                           "against the cited primary sources before any decision."),
-                "answer": ("AI-generated summary of published evidence — informational only, not investment "
-                           "advice. Market sentiment is a signal, not fact. Verify against the cited sources."),
+                "gate": "",
+                "footer": "",
+                "answer": "",
             },
             "examples": [
                 "Assess the competitive position and funding trajectory of an agentic-AI coding startup.",
