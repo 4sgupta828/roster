@@ -1758,6 +1758,83 @@ class ClaimGraphStore:
             return set()
         return {r["facet_value_norm"] for r in rows if r["facet_value_norm"]}
 
+    # ---- Analytics (Insights Q&A): code-owned GROUP-BY aggregation over the grounded index. The LLM
+    # only picks group_by/filter keys from these ALLOWLISTS — never interpolated as SQL identifiers.
+    _ANALYTICS_PEOPLE_KEYS = frozenset({"role", "seniority", "function", "industry", "metro", "company",
+                                        "worked_at", "country", "state", "stage", "accelerator", "skill"})
+    _ANALYTICS_JOB_COLS = frozenset({"company", "location", "source", "department"})
+
+    async def aggregate_people_facets(self, *, group_by: str, filters: "dict[str, list[str]] | None" = None,
+                                      top_n: int = 20, tenant_id: str = "demo") -> list[dict]:
+        """Count DISTINCT people per `group_by` facet value, optionally within an AND-filter of other
+        facets — the analytics core (tenant-scoped, ACTIVE people only, so takedowns are respected).
+        Allowlisted keys only; parameterized values. Returns [{value, display, n}] desc. []=bad key/error."""
+        if group_by not in self._ANALYTICS_PEOPLE_KEYS:
+            return []
+        filters = {k: v for k, v in (filters or {}).items()
+                   if k in self._ANALYTICS_PEOPLE_KEYS and k != group_by and v}
+        top_n = max(1, min(int(top_n or 20), 50))
+        await self.ensure_schema()
+        pool = await self._get_pool()
+        args = [tenant_id, group_by]
+        filt_sql = ""
+        if filters:
+            clauses = []
+            for k, vals in filters.items():
+                args.append(k); ki = len(args)
+                args.append([str(x) for x in vals]); vi = len(args)
+                clauses.append(f"(facet_key = ${ki} AND facet_value_norm = ANY(${vi}))")
+            args.append(len(filters)); nk = len(args)
+            filt_sql = (f" AND g.entity_id IN (SELECT entity_id FROM roster_entity_facet "
+                        f"WHERE tenant_id=$1 AND ({' OR '.join(clauses)}) "
+                        f"GROUP BY entity_id HAVING count(DISTINCT facet_key) = ${nk})")
+        args.append(top_n); li = len(args)
+        sql = (f"SELECT g.facet_value_norm AS value, max(g.display_value) AS display, "
+               f"count(DISTINCT g.entity_id) AS n FROM roster_entity_facet g "
+               f"JOIN rs_entity e ON e.entity_id = g.entity_id AND e.status='active' "
+               f"WHERE g.tenant_id=$1 AND g.facet_key=$2{filt_sql} "
+               f"GROUP BY g.facet_value_norm ORDER BY n DESC LIMIT ${li}")
+        try:
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute("SET LOCAL statement_timeout = '20s'")
+                    rows = await conn.fetch(sql, *args)
+        except Exception:   # noqa: BLE001 — bad query / timeout → empty (caller reports honestly)
+            return []
+        return [{"value": r["value"], "display": r["display"] or r["value"], "n": int(r["n"])} for r in rows]
+
+    async def aggregate_jobs(self, *, group_by: str, filters: "dict | None" = None, top_n: int = 20) -> list[dict]:
+        """Count jobs per `group_by` over rs_job (code-owned column allowlist). company is grouped on the
+        NORMALIZED slug (lower+underscore) so display-name variants don't fragment counts. filters:
+        company:list / location:str / terms:list (title ILIKE). Returns [{value, display, n}] desc."""
+        if group_by not in self._ANALYTICS_JOB_COLS:
+            return []
+        top_n = max(1, min(int(top_n or 20), 50))
+        val_expr = "lower(replace(company,' ','_'))" if group_by == "company" else f"lower({group_by})"
+        pool = await self._get_pool()
+        conds, args, i = ["title IS NOT NULL"], [], 1
+        filters = filters or {}
+        if filters.get("company"):
+            conds.append(f"lower(replace(company,' ','_')) = ANY(${i})")
+            args.append([str(c).lower().replace(" ", "_") for c in filters["company"]]); i += 1
+        if filters.get("location"):
+            conds.append(f"lower(location) ILIKE ${i}"); args.append(f"%{str(filters['location']).lower()}%"); i += 1
+        for t in (filters.get("terms") or [])[:4]:
+            t = str(t).strip().lower()
+            if t:
+                conds.append(f"title_norm ILIKE ${i}"); args.append(f"%{t}%"); i += 1
+        args.append(top_n); li = i
+        sql = (f"SELECT {val_expr} AS value, max({group_by}) AS display, count(*) AS n FROM rs_job "
+               f"WHERE {' AND '.join(conds)} GROUP BY {val_expr} ORDER BY n DESC LIMIT ${li}")
+        try:
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute("SET LOCAL statement_timeout = '20s'")
+                    rows = await conn.fetch(sql, *args)
+        except Exception:   # noqa: BLE001
+            return []
+        return [{"value": r["value"], "display": r["display"] or r["value"], "n": int(r["n"])} for r in rows]
+
     async def jobs_stats(self) -> dict:
         pool = await self._get_pool()
         try:

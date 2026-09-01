@@ -2055,7 +2055,7 @@ let SEARCH_MODE = "people";     // People/Jobs toggle — explicit routing, no k
 const PJ_COPY = {
   people: {h:"Who are you looking for?",  ph:"Search people — e.g. senior ML engineers at Stripe, or “someone who can scale ML infra at an early-stage startup”"},
   jobs:   {h:"What role are you looking for?", ph:"Search jobs — e.g. remote backend roles at big tech, or “design jobs that involve research”"},
-  qa:     {h:"Ask about companies, markets & tech", ph:"Ask a question — e.g. “How is the agentic-coding startup landscape shaping up?” or “What is OpenAI’s funding trajectory?”"},
+  qa:     {h:"Ask about the people & jobs data", ph:"Ask about patterns — e.g. “which companies hire the most ML engineers?”, “where are data scientists concentrated?”, “seniority mix for AI roles?”"},
 };
 function setSearchMode(m){
   SEARCH_MODE = PJ_COPY[m] ? m : "people";   // validate against the known modes (not a people/jobs binary)
@@ -2144,8 +2144,9 @@ async function loadConfig(){
     DUEL_ENABLED = !!c.duel_enabled;
     PULSE_ENABLED = !!c.pulse_enabled;
     window.JOBS_ENABLED = !!c.jobs_enabled;   // jobs mode: route job-intent queries to /jobs
-    window.EIGEN_QA_ENABLED = !!c.eigen_qa_enabled;   // Q&A mode: reveal the 💬 Q&A toggle → /qa (Eigen)
-    { const qb = document.getElementById("pjqa"); if(qb) qb.hidden = !window.EIGEN_QA_ENABLED; }
+    window.EIGEN_QA_ENABLED = !!c.eigen_qa_enabled;   // Q&A mode: reveal the 💬 Q&A toggle
+    window.INSIGHTS_QA_ENABLED = !!c.insights_qa_enabled;   // grounded people/jobs Q&A (default when on)
+    { const qb = document.getElementById("pjqa"); if(qb) qb.hidden = !(window.EIGEN_QA_ENABLED || window.INSIGHTS_QA_ENABLED); }
     window.JD_EXCLUDE_ENABLED = !!c.jd_exclude_source_co_enabled;   // Find candidates: source-company exclusion
     { const row = document.getElementById("jdSrcCoRow"); if(row) row.hidden = !window.JD_EXCLUDE_ENABLED; }
     window.RECRUITER_MATCH_ENABLED = !!c.recruiter_match_enabled;   // Find jobs: LLM recruiter brief + fine-tune
@@ -2277,6 +2278,8 @@ const QA_PHASE_COPY = {
   verifying:"Verifying claims…", composing:"Composing the answer…", progress:"Working…",
 };
 async function runQA(question){
+  // Grounded people/jobs Insights is the DEFAULT Q&A when enabled; Eigen is a separate optional mode.
+  if(window.INSIGHTS_QA_ENABLED){ return runInsights(question); }
   const out = $("#out");
   const setStatus = (msg)=>{ if(out){ out.hidden = false;
     out.innerHTML = `<div class="ppl-wrap"><div class="ppl-cov">💬 Asking Eigen — grounded answer over the companies/markets/tech corpus.</div><div class="status" style="margin-top:.6rem;">${esc(msg)}</div></div>`; } };
@@ -2302,6 +2305,41 @@ async function runQA(question){
     if(out) out.innerHTML = qaMarkup(final, question);
   }catch(e){ if(out) out.innerHTML = `<div class="pitem-empty">Couldn't reach Eigen — ${esc((e&&e.message)||e)}</div>`; }
   finally{ if(typeof go !== "undefined" && go){ go.disabled = false; go.classList.remove("loading"); } }
+}
+// Grounded Insights Q&A — analytical answers over Roster's own people/jobs index (/insights).
+async function runInsights(question){
+  const out = $("#out");
+  if(out){ out.hidden = false; out.innerHTML = `<div class="ppl-wrap"><div class="ppl-cov">💬 Analyzing Roster's grounded people &amp; jobs index…</div><div class="status" style="margin-top:.6rem;">Working…</div></div>`; }
+  if(typeof go !== "undefined" && go){ go.disabled = true; go.classList.add("loading"); }
+  try{
+    const r = await fetch("/insights", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
+      body: JSON.stringify({question, tenant_id:"demo", user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""})});
+    if(!r || r.status === 404){ if(out) out.innerHTML = `<div class="pitem-empty">Q&A isn't enabled.</div>`; return; }
+    if(out) out.innerHTML = insightsMarkup(await r.json());
+  }catch(e){ if(out) out.innerHTML = `<div class="pitem-empty">Couldn't answer that — ${esc((e&&e.message)||e)}</div>`; }
+  finally{ if(typeof go !== "undefined" && go){ go.disabled = false; go.classList.remove("loading"); } }
+}
+function insightsMarkup(d){
+  d = d || {};
+  if(d.error){ return `<div class="ppl-wrap"><div class="pitem-empty">${esc(d.error)}</div></div>`; }
+  if(d.abstain || (!d.rows||!d.rows.length)){
+    return `<div class="ppl-wrap"><div class="ppl-head"><b>Q&amp;A</b> <span class="ppl-tag">grounded in Roster's index</span></div>
+      <div class="rqanswer" style="margin-top:.5rem;">${esc(d.answer||"I can answer counts and distributions of people and jobs in Roster's index.")}</div></div>`;
+  }
+  const max = Math.max.apply(null, d.rows.map(r=>r.n||0)) || 1;
+  const bars = d.rows.map(r=>{
+    const pct = Math.max(3, Math.round((r.n/max)*100));
+    return `<div style="display:flex;align-items:center;gap:.5rem;margin:.2rem 0;font-size:.85rem;">
+      <div style="flex:0 0 42%;text-align:right;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc((r.display||r.value||"").replace(/_/g," "))}</div>
+      <div style="flex:1;background:var(--hair);border-radius:5px;overflow:hidden;"><div style="width:${pct}%;background:var(--gold);height:14px;border-radius:5px;"></div></div>
+      <div style="flex:0 0 auto;color:var(--muted);font-variant-numeric:tabular-nums;">${(r.n||0).toLocaleString()}</div></div>`;
+  }).join("");
+  const cav = (d.caveats||[]).map(c=>`<div class="ppl-cov" style="border-left-color:var(--gap);background:rgba(var(--gold-rgb),.05);">⚠ ${esc(c)}</div>`).join("");
+  const cov = (d.coverage_basis&&d.coverage_basis.population_statement) ? `<div class="ppl-cov">◔ ${esc(d.coverage_basis.population_statement)}</div>` : "";
+  return `<div class="ppl-wrap">
+    <div class="ppl-head"><b>Q&amp;A</b> <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">✓ grounded in Roster's index</span></div>
+    ${d.narrative?`<div class="rqanswer" style="margin:.5rem 0;">${esc(d.narrative)}</div>`:""}
+    <div style="margin:.5rem 0;">${bars}</div>${cav}${cov}</div>`;
 }
 // Render an Eigen answer as a grounded card: markdown prose + a numbered source list. Mirrors the
 // research answer surface's look without pulling in its flag-gated machinery (predictable + self-contained).

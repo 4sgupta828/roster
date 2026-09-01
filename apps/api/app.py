@@ -678,6 +678,13 @@ def eigen_qa_enabled() -> bool:
     return os.environ.get("ROSTER_EIGEN_QA", "").lower() in ("1", "true", "yes")
 
 
+def insights_qa_enabled() -> bool:
+    """Flag (default OFF, Rule 20) via ROSTER_INSIGHTS_QA: the GROUNDED Q&A — answers analytical questions
+    (counts/distributions/patterns) over Roster's OWN people + jobs index via coded aggregation, not the
+    Eigen proxy. When on, the Q&A mode routes here; Eigen stays a separate optional mode (no fallback)."""
+    return os.environ.get("ROSTER_INSIGHTS_QA", "").lower() in ("1", "true", "yes")
+
+
 def jd_exclude_source_co_enabled() -> bool:
     """Flag (default OFF, Rule 20) via ROSTER_JD_EXCLUDE_SOURCE_CO: when ON, "Find candidates" hides
     people who currently work at the JD's HIRING company (recruiters don't poach from the client),
@@ -2004,6 +2011,7 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             "people_geo_scope_enabled": people_geo_scope_enabled(),
             "jobs_enabled": jobs_enabled(),
             "eigen_qa_enabled": eigen_qa_enabled(),
+            "insights_qa_enabled": insights_qa_enabled(),
             "jd_exclude_source_co_enabled": jd_exclude_source_co_enabled(),
             "people_semantic_first_enabled": _people_semantic_first_enabled(),
             "recruiter_match_enabled": recruiter_match_enabled(),
@@ -2566,6 +2574,41 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         stats = await store.jobs_stats()
         await _save_job_session(rows, q)   # JOB searches appear in the user's private History
         return {"jobs": rows, "count": len(rows), "query": q, "semantic": bool(qvec), "stats": stats}
+
+    @app.post("/insights")
+    async def insights(body: ResearchIn) -> dict:
+        """GROUNDED Q&A (flag ROSTER_INSIGHTS_QA): analytical questions (counts / distributions / patterns)
+        answered over Roster's OWN people + jobs index via coded GROUP-BY aggregation — numbers computed
+        by code, narrated by the LLM, with honest coverage + caveats + abstain. 404 when off."""
+        if not insights_qa_enabled():
+            raise HTTPException(status_code=404, detail="insights Q&A not enabled")
+        store = _claim_store_cached()
+        if store is None:
+            raise HTTPException(status_code=503, detail="people/jobs index unavailable")
+        question = (body.question or "").strip()
+        if not question:
+            return {"answer": "", "rows": [], "grounded": False, "coverage_basis": None, "source": "roster"}
+        from api.people_population import answer_roster_insights
+        try:
+            res = await answer_roster_insights(question=question, tenant_id=body.tenant_id or "demo",
+                                               store=store, llm=build_llm(mode=resolve_mode()))
+        except Exception as e:   # noqa: BLE001 — never 500 to the browser
+            __import__("logging").getLogger("api.insights").warning("insights failed: %s", e)
+            return {"answer": "", "rows": [], "grounded": False, "coverage_basis": None,
+                    "source": "roster", "error": "Couldn't answer that right now — try again."}
+        res["source"] = "roster"
+        # Save to History (kind='qa') so it reopens as stored, like the other search modes.
+        try:
+            sstore = _store()
+            if sstore is not None:
+                await sstore.save(tenant_id=body.tenant_id, workspace_id=body.workspace_id,
+                    question=question, answer=res.get("answer") or "", grounded=bool(res.get("grounded")),
+                    claims=[], source_stats={}, coverage_gaps=[], rejected=0, sources=body.sources,
+                    user_name=body.user_name, user_email=body.user_email, kind="qa",
+                    extra={"insights_rows": (res.get("rows") or [])[:25], "insights": True})
+        except Exception:   # noqa: BLE001
+            pass
+        return res
 
     @app.post("/qa")
     async def qa(body: ResearchIn) -> dict:

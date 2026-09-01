@@ -873,6 +873,137 @@ def _coverage_basis(facets, stats, matches: int) -> dict:
     }
 
 
+_INSIGHT_FILTER_KEYS = ("role", "seniority", "function", "industry", "metro", "company",
+                        "worked_at", "country", "state", "stage", "accelerator", "skill")
+
+
+class _AnalyticsSpec(BaseModel):
+    """Compiled analytics question → a safe GROUP-BY spec. The LLM fills this; CODE runs the aggregation
+    and owns the numbers (Rule 18). `target='abstain'` when the question can't be answered from facets."""
+    target: str = ""                 # people | jobs | abstain
+    group_by: str = ""               # people facet_key OR jobs col (company/location/source/department)
+    metric: str = "distinct_people"  # people: distinct_people ; jobs: job_count
+    top_n: int = 15
+    unanswerable_reason: str = ""
+    # filter facets (flat, like _FacetParse) — AND across keys, OR within a key:
+    role: list[str] = []
+    seniority: list[str] = []
+    function: list[str] = []
+    industry: list[str] = []
+    metro: list[str] = []
+    company: list[str] = []
+    worked_at: list[str] = []
+    country: list[str] = []
+    state: list[str] = []
+    stage: list[str] = []
+    accelerator: list[str] = []
+    skill: list[str] = []
+
+
+async def parse_analytical_query(question: str, llm) -> _AnalyticsSpec | None:
+    """LLM query-COMPILER (Rule 18) → a structured analytics spec. Fail-safe: returns an abstain spec on
+    any error, never guesses. Keys/dimensions are validated against the allowlist by the caller/store."""
+    if llm is None or len((question or "").strip()) < 3:
+        return None
+    try:
+        comp = await llm.complete(
+            system=(
+                "Compile this analytics question about Roster's PEOPLE + JOBS index into a spec. "
+                "target: 'people' (counts/distributions of professionals), 'jobs' (counts of open roles), "
+                "or 'abstain' if it can't be answered from the index's facets (e.g. salary, tenure, growth "
+                "over time, sentiment, anything time-series). "
+                "group_by = the dimension to break down by — for people ONE of "
+                "[role, seniority, function, industry, metro, company, worked_at, country, state, stage, "
+                "accelerator, skill]; for jobs ONE of [company, location, source, department]. Prefer "
+                "role/seniority over job titles. Map 'works at / at X' → company filter; 'worked at / "
+                "ex-X / former' → worked_at. metric = 'distinct_people' (people) or 'job_count' (jobs). "
+                "Fill the filter facet lists with NORMALIZED values (lowercase, snake_case) that constrain "
+                "the population. top_n 5–25. If unanswerable, set target='abstain' and a short "
+                "unanswerable_reason. Never invent facets or values."),
+            messages=[{"role": "user", "content": (question or "")[:1000]}],
+            response_format=_AnalyticsSpec, max_tokens=400)
+        return comp.parsed
+    except Exception as e:   # noqa: BLE001
+        _log.warning("parse_analytical_query failed: %s", e)
+        return _AnalyticsSpec(target="abstain", unanswerable_reason="Couldn't interpret the question.")
+
+
+async def answer_roster_insights(*, question: str, tenant_id: str, store, llm) -> dict:
+    """Grounded INSIGHTS Q&A over Roster's own people/jobs index: compile → coded GROUP-BY aggregation →
+    grounded narration of ONLY the computed numbers, with honest coverage + data caveats + abstain.
+    Never fabricates a statistic (the numbers come from the store, not the model)."""
+    spec = await parse_analytical_query(question, llm)
+    if spec is None or spec.target == "abstain" or spec.target not in ("people", "jobs") or not spec.group_by:
+        reason = (getattr(spec, "unanswerable_reason", "") or
+                  "I can answer questions about counts and distributions of people and jobs in Roster's "
+                  "index (e.g. top companies hiring a role, skill or seniority breakdowns, where a role is "
+                  "concentrated) — but not this one.")
+        return {"grounded": False, "abstain": True, "answer": reason, "rows": [], "coverage_basis": None}
+    top_n = max(5, min(int(spec.top_n or 15), 25))
+    filters = {k: getattr(spec, k) for k in _INSIGHT_FILTER_KEYS if getattr(spec, k)}
+    caveats = []
+    if spec.target == "people":
+        rows = await store.aggregate_people_facets(group_by=spec.group_by, filters=filters,
+                                                   top_n=top_n, tenant_id=tenant_id)
+        stats = await store.people_index_stats(tenant_id=tenant_id)
+        fc = stats.get("facet_coverage", {}) or {}
+        denom = fc.get(spec.group_by, 0)
+        cov = _coverage_basis(filters, stats, sum(r["n"] for r in rows))
+        cov["group_by"] = spec.group_by
+        cov["group_facet_coverage"] = denom
+        # DATA-QUALITY caveats (panel): sparse skill, former-employer, canonical basis.
+        sparse = {"skill", "worked_at", "industry", "stage", "accelerator"}
+        if spec.group_by in sparse or (set(filters) & sparse):
+            caveats.append(f"'{spec.group_by if spec.group_by in sparse else 'skill'}' is a sparsely-tagged "
+                           f"facet (only a fraction of profiles carry it), so this ranks within the tagged "
+                           f"subset, not the whole index.")
+        if spec.group_by == "worked_at" or "worked_at" in filters:
+            caveats.append("worked_at = PAST employers (not current).")
+        subject = "people"
+    else:
+        rows = await store.aggregate_jobs(group_by=spec.group_by,
+                                          filters={"company": spec.company, "location": (spec.metro or spec.state or [None])[0],
+                                                   "terms": (spec.role or spec.function or [])}, top_n=top_n)
+        jstats = await store.jobs_stats()
+        cov = {"jobs_indexed": jstats.get("jobs", 0), "companies_indexed": jstats.get("companies", 0),
+               "group_by": spec.group_by, "not_ingested": NOT_INGESTED,
+               "population_statement": (f"Counts over the {jstats.get('jobs', 0)} open roles currently in "
+                                        f"Roster's job index (aggregated public ATS postings) — not every job "
+                                        f"on the market.")}
+        subject = "open roles"
+    if not rows:
+        return {"grounded": False, "abstain": False, "rows": [], "coverage_basis": cov,
+                "answer": (f"No {subject} in Roster's index match that yet — it may be a sparsely-covered "
+                           f"dimension. {cov.get('population_statement','')}")}
+    # DETERMINISTIC grounded lead (numbers are code-computed, never model-authored).
+    label = {"distinct_people": "people", "job_count": "open roles"}.get(spec.metric, subject)
+    lines = [f"{i}. {r['display']} — {r['n']:,} {label}" for i, r in enumerate(rows, 1)]
+    table = "\n".join(lines)
+    narrative = ""
+    try:
+        comp = await llm.complete(
+            system=("Write ONE short paragraph (2–4 sentences) summarizing this ranking for the user. Use "
+                    "ONLY the provided numbers — do NOT invent or extrapolate any figure. Neutral, factual, "
+                    "no hype. If caveats are given, reflect them honestly."),
+            messages=[{"role": "user", "content": json.dumps({
+                "question": question[:400], "group_by": spec.group_by, "metric": spec.metric,
+                "rows": rows[:15], "caveats": caveats})}],
+            response_format=_Narrative, max_tokens=300)
+        narrative = (comp.parsed.text or "").strip()
+    except Exception:   # noqa: BLE001 — the deterministic table stands on its own if narration fails
+        narrative = ""
+    answer = "\n".join([p for p in [narrative, table] if p]
+                       + ([""] + [f"⚠ {c}" for c in caveats] if caveats else [])
+                       + ["", cov.get("population_statement", "")])
+    return {"grounded": True, "abstain": False, "answer": answer.strip(), "narrative": narrative,
+            "rows": rows, "coverage_basis": cov, "group_by": spec.group_by, "metric": spec.metric,
+            "target": spec.target, "caveats": caveats}
+
+
+class _Narrative(BaseModel):
+    text: str = ""
+
+
 async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                                    scope_country: str = "") -> dict:
     """Answer a people-enumeration question from the grounded people index. Always returns a structured
