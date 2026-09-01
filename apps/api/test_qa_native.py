@@ -700,3 +700,80 @@ def test_worked_at_unions_current_company(monkeypatch):
     names = [p["name"] for p in res["people_rows"]]
     assert names[0] == "Ada Alum" and "Cara Current" in names and len(names) == 2
     assert "CURRENTLY at the named company" in res["coverage_basis"]["population_statement"]
+
+
+def test_foreign_metro_counts_as_foreign_under_scope(monkeypatch):
+    """metro=berlin with NO country facet is KNOWN-foreign under the us scope (metro→country map);
+    truly-untagged people stay; confirmed-us people lead the ordering."""
+    from roster_kernel.providers.llm import LLMResult
+    from api.people_population import _FacetParse, answer_people_population
+
+    class _LLM:
+        async def complete(self, *, system, messages, response_format, max_tokens=2048,
+                           temperature=None):
+            return LLMResult(parsed=_FacetParse(role=["ml_engineer"]), output_tokens=5)
+
+    def _p(eid, name, extra=()):
+        fs = [{"facet_key": "role", "facet_value_norm": "ml_engineer", "value_norm": "ml_engineer",
+               "display_value": "Ml Engineer", "document_id": "d", "block_id": "b"}]
+        for k, v in extra:
+            fs.append({"facet_key": k, "facet_value_norm": v, "value_norm": v,
+                       "display_value": v, "document_id": "d", "block_id": "b"})
+        return {"entity_id": eid, "name": name, "facets": fs}
+
+    class _Store:
+        async def people_index_stats(self, *, tenant_id):
+            return {"persons_indexed": 9, "source_documents": 3, "facet_coverage": {}}
+
+        async def enumerate_by_facets(self, facets, *, tenant_id, cap):
+            return [_p("a", "Berlin Untagged", (("metro", "berlin"),)),
+                    _p("b", "Truly Unknown"),
+                    _p("c", "US Person", (("country", "us"),))]
+
+    import asyncio
+    monkeypatch.delenv("ROSTER_SEMANTIC", raising=False)
+    monkeypatch.delenv("ROSTER_PEOPLE_SEMANTIC_FIRST", raising=False)
+    res = asyncio.get_event_loop().run_until_complete(answer_people_population(
+        question="ML engineers", tenant_id="demo", store=_Store(), llm=_LLM(),
+        scope_country="us"))
+    names = [p["name"] for p in res["people_rows"]]
+    assert "Berlin Untagged" not in names          # metro implies the country → dropped
+    assert names[0] == "US Person"                  # confirmed-scope leads
+    assert "Truly Unknown" in names                 # untagged kept (recall)
+
+
+def test_jobs_endpoint_honors_country_scope(monkeypatch):
+    """/jobs drops clearly-foreign locations under the selector scope; remote/unknown stays."""
+    class _JobsStore:
+        async def search_jobs(self, *, terms=None, company=None, location=None, cap=60):
+            return [{"company": "Bosch", "title": "Engineer", "location": "Stuttgart, Germany",
+                     "url": "u", "source": "smartrecruiters"},
+                    {"company": "Stripe", "title": "Engineer", "location": "San Francisco, CA",
+                     "url": "u", "source": "greenhouse"},
+                    {"company": "Acme", "title": "Engineer", "location": "Remote",
+                     "url": "u", "source": "lever"}]
+
+        async def jobs_stats(self):
+            return {"jobs": 3, "companies": 3}
+
+    monkeypatch.setenv("ROSTER_JOBS", "1")
+    monkeypatch.setenv("ROSTER_PEOPLE_GEO_SCOPE", "1")
+    monkeypatch.delenv("ROSTER_QA_ROUTER", raising=False)
+    monkeypatch.delenv("ROSTER_SEMANTIC", raising=False)
+    monkeypatch.delenv("ROSTER_AGENTIC_JOBS", raising=False)
+
+    class _JobLLM:
+        async def complete(self, *, system, messages, response_format, max_tokens=2048,
+                           temperature=None):
+            from roster_kernel.providers.llm import LLMResult
+            return LLMResult(parsed=response_format(title_keywords=["engineer"]), output_tokens=5)
+
+    monkeypatch.setattr(appmod, "build_llm", lambda *a, **k: _JobLLM())
+    app = create_app(_AskSpy())
+    app.state.claim_store = _JobsStore()
+    client = TestClient(app)
+    r = client.post("/jobs", json={"question": "engineering jobs", "tenant_id": "demo",
+                                   "country": "us"})
+    locs = [j["location"] for j in r.json()["jobs"]]
+    assert "Stuttgart, Germany" not in locs
+    assert "San Francisco, CA" in locs and "Remote" in locs

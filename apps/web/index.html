@@ -2070,24 +2070,13 @@ function setSearchMode(m){
   const outEl = document.getElementById("out");
   const prev = SEARCH_MODE;
   if(outEl && nm !== prev){
-    // Park the OUTGOING tab: Jobs keeps a rendered-html snapshot (one-shot results); People and
-    // Q&A each keep their OWN conversation THREAD — asking in one tab never appends to another's.
-    if(prev === "jobs"){
-      MODE_VIEWS.jobs = {html: outEl.innerHTML, hidden: outEl.hidden};
-    } else {
-      TAB_THREADS[prev] = THREAD;
-    }
+    // Every tab keeps its OWN conversation THREAD (People searches, Jobs searches, Q&A) — asking
+    // in one tab never appends to another's, and switching back restores that tab's dialogue.
+    TAB_THREADS[prev] = THREAD;
     SEARCH_MODE = nm;                     // set BEFORE rendering the incoming tab
-    if(nm === "jobs"){
-      const v = MODE_VIEWS.jobs;
-      outEl.innerHTML = (v && v.html) || "";
-      outEl.hidden = v ? !!v.hidden : true;
-      document.body.classList.remove("chatting");
-    } else {
-      THREAD = TAB_THREADS[nm] || {session_id: null, turns: []};
-      TAB_THREADS[nm] = THREAD;
-      renderThread();                     // that tab's own turns, or a clean landing
-    }
+    THREAD = TAB_THREADS[nm] || {session_id: null, turns: []};
+    TAB_THREADS[nm] = THREAD;
+    renderThread();                       // that tab's own turns, or a clean landing
   }
   SEARCH_MODE = nm;   // validate against the known modes (not a people/jobs binary)
   document.querySelectorAll("#pjmode .pjbtn").forEach(b=>{
@@ -2293,19 +2282,23 @@ async function runJobs(question){
   let r;
   try{ r = await fetch("/jobs", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
       body: JSON.stringify({question, tenant_id:"demo", refine_query: (JOBS_CTX||undefined),
+        country: (window.ROSTER_COUNTRY||"us"),   // the top-right scope applies to jobs too
         user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""})}); }
   catch(e){ return false; }
   if(!r || r.status === 404) return false;
-  const out = $("#out");
-  if(out){ out.hidden = false;
-    try{
-      const d = await r.json();
-      // Jobs-tab conversation memory: the merged query behind THIS result set is what the next
-      // utterance refines (New search clears it). Redirects don't advance the conversation.
-      if(!d.redirect_to_qa && d.query) JOBS_CTX = d.query;
-      out.innerHTML = jobsMarkup(d);
-    }
-    catch(e){ out.innerHTML = `<div class="pitem-empty">Couldn't load jobs — ${esc(e.message||e)}</div>`; } }
+  try{
+    const d = await r.json();
+    // Jobs is a CONVERSATION like the other tabs: each search/refinement is a turn on the jobs
+    // thread. The merged query behind THIS result set is what the next utterance refines
+    // (New search clears it). Redirects don't advance the conversation.
+    if(!d.redirect_to_qa && d.query) JOBS_CTX = d.query;
+    THREAD.turns.push({question, kind: "jobs", jobs: d.jobs||[], query: d.query||{},
+                       stats: d.stats||{}, semantic: d.semantic,
+                       redirect_to_qa: !!d.redirect_to_qa, note: d.note||"", answer: ""});
+    renderThread();
+  }
+  catch(e){ const out = $("#out"); if(out){ out.hidden = false;
+    out.innerHTML = `<div class="pitem-empty">Couldn't load jobs — ${esc(e.message||e)}</div>`; } }
   return true;
 }
 // Q&A MODE: STREAM the question through Roster's /qa/stream (SSE relay of Eigen's /research/stream).
@@ -3050,6 +3043,12 @@ function render(data, target, opts){
     const html = STRUCTURED ? mdToHtml(data.answer) : esc(data.answer);
     target.innerHTML = `<div class="rqnote">↻ Reshaped from your previous answer — no new evidence retrieved.</div>`
       + `<div class="answer${STRUCTURED?" md":""}">${html}</div>`;
+    return;
+  }
+  // JOBS turn (the Jobs tab is a conversation too): stored rows render as the jobs cards.
+  if(data.kind === "jobs"){
+    target.innerHTML = jobsMarkup(data);
+    if(typeof wireSaveButtons === "function") wireSaveButtons(target);
     return;
   }
   const parts = [];
@@ -6016,6 +6015,15 @@ function newConversation(){
   q.setAttribute("placeholder", pickPlaceholder());  // fresh question each New chat
   window.scrollTo({top:0}); q.focus();
 }
+// One-line summary for a FOLDED earlier turn: what it returned, at a glance.
+function turnFoldLabel(t){
+  if(t.kind === "jobs")  return `▸ ${(t.jobs||[]).length} role${(t.jobs||[]).length===1?"":"s"} — expand`;
+  if(Array.isArray(t.people_rows) && t.people_rows.length)
+    return `▸ ${t.people_rows.length} ${t.people_rows.length===1?"person":"people"} — expand`;
+  if(t.clarification) return `▸ asked to clarify — expand`;
+  const a = (t.answer||"").replace(/\[\[\/?[FRK]\]\]/g,"").replace(/[#*_`]/g,"").replace(/\s+/g," ").trim();
+  return a ? `▸ ${a.slice(0,120)}${a.length>120?"…":""}` : "▸ expand";
+}
 function renderThread(){
   // ALL tabs render results through this thread view (People searches included — the server
   // routes per surface). The one real bug was visibility: a tab switch could leave #out hidden,
@@ -6038,7 +6046,20 @@ function renderThread(){
     const qh = document.createElement("div"); qh.className = "turn-q";
     qh.innerHTML = `<span class="turn-qmark">Q${i+1}</span><div class="turn-qtext">${esc(t.question||"")}</div>`;
     block.appendChild(qh);
-    const ans = document.createElement("div"); block.appendChild(ans);
+    const ans = document.createElement("div");
+    const isLast = i === THREAD.turns.length - 1;
+    if(isLast || t._pending){
+      block.appendChild(ans);
+    } else {
+      // COMPRESS prior turns: with big result sets a long thread becomes unnavigable — earlier
+      // answers fold to a one-line summary (click to expand); only the LATEST turn stays open.
+      const det = document.createElement("details");
+      const sum = document.createElement("summary");
+      sum.style.cssText = "cursor:pointer;color:var(--muted);font-size:.85rem;margin:.2rem 0 .8rem;" +
+                          "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;";
+      sum.textContent = turnFoldLabel(t);
+      det.appendChild(sum); det.appendChild(ans); block.appendChild(det);
+    }
     out.appendChild(block);
     render(t, ans, {noLink:true, noConvo:true});   // per-turn keeps its Evidence box; convo box is once, below
   });

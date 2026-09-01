@@ -276,23 +276,27 @@ async def connection_path_answer(store, entities: list[str], *, tenant_id: str =
 # ---------------------------------------------------------------------------
 # Indexed job search — closed-world, honest (design §Jobs Search): indexed rows with an as-of
 # disclosure; never invents postings and never answers from stale rows without saying so.
-async def indexed_jobs_answer(store, question: str, llm) -> dict | None:
+async def indexed_jobs_answer(store, question: str, llm, *, country: str = "") -> dict | None:
     """Answer a job-search question from rs_job. Returns {answer, jobs, query, stats} (answer is a
     code-built markdown list — titles, employer, location, apply links) or None on any failure so
-    the caller can fall through to native research."""
+    the caller can fall through to native research. `country` (geo scope) drops jobs whose location
+    is CLEARLY in a different country; unplaceable/remote stays (recall)."""
     try:
-        from api.people_population import embed_query, parse_job_query, semantic_enabled
+        from api.people_population import _country_ok, embed_query, parse_job_query, semantic_enabled
         try:
             q = await parse_job_query(question, llm)
         except Exception:  # noqa: BLE001
             q = {"company": [], "title_keywords": [], "location": ""}
         qvec = embed_query(question) if semantic_enabled() else None
         if qvec:
-            rows = await store.semantic_jobs(qvec, company=(q.get("company") or None), cap=40)
+            rows = await store.semantic_jobs(qvec, company=(q.get("company") or None), cap=120)
         else:
             rows = await store.search_jobs(terms=q.get("title_keywords") or [],
                                            company=q.get("company") or None,
-                                           location=(q.get("location") or None), cap=40)
+                                           location=(q.get("location") or None), cap=120)
+        if country and not (q.get("location") or "").strip():   # an explicit location wins
+            rows = [r for r in rows if _country_ok(r.get("location") or "", country)]
+        rows = rows[:40]
         stats = await store.jobs_stats()
         if not rows:
             return {"answer": ("No matching open roles in Roster's job index yet (aggregated public "

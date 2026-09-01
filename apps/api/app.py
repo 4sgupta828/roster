@@ -2617,11 +2617,20 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         # else the exact title-keyword filter. Semantic understands 'jobs building ML infra', etc.
         qvec = embed_query(body.question) if semantic_enabled() else None
         if qvec:
-            rows = await store.semantic_jobs(qvec, company=(q.get("company") or None), cap=80)
+            rows = await store.semantic_jobs(qvec, company=(q.get("company") or None), cap=200)
         else:
             rows = await store.search_jobs(
                 terms=q.get("title_keywords") or [], company=q.get("company") or None,
-                location=(q.get("location") or None), cap=80)
+                location=(q.get("location") or None), cap=200)
+        # COUNTRY SCOPE (top-right selector, geo-scope flag): drop jobs whose location is CLEARLY in
+        # a different country; unplaceable/remote stays (recall). The F2000 sweep made the index
+        # global, so an unscoped search now surfaces Stuttgart/Tokyo rows to a US user.
+        if people_geo_scope_enabled():
+            _want = (body.country or "us").strip().lower()
+            if _want and not (q.get("location") or "").strip():   # an explicit location wins
+                from api.people_population import _country_ok
+                rows = [r for r in rows if _country_ok(r.get("location") or "", _want)]
+        rows = rows[:80]
         stats = await store.jobs_stats()
         await _save_job_session(rows, q)   # JOB searches appear in the user's private History
         return {"jobs": rows, "count": len(rows), "query": q, "semantic": bool(qvec), "stats": stats}
@@ -3604,7 +3613,9 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 _route_afo = _RAF.get("connection_path")
             elif _r == "indexed_job_search" and jobs_enabled() and _cstore is not None:
                 jres = await _qr.indexed_jobs_answer(
-                    _cstore, body.question, build_llm(mode=resolve_mode()))
+                    _cstore, body.question, build_llm(mode=resolve_mode()),
+                    country=((body.country or "us").strip().lower()
+                             if people_geo_scope_enabled() else ""))
                 if jres is not None:
                     if on_event is not None:
                         await on_event({"type": "jobs", "count": len(jres.get("jobs") or [])})

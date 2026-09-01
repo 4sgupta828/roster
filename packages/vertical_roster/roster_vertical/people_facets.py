@@ -198,3 +198,32 @@ def facet_refine_prompt(question: str, current_filter_json: str) -> str:
     return (PEOPLE_FACET_PARSE_PROMPT.split("Question: {question}")[0]
             + _REFINE_SUFFIX.replace("{current}", current_filter_json)
                             .replace("{question}", question))
+
+
+# metro → country (vertical vocabulary): lets the geo scope treat a person whose METRO is known-
+# foreign as foreign even when the explicit country facet is missing — untagged stays unknown (kept).
+METRO_COUNTRY = {
+    # US metros
+    "bay_area": "us", "san_francisco": "us", "sf": "us", "nyc": "us", "new_york": "us",
+    "seattle": "us", "boston": "us", "los_angeles": "us", "austin": "us", "chicago": "us",
+    "denver": "us", "portland": "us", "atlanta": "us", "san_diego": "us", "miami": "us",
+    "dallas": "us", "houston": "us", "philadelphia": "us", "phoenix": "us", "washington_dc": "us",
+    "dc": "us", "salt_lake_city": "us", "minneapolis": "us", "pittsburgh": "us", "raleigh": "us",
+    # non-US metros
+    "toronto": "ca", "vancouver": "ca", "montreal": "ca", "ottawa": "ca", "waterloo": "ca",
+    "london": "uk", "manchester": "uk", "edinburgh": "uk", "cambridge_uk": "uk",
+    "berlin": "de", "munich": "de", "hamburg": "de", "frankfurt": "de", "cologne": "de",
+    "stuttgart": "de", "paris": "fr", "lyon": "fr", "amsterdam": "nl", "madrid": "es",
+    "barcelona": "es", "zurich": "ch", "geneva": "ch", "dublin": "ie", "stockholm": "se",
+    "copenhagen": "dk", "oslo": "no", "helsinki": "fi", "warsaw": "pl", "lisbon": "pt",
+    "milan": "it", "rome": "it", "vienna": "at", "brussels": "be", "prague": "cz",
+    "bangalore": "in", "bengaluru": "in", "hyderabad": "in", "pune": "in", "delhi": "in",
+    "mumbai": "in", "chennai": "in", "gurgaon": "in", "noida": "in", "singapore": "sg",
+    "tokyo": "jp", "osaka": "jp", "seoul": "kr", "shanghai": "cn", "beijing": "cn",
+    "shenzhen": "cn", "hangzhou": "cn", "hong_kong": "hk", "taipei": "tw", "sydney": "au",
+    "melbourne": "au", "auckland": "nz", "tel_aviv": "il", "sao_paulo": "br",
+    "buenos_aires": "ar", "mexico_city": "mx", "bogota": "co", "santiago": "cl",
+    "lagos": "ng", "nairobi": "ke", "cairo": "eg", "cape_town": "za", "jakarta": "id",
+    "manila": "ph", "bangkok": "th", "ho_chi_minh_city": "vn", "kuala_lumpur": "my",
+    "dubai": "ae", "istanbul": "tr",
+}

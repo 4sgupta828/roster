@@ -130,6 +130,44 @@ _COUNTRY_RX = {
     "fr": re.compile(r"\b(france|paris|lyon|toulouse)\b", re.I),
     "in": re.compile(r"\b(india|bengaluru|bangalore|hyderabad|mumbai|delhi|pune|chennai|gurgaon|noida)\b", re.I),
     "jp": re.compile(r"\b(japan|tokyo|osaka|kyoto)\b", re.I),
+    # broadened after the F2000 sweep pulled global boards (Bosch/Kioxia/…) — a location we still
+    # can't place stays ambiguous and is NOT dropped (the recall rule).
+    "es": re.compile(r"\b(spain|madrid|barcelona|valencia)\b", re.I),
+    "nl": re.compile(r"\b(netherlands|amsterdam|eindhoven|rotterdam|utrecht)\b", re.I),
+    "ch": re.compile(r"\b(switzerland|zurich|zürich|geneva|basel|lausanne)\b", re.I),
+    "ie": re.compile(r"\b(ireland|dublin|cork)\b", re.I),
+    "se": re.compile(r"\b(sweden|stockholm|gothenburg)\b", re.I),
+    "dk": re.compile(r"\b(denmark|copenhagen|aarhus)\b", re.I),
+    "no": re.compile(r"\b(norway|oslo)\b", re.I),
+    "fi": re.compile(r"\b(finland|helsinki|espoo)\b", re.I),
+    "pl": re.compile(r"\b(poland|warsaw|krakow|kraków|wroclaw|gdansk)\b", re.I),
+    "pt": re.compile(r"\b(portugal|lisbon|porto)\b", re.I),
+    "it": re.compile(r"\b(italy|milan|milano|rome|roma|turin)\b", re.I),
+    "at": re.compile(r"\b(austria|vienna|wien)\b", re.I),
+    "be": re.compile(r"\b(belgium|brussels|antwerp|ghent)\b", re.I),
+    "cz": re.compile(r"\b(czech|prague|brno)\b", re.I),
+    "ro": re.compile(r"\b(romania|bucharest|cluj)\b", re.I),
+    "hu": re.compile(r"\b(hungary|budapest)\b", re.I),
+    "br": re.compile(r"\b(brazil|brasil|s[ãa]o paulo|rio de janeiro|campinas)\b", re.I),
+    "mx": re.compile(r"(?<!new )\bmexico\b|\bm[ée]xico\b|\bguadalajara\b|\bmonterrey\b", re.I),
+    "ar": re.compile(r"\b(argentina|buenos aires)\b", re.I),
+    "co": re.compile(r"\b(colombia|bogot[aá]|medell[ií]n)\b", re.I),
+    "sg": re.compile(r"\b(singapore)\b", re.I),
+    "kr": re.compile(r"\b(south korea|korea|seoul)\b", re.I),
+    "cn": re.compile(r"\b(china|shanghai|beijing|shenzhen|hangzhou|suzhou|nanjing)\b", re.I),
+    "tw": re.compile(r"\b(taiwan|taipei|hsinchu)\b", re.I),
+    "hk": re.compile(r"\b(hong kong)\b", re.I),
+    "au": re.compile(r"\b(australia|sydney|melbourne|brisbane|perth)\b", re.I),
+    "nz": re.compile(r"\b(new zealand|auckland|wellington)\b", re.I),
+    "il": re.compile(r"\b(israel|tel aviv|haifa|jerusalem)\b", re.I),
+    "ae": re.compile(r"\b(united arab emirates|dubai|abu dhabi|uae)\b", re.I),
+    "tr": re.compile(r"\b(turkey|t[üu]rkiye|istanbul|ankara)\b", re.I),
+    "za": re.compile(r"\b(south africa|cape town|johannesburg)\b", re.I),
+    "id": re.compile(r"\b(indonesia|jakarta)\b", re.I),
+    "th": re.compile(r"\b(thailand|bangkok)\b", re.I),
+    "vn": re.compile(r"\b(vietnam|hanoi|ho chi minh)\b", re.I),
+    "my": re.compile(r"\b(malaysia|kuala lumpur)\b", re.I),
+    "ph": re.compile(r"\b(philippines|manila)\b", re.I),
 }
 def _job_country(loc: str) -> str:
     for c, rx in _COUNTRY_RX.items():
@@ -511,6 +549,24 @@ async def build_tailored_resume(jd_text: str, profile: dict, resume_text: str, l
     except Exception as e:   # noqa: BLE001
         _log.warning("build_tailored_resume failed: %s", e)
         return None
+
+
+def _person_countries(facet_rows: list[dict]) -> set[str]:
+    """Best-effort countries for a person under a geo scope: explicit country facets first; when
+    none, a known METRO implies its country (vertical map) — so metro=berlin with no country facet
+    counts as KNOWN-foreign under a 'us' scope. Empty set = truly unknown (kept, recall)."""
+    from roster_vertical.people_facets import METRO_COUNTRY
+    out = {(f.get("value_norm") or f.get("facet_value_norm") or "").strip()
+           for f in facet_rows if f.get("facet_key") == "country"}
+    out.discard("")
+    if out:
+        return out
+    for f in facet_rows:
+        if f.get("facet_key") == "metro":
+            c = METRO_COUNTRY.get((f.get("value_norm") or f.get("facet_value_norm") or "").strip())
+            if c:
+                out.add(c)
+    return out
 
 
 def _person_row_from_facets(r: dict) -> dict:
@@ -1147,10 +1203,11 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         if want:
             kept = []
             for r in rows_:
-                cv = {(f.get("value_norm") or "") for f in r["facets"] if f["facet_key"] == "country"}
-                cv.discard("")
-                if not cv or (cv & want):   # unknown country keeps the person (recall)
+                cv = _person_countries(r["facets"])   # explicit country, else metro→country
+                if not cv or (cv & want):   # truly-unknown keeps the person (recall)
                     kept.append(r)
+            # confirmed-scope people lead; unknown-country follow (stable within groups)
+            kept.sort(key=lambda r: 0 if (_person_countries(r["facets"]) & want) else 1)
             rows_ = kept
         return rows_[:cap]
 
@@ -1180,8 +1237,8 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         ranked = []
         for r in cand:
             if want_country:
-                cvals = [f["value_norm"] for f in r["facets"] if f["facet_key"] == "country"]
-                if cvals and not (set(cvals) & want_country):
+                cvals = _person_countries(r["facets"])   # explicit country, else metro→country
+                if cvals and not (cvals & want_country):
                     continue                     # KNOWN-foreign → drop; unknown country → keep (recall)
             rf = {(f["facet_key"], f["value_norm"]) for f in r["facets"]}
             nb = sum(1 for k, vals in boost.items() for v in vals if (k, v) in rf)
@@ -1288,6 +1345,14 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
 
     if not semantic_used:            # semantic search already ranked by query relevance — keep that order
         people_rows.sort(key=lambda p: (-_score(p), p["name"]))
+
+    # CONFIRMED-COUNTRY priority under a geo scope: people we can PLACE in the scoped country lead;
+    # unknown-location profiles follow (recall keeps them; rank stops them crowding out confirmed).
+    _want_c = set(facets.get("country") or [])
+    if _want_c and people_rows:
+        _placed = {r["entity_id"]: bool(_person_countries(r["facets"]) & _want_c) for r in rows}
+        people_rows = ([p for p in people_rows if _placed.get(p["entity_id"])]
+                       + [p for p in people_rows if not _placed.get(p["entity_id"])])
 
     # PRIMARY-ROLE priority: when the query names role(s), people whose FIRST (primary) role facet
     # IS that role lead the list; multi-tagged profiles (an SWE who also carries a data_scientist
