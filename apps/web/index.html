@@ -1648,8 +1648,8 @@
         <circle class="sa-cap" cx="170" cy="80" r="2.4"/>
       </g>
     </svg>
-    <div class="mf-h">Talent, findable on merit.</div>
-    <div class="mf-b">Roster turns public professional signal into a living map of people, companies, and the work between them — so the right person and the right role can find each other, whether through a direct search or a warm introduction.</div>
+    <div class="mf-h">People, work, and companies — findable on merit.</div>
+    <div class="mf-b">Roster turns public professional signal into a living map of people, companies, and the work between them — so you can find the right role, find the right people, and understand the market they move in, whether you’re job-hunting, hiring, or just making sense of it all.</div>
   </footer>
 </div>
 
@@ -1820,6 +1820,8 @@
       <label><input type="checkbox" id="mStartup"/> Startup</label>
       <label style="display:inline-flex;align-items:center;gap:.3rem;">Min salary <input id="mSal" type="number" placeholder="optional" style="width:90px;"/></label>
     </div>
+    <button type="button" class="histbtn" id="mFineTune" hidden style="margin:.2rem 0 .4rem;font-size:.82rem;">✨ Fine tune config — let a recruiter AI read your résumé &amp; optimize</button>
+    <div id="mBrief" style="margin:.2rem 0;"></div>
     <div style="margin:.5rem 0;"><button type="button" class="idgo" id="mGo" style="width:100%;padding:.55rem;">🎯 Find matching jobs</button></div>
     <div id="matchnote" style="font-size:.78rem;color:var(--muted);"></div>
     <div id="matchresults" style="margin-top:.4rem;"></div>
@@ -2105,6 +2107,8 @@ async function loadConfig(){
     { const qb = document.getElementById("pjqa"); if(qb) qb.hidden = !window.EIGEN_QA_ENABLED; }
     window.JD_EXCLUDE_ENABLED = !!c.jd_exclude_source_co_enabled;   // Find candidates: source-company exclusion
     { const row = document.getElementById("jdSrcCoRow"); if(row) row.hidden = !window.JD_EXCLUDE_ENABLED; }
+    window.RECRUITER_MATCH_ENABLED = !!c.recruiter_match_enabled;   // Find jobs: LLM recruiter brief + fine-tune
+    { const b = document.getElementById("mFineTune"); if(b) b.hidden = !window.RECRUITER_MATCH_ENABLED; }
     // People geo-scope (flag-gated): reveal the top-right country selector, persist the choice, and
     // ship it on every people query as `country`. Default 'us'. Backend ignores it when the flag is off.
     try{ window.ROSTER_COUNTRY = localStorage.getItem("roster_country") || "us"; }catch(e){ window.ROSTER_COUNTRY = "us"; }
@@ -6823,23 +6827,73 @@ async function openMatch(){
   $("#matchresumestatus").textContent = hasResume ? ("Résumé on file"+(prof.resume&&prof.resume.name?" — "+prof.resume.name:"")) : "No résumé yet — upload one to the right →";
   if(hasResume || Object.keys(profile).length>=3){ applyMatchDefaults(profile); $("#matchnote").textContent="Adjust your preferences, then Find matches."; }
   else { $("#matchnote").textContent="Upload your résumé above to get matches."; }
+  // REMEMBERED config wins over the heuristic defaults (locations/roles/seniority/company & more).
+  try{
+    const cfg = (await (await fetch("/me/match-jobs/config", {headers: authHeaders()})).json()).config;
+    if(cfg) applySavedConfig(cfg);
+  }catch(e){}
 }
-async function runMatch(){
-  const prefs = {
+function applySavedConfig(cfg){
+  cfg = cfg || {};
+  if(Array.isArray(cfg.locations)){ MATCH_LOCS = cfg.locations.slice(); renderChips("mLocBox", MATCH_LOCS); }
+  if(Array.isArray(cfg.role_keywords)){ MATCH_ROLES = cfg.role_keywords.slice(); renderChips("mRoleBox", MATCH_ROLES); }
+  if(Array.isArray(cfg.seniorities)){ MATCH_SENS = new Set(cfg.seniorities); renderSenToggles(); }
+  const set = (id,v)=>{ const el=$(id); if(el) el.checked = !!v; };
+  const ct = new Set(cfg.company_types||[]);
+  set("#mF500", ct.has("f500")); set("#mPublic", ct.has("public")); set("#mStartup", ct.has("startup"));
+  set("#mRemote", cfg.remote);
+  if(cfg.min_salary){ const s=$("#mSal"); if(s) s.value = cfg.min_salary; }
+}
+// ✨ Fine tune config: a recruiter AI reads the résumé (recency-weighted, multi-dimensional) and
+// proposes an optimized config; we populate the form and show the candidate brief it built.
+async function runFineTune(){
+  const btn = $("#mFineTune"); const orig = btn ? btn.textContent : "";
+  if(btn){ btn.disabled = true; btn.textContent = "✨ Reading your résumé like a recruiter…"; }
+  try{
+    const cur = collectMatchPrefs();
+    const r = await fetch("/me/match-jobs/fine-tune", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(cur)});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); $("#matchnote").textContent = e.detail || "Couldn't fine-tune — upload/parse a résumé first."; return; }
+    const d = await r.json();
+    if(d.config) applySavedConfig(d.config);
+    renderBrief(d.brief);
+    $("#matchnote").textContent = "Config fine-tuned from your résumé — review and Find matches.";
+  }catch(e){ $("#matchnote").textContent = "Fine-tune failed — try again."; }
+  finally{ if(btn){ btn.disabled = false; btn.textContent = orig; } }
+}
+function renderBrief(b){
+  const box = $("#mBrief"); if(!box) return;
+  if(!b){ box.innerHTML = ""; return; }
+  const li = a => (a||[]).slice(0,5).map(x=>`<li>${esc(x)}</li>`).join("");
+  box.innerHTML = `<details class="plain plain-d" open><summary class="plain-h">🧭 Recruiter's read of your résumé</summary>
+    <div class="plain-b" style="font-size:.82rem;line-height:1.5;padding-top:.4rem;">
+      ${b.search_text?`<p style="margin:.2rem 0 .5rem;">${esc(b.search_text)}</p>`:""}
+      ${b.tech_breadth?`<div><b>Breadth:</b> ${esc(b.tech_breadth)}</div>`:""}
+      ${b.leadership?`<div><b>Leadership:</b> ${esc(b.leadership)}</div>`:""}
+      ${(b.technical_skills||[]).length?`<div style="margin-top:.3rem;"><b>Top skills:</b> ${(b.technical_skills||[]).slice(0,12).map(esc).join(" · ")}</div>`:""}
+      ${(b.key_contributions||[]).length?`<div style="margin-top:.3rem;"><b>Key contributions</b><ul style="margin:.2rem 0;padding-left:1.1rem;">${li(b.key_contributions)}</ul></div>`:""}
+      ${(b.major_achievements||[]).length?`<div><b>Major achievements</b><ul style="margin:.2rem 0;padding-left:1.1rem;">${li(b.major_achievements)}</ul></div>`:""}
+    </div></details>`;
+}
+function collectMatchPrefs(){
+  return {
     locations: MATCH_LOCS.slice(),
     role_keywords: MATCH_ROLES.map(s=>s.toLowerCase()),
     seniorities: Array.from(MATCH_SENS),
-    min_salary: parseInt($("#mSal").value||"0",10)||0,
-    remote: $("#mRemote").checked,
-    company_types: [$("#mF500").checked&&"f500", $("#mPublic").checked&&"public", $("#mStartup").checked&&"startup"].filter(Boolean),
-    country: (window.ROSTER_COUNTRY||"us"),
-    limit: 40,
+    min_salary: parseInt(($("#mSal")||{}).value||"0",10)||0,
+    remote: ($("#mRemote")||{}).checked,
+    company_types: [($("#mF500")||{}).checked&&"f500", ($("#mPublic")||{}).checked&&"public", ($("#mStartup")||{}).checked&&"startup"].filter(Boolean),
+    country: (window.ROSTER_COUNTRY||"us"), limit: 40,
   };
+}
+async function runMatch(){
+  const prefs = collectMatchPrefs();
   $("#matchnote").textContent = "Matching your résumé to open roles…"; $("#matchresults").innerHTML = "";
   try{
     const r = await fetch("/me/match-jobs", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(prefs)});
     if(!r.ok){ const e = await r.json().catch(()=>({})); $("#matchnote").textContent = e.detail || "Upload your résumé above first."; return; }
-    renderMatchResults(await r.json());
+    const d = await r.json();
+    if(d.brief) renderBrief(d.brief);
+    renderMatchResults(d);
   }catch(e){ $("#matchnote").textContent = "Match failed — try again."; }
 }
 function renderMatchResults(d){
@@ -6861,6 +6915,7 @@ function renderMatchResults(d){
 }
 $("#matchclose") && $("#matchclose").addEventListener("click", ()=>{ $("#matchmodal").hidden = true; });
 $("#mGo") && $("#mGo").addEventListener("click", runMatch);
+$("#mFineTune") && $("#mFineTune").addEventListener("click", runFineTune);
 $("#matchbtn2") && $("#matchbtn2").addEventListener("click", ()=>{ $("#applymodal").hidden=true; openMatch(); });
 $("#mSenBox") && $("#mSenBox").addEventListener("click",(e)=>{ const t=e.target.closest(".sentog"); if(!t) return;
   const k=t.dataset.sen; MATCH_SENS.has(k)?MATCH_SENS.delete(k):MATCH_SENS.add(k); renderSenToggles(); });

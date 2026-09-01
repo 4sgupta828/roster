@@ -382,7 +382,7 @@ class AccountStore:
             await conn.execute(
                 """INSERT INTO roster_user_pref (user_id, key, value) VALUES ($1,$2,$3)
                    ON CONFLICT (user_id, key) DO UPDATE SET value=EXCLUDED.value,
-                   updated_at=now()""", user_id, key[:64], (value or "")[:200])
+                   updated_at=now()""", user_id, key[:64], (value or "")[:8000])
 
     # ---- password login (email + password → fresh per-device token) ----
     async def login(self, *, email: str, password: str) -> tuple[dict[str, Any], str] | None:

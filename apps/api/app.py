@@ -686,6 +686,29 @@ def jd_exclude_source_co_enabled() -> bool:
     return os.environ.get("ROSTER_JD_EXCLUDE_SOURCE_CO", "").lower() in ("1", "true", "yes")
 
 
+def _match_config_of(prefs: dict) -> dict:
+    """The rememberable Find-jobs config fields (what the form prefills next time)."""
+    return {k: prefs.get(k) for k in ("locations", "role_keywords", "seniorities", "remote",
+                                      "company_types", "min_salary", "country")}
+
+
+def _resume_fingerprint(profile: dict) -> str:
+    """Stable hash of the résumé content — the recruiter brief is cached against this so it's rebuilt
+    only when the résumé changes (not on every search)."""
+    import hashlib
+    t = str(profile.get("_resume_text") or "") + json.dumps(profile.get("work_history") or [],
+                                                            sort_keys=True, default=str)
+    return hashlib.sha256(t.encode()).hexdigest()[:32] if t.strip() else ""
+
+
+def recruiter_match_enabled() -> bool:
+    """Flag (default OFF, Rule 20) via ROSTER_RECRUITER_MATCH: when ON, résumé→jobs matching first builds
+    an LLM 'recruiter brief' (recency-weighted last 3–5y; technical skills / breadth / leadership /
+    contributions / achievements) and matches on that 'soul of the résumé' rather than raw text. OFF →
+    raw-résumé matching (byte-identical)."""
+    return os.environ.get("ROSTER_RECRUITER_MATCH", "").lower() in ("1", "true", "yes")
+
+
 def eigen_api_url() -> str:
     """Base URL of the Eigen research API that powers Q&A mode. Overridable via ROSTER_EIGEN_API_URL;
     defaults to the prod deployment. Trailing slash trimmed so `{base}/research` joins cleanly."""
@@ -1970,6 +1993,7 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             "eigen_qa_enabled": eigen_qa_enabled(),
             "jd_exclude_source_co_enabled": jd_exclude_source_co_enabled(),
             "people_semantic_first_enabled": _people_semantic_first_enabled(),
+            "recruiter_match_enabled": recruiter_match_enabled(),
         }
 
     @app.post("/search")
@@ -4700,10 +4724,80 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         if cstore is None:
             raise HTTPException(status_code=503, detail="job index unavailable")
         from api.people_population import match_resume_jobs
+        prefs = body.model_dump()
+        prefs.pop("brief_text", None)   # server-controlled — never honor a client-supplied brief_text
+        # REMEMBER the config for next time (prefilled via GET /me/match-jobs/config) — off the hot path.
+        asyncio.create_task(_safe_set_pref(store, user["id"], "match_config",
+                                           json.dumps(_match_config_of(prefs))))
+        # RECRUITER BRIEF (flag): match on the recency-weighted "soul" — but reuse the CACHED brief built
+        # by "Fine tune" (keyed to the résumé fingerprint); never build it per-search (cost/latency).
+        brief = None
+        if recruiter_match_enabled():
+            cached = await _get_cached_brief(store, user["id"])
+            if cached and cached.get("hash") == _resume_fingerprint(profile) and cached.get("brief"):
+                brief = cached["brief"]
+                if brief.get("search_text"):
+                    prefs["brief_text"] = brief["search_text"]
         try:
-            return await match_resume_jobs(cstore, profile, body.model_dump())
+            res = await match_resume_jobs(cstore, profile, prefs)
+            if brief:
+                res["brief"] = brief
+            return res
         except Exception as e:   # noqa: BLE001
             raise HTTPException(status_code=502, detail=f"match failed: {e}") from e
+
+    async def _safe_set_pref(store, uid: str, key: str, val: str) -> None:
+        try:
+            await store.set_pref(uid, key, val)
+        except Exception:   # noqa: BLE001 — best-effort persistence, never blocks the response
+            pass
+
+    async def _get_cached_brief(store, uid: str):
+        try:
+            raw = await store.get_pref(uid, "match_brief")
+            return json.loads(raw) if raw else None
+        except Exception:   # noqa: BLE001
+            return None
+
+    @app.get("/me/match-jobs/config")
+    async def me_match_config(x_roster_token: str = Header(default="")) -> dict:
+        """The user's last Find-jobs config (locations/roles/seniority/company-types/…) to prefill the form."""
+        store, user = await _require_user(x_roster_token)
+        try:
+            raw = await store.get_pref(user["id"], "match_config")
+            return {"config": json.loads(raw) if raw else None}
+        except Exception:   # noqa: BLE001
+            return {"config": None}
+
+    @app.post("/me/match-jobs/fine-tune")
+    async def me_match_fine_tune(body: MatchIn, x_roster_token: str = Header(default="")) -> dict:
+        """✨ Fine-tune config: an LLM recruiter reads the résumé (weighting the last 3–5y) and proposes
+        an optimized search config for maximum relevant matches, plus the candidate brief it built. The FE
+        populates the form from `config` and shows `brief`. 404 when the recruiter-match flag is off."""
+        if not recruiter_match_enabled():
+            raise HTTPException(status_code=404, detail="recruiter match not enabled")
+        store, user = await _require_user(x_roster_token)
+        saved = (await store.get_profile(user["id"])).get("profile") or {}
+        parsed = (await store.get_parse(user["id"])).get("profile") or {}
+        profile = {**parsed, **saved}
+        from api.people_population import build_candidate_brief
+        brief = await build_candidate_brief(profile.get("_resume_text", ""), profile, build_llm(mode=resolve_mode()))
+        if not brief:
+            raise HTTPException(status_code=400, detail="Upload/parse a résumé first — nothing to tune from.")
+        # CACHE the brief against the résumé fingerprint so plain searches reuse it (no per-search LLM).
+        await _safe_set_pref(store, user["id"], "match_brief",
+                             json.dumps({"hash": _resume_fingerprint(profile), "brief": brief}))
+        cur = body.model_dump()
+        # LLM proposals win for role/seniority; keep the user's geo/company/salary unless empty.
+        config = {
+            "role_keywords": brief.get("target_roles") or cur.get("role_keywords") or [],
+            "seniorities": ([brief["seniority"]] if brief.get("seniority") else (cur.get("seniorities") or [])),
+            "locations": cur.get("locations") or [],
+            "remote": bool(cur.get("remote")),
+            "company_types": cur.get("company_types") or [],
+            "min_salary": cur.get("min_salary") or None,
+        }
+        return {"config": config, "brief": brief}
 
     @app.get("/me/history")
     async def me_history(q: str = "", kind: str = "", x_roster_token: str = Header(default="")) -> dict:

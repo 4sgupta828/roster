@@ -160,6 +160,14 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
     for k in ("field_of_study", "highest_degree"):
         parts.append(str(profile.get(k, "")))
     qtext = " ".join(p for p in parts if p).strip()
+    # RECRUITER BRIEF (flag): a recency-weighted, multi-dimensional read of the candidate (the "soul"
+    # of the résumé) is a far better retrieval query than raw résumé text — use it as the query when the
+    # endpoint supplied one. Falls back to the raw text (byte-identical) when absent.
+    brief_text = str(prefs.get("brief_text") or "").strip()
+    if brief_text:
+        # BLEND, don't replace: the recruiter brief leads (recency-weighted narrative), but keep the raw
+        # résumé text too so niche technical vocab (frameworks, project names) still drives the embedding.
+        qtext = (brief_text + "\n\n" + qtext).strip() if qtext else brief_text
     if not qtext:
         return {"jobs": [], "note": "Add or parse a résumé first — no profile content to match on."}
     qvec = embed_query(qtext)
@@ -220,6 +228,77 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
     return {"jobs": out[: int(prefs.get("limit", 40))],
             "matched_on": qtext[:180], "dropped_out_of_country": dropped_country,
             "note": " · ".join(notes)}
+
+
+class _CandidateBrief(BaseModel):
+    technical_skills: list[str] = []     # ranked, strongest/most-recent first
+    tech_breadth: str = ""               # one line on range across stacks/domains
+    leadership: str = ""                 # scope of leadership/ownership (team size, org, IC-vs-manager)
+    key_contributions: list[str] = []    # concrete things they built/shipped
+    major_achievements: list[str] = []   # outcomes/impact (scale, revenue, awards)
+    target_roles: list[str] = []         # roles a recruiter would pitch them for (canonical, snake_case)
+    seniority: str = ""                  # intern|junior|mid|senior|staff|principal|lead|manager|director|vp|c_level
+    search_text: str = ""                # a rich recency-weighted paragraph — the query used to find jobs
+
+
+async def build_candidate_brief(resume_text: str, profile: dict, llm) -> dict | None:
+    """Act as a professional recruiter representing this candidate: read the résumé (WEIGHTING the last
+    3–5 years far more than earlier roles) and build a comprehensive, multi-dimensional picture —
+    technical skills, tech breadth, leadership, key contributions, major achievements — then the roles +
+    seniority to pitch and a rich `search_text` (the 'soul' of the résumé) used as the job-match query.
+    LLM-owned (Rule 18). Fail-safe to None on any error so the caller falls back to raw-résumé matching."""
+    # CODE-DRIVEN RECENCY (Rule 8): work_history is stored most-recent-first (resume_parser), so slice the
+    # top roles into a RECENT block the model is told to weight heavily, rather than trusting it to infer
+    # recency from a monolithic blob. Fall back to raw résumé text when there's no structured history.
+    wh = profile.get("work_history") if isinstance(profile.get("work_history"), list) else []
+    def _role_line(w):
+        if not isinstance(w, dict):
+            return str(w)
+        span = " ".join(str(w.get(k, "")) for k in ("start", "end") if w.get(k))
+        return f"{w.get('title','')} @ {w.get('company','')} ({span}) — {w.get('description','')}".strip()
+    if wh:
+        recent = "\n".join(_role_line(w) for w in wh[:3])
+        earlier = "\n".join(_role_line(w) for w in wh[3:8])
+        skills = ", ".join(profile.get("skills", []) if isinstance(profile.get("skills"), list) else [])
+        text = (f"SUMMARY: {profile.get('summary','')}\n\nRECENT EXPERIENCE (weight this MOST):\n{recent}\n\n"
+                f"EARLIER EXPERIENCE (context only):\n{earlier}\n\nSKILLS: {skills}").strip()
+    else:
+        text = (resume_text or "").strip() or " ".join(
+            str(profile.get(k, "")) for k in ("summary", "current_title", "_resume_text"))
+    if len(text.strip()) < 40 or llm is None:
+        return None
+    # The ONLY seniority values the matcher/UI understand (backend _title_seniority + FE SEN_OPTS).
+    _SEN = "intern | junior | mid | senior | staff_plus | leadership"
+    try:
+        comp = await llm.complete(
+            system=(
+                "You are a top technical recruiter working ON BEHALF OF this candidate to find the best-fit "
+                "roles. Build a comprehensive picture, weighting the RECENT EXPERIENCE block far more than the "
+                "EARLIER one — recent work defines who they are now. Capture across dimensions: technical_skills "
+                "(ranked, recent/strongest first), tech_breadth (range across stacks/domains), leadership (scope "
+                "— team size, IC vs manager), key_contributions (what they built/shipped), major_achievements "
+                "(impact/scale/outcomes). target_roles: 3–6 job-title phrases a recruiter would pitch them for, "
+                "in PLAIN lowercase words (e.g. 'staff machine learning engineer', 'ml infrastructure lead') — "
+                f"NOT snake_case. seniority: EXACTLY ONE of [{_SEN}] — no other value. search_text: a rich 4–8 "
+                "sentence paragraph capturing the SOUL of this candidate (recent focus, strengths, level, "
+                "domains) — the query used to retrieve matching jobs, so make it dense with the signal a great "
+                "match shares. Ground everything in the résumé; do not invent."),
+            messages=[{"role": "user", "content": text[:12000]}],
+            response_format=_CandidateBrief, max_tokens=900)
+        b = comp.parsed
+        sen = str(b.seniority or "").strip().lower().replace(" ", "_")
+        _SEN_OK = {"intern", "junior", "mid", "senior", "staff_plus", "leadership"}
+        return {"technical_skills": b.technical_skills[:20], "tech_breadth": b.tech_breadth,
+                "leadership": b.leadership, "key_contributions": b.key_contributions[:8],
+                "major_achievements": b.major_achievements[:8],
+                # PLAIN lowercase role phrases (NOT snake_case) — role_keywords is substring-matched
+                # against job titles, so 'staff_ml_engineer' would never match "Staff ML Engineer".
+                "target_roles": [str(r).strip().lower() for r in (b.target_roles or []) if str(r).strip()][:6],
+                "seniority": sen if sen in _SEN_OK else "",
+                "search_text": (b.search_text or "").strip()}
+    except Exception as e:   # noqa: BLE001 — never break matching; fall back to raw résumé
+        _log.warning("build_candidate_brief failed: %s", e)
+        return None
 
 
 def _person_row_from_facets(r: dict) -> dict:
