@@ -562,3 +562,41 @@ def test_identity_facets_gate_semantic_first(monkeypatch):
         tenant_id="demo", store=_Store(), llm=_LLM()))
     assert calls["scored"] == 0 and calls["enum"] >= 1
     assert res["people_rows"] and res["people_rows"][0]["name"] == "Xa"
+
+
+def test_primary_role_leads_the_ranking(monkeypatch):
+    """'Data scientists at Google': people whose PRIMARY role is data_scientist must lead — a
+    multi-tagged SWE who merely carries the tag follows (session 0cb80174)."""
+    from roster_kernel.providers.llm import LLMResult
+    from api.people_population import _FacetParse, answer_people_population
+
+    class _LLM:
+        async def complete(self, *, system, messages, response_format, max_tokens=2048,
+                           temperature=None):
+            return LLMResult(parsed=_FacetParse(role=["data_scientist"], company=["google"]),
+                             output_tokens=5)
+
+    def _person(eid, name, roles):
+        return {"entity_id": eid, "name": name, "facets": [
+            {"facet_key": "role", "facet_value_norm": r, "value_norm": r,
+             "display_value": r.replace("_", " ").title(), "document_id": "d", "block_id": "b"}
+            for r in roles]}
+
+    class _Store:
+        async def people_index_stats(self, *, tenant_id):
+            return {"persons_indexed": 9, "source_documents": 3, "facet_coverage": {}}
+
+        async def enumerate_by_facets(self, facets, *, tenant_id, cap):
+            # store order simulates semantic/prominence order that buried the pure data scientist
+            return [_person("gh:swe", "Sam SWE", ["software_engineer", "data_scientist"]),
+                    _person("gh:ml", "Mia ML", ["ml_engineer", "data_scientist"]),
+                    _person("gh:ds", "Dana DS", ["data_scientist"])]
+
+    import asyncio
+    monkeypatch.delenv("ROSTER_SEMANTIC", raising=False)
+    monkeypatch.delenv("ROSTER_PEOPLE_SEMANTIC_FIRST", raising=False)
+    res = asyncio.get_event_loop().run_until_complete(answer_people_population(
+        question="Data scientists at Google", tenant_id="demo", store=_Store(), llm=_LLM()))
+    names = [p["name"] for p in res["people_rows"]]
+    assert names[0] == "Dana DS", names          # primary data scientist leads
+    assert set(names[1:]) == {"Sam SWE", "Mia ML"}

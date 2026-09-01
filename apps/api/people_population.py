@@ -1246,6 +1246,18 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     if not semantic_used:            # semantic search already ranked by query relevance — keep that order
         people_rows.sort(key=lambda p: (-_score(p), p["name"]))
 
+    # PRIMARY-ROLE priority: when the query names role(s), people whose FIRST (primary) role facet
+    # IS that role lead the list; multi-tagged profiles (an SWE who also carries a data_scientist
+    # tag) follow, each group keeping its existing order — the "data scientists ranked at the
+    # bottom" fix (session 0cb80174). Stable partition: relevance order survives within groups.
+    _want_roles = set(facets.get("role") or [])
+    if _want_roles and people_rows:
+        def _primary_role(p):
+            v = next((a["display"] for a in p["attributes"] if a["key"] == "role"), "")
+            return (v or "").strip().lower().replace(" ", "_")
+        people_rows = ([p for p in people_rows if _primary_role(p) in _want_roles]
+                       + [p for p in people_rows if _primary_role(p) not in _want_roles])
+
     summary = _facet_summary(facets)
     if people_rows:
         relax_note = (f" (no exact match, so the {', '.join(relaxed_from)} filter"
