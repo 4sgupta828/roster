@@ -254,6 +254,10 @@ class SessionStore:
             where += " AND thread->0->>'kind' = 'panel'"
         elif kind == "crossview":
             where += " AND thread->0->>'kind' = 'crossview'"
+        elif kind == "jobs":
+            where += " AND thread->0->>'kind' = 'jobs'"
+        elif kind == "people":           # people + plain research (everything that isn't a job search)
+            where += " AND (thread->0->>'kind' IS NULL OR thread->0->>'kind' IN ('research','population'))"
         elif kind == "research":
             where += " AND (thread->0->>'kind' IS NULL OR thread->0->>'kind' = 'research')"
         params.append(limit)

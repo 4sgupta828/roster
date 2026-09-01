@@ -211,6 +211,64 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
             "note": " · ".join(notes)}
 
 
+def _person_row_from_facets(r: dict) -> dict:
+    """Build a people-card row (same shape as answer_people_population) from a people_by_ids row."""
+    facets = r["facets"]
+    cite = next(({"document_id": f["document_id"], "block_id": f["block_id"]}
+                 for f in facets if f.get("document_id")), None)
+    links, attrs = [], []
+    for f in facets:
+        if f["facet_key"].startswith("link_"):
+            links.append({"kind": f["facet_key"][5:], "url": f["display_value"]})
+        else:
+            attrs.append({"key": f["facet_key"], "display": f["display_value"],
+                          "document_id": f["document_id"], "block_id": f["block_id"]})
+    return {"entity_id": r["entity_id"], "name": r["name"], "blurb": _person_blurb(attrs),
+            "attributes": attrs, "links": links, "citation": cite}
+
+
+async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
+    """RECRUITER reverse-match: a job description → ranked candidate PEOPLE (semantic over person
+    embeddings), re-ranked by preferences (seniority, location, country). Mirror of match_resume_jobs."""
+    prefs = prefs or {}
+    jd = (jd_text or "").strip()
+    if len(jd) < 20:
+        return {"people_rows": [], "note": "Paste a job description (a sentence or more) to match."}
+    qvec = embed_query(jd)
+    if not qvec:
+        return {"people_rows": [], "note": "Matching is unavailable right now."}
+    cands = await store.match_people_scored(qvec, cap=int(prefs.get("candidate_cap", 400)))
+    if not cands:
+        return {"people_rows": []}
+    sim_map = {c["entity_id"]: c["sim"] for c in cands}
+    rows = await store.people_by_ids([c["entity_id"] for c in cands])
+    want_sens = {str(s).lower() for s in (prefs.get("seniorities") or []) if str(s).strip()}
+    want_country = (prefs.get("country") or "").lower()
+    locs = [str(l).lower() for l in (prefs.get("locations") or []) if str(l).strip()]
+    out = []
+    for r in rows:
+        facets = r["facets"]
+        def fval(k):
+            return next((f["value_norm"] for f in facets if f["facet_key"] == k), "")
+        sen, country, metro = fval("seniority"), fval("country"), fval("metro")
+        if want_country and country and country != want_country:   # drop only when we KNOW it's elsewhere
+            continue
+        sim = sim_map.get(r["entity_id"], 0.0)
+        score, reasons = sim, []
+        if want_sens and sen and sen in want_sens:
+            score += 0.12; reasons.append(f"{sen.replace('_',' ')} level")
+        if locs and metro and any(l in metro or metro in l for l in locs):
+            score += 0.12; reasons.append("location")
+        card = _person_row_from_facets(r)
+        card["match_pct"] = min(99, round(sim * 100)); card["reasons"] = reasons; card["_score"] = score
+        out.append(card)
+    out.sort(key=lambda x: -x["_score"])
+    for c in out:
+        c.pop("_score", None)
+    return {"people_rows": out[: int(prefs.get("limit", 40))],
+            "note": (want_country.upper() + " only" if want_country else "")}
+
+
 async def parse_people_facets(question: str, llm) -> tuple[dict[str, list[str]], str, str]:
     """LLM query-compiler: free-text people question → (facet filter, person, person_context).
     `facets` is a normalized enumeration filter (empty when the question is not enumeration); `person`

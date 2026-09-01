@@ -1637,14 +1637,16 @@ class ClaimGraphStore:
         pool = await self._get_pool()
         try:
             async with pool.acquire() as conn:
-                if candidate_ids:
-                    rows = await conn.fetch(
-                        "SELECT entity_id FROM rs_person_vec WHERE entity_id = ANY($1) "
-                        "ORDER BY embedding <=> $2::vector LIMIT $3", list(candidate_ids), qvec, int(cap))
-                else:
-                    rows = await conn.fetch(
-                        "SELECT entity_id FROM rs_person_vec ORDER BY embedding <=> $1::vector LIMIT $2",
-                        qvec, int(cap))
+                async with conn.transaction():
+                    await conn.execute(f"SET LOCAL hnsw.ef_search = {max(int(cap) + 40, 100)}")  # HNSW cap fix
+                    if candidate_ids:
+                        rows = await conn.fetch(
+                            "SELECT entity_id FROM rs_person_vec WHERE entity_id = ANY($1) "
+                            "ORDER BY embedding <=> $2::vector LIMIT $3", list(candidate_ids), qvec, int(cap))
+                    else:
+                        rows = await conn.fetch(
+                            "SELECT entity_id FROM rs_person_vec ORDER BY embedding <=> $1::vector LIMIT $2",
+                            qvec, int(cap))
         except Exception:
             return []
         return [r["entity_id"] for r in rows]
@@ -1684,6 +1686,21 @@ class ClaimGraphStore:
         except Exception:
             return []
         return [dict(r) for r in rows]
+
+    async def match_people_scored(self, qvec: str, *, cap: int = 400) -> "list[dict]":
+        """Top `cap` people by cosine similarity to a job-description embedding, WITH the sim score
+        (for recruiter reverse-match: JD → ranked candidates). ef_search raised so cap is real."""
+        pool = await self._get_pool()
+        sql = ("SELECT entity_id, 1 - (embedding <=> $1::vector) AS sim "
+               "FROM rs_person_vec ORDER BY embedding <=> $1::vector LIMIT $2")
+        try:
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute(f"SET LOCAL hnsw.ef_search = {max(int(cap) + 40, 100)}")
+                    rows = await conn.fetch(sql, qvec, int(cap))
+        except Exception:
+            return []
+        return [{"entity_id": r["entity_id"], "sim": float(r["sim"])} for r in rows]
 
     async def companies_with_facet(self, facet_keys: "tuple[str, ...]", values=None) -> set:
         """Set of company slugs that carry any of `facet_keys` (optionally restricted to `values`) on

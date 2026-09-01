@@ -1092,6 +1092,14 @@ class OutreachIn(BaseModel):
     message: str = ""
 
 
+class MatchPeopleIn(BaseModel):        # recruiter reverse-match: JD → candidate people
+    job_description: str
+    seniorities: list[str] = []
+    locations: list[str] = []
+    country: str = "us"
+    limit: int = 40
+
+
 class MatchIn(BaseModel):
     locations: list[str] = []
     remote: bool = False
@@ -2421,6 +2429,18 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         except Exception:   # noqa: BLE001 — history is best-effort, never blocks the jobs result
             pass
         return {"jobs": rows, "count": len(rows), "query": q, "semantic": bool(qvec), "stats": stats}
+
+    @app.post("/match-people")
+    async def match_people(body: MatchPeopleIn) -> dict:
+        """RECRUITER reverse-match: a job description → ranked candidate people from the grounded index."""
+        cstore = _claim_store_cached()
+        if cstore is None:
+            raise HTTPException(status_code=503, detail="people index unavailable")
+        from api.people_population import match_jd_people
+        try:
+            return await match_jd_people(cstore, body.job_description, body.model_dump())
+        except Exception as e:   # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"match failed: {e}") from e
 
     @app.post("/research/focus")
     async def research_focus(body: FocusIn, x_roster_token: str = Header(default="")) -> dict:
@@ -4391,7 +4411,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         email = (user or {}).get("email")
         if sstore is None or not email:
             return {"sessions": []}
-        knd = kind if kind in ("panel", "research", "crossview") else None
+        knd = kind if kind in ("panel", "research", "crossview", "jobs", "people") else None
         try:
             return {"sessions": await sstore.list(tenant_id="demo", limit=200, q=q or None,
                                                   kind=knd, user_email=email)}

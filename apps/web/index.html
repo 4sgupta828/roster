@@ -1458,6 +1458,7 @@
     </label>
     <button type="button" class="histbtn newbtn" id="newbtn" style="margin-left:12px;">＋ New search</button>
     <button type="button" class="histbtn" id="matchhdr" style="margin-left:0;" title="Upload your résumé → get ranked matching jobs">🎯 Match my résumé</button>
+    <button type="button" class="histbtn" id="candhdr" style="margin-left:0;" title="Recruiter: paste a job description → ranked candidate people">🧲 Find candidates</button>
     <button type="button" class="histbtn" id="signinbtn" style="margin-left:0;" title="Sign in or create an account">Sign in</button>
     <button type="button" class="histbtn" id="histbtn2" style="margin-left:0;" hidden title="Your search history — private to your account">⧗ History</button>
     <button type="button" class="histbtn" id="acctbtn" style="margin-left:0;" hidden title="Your account — shortlists, saved searches, apply profile">◈ Account</button>
@@ -1766,6 +1767,24 @@
     <div style="margin:.5rem 0;"><button type="button" class="idgo" id="mGo" style="width:100%;padding:.55rem;">🎯 Find matching jobs</button></div>
     <div id="matchnote" style="font-size:.78rem;color:var(--muted);"></div>
     <div id="matchresults" style="margin-top:.4rem;"></div>
+  </div>
+</div>
+<!-- Recruiter reverse-match: a job description → ranked candidate people -->
+<div class="idmodal" id="jdmodal" hidden>
+  <div class="idcard" style="max-width:760px;width:94%;text-align:left;max-height:88vh;overflow:auto;">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <h2 style="margin:0;">Find candidates for a role</h2>
+      <button type="button" class="histbtn" id="jdclose">Close</button>
+    </div>
+    <p style="font-size:.8rem;color:var(--muted);margin:.3rem 0;">Paste a job description — we rank people whose grounded profile best fits it. Country follows your top-right selector.</p>
+    <textarea id="jdText" rows="7" style="width:100%;font-size:.9rem;" placeholder="Paste the full job description here — title, responsibilities, required skills…"></textarea>
+    <span class="mlabel">Seniority (pick any)</span>
+    <div class="sentogs" id="jdSenBox"></div>
+    <span class="mlabel">Locations</span>
+    <div class="chipbox" id="jdLocBox"><input id="jdLoc" type="text" placeholder="Add a metro, press Enter"/></div>
+    <div style="margin:.6rem 0;"><button type="button" class="idgo" id="jdGo" style="width:100%;padding:.55rem;">🧲 Find matching candidates</button></div>
+    <div id="jdnote" style="font-size:.78rem;color:var(--muted);"></div>
+    <div id="jdresults" style="margin-top:.4rem;"></div>
   </div>
 </div>
 <!-- Reach out: draft a message → hand off to whatever channel the person shared (no auto-send) -->
@@ -5795,6 +5814,7 @@ function openSessions(){
   setSback("← Back");
   document.body.style.overflow = "hidden";
   sdetail.innerHTML = `<div class="splaceholder">Select a question to view its answer.</div>`;
+  buildSessionTabs();     // People / Jobs tabs
   loadSessionList();
 }
 function backToSessionList(){           // mobile: answer → list (not all the way out of the panel)
@@ -5810,12 +5830,10 @@ const fmtDate = s => { try{ return new Date(s).toLocaleString([], {dateStyle:"me
 // discussions so they never clutter the Q&A tabs.
 function buildSessionTabs(){
   const tabs = $("#stabs"); if(!tabs) return;
-  const defs = [];
-  if(ASK_PANEL_ENABLED){
-    defs.push({key:"qa", aud:null, kind:"research", label:"Quick Q&amp;A"});
-    defs.push({key:"panel", aud:null, kind:"panel", label:"◈ Expert Panel"});
-  }
-  SESS_TAB = defs[0] || null;
+  // Roster history is People + Jobs (mirrors the search modes); panel tab added only if enabled.
+  const defs = [{key:"people", kind:"people", label:"👤 People"}, {key:"jobs", kind:"jobs", label:"💼 Jobs"}];
+  if(ASK_PANEL_ENABLED) defs.push({key:"panel", kind:"panel", label:"◈ Panel"});
+  SESS_TAB = defs[0];
   if(defs.length < 2){ tabs.hidden = true; tabs.innerHTML = ""; return; }
   tabs.hidden = false;
   tabs.innerHTML = defs.map((d,i)=>`<button type="button" class="stab" role="tab" data-key="${d.key}"`
@@ -5831,7 +5849,7 @@ async function loadSessionList(){
   const q = ($("#ssearch").value||"").trim();
   slist.innerHTML = `<div class="sempty">Loading…</div>`;
   // The active tab (see buildSessionTabs) filters the list server-side by kind.
-  const kindParam = (ASK_PANEL_ENABLED && SESS_TAB) ? `&kind=${SESS_TAB.kind}` : "";
+  const kindParam = SESS_TAB ? `&kind=${SESS_TAB.kind}` : "";
   try{
     // PRIVATE per-account history — only the signed-in user's own sessions (server scopes by their email)
     const {sessions} = await (await fetch("/me/history?q="+encodeURIComponent(q)+kindParam, {headers: authHeaders()})).json();
@@ -6656,6 +6674,33 @@ $("#mSenBox") && $("#mSenBox").addEventListener("click",(e)=>{ const t=e.target.
 $("#matchfile") && $("#matchfile").addEventListener("change",(e)=>{ if(e.target.files&&e.target.files[0]) matchUploadResume(e.target.files[0]); });
 $("#matchhdr") && $("#matchhdr").addEventListener("click", openMatch);   // top-level header button
 wireChipInput("mLocBox", MATCH_LOCS); wireChipInput("mRoleBox", MATCH_ROLES);
+
+// ===== Recruiter reverse-match: job description → ranked candidate people =====
+let JD_LOCS = [], JD_SENS = new Set();
+function renderJDSen(){ const box=$("#jdSenBox"); if(!box) return;
+  box.innerHTML = SEN_OPTS.map(([k,l])=>`<span class="sentog ${JD_SENS.has(k)?"on":""}" data-sen="${k}">${esc(l)}</span>`).join(""); }
+function openJD(){ $("#jdmodal").hidden=false; $("#jdresults").innerHTML=""; $("#jdnote").textContent=""; renderJDSen(); }
+async function runJDMatch(){
+  const jd = ($("#jdText").value||"").trim();
+  if(jd.length < 20){ $("#jdnote").textContent = "Paste a fuller job description (a sentence or more)."; return; }
+  $("#jdnote").textContent = "Finding matching candidates…"; $("#jdresults").innerHTML = "";
+  const prefs = { job_description: jd, seniorities: Array.from(JD_SENS), locations: JD_LOCS.slice(),
+                  country: (window.ROSTER_COUNTRY||"us"), limit: 40 };
+  try{
+    const r = await fetch("/match-people", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(prefs)});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); $("#jdnote").textContent = e.detail || "Match failed — try again."; return; }
+    const d = await r.json(); const rows = d.people_rows || [];
+    $("#jdnote").textContent = rows.length ? (`Top ${rows.length} candidates`+(d.note?` · ${d.note}`:"")) : "No candidates found — loosen the filters.";
+    rows.forEach(p=>{ p.blurb = `[${p.match_pct}% fit${(p.reasons&&p.reasons.length)?" · "+p.reasons.join(" · "):""}] ` + (p.blurb||""); });
+    $("#jdresults").innerHTML = peopleRowsMarkup({people_rows: rows, coverage_basis:{query_facets:{}, population_statement:""}});
+  }catch(e){ $("#jdnote").textContent = "Match failed — try again."; }
+}
+$("#candhdr") && $("#candhdr").addEventListener("click", openJD);
+$("#jdclose") && $("#jdclose").addEventListener("click", ()=>{ $("#jdmodal").hidden=true; });
+$("#jdGo") && $("#jdGo").addEventListener("click", runJDMatch);
+$("#jdSenBox") && $("#jdSenBox").addEventListener("click",(e)=>{ const t=e.target.closest(".sentog"); if(!t) return;
+  const k=t.dataset.sen; JD_SENS.has(k)?JD_SENS.delete(k):JD_SENS.add(k); renderJDSen(); });
+wireChipInput("jdLocBox", JD_LOCS);
 
 // ---- product settings (⚙, password-gated): live flag toggles served by /admin/settings ----
 const SET_LABELS = {
