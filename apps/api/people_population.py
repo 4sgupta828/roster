@@ -655,6 +655,33 @@ async def parse_people_facets(question: str, llm) -> tuple[dict[str, list[str]],
     return out, (getattr(p, "person", "") or "").strip(), (getattr(p, "person_context", "") or "").strip()
 
 
+async def parse_people_refinement(question: str, prior_facets: dict, llm) -> dict[str, list[str]]:
+    """REFINEMENT compile (conversation turns 2+): the LLM applies the utterance to the running
+    filter — narrowing, expansion, removal, replacement, per the user's lead — and returns the FULL
+    updated filter. {} = the utterance isn't about this people search (or the parse failed; the
+    caller falls back to an additive merge)."""
+    import json as _json
+    from roster_vertical.people_facets import PEOPLE_FACET_KEYS, facet_refine_prompt
+    try:
+        comp = await llm.complete(
+            system="You update an ongoing people-search filter per the user's refinement. "
+                   "Return only the structured object.",
+            messages=[{"role": "user", "content": facet_refine_prompt(
+                question, _json.dumps(prior_facets, sort_keys=True))}],
+            response_format=_FacetParse, max_tokens=400)
+        p = comp.parsed
+    except Exception as e:  # noqa: BLE001 — refinement-parse failure falls back to merge
+        _log.warning("parse_people_refinement failed: %s", e)
+        return {}
+    out: dict[str, list[str]] = {}
+    for k in PEOPLE_FACET_KEYS:
+        vals = [str(v).strip().lower().replace(" ", "_")
+                for v in (getattr(p, k, None) or []) if str(v).strip()]
+        if vals:
+            out[k] = vals
+    return out
+
+
 class _JobParse(BaseModel):
     """LLM parse of a JOB search → filters over the public-postings table. `title_keywords` are words
     that would actually appear IN a job TITLE (so 'ML engineer' → ['machine learning','engineer'], not
@@ -692,6 +719,40 @@ async def parse_job_query(question: str, llm) -> dict:
 
 
 # ---- Agentic job search: LLM understands + expands → multi-leg semantic retrieval → rerank ------------
+async def parse_job_refinement(question: str, prior_query: dict, llm) -> dict:
+    """Jobs-tab REFINEMENT compile: apply the utterance to the running job query — narrow, expand,
+    remove, or replace, per the user's lead — and return the FULL updated
+    {company, title_keywords, location}. {} = not about this job search / parse failed."""
+    import json as _json
+    prompt = (
+        "The user is refining an ONGOING job search. The CURRENT query (JSON) is:\n"
+        + _json.dumps(prior_query, sort_keys=True) +
+        "\n\nApply the user's utterance to that query and output the FULL UPDATED query as JSON with "
+        "keys `company` (list of canonical lowercased employers), `title_keywords` (words that would "
+        "appear IN a job title), `location` (city/region or 'remote' or empty):\n"
+        "- narrowing ('only staff level', 'just at Stripe') → add/replace those fields, keep the rest;\n"
+        "- expansion ('also Google', 'include frontend roles too') → append to that field;\n"
+        "- removal ('anywhere', 'any company') → clear that field, keep the rest;\n"
+        "- replacement ('in London instead') → replace that field;\n"
+        "- a fresh unrelated job search → output the new search's query alone.\n"
+        "Output an empty object ONLY if the utterance is clearly not about this job search.\n\n"
+        "Utterance: " + question + "\nJSON:")
+    try:
+        comp = await llm.complete(
+            system="You update an ongoing job-search query per the user's refinement. "
+                   "Return only the structured object.",
+            messages=[{"role": "user", "content": prompt}],
+            response_format=_JobParse, max_tokens=300)
+        p = comp.parsed
+        out = {"company": [str(c).strip().lower().replace(" ", "_") for c in (p.company or [])][:6],
+               "title_keywords": [str(t).strip().lower() for t in (p.title_keywords or [])][:8],
+               "location": (p.location or "").strip()}
+        return out if (out["company"] or out["title_keywords"] or out["location"]) else {}
+    except Exception as e:  # noqa: BLE001
+        _log.warning("parse_job_refinement failed: %s", e)
+        return {}
+
+
 class _JobPlan(BaseModel):
     intent: str = ""
     query_variants: list[str] = []   # alternative phrasings / adjacent titles that surface good matches
@@ -1007,15 +1068,39 @@ class _Narrative(BaseModel):
 
 
 async def answer_people_population(*, question: str, tenant_id: str, store, llm,
-                                   scope_country: str = "") -> dict:
+                                   scope_country: str = "",
+                                   prior_facets: dict | None = None) -> dict:
     """Answer a people-enumeration question from the grounded people index. Always returns a structured
     result (never raises to the route): a compiled facet filter, grounded rows, and honest coverage.
 
     `scope_country` (from the top-right selector, flag-gated) HARD-filters results to that country — a
     `country=<scope>` facet is ANDed in, so people we cannot place there are excluded. A country the
-    query itself names (compiler-parsed) OVERRIDES the selector default."""
-    facets, person, ctx = await parse_people_facets(question, llm)
-    if not facets and person:
+    query itself names (compiler-parsed) OVERRIDES the selector default.
+
+    `prior_facets` (conversation REFINEMENT): the accumulated filter from the previous turn in this
+    People-tab conversation. The new utterance's parsed facets MERGE onto it — a new key NARROWS the
+    previous result set, a repeated key REPLACES that dimension ("in Munich instead") — so follow-ups
+    build on the results so far instead of starting fresh. Keys are sanitized against the vertical's
+    facet vocabulary; New search (FE) clears the context."""
+    _prior: dict = {}
+    if prior_facets:
+        from roster_vertical.people_facets import PEOPLE_FACET_KEYS
+        _ok = set(PEOPLE_FACET_KEYS) | {"country", "state", "metro"}
+        _prior = {k: [str(v).strip().lower().replace(" ", "_") for v in vals if str(v).strip()]
+                  for k, vals in prior_facets.items()
+                  if k in _ok and isinstance(vals, (list, tuple))}
+        _prior = {k: v[:6] for k, v in _prior.items() if v}
+    if _prior:
+        # REFINEMENT turn: the model applies the utterance to the RUNNING filter — narrow, expand,
+        # remove, or replace, following the user's lead (Rule 18) — and returns the full new filter.
+        facets, person, ctx = await parse_people_refinement(question, _prior, llm), "", ""
+        if not facets:
+            # fail-safe: plain parse + additive merge (an unparseable utterance never loses the set)
+            f2, _p2, _c2 = await parse_people_facets(question, llm)
+            facets = {**_prior, **f2} if f2 else {}
+    else:
+        facets, person, ctx = await parse_people_facets(question, llm)
+    if not facets and person and not _prior:
         # SINGLE-PERSON identity/profile question — the router runs the web bio and attaches this
         # profile card (explicit GitHub/X/LinkedIn search links). kind='person'.
         return {"kind": "person", "not_people_query": False,

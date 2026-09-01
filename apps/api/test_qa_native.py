@@ -466,3 +466,49 @@ def test_jobs_for_profile_matches_and_analyzes(monkeypatch):
     assert any("job matches" in d["name"] for d in docs)
     assert any("resume" in d["name"] for d in docs)
     assert "career-analyst" in (svc.calls[0].get("answer_format_override") or "")
+
+
+def test_people_refinement_follows_user_lead(monkeypatch):
+    """Turn 2 in the People tab REFINES the running filter via the LLM refinement compile — the
+    model returns the FULL updated filter (here: expansion of metro + kept role)."""
+    from roster_kernel.providers.llm import LLMResult
+    from api.people_population import _FacetParse
+
+    seen_filters = []
+
+    class _RefineLLM:
+        async def complete(self, *, system, messages, response_format, max_tokens=2048,
+                           temperature=None):
+            assert response_format is _FacetParse
+            assert "REFINEMENT MODE" in messages[0]["content"]     # the refine prompt was used
+            assert '"role": ["ml_engineer"]' in messages[0]["content"]
+            return LLMResult(parsed=_FacetParse(role=["ml_engineer"], metro=["berlin", "munich"]),
+                             output_tokens=5)
+
+    class _Store:
+        async def people_index_stats(self, *, tenant_id):
+            return {"persons_indexed": 5, "source_documents": 2, "facet_coverage": {}}
+
+        async def enumerate_by_facets(self, facets, *, tenant_id, cap):
+            seen_filters.append(facets)
+            return [{"entity_id": "github:a", "name": "Ada", "facets": [
+                {"facet_key": "role", "facet_value_norm": "ml_engineer",
+                 "display_value": "ML Engineer", "document_id": "d", "block_id": "b"}]}]
+
+    svc = _AskSpy(answer="MUST NOT RUN")
+    monkeypatch.setenv("ROSTER_QA_ROUTER", "1")
+    monkeypatch.setenv("ROSTER_PEOPLE_POPULATION", "1")
+    monkeypatch.delenv("ROSTER_REASONED_DEFAULT", raising=False)
+    monkeypatch.delenv("ROSTER_SEMANTIC", raising=False)
+    monkeypatch.delenv("ROSTER_PEOPLE_SEMANTIC_FIRST", raising=False)
+    monkeypatch.setattr(appmod, "build_llm", lambda *a, **k: _RefineLLM())
+    app = create_app(svc)
+    app.state.claim_store = _Store()
+    client = TestClient(app)
+    r = client.post("/research", json={
+        "question": "also include Munich", "tenant_id": "demo", "surface": "people",
+        "refine_facets": {"role": ["ml_engineer"], "metro": ["berlin"]}})
+    data = r.json()
+    assert data["people_rows"], data
+    assert seen_filters and seen_filters[0].get("metro") == ["berlin", "munich"]
+    assert svc.calls == []

@@ -1096,6 +1096,10 @@ class ResearchIn(BaseModel):
     country: str = ""                     # people geo-scope from the top-right selector (default 'us' when the flag is on)
     surface: str = ""                     # which UI tab asked: "people" | "jobs" | "qa" | "" — People/Jobs are
     #                                       SEARCH surfaces (never prose answers); Q&A owns questions
+    refine_facets: dict | None = None     # People-tab CONVERSATION: the previous turn's accumulated facet
+    #                                       filter — the new utterance refines/narrows it (None = fresh)
+    refine_query: dict | None = None      # Jobs-tab CONVERSATION: the previous turn's parsed job query —
+    #                                       merged so follow-ups narrow the same search (None = fresh)
 
 
 class FocusIn(BaseModel):
@@ -2588,11 +2592,27 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 _log = __import__("logging").getLogger("api.jobs")
                 _log.warning("agentic job search failed, falling back to direct: %s", e)
 
-        from api.people_population import parse_job_query, semantic_enabled, embed_query
-        try:
-            q = await parse_job_query(body.question, build_llm(mode=resolve_mode()))
-        except Exception:   # noqa: BLE001
-            q = {"company": [], "title_keywords": [], "location": ""}
+        from api.people_population import (parse_job_query, parse_job_refinement, semantic_enabled,
+                                           embed_query)
+        # Jobs-tab CONVERSATION refinement (user-led): turns 2+ carry the previous query; the model
+        # applies the utterance to it — narrowing, expansion, removal, or replacement — and returns
+        # the FULL updated query. Fail-safe: plain parse merged additively. New search → fresh.
+        _pq = body.refine_query if isinstance(body.refine_query, dict) else None
+        q = {}
+        if _pq:
+            q = await parse_job_refinement(body.question, _pq, build_llm(mode=resolve_mode()))
+        if not q:
+            try:
+                q = await parse_job_query(body.question, build_llm(mode=resolve_mode()))
+            except Exception:   # noqa: BLE001
+                q = {"company": [], "title_keywords": [], "location": ""}
+            if _pq:             # refinement parse fell through → additive merge keeps the set
+                q = {"company": (q.get("company") or
+                                 [str(c) for c in (_pq.get("company") or [])][:6]),
+                     "title_keywords": list(dict.fromkeys(
+                         [*(str(t) for t in (_pq.get("title_keywords") or [])),
+                          *(q.get("title_keywords") or [])]))[:8],
+                     "location": (q.get("location") or str(_pq.get("location") or ""))}
         # SEMANTIC (flag): rank jobs by embedding similarity (optionally within the company filter);
         # else the exact title-keyword filter. Semantic understands 'jobs building ML infra', etc.
         qvec = embed_query(body.question) if semantic_enabled() else None
@@ -3397,7 +3417,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             scope_country = (body.country or "us").strip().lower() if people_geo_scope_enabled() else ""
             res = await answer_people_population(
                 question=body.question, tenant_id=body.tenant_id,
-                store=store, llm=build_llm(mode=resolve_mode()), scope_country=scope_country)
+                store=store, llm=build_llm(mode=resolve_mode()), scope_country=scope_country,
+                prior_facets=body.refine_facets)
             if res.get("kind") == "person":
                 if fallthrough:
                     return None, res      # router: grounded dossier, never only the static card

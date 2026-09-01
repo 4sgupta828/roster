@@ -2057,6 +2057,8 @@ const PJ_COPY = {
   jobs:   {h:"What role are you looking for?", ph:"Search jobs — e.g. remote backend roles at big tech, or “design jobs that involve research”"},
   qa:     {h:"Ask about the people & jobs data", ph:"Ask about patterns — e.g. “which companies hire the most ML engineers?”, “where are data scientists concentrated?”, “seniority mix for AI roles?”"},
 };
+let PEOPLE_CTX = null;          // People-tab conversation: accumulated facet filter — follow-ups NARROW it
+let JOBS_CTX = null;            // Jobs-tab conversation: accumulated job query — follow-ups NARROW it
 let MODE_VIEWS = {};            // per-mode result snapshot {html, hidden} — each tab keeps ITS OWN
 //                                 last result: switching away hides it, switching back restores it,
 //                                 "＋ New search" clears all (the user-specified tab semantics).
@@ -2272,12 +2274,19 @@ function esc(s){const d=document.createElement("div");d.textContent=s??"";return
 async function runJobs(question){
   let r;
   try{ r = await fetch("/jobs", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
-      body: JSON.stringify({question, tenant_id:"demo", user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""})}); }
+      body: JSON.stringify({question, tenant_id:"demo", refine_query: (JOBS_CTX||undefined),
+        user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""})}); }
   catch(e){ return false; }
   if(!r || r.status === 404) return false;
   const out = $("#out");
   if(out){ out.hidden = false;
-    try{ out.innerHTML = jobsMarkup(await r.json()); }
+    try{
+      const d = await r.json();
+      // Jobs-tab conversation memory: the merged query behind THIS result set is what the next
+      // utterance refines (New search clears it). Redirects don't advance the conversation.
+      if(!d.redirect_to_qa && d.query) JOBS_CTX = d.query;
+      out.innerHTML = jobsMarkup(d);
+    }
     catch(e){ out.innerHTML = `<div class="pitem-empty">Couldn't load jobs — ${esc(e.message||e)}</div>`; } }
   return true;
 }
@@ -3085,6 +3094,11 @@ function render(data, target, opts){
   // PEOPLE-ENUMERATION result — enriched cards (name→profile link, role, tags) + honest coverage
   // banner, instead of the plain-text answer wall.
   if(Array.isArray(data.people_rows) && data.people_rows.length){
+    // People-tab conversation memory: the merged filter that produced THIS result set becomes the
+    // base the next utterance refines (New search clears it).
+    if(SEARCH_MODE === "people" && data.coverage_basis && data.coverage_basis.query_facets){
+      PEOPLE_CTX = data.coverage_basis.query_facets;
+    }
     parts.push(peopleRowsMarkup(data));
     // single-person profile card also carries a grounded bio prose (enumeration does not) — show it below
     if(data.answer && !data.coverage_basis){
@@ -5437,6 +5451,8 @@ async function askQuestion(question, opts){
   const payload = {question, tenant_id:"demo", sources: chosen(), country: (window.ROSTER_COUNTRY||"us"),
     surface: SEARCH_MODE,   // which tab asked — People/Jobs are SEARCH surfaces; Q&A owns questions
     user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""};   // attribute sessions to the user
+  // People-tab CONVERSATION: carry the accumulated filter so this utterance REFINES the results so far.
+  if(SEARCH_MODE === "people" && PEOPLE_CTX) payload.refine_facets = PEOPLE_CTX;
   if(EFFORT_ENABLED && EFFORT > 1) payload.effort = EFFORT;
   if(ATTACHMENTS.length) payload.attachments = ATTACHMENTS.slice();
   if(PENDING_INTAKE_TRANSCRIPT && PENDING_INTAKE_TRANSCRIPT.length && !THREAD.turns.length){
@@ -5970,6 +5986,7 @@ function wireEngineHops(root, t){
 function newConversation(){
   THREAD = {session_id:null, turns:[]};
   MODE_VIEWS = {};                     // "＋ New search" wipes every tab's remembered result
+  PEOPLE_CTX = null; JOBS_CTX = null;  // …and both tabs' refinement conversations start fresh
   GUIDED_REFINED = false;
   document.body.classList.remove("chatting"); out.style.paddingBottom = "";   // back to landing layout
   out.innerHTML = "";

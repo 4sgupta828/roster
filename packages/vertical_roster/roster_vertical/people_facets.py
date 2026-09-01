@@ -171,3 +171,30 @@ JSON:"""
 
 def facet_parse_prompt(question: str) -> str:
     return PEOPLE_FACET_PARSE_PROMPT.replace("{question}", question)
+
+
+# ── REFINEMENT compile (conversation turns 2+): the model applies the user's change to the RUNNING
+# filter — narrow (add a key), expand (add values to a key), replace a dimension, or remove one —
+# and returns the FULL updated filter. The user leads; code never guesses merge semantics (Rule 18).
+_REFINE_SUFFIX = """
+
+REFINEMENT MODE: the user is refining an ONGOING people search. The CURRENT filter (JSON) is:
+{current}
+
+Apply the user's utterance to that filter and output the FULL UPDATED filter (same JSON shape,
+same valid keys and normalization rules as above):
+- narrowing ("only the ones who worked at Google", "just staff+") → ADD/REPLACE those keys, keep the rest;
+- expansion ("also include Munich", "add data scientists too") → APPEND the new values to that key;
+- removal ("any location", "drop the company filter", "ignore seniority") → REMOVE that key, keep the rest;
+- replacement ("in Munich instead") → REPLACE that key's values;
+- a fresh unrelated people search → output the NEW search's filter alone.
+Output {} ONLY when the utterance is clearly not about this people search at all.
+
+Utterance: {question}
+JSON:"""
+
+
+def facet_refine_prompt(question: str, current_filter_json: str) -> str:
+    return (PEOPLE_FACET_PARSE_PROMPT.split("Question: {question}")[0]
+            + _REFINE_SUFFIX.replace("{current}", current_filter_json)
+                            .replace("{question}", question))
