@@ -2365,13 +2365,22 @@ function qaMarkup(d, question){
   const answer = d.answer || "";
   if(!answer){ return `<div class="ppl-wrap"><div class="pitem-empty">No answer came back for that question. Try rephrasing, or ask something more specific about a person, company, role, or market.</div></div>`; }
   const claims = d.claims || [];
-  // The answer prose carries inline [1][2]… markers that index the claims array by 1-based position,
-  // so the Sources list is rendered IN ORDER with NO dedup — [N] must line up with source N.
-  const cites = claims.map(c=>{
+  // The answer prose carries inline [1][2]… markers that index the claims array by 1-based position.
+  // Render the SAME evidence cards as the research surface (article.claim#f{n} with .ctext/.cquote/
+  // .srclink) so the global citation-HOVER tooltip finds #f{n} in this turn's scope and shows the
+  // claim + full verbatim quote on hover — parity with the research answers. Collapsed by default
+  // (<details>) to keep the mobile answer tidy; hover works while collapsed (the cards are in-DOM).
+  const cards = claims.map((c,idx)=>{
     const url = (c && /^https?:\/\//i.test(c.url||"")) ? c.url : "";
-    const title = esc((c && (c.title || c.source)) || "source");
-    const src = c && c.source && c.source !== (c.title||"") ? ` <span style="color:var(--muted);font-size:.74rem;">· ${esc(c.source)}</span>` : "";
-    return `<li>${url?`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${title} ↗</a>`:title}${src}</li>`;
+    const label = esc((c && c.source) || "") + (c && c.title ? (c.source?" · ":"") + esc(c.title) : "");
+    const src = url
+      ? `<a class="src srclink" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="Open source in a new tab">${label||"source"} ↗</a>`
+      : (label ? `<span class="src">${label}</span>` : "");
+    return `<article class="claim" id="f${idx+1}">
+      <div class="chead"><span class="fnum">${idx+1}</span><div class="ctext">${esc(c.text||"")}</div></div>
+      ${c.quote?`<blockquote class="cquote">${esc(c.quote)}</blockquote>`:""}
+      <div class="cfoot"><span class="verified" title="A verbatim quote from this source was located and matched — this is a provenance check, not a judgment of source quality, currency, or applicability.">✓ Quote found in source</span>${typeof srcBadge==="function"?srcBadge(c):""}${src}</div>
+    </article>`;
   }).join("");
   const gaps = (d.coverage_gaps||[]).map(g=>`<li>${esc(g)}</li>`).join("");
   const grounded = d.grounded
@@ -2379,7 +2388,7 @@ function qaMarkup(d, question){
     : `<span class="ppl-tag">model read — not corpus-verified</span>`;
   const via = (d.source === "roster") ? "Roster" : "Eigen";
   const head = `<div class="ppl-head"><b>Q&amp;A</b> ${grounded} <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.10);">via ${via}</span></div>`;
-  const citesBlock = cites ? `<div class="qa-cites" style="margin-top:.9rem;"><div class="plain-h" style="margin-bottom:.3rem;">Sources (${claims.length})</div><ol style="margin:0;padding-left:1.2rem;display:flex;flex-direction:column;gap:.25rem;">${cites}</ol></div>` : "";
+  const citesBlock = cards ? `<details class="qa-cites" style="margin-top:.9rem;"><summary class="plain-h" style="cursor:pointer;margin-bottom:.3rem;">Backing evidence (${claims.length})</summary><div style="display:flex;flex-direction:column;gap:.6rem;">${cards}</div></details>` : "";
   const gapsBlock = gaps ? `<div class="ppl-cov" style="margin-top:.7rem;"><b>Coverage gaps</b><ul style="margin:.3rem 0 0;padding-left:1.1rem;">${gaps}</ul></div>` : "";
   // Secondary profile-search links on a person dossier (navigation aids, never the answer).
   const pplLinks = (Array.isArray(d.people) ? d.people : [])
