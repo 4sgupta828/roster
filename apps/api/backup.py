@@ -24,8 +24,14 @@ CRITICAL_TABLES = (
     "roster_watch", "roster_watch_seen", "roster_pulse_state",
     "roster_research_session", "roster_corpus_gap_queue",
 )
-_BLOCK_COLS = ("tenant_id", "workspace_id", "document_id", "block_id", "text", "facets",
-               "document_title", "content_type", "source_key", "created_at")
+# LARGE tables streamed in flat-memory row parts. Columns are resolved dynamically and vector/tsvector
+# columns are EXCLUDED (embeddings + full-text indexes are recreatable by re-embedding/re-indexing):
+#   rs_block            — research corpus text + facets
+#   rs_entity           — people/company IDENTITIES (the people index backbone)
+#   roster_entity_facet — the extracted people/company FACETS (title/role/skill/company/links/…)
+#   rs_job              — the jobs index (embedding excluded, recreatable)
+# With these, a total Postgres loss restores the people + jobs + corpus from R2 alone.
+_STREAM_TABLES = ("rs_block", "rs_entity", "roster_entity_facet", "rs_job")
 _PART_ROWS = 50_000
 
 
@@ -68,14 +74,52 @@ class R2Named:
         return self._c().get_object(Bucket=self._bucket, Key=key)["Body"].read()
 
 
+async def _dumpable_cols(conn, table: str) -> list[str]:
+    """Columns of `table` safe to dump — EXCLUDING vector/tsvector columns (embeddings + full-text
+    indexes, which are large and recreatable by re-embedding/re-indexing). Empty list = table absent."""
+    rows = await conn.fetch(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name = $1 AND udt_name NOT IN ('vector', 'tsvector') "
+        "ORDER BY ordinal_position", table)
+    return [r["column_name"] for r in rows]
+
+
+async def _dump_streamed(conn, store, base: str, table: str, manifest: dict) -> None:
+    """Stream a large table to R2 in flat-memory row parts (memory stays flat regardless of size).
+    Columns resolved dynamically with vector/tsv excluded. Records parts + row count in the manifest;
+    a missing table or mid-dump failure is recorded and skipped (a partial backup beats none)."""
+    try:
+        cols = await _dumpable_cols(conn, table)
+        if not cols:
+            manifest["errors"].append({table: "absent or no dumpable columns"})
+            return
+        collist = ", ".join(f'"{c}"' for c in cols)
+        part, buf, n_in_part, total = 0, [], 0, 0
+        async with conn.transaction():
+            async for r in conn.cursor(f"SELECT {collist} FROM {table}"):   # noqa: S608 — cols from info_schema
+                buf.append(json.dumps({k: _ser(v) for k, v in dict(r).items()}, default=str))
+                n_in_part += 1; total += 1
+                if n_in_part >= _PART_ROWS:
+                    store.put(f"{base}/{table}-part{part:04d}.jsonl.gz",
+                              gzip.compress("\n".join(buf).encode()), content_type="application/gzip")
+                    part += 1; buf, n_in_part = [], 0
+        if buf:
+            store.put(f"{base}/{table}-part{part:04d}.jsonl.gz",
+                      gzip.compress("\n".join(buf).encode()), content_type="application/gzip")
+            part += 1
+        manifest["streamed"][table] = {"rows": total, "parts": part}
+    except Exception as e:   # noqa: BLE001
+        manifest["errors"].append({table: str(e)[:200]})
+
+
 async def run_backup(dsn: str, store) -> dict:
-    """Dump all critical tables + corpus text to R2 via `store` (R2Named: put(key, data,
-    content_type)). Returns a manifest summary. Any table that fails is
-    recorded and skipped — a partial backup with a manifest beats none."""
+    """Dump all critical tables + the large streamed tables (corpus, people identities + facets, jobs)
+    to R2 via `store` (R2Named: put(key, data, content_type)). Returns a manifest summary. Any table
+    that fails is recorded and skipped — a partial backup with a manifest beats none."""
     import asyncpg
     day = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
     base = f"backups/{day}"
-    manifest: dict = {"date": day, "tables": {}, "corpus_parts": 0, "errors": []}
+    manifest: dict = {"date": day, "tables": {}, "streamed": {}, "corpus_parts": 0, "errors": []}
     conn = await asyncpg.connect(dsn)
     try:
         for t in CRITICAL_TABLES:
@@ -88,24 +132,10 @@ async def run_backup(dsn: str, store) -> dict:
                 manifest["tables"][t] = len(rows)
             except Exception as e:   # noqa: BLE001
                 manifest["errors"].append({t: str(e)[:200]})
-        # corpus text+facets in flat-memory parts (embeddings/tsv EXCLUDED — recreatable)
-        part, buf, n_in_part = 0, [], 0
-        cols = ", ".join(_BLOCK_COLS)
-        async with conn.transaction():
-            async for r in conn.cursor(f"SELECT {cols} FROM rs_block"):   # noqa: S608
-                buf.append(json.dumps({k: _ser(v) for k, v in dict(r).items()}, default=str))
-                n_in_part += 1
-                if n_in_part >= _PART_ROWS:
-                    store.put(f"{base}/rs_block-part{part:04d}.jsonl.gz",
-                              gzip.compress("\n".join(buf).encode()),
-                              content_type="application/gzip")
-                    part += 1
-                    buf, n_in_part = [], 0
-        if buf:
-            store.put(f"{base}/rs_block-part{part:04d}.jsonl.gz",
-                      gzip.compress("\n".join(buf).encode()), content_type="application/gzip")
-            part += 1
-        manifest["corpus_parts"] = part
+        # LARGE tables streamed in parts (people index + jobs + corpus; vector/tsv excluded).
+        for t in _STREAM_TABLES:
+            await _dump_streamed(conn, store, base, t, manifest)
+        manifest["corpus_parts"] = manifest["streamed"].get("rs_block", {}).get("parts", 0)  # back-compat
     finally:
         await conn.close()
     manifest["finished_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
