@@ -34,6 +34,12 @@ def main() -> None:
         raise SystemExit("ROSTER_CORPUS_DSN is required for the ingest worker")
     # health server in a daemon thread so Railway sees the service as up while we ingest
     threading.Thread(target=_serve_health, daemon=True, name="health").start()
+    # BULK-INGEST worker (people/jobs corpus → 2x): durable, resumable loop off the API process.
+    if os.environ.get("ROSTER_BULK_INGEST", "").lower() in ("1", "true", "yes"):
+        from worker.bulk_ingest import run_bulk_ingest_loop
+        print("[worker] roster BULK-INGEST WORKER (people/jobs)", flush=True)
+        run_bulk_ingest_loop()                 # blocks forever on the bulk-ingest loop
+        return
     # import here (not at module top) so a missing FastAPI dep can't break health startup
     from api.app import _run_gap_processor
     from roster_kernel.runtime.build import load_active_vertical
