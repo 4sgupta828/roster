@@ -635,6 +635,14 @@ def eigen_qa_enabled() -> bool:
     return os.environ.get("ROSTER_EIGEN_QA", "").lower() in ("1", "true", "yes")
 
 
+def jd_exclude_source_co_enabled() -> bool:
+    """Flag (default OFF, Rule 20) via ROSTER_JD_EXCLUDE_SOURCE_CO: when ON, "Find candidates" hides
+    people who currently work at the JD's HIRING company (recruiters don't poach from the client),
+    unless the recruiter ticks "include source-company profiles". OFF → byte-identical (no exclusion,
+    no extra LLM call). The company is identified by the LLM (Rule 18); a miss fails safe (no drop)."""
+    return os.environ.get("ROSTER_JD_EXCLUDE_SOURCE_CO", "").lower() in ("1", "true", "yes")
+
+
 def eigen_api_url() -> str:
     """Base URL of the Eigen research API that powers Q&A mode. Overridable via ROSTER_EIGEN_API_URL;
     defaults to the prod deployment. Trailing slash trimmed so `{base}/research` joins cleanly."""
@@ -1119,6 +1127,7 @@ class MatchPeopleIn(BaseModel):        # recruiter reverse-match: JD → candida
     locations: list[str] = []
     country: str = "us"
     limit: int = 40
+    allow_source_company: bool = False   # recruiter opt-in: include people at the JD's hiring company
 
 
 class MatchIn(BaseModel):
@@ -1915,6 +1924,7 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             "people_geo_scope_enabled": people_geo_scope_enabled(),
             "jobs_enabled": jobs_enabled(),
             "eigen_qa_enabled": eigen_qa_enabled(),
+            "jd_exclude_source_co_enabled": jd_exclude_source_co_enabled(),
         }
 
     @app.post("/search")
@@ -2578,9 +2588,18 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             if len(jd) < 40:
                 raise HTTPException(status_code=400,
                     detail="Couldn't read a job description from that link — paste the text instead.")
-        from api.people_population import match_jd_people
+        from api.people_population import match_jd_people, extract_jd_company
+        prefs = body.model_dump()
+        # Source-company exclusion (flag ROSTER_JD_EXCLUDE_SOURCE_CO, default OFF): identify the JD's
+        # hiring company (LLM, Rule 18) and pass it as the exclude set — unless the recruiter opted in
+        # to include them. Extraction failure fails safe (empty → no exclusion).
+        if jd_exclude_source_co_enabled() and not body.allow_source_company:
+            try:
+                prefs["exclude_companies"] = await extract_jd_company(jd, build_llm(mode=resolve_mode()))
+            except Exception:   # noqa: BLE001
+                prefs["exclude_companies"] = []
         try:
-            return await match_jd_people(cstore, jd, body.model_dump())
+            return await match_jd_people(cstore, jd, prefs)
         except Exception as e:   # noqa: BLE001
             raise HTTPException(status_code=502, detail=f"match failed: {e}") from e
 

@@ -227,9 +227,57 @@ def _person_row_from_facets(r: dict) -> dict:
             "attributes": attrs, "links": links, "citation": cite}
 
 
+class _JDCompany(BaseModel):
+    companies: list[str] = []   # the HIRING company and its common name variants/aliases
+
+
+async def extract_jd_company(jd_text: str, llm) -> list[str]:
+    """LLM-owned (Rule 18 — identifying the hiring entity is meaning, not a keyword match): read a job
+    description and return the HIRING company plus its common name variants, each a short lowercased
+    token (OpenAI -> 'openai', Alphabet/Google -> ['google','alphabet']). FAIL SAFE to [] on any error
+    or when the company isn't clearly stated (never guess) — a miss can only UNDER-exclude, never drop
+    the wrong people."""
+    jd = (jd_text or "").strip()
+    if len(jd) < 20 or llm is None:
+        return []
+    try:
+        comp = await llm.complete(
+            system="Identify the company that is HIRING for this job description (the employer posting the "
+                   "role — not a customer, partner, or a company merely mentioned). Return that company's "
+                   "name and its common variants/aliases, each a short lowercased token. If the hiring "
+                   "company is not clearly stated, return an empty list. Never guess.",
+            messages=[{"role": "user", "content": jd[:6000]}],
+            response_format=_JDCompany, max_tokens=120)
+        return [str(c).strip().lower() for c in (comp.parsed.companies or []) if str(c).strip()]
+    except Exception:   # noqa: BLE001 — extraction failure must fail safe (no exclusion), never crash
+        return []
+
+
+def _norm_co(s: str) -> str:
+    """Structural (Rule 18-safe) company key for COMPARISON only: lowercase, alphanumerics only.
+    The semantic call (which company + its aliases) is the LLM's; this is just string matching."""
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def _co_matches(candidate_norm: str, excl: set[str]) -> bool:
+    """True if a candidate's normalized company EXACTLY equals any excluded company (after norm).
+    Exact-only on purpose: company norms strip legal suffixes to a clean short name, and the LLM
+    supplies real aliases, so equality covers the true variants WITHOUT prefix false-positives
+    (a 'meta' exclusion must not drop someone at 'metabase'). A miss under-excludes — never
+    wrongly hides a valid candidate. The <3-char guard blocks a stray tiny token."""
+    ck = candidate_norm
+    if not ck:
+        return False
+    return any(len(e) >= 3 and ck == e for e in excl)
+
+
 async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
     """RECRUITER reverse-match: a job description → ranked candidate PEOPLE (semantic over person
-    embeddings), re-ranked by preferences (seniority, location, country). Mirror of match_resume_jobs."""
+    embeddings), re-ranked by preferences (seniority, location, country). Mirror of match_resume_jobs.
+
+    Source-company exclusion: when `prefs['exclude_companies']` is non-empty, candidates who currently
+    work at the hiring company are dropped (a recruiter doesn't want to poach from the client). The
+    caller (endpoint) decides whether to populate it, gated on the flag + the recruiter's opt-in."""
     prefs = prefs or {}
     jd = (jd_text or "").strip()
     if len(jd) < 20:
@@ -245,6 +293,9 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
     want_sens = {str(s).lower() for s in (prefs.get("seniorities") or []) if str(s).strip()}
     want_country = (prefs.get("country") or "").lower()
     locs = [str(l).lower() for l in (prefs.get("locations") or []) if str(l).strip()]
+    excl_raw = [str(c).strip() for c in (prefs.get("exclude_companies") or []) if str(c).strip()]
+    excl = {_norm_co(c) for c in excl_raw if _norm_co(c)}
+    excluded_n = 0
     out = []
     for r in rows:
         facets = r["facets"]
@@ -252,6 +303,9 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
             return next((f["value_norm"] for f in facets if f["facet_key"] == k), "")
         sen, country, metro = fval("seniority"), fval("country"), fval("metro")
         if want_country and country and country != want_country:   # drop only when we KNOW it's elsewhere
+            continue
+        if excl and _co_matches(_norm_co(fval("company")), excl):   # hide people at the hiring company
+            excluded_n += 1
             continue
         sim = sim_map.get(r["entity_id"], 0.0)
         score, reasons = sim, []
@@ -266,7 +320,8 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
     for c in out:
         c.pop("_score", None)
     return {"people_rows": out[: int(prefs.get("limit", 40))],
-            "note": (want_country.upper() + " only" if want_country else "")}
+            "note": (want_country.upper() + " only" if want_country else ""),
+            "excluded_source_company": ({"companies": excl_raw, "count": excluded_n} if excl else None)}
 
 
 async def parse_people_facets(question: str, llm) -> tuple[dict[str, list[str]], str, str]:

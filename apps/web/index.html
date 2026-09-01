@@ -947,6 +947,12 @@
      Guided chat), else it renders mid-screen above the fixed composer. Per-answer footnotes still show. */
   body.chatting #pagefoot,
   body.triage-live #pagefoot{display:none;}
+  /* Mission — a quiet landing footer (same docked-hide rule as the disclaimer footer). */
+  .missionfoot{margin:2.4rem auto 1.4rem;max-width:640px;text-align:center;padding:1.3rem 1.2rem 0;border-top:1px solid var(--hair);}
+  .missionfoot .mf-h{font-family:var(--display);font-weight:700;font-size:1.02rem;color:var(--ink,var(--gold));margin-bottom:.35rem;letter-spacing:.01em;}
+  .missionfoot .mf-b{font-size:.82rem;line-height:1.5;color:var(--muted);}
+  body.chatting .missionfoot,
+  body.triage-live .missionfoot{display:none;}
   /* suggested follow-ups */
   .suggest{margin:.6rem 0 .4rem;padding:1rem 1.15rem;border:1px solid var(--hair);border-radius:14px;background:var(--panel2);}
   .suggest-h{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.1em;color:var(--gold);margin-bottom:.7rem;}
@@ -1584,6 +1590,10 @@
 <section class="panelbody" id="panelbody" hidden aria-label="Expert panel"></section>
   <section class="triagebody" id="triagebody" hidden aria-label="Guided intake"></section>
   <footer class="pagefoot" id="pagefoot" hidden></footer>
+  <footer class="missionfoot" id="missionfoot">
+    <div class="mf-h">Talent, findable on merit.</div>
+    <div class="mf-b">Roster turns public professional signal into a living map of people, companies, and the work between them — so the right person and the right role can find each other directly, not through a gatekeeper or a warm intro.</div>
+  </footer>
 </div>
 
 <!-- Past Sessions: full-page master/detail (questions left, answer right) -->
@@ -1741,7 +1751,8 @@
     <span class="mlabel">Locations</span>
     <div class="chipbox" id="mLocBox"><input id="mLoc" type="text" placeholder="Add a city, press Enter"/></div>
     <span class="mlabel">Roles</span>
-    <div class="chipbox" id="mRoleBox"><input id="mRole" type="text" placeholder="Add a role, press Enter"/></div>
+    <select id="mRoleSel" style="width:100%;font-size:.86rem;margin-bottom:.35rem;"><option value="">Pick a role…</option></select>
+    <div class="chipbox" id="mRoleBox"><input id="mRole" type="text" placeholder="…or type a custom role, press Enter"/></div>
     <span class="mlabel">Seniority (pick any)</span>
     <div class="sentogs" id="mSenBox"></div>
     <span class="mlabel">Company &amp; more</span>
@@ -1771,6 +1782,10 @@
     <div class="sentogs" id="jdSenBox"></div>
     <span class="mlabel">Locations</span>
     <div class="chipbox" id="jdLocBox"><input id="jdLoc" type="text" placeholder="Add a metro, press Enter"/></div>
+    <label id="jdSrcCoRow" hidden style="display:flex;align-items:center;gap:.45rem;margin:.5rem 0 .2rem;font-size:.82rem;color:var(--muted);cursor:pointer;">
+      <input type="checkbox" id="jdAllowSrcCo" style="width:auto;margin:0;" />
+      Include people currently at the hiring company <span style="opacity:.7;">(off = don’t poach from the client)</span>
+    </label>
     <div style="margin:.6rem 0;"><button type="button" class="idgo" id="jdGo" style="width:100%;padding:.55rem;">🧲 Find matching candidates</button></div>
     <div id="jdnote" style="font-size:.78rem;color:var(--muted);"></div>
     <div id="jdresults" style="margin-top:.4rem;"></div>
@@ -2031,6 +2046,8 @@ async function loadConfig(){
     window.JOBS_ENABLED = !!c.jobs_enabled;   // jobs mode: route job-intent queries to /jobs
     window.EIGEN_QA_ENABLED = !!c.eigen_qa_enabled;   // Q&A mode: reveal the 💬 Q&A toggle → /qa (Eigen)
     { const qb = document.getElementById("pjqa"); if(qb) qb.hidden = !window.EIGEN_QA_ENABLED; }
+    window.JD_EXCLUDE_ENABLED = !!c.jd_exclude_source_co_enabled;   // Find candidates: source-company exclusion
+    { const row = document.getElementById("jdSrcCoRow"); if(row) row.hidden = !window.JD_EXCLUDE_ENABLED; }
     // People geo-scope (flag-gated): reveal the top-right country selector, persist the choice, and
     // ship it on every people query as `country`. Default 'us'. Backend ignores it when the flag is off.
     try{ window.ROSTER_COUNTRY = localStorage.getItem("roster_country") || "us"; }catch(e){ window.ROSTER_COUNTRY = "us"; }
@@ -6775,6 +6792,36 @@ $("#matchfile") && $("#matchfile").addEventListener("change",(e)=>{ if(e.target.
 $("#matchhdr") && $("#matchhdr").addEventListener("click", openMatch);   // top-level header button
 wireChipInput("mLocBox", MATCH_LOCS); wireChipInput("mRoleBox", MATCH_ROLES);
 
+// Smart role dropdown for "Find jobs": curated tech roles (grouped), so the Roles field guides the
+// choice instead of being totally free-form. Selecting a role adds it as a chip; the chip input stays
+// for a genuinely custom role. Kept in sync with MATCH_ROLES so runMatch sends the same role_keywords.
+const ROLE_OPTIONS = {
+  "Engineering": ["Software Engineer","Frontend Engineer","Backend Engineer","Full-Stack Engineer",
+    "Mobile Engineer","Platform Engineer","Infrastructure Engineer","DevOps Engineer","Site Reliability Engineer",
+    "Security Engineer","Data Engineer","Machine Learning Engineer","AI Engineer","QA Engineer","Embedded Engineer"],
+  "Data & Research": ["Data Scientist","Applied Scientist","Research Scientist","ML Researcher",
+    "Data Analyst","Analytics Engineer"],
+  "Product & Design": ["Product Manager","Technical Product Manager","Product Designer","UX Designer",
+    "UX Researcher","Design Engineer"],
+  "Leadership": ["Tech Lead","Staff Engineer","Principal Engineer","Engineering Manager",
+    "Director of Engineering","VP of Engineering","CTO"],
+  "Go-to-Market & Ops": ["Developer Advocate","Solutions Engineer","Sales Engineer","Technical Program Manager"],
+};
+function populateRoleSelect(){
+  const sel = $("#mRoleSel"); if(!sel || sel.dataset.filled) return;
+  Object.entries(ROLE_OPTIONS).forEach(([grp, roles])=>{
+    const og = document.createElement("optgroup"); og.label = grp;
+    roles.forEach(r=>{ const o=document.createElement("option"); o.value=r; o.textContent=r; og.appendChild(o); });
+    sel.appendChild(og);
+  });
+  sel.dataset.filled = "1";
+  sel.addEventListener("change", ()=>{
+    const v = sel.value; sel.value = "";
+    if(v && !MATCH_ROLES.includes(v)){ MATCH_ROLES.push(v); renderChips("mRoleBox", MATCH_ROLES); }
+  });
+}
+populateRoleSelect();
+
 // ===== Recruiter reverse-match: job description → ranked candidate people =====
 let JD_LOCS = [], JD_SENS = new Set();
 function renderJDSen(){ const box=$("#jdSenBox"); if(!box) return;
@@ -6787,12 +6834,15 @@ async function runJDMatch(){
   $("#jdnote").textContent = (url && jd.length<20) ? "Fetching the JD from the link…" : "Finding matching candidates…";
   $("#jdresults").innerHTML = "";
   const prefs = { job_description: jd, job_url: url, seniorities: Array.from(JD_SENS), locations: JD_LOCS.slice(),
-                  country: (window.ROSTER_COUNTRY||"us"), limit: 40 };
+                  country: (window.ROSTER_COUNTRY||"us"), limit: 40,
+                  allow_source_company: !!($("#jdAllowSrcCo")||{}).checked };
   try{
     const r = await fetch("/match-people", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(prefs)});
     if(!r.ok){ const e = await r.json().catch(()=>({})); $("#jdnote").textContent = e.detail || "Match failed — try again."; return; }
     const d = await r.json(); const rows = d.people_rows || [];
-    $("#jdnote").textContent = rows.length ? (`Top ${rows.length} candidates`+(d.note?` · ${d.note}`:"")) : "No candidates found — loosen the filters.";
+    const ex = d.excluded_source_company;
+    const exNote = (ex && ex.count) ? ` · hid ${ex.count} at ${(ex.companies||[]).join(", ")} (tick the box to include)` : "";
+    $("#jdnote").textContent = rows.length ? (`Top ${rows.length} candidates`+(d.note?` · ${d.note}`:"")+exNote) : ("No candidates found — loosen the filters."+exNote);
     rows.forEach(p=>{ p.blurb = `[${p.match_pct}% fit${(p.reasons&&p.reasons.length)?" · "+p.reasons.join(" · "):""}] ` + (p.blurb||""); });
     $("#jdresults").innerHTML = peopleRowsMarkup({people_rows: rows, coverage_basis:{query_facets:{}, population_statement:""}});
   }catch(e){ $("#jdnote").textContent = "Match failed — try again."; }
