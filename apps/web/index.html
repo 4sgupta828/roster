@@ -7021,12 +7021,12 @@ function renderEditableDoc(box, title, text, filename){
 }
 // Save the current (edited) text as PDF via the browser's print → "Save as PDF". No library/deps.
 function saveAsPdf(title, text, filename){
+  // Print the content EXACTLY as-is (no injected heading/label) — the title is only the browser/file
+  // name for the print dialog. The document IS the résumé/letter, ready to send.
   const w = window.open("", "_blank"); if(!w) return;
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(filename||title)}</title>
-    <style>@page{margin:1in;} body{font:13px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#111;white-space:pre-wrap;word-wrap:break-word;}
-    h1{font-size:15px;margin:0 0 12px;} @media print{.noprint{display:none;}}</style></head>
-    <body><h1>${esc(title)}</h1><div>${esc(text||"")}</div>
-    <script>window.onload=function(){setTimeout(function(){window.print();},150);};<\/script></body></html>`);
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(filename||title||"document")}</title>
+    <style>@page{margin:1in;} body{font:12.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#111;white-space:pre-wrap;word-wrap:break-word;}</style></head>
+    <body>${esc(text||"")}<script>window.onload=function(){setTimeout(function(){window.print();},150);};<\/script></body></html>`);
   w.document.close(); w.focus();
 }
 async function runAaDoc(kind){                 // kind: 'cover-letter' | 'tailored-resume'

@@ -421,17 +421,21 @@ async def build_tailored_resume(jd_text: str, profile: dict, resume_text: str, l
     try:
         comp = await llm.complete(
             system=(
-                "Rewrite this candidate's résumé, tailored to the target role, in the `resume` field. "
-                "STRICT GROUNDING: use ONLY facts present in the original résumé — you may reorder, "
-                "re-emphasize, rephrase, tighten, and surface the most role-relevant experience and "
-                "achievements, and mirror the job's terminology where it TRUTHFULLY applies. You must NOT "
-                "invent or inflate any skill, title, employer, date, metric, or achievement, and must not "
-                "claim experience the original doesn't support. Keep it truthful and ATS-friendly with "
-                "clear sections (Summary, Experience with bullet points, Skills, Education). Return the "
-                "full résumé as plain text."),
+                "Produce a READY-TO-SEND résumé for this candidate, in the `resume` field — the SAME résumé, "
+                "carefully reprioritized to foreground what THIS target role needs. Return ONLY the résumé "
+                "itself: NO title/label like 'Tailored Résumé', no preamble, no commentary. "
+                "PRESERVE the original's structure, sections, section order, and formatting, and KEEP EVERY "
+                "factual detail — name, contact, every employer, title, date range, education, and each "
+                "experience bullet. Do NOT drop content and do NOT reformat into a different template. "
+                "Your job is to REPRIORITIZE and HIGHLIGHT: reorder bullets within a role so the most "
+                "role-relevant ones come first, sharpen wording to mirror the job's terminology WHERE IT "
+                "TRUTHFULLY APPLIES, and (if the original has a summary) tune it toward this role. "
+                "STRICT GROUNDING: use ONLY facts present in the original — never invent, inflate, or imply "
+                "any skill, title, employer, date, metric, or achievement the original doesn't state. "
+                "The result must be a faithful, high-quality résumé the candidate could send as-is."),
             messages=[{"role": "user", "content": f"TARGET ROLE (JOB DESCRIPTION):\n{jd[:9000]}\n\n"
-                       f"ORIGINAL RÉSUMÉ (the only source of truth):\n{rt[:12000]}"}],
-            response_format=_TailoredResume, max_tokens=2000)
+                       f"ORIGINAL RÉSUMÉ (the ONLY source of truth — preserve its structure + every detail):\n{rt[:12000]}"}],
+            response_format=_TailoredResume, max_tokens=2200)
         return (comp.parsed.resume or "").strip() or None
     except Exception as e:   # noqa: BLE001
         _log.warning("build_tailored_resume failed: %s", e)
