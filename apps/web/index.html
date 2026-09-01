@@ -1428,6 +1428,7 @@
     </label>
     <button type="button" class="histbtn newbtn" id="newbtn" style="margin-left:12px;">＋ New search</button>
     <button type="button" class="histbtn" id="signinbtn" style="margin-left:0;" title="Sign in or create an account">Sign in</button>
+    <button type="button" class="histbtn" id="histbtn2" style="margin-left:0;" hidden title="Your search history — private to your account">⧗ History</button>
     <button type="button" class="histbtn" id="acctbtn" style="margin-left:0;" hidden title="Your account — shortlists, saved searches, apply profile">◈ Account</button>
     <!-- legacy hidden hooks (handlers guard for null; kept out of the header) -->
     <button type="button" id="savedbtn" hidden></button>
@@ -4974,7 +4975,8 @@ async function runPanelTurn(question){
 async function runDuel(question){
   const flip = Math.random() < 0.5;                                     // blinded, randomized arm order
   const arms = flip ? ["reasoned", "standard"] : ["standard", "reasoned"];   // arms[0] = "Answer A"
-  const base = {question, tenant_id: "demo", sources: chosen(), country: (window.ROSTER_COUNTRY||"us")};
+  const base = {question, tenant_id: "demo", sources: chosen(), country: (window.ROSTER_COUNTRY||"us"),
+    user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""};   // attribute sessions to the user
   if(EFFORT_ENABLED && EFFORT > 1) base.effort = EFFORT;
   if(ATTACHMENTS.length) base.attachments = ATTACHMENTS.slice();
   if(USER){ base.user_name = USER.name; base.user_email = USER.email; }
@@ -5082,7 +5084,8 @@ async function askQuestion(question, opts){
   // Follow-ups, retries, panel/triage and internal re-entries all skip the duel.
   if(DUEL_ENABLED && !opts.skipDuel && APP_MODE === "qa" && !THREAD.turns.length){ return runDuel(question); }
   const conv = CONV_ENABLED;
-  const payload = {question, tenant_id:"demo", sources: chosen(), country: (window.ROSTER_COUNTRY||"us")};
+  const payload = {question, tenant_id:"demo", sources: chosen(), country: (window.ROSTER_COUNTRY||"us"),
+    user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""};   // attribute sessions to the user
   if(EFFORT_ENABLED && EFFORT > 1) payload.effort = EFFORT;
   if(ATTACHMENTS.length) payload.attachments = ATTACHMENTS.slice();
   if(PENDING_INTAKE_TRANSCRIPT && PENDING_INTAKE_TRANSCRIPT.length && !THREAD.turns.length){
@@ -5783,11 +5786,12 @@ async function loadSessionList(){
   // The active tab (see buildSessionTabs) filters the list server-side by kind.
   const kindParam = (ASK_PANEL_ENABLED && SESS_TAB) ? `&kind=${SESS_TAB.kind}` : "";
   try{
-    const {sessions} = await (await fetch("/sessions?tenant_id=demo&limit=200&q="+encodeURIComponent(q)+kindParam)).json();
+    // PRIVATE per-account history — only the signed-in user's own sessions (server scopes by their email)
+    const {sessions} = await (await fetch("/me/history?q="+encodeURIComponent(q)+kindParam, {headers: authHeaders()})).json();
     if(!sessions || !sessions.length){
       const empty = q ? "No matching sessions."
         : (SESS_TAB && SESS_TAB.kind === "panel" ? "No expert-panel discussions yet."
-                                  : "No saved questions yet.");
+                                  : "No saved searches yet — your history appears here as you search.");
       slist.innerHTML = `<div class="sempty">${empty}</div>`; return;
     }
     slist.innerHTML = sessions.map(s=>{
@@ -6139,8 +6143,10 @@ function maybeShowSavedBtn(){
   const on = loggedIn();
   document.body.classList.toggle("logged-in", on);
   const acct = $("#acctbtn"); if(acct) acct.hidden = !on;                       // Account (signed in)
+  const hist = $("#histbtn2"); if(hist) hist.hidden = !on;                       // History (signed in, private)
   const sign = $("#signinbtn"); if(sign) sign.hidden = on || !ACCOUNTS_ENABLED;  // Sign in (signed out)
 }
+$("#histbtn2") && $("#histbtn2").addEventListener("click", openSessions);
 async function openAccount(){
   if(!loggedIn()){ AUTH_MODE = "login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden = false; return; }
   const em = $("#acctemail"); if(em) em.textContent = (USER && USER.email) || "";

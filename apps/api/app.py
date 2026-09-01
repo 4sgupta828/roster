@@ -4365,6 +4365,22 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         except Exception as e:   # noqa: BLE001
             raise HTTPException(status_code=502, detail=f"match failed: {e}") from e
 
+    @app.get("/me/history")
+    async def me_history(q: str = "", kind: str = "", x_roster_token: str = Header(default="")) -> dict:
+        """PRIVATE per-account history: the signed-in user's OWN research/search sessions only
+        (scoped by their email). Replaces the old global /sessions view that leaked across users."""
+        _, user = await _require_user(x_roster_token)
+        sstore = _store()
+        email = (user or {}).get("email")
+        if sstore is None or not email:
+            return {"sessions": []}
+        knd = kind if kind in ("panel", "research", "crossview") else None
+        try:
+            return {"sessions": await sstore.list(tenant_id="demo", limit=200, q=q or None,
+                                                  kind=knd, user_email=email)}
+        except Exception as e:   # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"history error: {e}") from e
+
     # ---- outreach log (draft + handoff only; Roster never sends on the user's behalf) ----
     @app.post("/me/outreach")
     async def me_add_outreach(body: OutreachIn, x_roster_token: str = Header(default="")) -> dict:

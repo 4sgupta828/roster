@@ -232,12 +232,15 @@ class SessionStore:
 
     async def list(self, *, tenant_id: str, limit: int = 50,
                    q: str | None = None, audience: str | None = None,
-                   kind: str | None = None) -> list[dict[str, Any]]:
+                   kind: str | None = None, user_email: str | None = None) -> list[dict[str, Any]]:
         await self._ensure()
         pool = await self._get_pool()
         # optional full-text-ish search over the question + asker (name/email)
         where = "vertical=$1 AND tenant_id=$2 AND NOT deleted"
         params: list[Any] = [self._vertical, tenant_id]
+        if user_email and user_email.strip():          # PRIVATE per-account scoping
+            params.append(user_email.strip().lower())
+            where += f" AND lower(user_email)=${len(params)}"
         if q and q.strip():
             params.append(f"%{q.strip()}%")
             where += (f" AND (question ILIKE ${len(params)} OR user_name ILIKE ${len(params)}"
