@@ -90,6 +90,7 @@
     padding:.38rem .8rem;color:var(--muted);transition:all .13s;}
   .histbtn:hover{color:var(--ink);border-color:var(--muted);background:var(--panel2);}
   #effort{display:none !important;}   /* Effort dial removed from the UI */
+  #heading{display:none;}             /* heading is redundant — the mode toggle + placeholder say it */
   /* People / Jobs segmented mode toggle — one click, no ambiguity */
   .pjmode{display:inline-flex;gap:.22rem;background:var(--panel2);border:1px solid var(--hair);
     border-radius:999px;padding:.22rem;margin:0 0 1.05rem;}
@@ -148,13 +149,13 @@
   h1{font-family:var(--serif);font-size:2rem;line-height:1.14;letter-spacing:-.015em;
     font-weight:600;color:var(--ink);margin:.2rem 0 1.15rem;}
   form{display:flex;flex-direction:column;gap:.9rem;}
-  .field{display:flex;align-items:flex-end;gap:.7rem;background:var(--panel);
-    border:1px solid var(--hair);border-radius:16px;padding:.95rem 1rem 1rem 1.2rem;
+  .field{display:flex;align-items:center;gap:.7rem;background:var(--panel);
+    border:1px solid var(--hair);border-radius:16px;padding:.7rem .9rem .7rem 1.2rem;
     box-shadow:0 8px 30px -18px rgba(0,0,0,.6);transition:border-color .15s, box-shadow .15s;}
   .field:focus-within{border-color:rgba(var(--gold-rgb),.55);
     box-shadow:0 8px 30px -16px rgba(0,0,0,.7), 0 0 0 3px rgba(var(--gold-rgb),.14);}
   textarea{flex:1;border:0;background:transparent;color:var(--ink);font:inherit;font-size:1.06rem;
-    line-height:1.5;resize:none;outline:none;padding:.15rem 0;min-height:3.5rem;max-height:20rem;overflow-y:auto;}
+    line-height:1.6;resize:none;outline:none;padding:0;min-height:1.7rem;max-height:20rem;overflow-y:auto;}
   textarea::placeholder{color:var(--muted);}
   button.go{flex:none;width:44px;height:44px;border:0;border-radius:50%;cursor:pointer;
     background:var(--gold);color:var(--on-accent);display:grid;place-items:center;
