@@ -5604,6 +5604,9 @@ function appendGapFallback(question){
 function threadHistoryPayload(){ return THREAD.turns.map(t=>({question:t.question,
   // a clarification turn has no answer — feed its prompt into history so the user's reply resolves.
   answer:t.answer || (t.clarification ? "(I asked to clarify) "+t.clarification : ""),
+  // which engine answered the turn — the router uses this to keep follow-ups on card-producing
+  // routes ("example people for these roles" after a jobs turn → discovery, not prose).
+  route:(t.qa_route && t.qa_route.route) || (t.kind === "jobs" ? "indexed_job_search" : undefined),
   // episodic memory: send the turn's verified findings (text only, capped) so the agent builds on them.
   claims:(t.claims||[]).slice(0,8).map(c=>({text:c.text}))})); }
 // Recover a mid-stream-dropped answer: the server finishes + persists it, so poll the sessions list

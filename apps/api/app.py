@@ -3408,7 +3408,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         if not persist_kind and (body.surface or "").strip().lower() == "qa":
             persist_kind = "qa"       # Q&A-tab conversations file under the qa kind in History
 
-        async def _people_population_route(*, fallthrough: bool, route_extra: dict | None = None):
+        async def _people_population_route(*, fallthrough: bool, route_extra: dict | None = None,
+                                           question_text: str | None = None):
             """The closed-world people-index engine (flag ROSTER_PEOPLE_POPULATION) shared by the
             legacy intercept and the Q&A router. Returns (ResearchOut|None, raw_engine_result|None).
             fallthrough=False reproduces the legacy behavior EXACTLY (always a ResearchOut: person
@@ -3428,7 +3429,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             # default 'us'); a query-named country overrides it inside the engine. OFF → "" = no filter.
             scope_country = (body.country or "us").strip().lower() if people_geo_scope_enabled() else ""
             res = await answer_people_population(
-                question=body.question, tenant_id=body.tenant_id,
+                question=(question_text or body.question), tenant_id=body.tenant_id,
                 store=store, llm=build_llm(mode=resolve_mode()), scope_country=scope_country,
                 prior_facets=body.refine_facets)
             if res.get("kind") == "person":
@@ -3519,6 +3520,19 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         user_email=body.user_email, kind=kind, extra=extra)
                 except Exception:   # noqa: BLE001 — persistence is best-effort
                     return None
+
+            def _ctx_question() -> str:
+                """A FOLLOW-UP referencing earlier turns ('example people for these roles') carries
+                no facets on its own — enrich the engine's question with the recent conversation so
+                the compiler resolves the reference (cards, not a research-prose fallthrough)."""
+                if not body.history:
+                    return body.question
+                _pq = [str(t.get("question") or "")[:160] for t in body.history[-2:]
+                       if isinstance(t, dict) and (t.get("question") or "").strip()]
+                if not _pq:
+                    return body.question
+                return (body.question + "\n(Context — earlier in this conversation: "
+                        + " | ".join(_pq) + ")")
 
             _r = _route.route
             if _r == "clarify":
@@ -3614,7 +3628,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 _route_afo = _RAF.get("connection_path")
             elif _r == "indexed_job_search" and jobs_enabled() and _cstore is not None:
                 jres = await _qr.indexed_jobs_answer(
-                    _cstore, body.question, build_llm(mode=resolve_mode()),
+                    _cstore, _ctx_question(), build_llm(mode=resolve_mode()),
                     country=((body.country or "us").strip().lower()
                              if people_geo_scope_enabled() else ""))
                 if jres is not None:
@@ -3641,7 +3655,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         coverage_gaps=["people-index discovery engine disabled"],
                         qa_route=_route.model_dump())
                 out, pres = await _people_population_route(
-                    fallthrough=True, route_extra={"qa_route": _route.model_dump()})
+                    fallthrough=True, route_extra={"qa_route": _route.model_dump()},
+                    question_text=_ctx_question())
                 if out is not None:
                     out.qa_route = _route.model_dump()
                     return out

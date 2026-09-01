@@ -777,3 +777,49 @@ def test_jobs_endpoint_honors_country_scope(monkeypatch):
     locs = [j["location"] for j in r.json()["jobs"]]
     assert "Stuttgart, Germany" not in locs
     assert "San Francisco, CA" in locs and "Remote" in locs
+
+
+def test_followup_discovery_gets_conversation_context(monkeypatch):
+    """A follow-up like 'example people for these roles' carries no facets alone — the discovery
+    engine's question must be enriched with the prior turns so the compiler resolves the reference
+    (cards, not research prose; session 4efafe24 turn 2)."""
+    from roster_kernel.providers.llm import LLMResult
+    from api.people_population import _FacetParse
+
+    class _TwoStageLLM:
+        async def complete(self, *, system, messages, response_format, max_tokens=2048,
+                           temperature=None):
+            if response_format is _FacetParse:
+                # the compiler must SEE the conversation context, not just the bare follow-up
+                assert "AI Engineers" in messages[0]["content"]
+                return LLMResult(parsed=_FacetParse(role=["ml_engineer"]), output_tokens=5)
+            return LLMResult(parsed=response_format(route="indexed_people_discovery",
+                                                    confidence="high"), output_tokens=5)
+
+    class _Store:
+        async def people_index_stats(self, *, tenant_id):
+            return {"persons_indexed": 5, "source_documents": 2, "facet_coverage": {}}
+
+        async def enumerate_by_facets(self, facets, *, tenant_id, cap):
+            return [{"entity_id": "gh:a", "name": "Ada", "facets": [
+                {"facet_key": "role", "facet_value_norm": "ml_engineer", "value_norm": "ml_engineer",
+                 "display_value": "ML Engineer", "document_id": "d", "block_id": "b"}]}]
+
+    svc = _AskSpy(answer="PROSE MUST NOT WIN")
+    monkeypatch.setenv("ROSTER_QA_ROUTER", "1")
+    monkeypatch.setenv("ROSTER_PEOPLE_POPULATION", "1")
+    monkeypatch.delenv("ROSTER_REASONED_DEFAULT", raising=False)
+    monkeypatch.delenv("ROSTER_SEMANTIC", raising=False)
+    monkeypatch.delenv("ROSTER_PEOPLE_SEMANTIC_FIRST", raising=False)
+    monkeypatch.setattr(appmod, "build_llm", lambda *a, **k: _TwoStageLLM())
+    app = create_app(svc)
+    app.state.claim_store = _Store()
+    client = TestClient(app)
+    r = client.post("/qa", json={
+        "question": "Provide me with some example people profiles that fit these roles",
+        "tenant_id": "demo",
+        "history": [{"question": "Which companies are hiring a lot of AI Engineers that do LLM "
+                                 "based coding?", "answer": "40 roles", "route": "indexed_job_search"}]})
+    data = r.json()
+    assert data["people_rows"] and data["people_rows"][0]["name"] == "Ada"
+    assert svc.calls == []                       # cards, not prose
