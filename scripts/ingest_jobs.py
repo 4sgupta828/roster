@@ -26,17 +26,46 @@ import sys
 import urllib.error
 import urllib.request
 
-# (ats, board_token, company_display) — public board identifiers (structural, not secret).
+# (ats, board_token, company_display) — public board identifiers (structural, not secret). A curated,
+# high-confidence set of large tech employers (high job counts). Wrong/renamed tokens just 404 and are
+# skipped. For a bigger 2x sweep, supply thousands via --boards-file (ats<TAB>token<TAB>company).
 STARTER_BOARDS: list[tuple[str, str, str]] = [
+    # --- Greenhouse (boards-api.greenhouse.io) ---
     ("greenhouse", "stripe", "Stripe"), ("greenhouse", "databricks", "Databricks"),
     ("greenhouse", "gitlab", "GitLab"), ("greenhouse", "coinbase", "Coinbase"),
     ("greenhouse", "robinhood", "Robinhood"), ("greenhouse", "instacart", "Instacart"),
     ("greenhouse", "airbnb", "Airbnb"), ("greenhouse", "dropbox", "Dropbox"),
     ("greenhouse", "twitch", "Twitch"), ("greenhouse", "cloudflare", "Cloudflare"),
-    ("lever", "plaid", "Plaid"), ("lever", "netflix", "Netflix"), ("lever", "spotify", "Spotify"),
-    ("lever", "brex", "Brex"), ("lever", "ramp", "Ramp"),
+    ("greenhouse", "pinterest", "Pinterest"), ("greenhouse", "reddit", "Reddit"),
+    ("greenhouse", "figma", "Figma"), ("greenhouse", "gusto", "Gusto"),
+    ("greenhouse", "affirm", "Affirm"), ("greenhouse", "doordash", "DoorDash"),
+    ("greenhouse", "snowflake", "Snowflake"), ("greenhouse", "samsara", "Samsara"),
+    ("greenhouse", "asana", "Asana"), ("greenhouse", "twilio", "Twilio"),
+    ("greenhouse", "hashicorp", "HashiCorp"), ("greenhouse", "datadog", "Datadog"),
+    ("greenhouse", "elastic", "Elastic"), ("greenhouse", "confluent", "Confluent"),
+    ("greenhouse", "gemini", "Gemini"), ("greenhouse", "discord", "Discord"),
+    ("greenhouse", "lyft", "Lyft"), ("greenhouse", "sofi", "SoFi"),
+    ("greenhouse", "chime", "Chime"), ("greenhouse", "flexport", "Flexport"),
+    ("greenhouse", "benchling", "Benchling"), ("greenhouse", "airtable", "Airtable"),
+    ("greenhouse", "faire", "Faire"), ("greenhouse", "checkr", "Checkr"),
+    ("greenhouse", "webflow", "Webflow"), ("greenhouse", "grammarly", "Grammarly"),
+    ("greenhouse", "niantic", "Niantic"), ("greenhouse", "unity", "Unity"),
+    ("greenhouse", "cockroachlabs", "Cockroach Labs"), ("greenhouse", "mongodb", "MongoDB"),
+    ("greenhouse", "cruise", "Cruise"), ("greenhouse", "wealthsimple", "Wealthsimple"),
+    ("greenhouse", "toast", "Toast"), ("greenhouse", "opensea", "OpenSea"),
+    ("greenhouse", "circle", "Circle"), ("greenhouse", "kraken", "Kraken"),
+    ("greenhouse", "vimeo", "Vimeo"), ("greenhouse", "squarespace", "Squarespace"),
+    # --- Lever (api.lever.co) ---
+    ("lever", "spotify", "Spotify"), ("lever", "palantir", "Palantir"),
+    ("lever", "kickstarter", "Kickstarter"), ("lever", "mercury", "Mercury"),
+    ("lever", "attentive", "Attentive"), ("lever", "hometap", "Hometap"),
+    ("lever", "voleon", "Voleon"), ("lever", "included", "Included Health"),
+    # --- Ashby (api.ashbyhq.com) ---
     ("ashby", "openai", "OpenAI"), ("ashby", "notion", "Notion"), ("ashby", "linear", "Linear"),
-    ("ashby", "vercel", "Vercel"), ("ashby", "anthropic", "Anthropic"),
+    ("ashby", "ramp", "Ramp"), ("ashby", "runway", "Runway"), ("ashby", "clipboard", "Clipboard Health"),
+    ("ashby", "posthog", "PostHog"), ("ashby", "replit", "Replit"), ("ashby", "cursor", "Cursor"),
+    ("ashby", "perplexity", "Perplexity"), ("ashby", "mistral", "Mistral AI"),
+    ("ashby", "scale", "Scale AI"), ("ashby", "sardine", "Sardine"), ("ashby", "tome", "Tome"),
 ]
 
 _UA = {"User-Agent": "roster-jobs-ingest/1.0 (+https://roster-api-production-3405.up.railway.app)"}

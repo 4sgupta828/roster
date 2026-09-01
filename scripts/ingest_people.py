@@ -31,14 +31,23 @@ import time
 import urllib.parse
 import urllib.request
 
-# Search WINDOWS tile the 1000/query cap. Each is a GitHub user-search qualifier string; we page it
-# (100/page × up to 10 pages = 1000). Keep them disjoint-ish so we cover breadth, not the same 1000.
-WINDOWS: list[str] = [
-    "location:%s followers:%s language:%s" % (loc, fol, lang)
-    for loc in ("San Francisco", "New York", "Seattle", "London", "Berlin", "Bangalore", "Toronto", "Remote")
-    for fol in (">500", "200..500", "100..199")
-    for lang in ("Python", "TypeScript", "Go", "Rust")
-]
+# Search WINDOWS tile the 1000-results-per-query cap. Each is a GitHub user-search qualifier string,
+# paged (100/page × up to 10 pages = 1000) and sorted by followers so prominent people come first.
+# location × language across many hubs gives the breadth to reach a 2x (~350k) target; multi-word
+# locations MUST be quoted or GitHub splits them into a free-text term (the New-York under-yield bug).
+_CITIES = (
+    "San Francisco", "New York", "Seattle", "Los Angeles", "Boston", "Austin", "Chicago", "Denver",
+    "Portland", "Atlanta", "Toronto", "Vancouver", "London", "Berlin", "Paris", "Amsterdam", "Madrid",
+    "Barcelona", "Munich", "Zurich", "Dublin", "Stockholm", "Copenhagen", "Warsaw", "Lisbon",
+    "Bangalore", "Bengaluru", "Hyderabad", "Pune", "Delhi", "Mumbai", "Chennai", "Singapore", "Tokyo",
+    "Seoul", "Shanghai", "Beijing", "Shenzhen", "Sydney", "Melbourne", "Tel Aviv", "Sao Paulo",
+    "Buenos Aires", "Mexico City", "Lagos", "Nairobi", "Cairo", "Jakarta", "Remote",
+)
+_LANGS = (
+    "Python", "TypeScript", "JavaScript", "Go", "Rust", "Java", "C++", "Ruby", "Scala", "Kotlin",
+    "Swift", "C#", "PHP", "Elixir", "Julia", "Haskell", "R", "Dart", "Clojure", "Solidity",
+)
+WINDOWS: list[str] = [f'location:"{c}" language:{lang}' for c in _CITIES for lang in _LANGS]
 
 _GH = "https://api.github.com"
 
@@ -70,7 +79,8 @@ def search_logins(window: str, *, token: str, cap: int) -> list[str]:
     logins, page = [], 1
     while len(logins) < cap and page <= 10:
         data, hdr = _gh_get("/search/users", token=token,
-                            params={"q": f"type:user {window}", "per_page": 100, "page": page})
+                            params={"q": f"type:user {window}", "per_page": 100, "page": page,
+                                    "sort": "followers", "order": "desc"})
         items = data.get("items", [])
         if not items:
             break
@@ -220,7 +230,7 @@ async def main() -> None:
     ap.add_argument("--live", action="store_true")
     ap.add_argument("--dry", action="store_true")
     ap.add_argument("--limit", type=int, default=0, help="max PEOPLE to process this run (0 = all in the windows)")
-    ap.add_argument("--per-window", type=int, default=200, help="max logins pulled per search window")
+    ap.add_argument("--per-window", type=int, default=1000, help="max logins pulled per search window (cap 1000)")
     ap.add_argument("--refresh", action="store_true")
     args = ap.parse_args()
     live = args.live and not args.dry
