@@ -304,7 +304,11 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
         sen, country, metro = fval("seniority"), fval("country"), fval("metro")
         if want_country and country and country != want_country:   # drop only when we KNOW it's elsewhere
             continue
-        if excl and _co_matches(_norm_co(fval("company")), excl):   # hide people at the hiring company
+        # Hide people at the hiring company — check ALL of the person's company facets (a profile can
+        # carry more than one), not just the first, so a current employer listed after a prior one is
+        # still caught. Still exact-match per alias, so no false positives.
+        if excl and any(_co_matches(_norm_co(f["value_norm"]), excl)
+                        for f in facets if f["facet_key"] == "company"):
             excluded_n += 1
             continue
         sim = sim_map.get(r["entity_id"], 0.0)
