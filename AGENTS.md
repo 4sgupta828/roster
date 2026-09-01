@@ -1,6 +1,6 @@
-# CLAUDE.md — Roster
+# AGENTS.md — Roster
 
-Guidance for Claude Code when working in this repo: **Roster**, an AI platform for searching
+Guidance for Codex when working in this repo: **Roster**, an AI platform for searching
 **professionals and companies and how they are connected** — a "shadow LinkedIn" reconstructed from
 publicly available information (company registries, filings, code hosts, scholarly graphs, the open
 web). The user asks who a person/company is, who they're connected to, and how — and gets grounded,

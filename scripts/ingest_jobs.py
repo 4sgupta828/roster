@@ -256,9 +256,39 @@ async def ensure_checkpoint(conn) -> None:
 
 
 async def done_boards(conn) -> set[str]:
+    # 'dead' = permanently-failing board (moved/renamed token) — skipped exactly like 'done' so the
+    # recurring bulk loop stops burning a fetch on it every cycle. --refresh retries both.
     rows = await conn.fetch("SELECT cursor_key FROM rs_ingest_checkpoint "
-                            "WHERE source='jobs' AND status='done'")
+                            "WHERE source='jobs' AND status IN ('done','dead')")
     return {r["cursor_key"] for r in rows}
+
+
+_PERMANENT_HTTP = (404, 410, 422)   # dead/renamed token or wrong tenant config — retrying can't help
+_DEAD_AFTER = 3                     # consecutive permanent failures before a board is marked dead
+
+
+async def note_fetch_failure(conn, key: str, e: Exception, *, live: bool) -> None:
+    """Three-strike a PERMANENTLY failing board (404/410/422) into status='dead' so it stops being
+    retried every cycle. Transient errors (429, timeouts, 5xx) are never counted; a later success
+    overwrites the row with status='done'. n_seen doubles as the consecutive-failure count while the
+    row is in 'fail'/'dead' status."""
+    code = getattr(e, "code", None)
+    if not live or code not in _PERMANENT_HTTP:
+        return
+    row = await conn.fetchrow(
+        """INSERT INTO rs_ingest_checkpoint (source, cursor_key, status, n_seen, n_written)
+           VALUES ('jobs',$1,'fail',1,0)
+           ON CONFLICT (source, cursor_key) DO UPDATE SET
+             n_seen = CASE WHEN rs_ingest_checkpoint.status IN ('fail','dead')
+                           THEN rs_ingest_checkpoint.n_seen + 1 ELSE 1 END,
+             status = CASE WHEN rs_ingest_checkpoint.status IN ('fail','dead')
+                                AND rs_ingest_checkpoint.n_seen + 1 >= $2
+                           THEN 'dead' ELSE 'fail' END,
+             updated_at = now()
+           RETURNING status, n_seen""", key, _DEAD_AFTER)
+    if row and row["status"] == "dead":
+        print(f"[dead] {key}: {row['n_seen']} consecutive permanent failures — "
+              f"won't retry (re-enable with --refresh)", file=sys.stderr)
 
 
 async def upsert_jobs(conn, source: str, rows: list[dict], vecs: list[str | None],
@@ -337,6 +367,7 @@ async def main() -> None:
                 rows = _FETCHERS[ats](token)
             except Exception as e:   # noqa: BLE001 — a dead/renamed board must not abort the sweep
                 print(f"[skip] {key} ({company}): fetch failed: {e}", file=sys.stderr)
+                await note_fetch_failure(conn, key, e, live=live)
                 continue
             total_seen += len(rows)
             if args.dry:
@@ -374,6 +405,7 @@ async def main() -> None:
                     rows = fetch()
                 except Exception as e:   # noqa: BLE001
                     print(f"[skip] {key}: fetch failed: {e}", file=sys.stderr)
+                    await note_fetch_failure(conn, key, e, live=live)
                     continue
                 total_seen += len(rows)
                 if args.dry:
@@ -410,6 +442,7 @@ async def main() -> None:
                     rows = fetch_workday(cfg)
                 except Exception as e:   # noqa: BLE001 — a wrong/renamed tenant must not abort the sweep
                     print(f"[skip] {key} ({company}): fetch failed: {e}", file=sys.stderr)
+                    await note_fetch_failure(conn, key, e, live=live)
                     continue
                 total_seen += len(rows)
                 if args.dry:

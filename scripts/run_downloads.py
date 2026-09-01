@@ -13,7 +13,7 @@ Usage:
 from __future__ import annotations
 import argparse, json, os, sys, urllib.request
 
-PROD = os.environ.get("ROSTER_PROD_URL", "https://roster-api-production.up.railway.app")
+PROD = os.environ.get("ROSTER_PROD_URL", "https://roster-api-production-3405.up.railway.app")
 
 # --- T1a: EDGAR flagship DEPTH (default forms: 10-K/10-Q/S-1/DEF 14A → history + people/comp) ---
 # Public leaders across AI, semis, cloud, software, security — deepen the entities we already have.
