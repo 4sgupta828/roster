@@ -6543,9 +6543,10 @@ async function openMatch(){
   if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
   $("#matchmodal").hidden = false;
   $("#matchresults").innerHTML = ""; $("#matchnote").textContent = "Loading your profile…";
-  let prof = {};
+  let prof = {}, parsed = {};
   try{ prof = await (await fetch("/me/profile", {headers: authHeaders()})).json(); }catch(e){}
-  const profile = prof.profile || {};
+  try{ parsed = (await (await fetch("/me/profile/parse-resume", {headers: authHeaders()})).json()).profile || {}; }catch(e){}
+  const profile = {...parsed, ...(prof.profile||{})};   // merge parsed résumé data (saved edits win)
   const hasContent = !!prof.resume || Object.keys(profile).length >= 3;
   if(!hasContent){
     $("#matchnote").innerHTML = "To match jobs, add your résumé first — the matcher reads it. "

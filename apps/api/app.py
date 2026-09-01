@@ -4355,7 +4355,9 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         """On-demand résumé → best-matching jobs, ranked by the user's preferences (location/remote,
         seniority, role, company type, best-effort salary). Uses the stored parsed profile + embeddings."""
         store, user = await _require_user(x_roster_token)
-        profile = (await store.get_profile(user["id"])).get("profile") or {}
+        saved = (await store.get_profile(user["id"])).get("profile") or {}
+        parsed = (await store.get_parse(user["id"])).get("profile") or {}
+        profile = {**parsed, **saved}   # merge parsed résumé data; the user's saved edits win
         cstore = _claim_store_cached()
         if cstore is None:
             raise HTTPException(status_code=503, detail="job index unavailable")
