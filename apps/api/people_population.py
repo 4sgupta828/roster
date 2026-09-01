@@ -1120,10 +1120,15 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     # ranks). qvec None (flag off / no key / embed failure) → the exact facet path (byte-identical).
     qvec = embed_query(question) if (semantic_enabled() or people_semantic_first_enabled()) else None
     real_facets = [k for k in facets if k not in ("country", "state", "metro")]
+    # IDENTITY facets (company / worked_at) are what the question is ABOUT — they must GATE, never
+    # soften to a +0.03 boost. Semantic-first over the whole index let 164 OpenAlex researchers
+    # dominate "people who worked at Apple" (the index is ~53% academics); with an identity facet
+    # present we route to the HYBRID path below: hard facet filter first, semantic rank within it.
+    _identity_facets = [k for k in ("company", "worked_at") if facets.get(k)]
     semantic_used = False
     semantic_first = False
     sf_sim: dict = {}                            # entity_id -> similarity (semantic-first → match_pct)
-    if qvec and people_semantic_first_enabled():
+    if qvec and people_semantic_first_enabled() and not _identity_facets:
         # SEMANTIC-FIRST (flag): meaning leads. Rank ALL people by query→profile similarity; the ONLY
         # hard filter is country (drop just the known-foreign — an unknown country keeps the person, so
         # a sparse facet never strangles recall). Every parsed facet (skill/function/role/metro/…) is a

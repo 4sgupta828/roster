@@ -512,3 +512,53 @@ def test_people_refinement_follows_user_lead(monkeypatch):
     assert data["people_rows"], data
     assert seen_filters and seen_filters[0].get("metro") == ["berlin", "munich"]
     assert svc.calls == []
+
+
+def test_identity_facets_gate_semantic_first(monkeypatch):
+    """'people who worked at Apple' must HARD-filter worked_at=apple (hybrid path) even in
+    semantic-first mode — never rank the whole index where academics dominate (the researcher-flood
+    session 2a0302d3)."""
+    from roster_kernel.providers.llm import LLMResult
+    from api.people_population import _FacetParse, answer_people_population
+
+    class _LLM:
+        async def complete(self, *, system, messages, response_format, max_tokens=2048,
+                           temperature=None):
+            return LLMResult(parsed=_FacetParse(worked_at=["apple"], seniority=["senior"]),
+                             output_tokens=5)
+
+    calls = {"scored": 0, "enum": 0}
+
+    class _Store:
+        async def people_index_stats(self, *, tenant_id):
+            return {"persons_indexed": 10, "source_documents": 5, "facet_coverage": {}}
+
+        async def match_people_scored(self, qvec, cap=500):
+            calls["scored"] += 1          # whole-index semantic ranking — must NOT run
+            return []
+
+        async def enumerate_by_facets(self, facets, *, tenant_id, cap):
+            calls["enum"] += 1
+            assert facets.get("worked_at") == ["apple"]     # identity facet gates
+            return [{"entity_id": "github:x", "name": "Xa", "facets": [
+                {"facet_key": "worked_at", "facet_value_norm": "apple",
+                 "display_value": "Apple", "document_id": "d", "block_id": "b"}]}]
+
+        async def semantic_people(self, qvec, candidate_ids=None, cap=200):
+            assert candidate_ids == ["github:x"]            # rank WITHIN the gated pool
+            return ["github:x"]
+
+        async def people_by_ids(self, ids, *, tenant_id):
+            return [{"entity_id": "github:x", "name": "Xa", "facets": [
+                {"facet_key": "worked_at", "facet_value_norm": "apple", "value_norm": "apple",
+                 "display_value": "Apple", "document_id": "d", "block_id": "b"}]}]
+
+    import api.people_population as pp
+    monkeypatch.setenv("ROSTER_PEOPLE_SEMANTIC_FIRST", "1")
+    monkeypatch.setattr(pp, "embed_query", lambda text: "[0.1,0.2]")
+    import asyncio
+    res = asyncio.get_event_loop().run_until_complete(answer_people_population(
+        question="people who worked at Apple for more than 5 years",
+        tenant_id="demo", store=_Store(), llm=_LLM()))
+    assert calls["scored"] == 0 and calls["enum"] >= 1
+    assert res["people_rows"] and res["people_rows"][0]["name"] == "Xa"
