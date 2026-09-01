@@ -2057,8 +2057,19 @@ const PJ_COPY = {
   jobs:   {h:"What role are you looking for?", ph:"Search jobs — e.g. remote backend roles at big tech, or “design jobs that involve research”"},
   qa:     {h:"Ask about the people & jobs data", ph:"Ask about patterns — e.g. “which companies hire the most ML engineers?”, “where are data scientists concentrated?”, “seniority mix for AI roles?”"},
 };
+let MODE_VIEWS = {};            // per-mode result snapshot {html, hidden} — each tab keeps ITS OWN
+//                                 last result: switching away hides it, switching back restores it,
+//                                 "＋ New search" clears all (the user-specified tab semantics).
 function setSearchMode(m){
-  SEARCH_MODE = PJ_COPY[m] ? m : "people";   // validate against the known modes (not a people/jobs binary)
+  const nm = PJ_COPY[m] ? m : "people";
+  const outEl = document.getElementById("out");
+  if(outEl && nm !== SEARCH_MODE){
+    MODE_VIEWS[SEARCH_MODE] = {html: outEl.innerHTML, hidden: outEl.hidden};
+    const v = MODE_VIEWS[nm];
+    outEl.innerHTML = (v && v.html) || "";
+    outEl.hidden = v ? !!v.hidden : true;
+  }
+  SEARCH_MODE = nm;   // validate against the known modes (not a people/jobs binary)
   document.querySelectorAll("#pjmode .pjbtn").forEach(b=>{
     const on = b.dataset.pj === SEARCH_MODE; b.classList.toggle("on", on); b.setAttribute("aria-selected", on);
   });
@@ -5937,6 +5948,7 @@ function wireEngineHops(root, t){
 
 function newConversation(){
   THREAD = {session_id:null, turns:[]};
+  MODE_VIEWS = {};                     // "＋ New search" wipes every tab's remembered result
   GUIDED_REFINED = false;
   document.body.classList.remove("chatting"); out.style.paddingBottom = "";   // back to landing layout
   out.innerHTML = "";
