@@ -1478,6 +1478,7 @@
   <div class="pjmode" id="pjmode" role="tablist" aria-label="Search mode">
     <button type="button" class="pjbtn on" data-pj="people" role="tab" aria-selected="true">👤 People</button>
     <button type="button" class="pjbtn" data-pj="jobs" role="tab" aria-selected="false">💼 Jobs</button>
+    <button type="button" class="pjbtn" data-pj="qa" role="tab" aria-selected="false" id="pjqa" hidden>💬 Q&amp;A</button>
   </div>
   <div class="modeswitch" id="modeswitch">
     <div class="modeseg" role="tablist" aria-label="Answer mode">
@@ -1939,9 +1940,10 @@ let SEARCH_MODE = "people";     // People/Jobs toggle — explicit routing, no k
 const PJ_COPY = {
   people: {h:"Who are you looking for?",  ph:"Search people — e.g. senior ML engineers at Stripe, or “someone who can scale ML infra at an early-stage startup”"},
   jobs:   {h:"What role are you looking for?", ph:"Search jobs — e.g. remote backend roles at big tech, or “design jobs that involve research”"},
+  qa:     {h:"Ask about companies, markets & tech", ph:"Ask a question — e.g. “How is the agentic-coding startup landscape shaping up?” or “What is OpenAI’s funding trajectory?”"},
 };
 function setSearchMode(m){
-  SEARCH_MODE = (m === "jobs") ? "jobs" : "people";
+  SEARCH_MODE = PJ_COPY[m] ? m : "people";   // validate against the known modes (not a people/jobs binary)
   document.querySelectorAll("#pjmode .pjbtn").forEach(b=>{
     const on = b.dataset.pj === SEARCH_MODE; b.classList.toggle("on", on); b.setAttribute("aria-selected", on);
   });
@@ -1991,6 +1993,8 @@ async function loadConfig(){
           ACCOUNTS_ENABLED = !!f.accounts_enabled;
           DYN_ENGINES = !!f.dynamic_engines_enabled;
           window.JOBS_ENABLED = !!f.jobs_enabled;   // hot-apply so job-intent routing works THIS load
+          window.EIGEN_QA_ENABLED = !!f.eigen_qa_enabled;
+          { const qb = document.getElementById("pjqa"); if(qb) qb.hidden = !window.EIGEN_QA_ENABLED; }
           PULSE_ENABLED = !!f.pulse_enabled; maybeShowPulseBell();
         })
         .catch(()=>{});
@@ -2025,6 +2029,8 @@ async function loadConfig(){
     DUEL_ENABLED = !!c.duel_enabled;
     PULSE_ENABLED = !!c.pulse_enabled;
     window.JOBS_ENABLED = !!c.jobs_enabled;   // jobs mode: route job-intent queries to /jobs
+    window.EIGEN_QA_ENABLED = !!c.eigen_qa_enabled;   // Q&A mode: reveal the 💬 Q&A toggle → /qa (Eigen)
+    { const qb = document.getElementById("pjqa"); if(qb) qb.hidden = !window.EIGEN_QA_ENABLED; }
     // People geo-scope (flag-gated): reveal the top-right country selector, persist the choice, and
     // ship it on every people query as `country`. Default 'us'. Backend ignores it when the flag is off.
     try{ window.ROSTER_COUNTRY = localStorage.getItem("roster_country") || "us"; }catch(e){ window.ROSTER_COUNTRY = "us"; }
@@ -2140,6 +2146,48 @@ async function runJobs(question){
     try{ out.innerHTML = jobsMarkup(await r.json()); }
     catch(e){ out.innerHTML = `<div class="pitem-empty">Couldn't load jobs — ${esc(e.message||e)}</div>`; } }
   return true;
+}
+// Q&A MODE: proxy the question to the Eigen research service (/qa) and render the grounded answer
+// (prose + citations) into #out. Eigen owns retrieval/corpus/compose; Roster renders. Runs can take
+// a while — show a thinking state on the Go button and in the results pane.
+async function runQA(question){
+  const out = $("#out");
+  if(out){ out.hidden = false; out.innerHTML = `<div class="ppl-wrap"><div class="ppl-cov">💬 Asking Eigen — grounded answer over the companies/markets/tech corpus. This can take a bit…</div><div class="status" style="margin-top:.6rem;">Thinking…</div></div>`; }
+  if(typeof go !== "undefined" && go){ go.disabled = true; go.classList.add("loading"); }
+  let d;
+  try{
+    const r = await fetch("/qa", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
+      body: JSON.stringify({question, tenant_id:"demo", user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""})});
+    if(!r || r.status === 404){ if(out) out.innerHTML = `<div class="pitem-empty">Q&A mode isn't enabled.</div>`; return; }
+    d = await r.json();
+  }catch(e){ if(out) out.innerHTML = `<div class="pitem-empty">Couldn't reach Eigen — ${esc(e.message||e)}</div>`; return; }
+  finally{ if(typeof go !== "undefined" && go){ go.disabled = false; go.classList.remove("loading"); } }
+  if(out) out.innerHTML = qaMarkup(d, question);
+}
+// Render an Eigen answer as a grounded card: markdown prose + a numbered source list. Mirrors the
+// research answer surface's look without pulling in its flag-gated machinery (predictable + self-contained).
+function qaMarkup(d, question){
+  d = d || {};
+  if(d.error){ return `<div class="ppl-wrap"><div class="pitem-empty">${esc(d.error)}</div></div>`; }
+  const answer = d.answer || "";
+  if(!answer){ return `<div class="ppl-wrap"><div class="pitem-empty">No answer came back for that question. Try rephrasing, or ask something more specific about a company, market, or technology.</div></div>`; }
+  const claims = d.claims || [];
+  // The answer prose carries inline [1][2]… markers that index the claims array by 1-based position,
+  // so the Sources list is rendered IN ORDER with NO dedup — [N] must line up with source N.
+  const cites = claims.map(c=>{
+    const url = (c && /^https?:\/\//i.test(c.url||"")) ? c.url : "";
+    const title = esc((c && (c.title || c.source)) || "source");
+    const src = c && c.source && c.source !== (c.title||"") ? ` <span style="color:var(--muted);font-size:.74rem;">· ${esc(c.source)}</span>` : "";
+    return `<li>${url?`<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${title} ↗</a>`:title}${src}</li>`;
+  }).join("");
+  const gaps = (d.coverage_gaps||[]).map(g=>`<li>${esc(g)}</li>`).join("");
+  const grounded = d.grounded
+    ? `<span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">✓ grounded</span>`
+    : `<span class="ppl-tag">model read — not corpus-verified</span>`;
+  const head = `<div class="ppl-head"><b>Q&amp;A</b> ${grounded} <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.10);">via Eigen</span></div>`;
+  const citesBlock = cites ? `<div class="qa-cites" style="margin-top:.9rem;"><div class="plain-h" style="margin-bottom:.3rem;">Sources (${claims.length})</div><ol style="margin:0;padding-left:1.2rem;display:flex;flex-direction:column;gap:.25rem;">${cites}</ol></div>` : "";
+  const gapsBlock = gaps ? `<div class="ppl-cov" style="margin-top:.7rem;"><b>Coverage gaps</b><ul style="margin:.3rem 0 0;padding-left:1.1rem;">${gaps}</ul></div>` : "";
+  return `<div class="ppl-wrap">${head}<div class="rqanswer md" style="margin-top:.6rem;">${mdToHtml(answer)}</div>${citesBlock}${gapsBlock}</div>`;
 }
 function jobsMarkup(d){
   const jobs = d.jobs||[], st = d.stats||{}, q = d.query||{};
@@ -5128,6 +5176,7 @@ async function askQuestion(question, opts){
   // EXPLICIT mode: the People/Jobs toggle decides routing — no keyword guessing. Jobs → ATS search;
   // People → the grounded people index (server routes it). (Legacy keyword fallback kept for safety.)
   if(SEARCH_MODE === "jobs"){ await runJobs(question); return; }
+  if(SEARCH_MODE === "qa"){ await runQA(question); return; }   // Q&A → Eigen research proxy (/qa)
   if(SEARCH_MODE !== "people" &&
      (/\b(jobs?|hiring|openings?|positions?|careers?|vacanc|apply)\b|\bopen roles?\b/i.test(question)) && await runJobs(question)){
     return;
@@ -5825,6 +5874,7 @@ function buildSessionTabs(){
   const tabs = $("#stabs"); if(!tabs) return;
   // Roster history is People + Jobs (mirrors the search modes); panel tab added only if enabled.
   const defs = [{key:"people", kind:"people", label:"👤 People"}, {key:"jobs", kind:"jobs", label:"💼 Jobs"}];
+  if(window.EIGEN_QA_ENABLED) defs.push({key:"qa", kind:"qa", label:"💬 Q&A"});
   if(ASK_PANEL_ENABLED) defs.push({key:"panel", kind:"panel", label:"◈ Panel"});
   SESS_TAB = defs[0];
   if(defs.length < 2){ tabs.hidden = true; tabs.innerHTML = ""; return; }
@@ -5878,21 +5928,27 @@ async function loadSessionList(){
 function renderSearchSessionDetail(row, rowEl, t0){
   if(rowEl){ slist.querySelectorAll(".srow").forEach(r=>r.removeAttribute("aria-current")); rowEl.setAttribute("aria-current","true"); }
   const who = row.user_name || row.user_email;
-  const isJobs = t0.kind === "jobs";
+  const kind = t0.kind;   // "jobs" | "people_population" | "qa"
+  const mode = kind === "jobs" ? "jobs" : (kind === "qa" ? "qa" : "people");
   let body;
-  if(isJobs){
+  if(kind === "jobs"){
     const jobs = t0.jobs || [];
     body = jobs.length
       ? jobsMarkup({jobs, query: t0.query || {}, stats: {}})
       : `<div class="empty">This search's results weren't stored. Re-run it from the search box to see current openings.</div>`;
+  } else if(kind === "qa"){
+    const answer = t0.answer || row.answer || "";
+    body = answer
+      ? qaMarkup({answer, claims: t0.qa_claims || [], grounded: t0.grounded, coverage_gaps: t0.coverage_gaps || []}, row.question)
+      : `<div class="empty">This answer wasn't stored. Ask it again from the Q&A search box.</div>`;
   } else {
     const rows = t0.people_rows || [];
     body = rows.length
       ? peopleRowsMarkup({people_rows: rows, coverage_basis: t0.coverage_basis || {query_facets:{}, population_statement:""}})
       : `<div class="empty">This search's results weren't stored. Re-run it from the search box to see current people.</div>`;
   }
-  const rerun = `<button type="button" class="srerun" data-q="${esc(row.question)}" data-mode="${isJobs?"jobs":"people"}"
-      style="margin-top:.6rem;font-size:.8rem;">↻ Run this search again</button>`;
+  const rerun = `<button type="button" class="srerun" data-q="${esc(row.question)}" data-mode="${mode}"
+      style="margin-top:.6rem;font-size:.8rem;">↻ ${kind==="qa"?"Ask this again":"Run this search again"}</button>`;
   sdetail.innerHTML = `<div class="sqhead">
       <div class="qhrow"><div class="qq">${esc(row.question)}</div></div>
       <div class="qm">${who?`Searched by <b>${esc(row.user_name||"")}</b>${row.user_email?" · "+esc(row.user_email):""} · `:""}${fmtDate(row.created_at)} · stored results</div>
@@ -5916,7 +5972,7 @@ function showSessionDetail(row, rowEl){
   CURRENT_Q = row.question;
   if(isPanelRow(row)){ renderPanelSessionDetail(row); return; }   // panel session renders IN the pane, like Q&A
   const t0 = (row.thread && row.thread[0]) || row;
-  if(t0.kind === "jobs" || t0.kind === "people_population"){ renderSearchSessionDetail(row, rowEl, t0); return; }
+  if(t0.kind === "jobs" || t0.kind === "people_population" || t0.kind === "qa"){ renderSearchSessionDetail(row, rowEl, t0); return; }
 
   const who = row.user_name || row.user_email;
   // Render the WHOLE conversation (all follow-up turns), not just the first answer.

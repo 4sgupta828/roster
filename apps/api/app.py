@@ -628,6 +628,19 @@ def jobs_enabled() -> bool:
     return os.environ.get("ROSTER_JOBS", "").lower() in ("1", "true", "yes")
 
 
+def eigen_qa_enabled() -> bool:
+    """Flag (default OFF, Rule 20) via ROSTER_EIGEN_QA: the Q&A MODE — a third search vertical that
+    proxies the question to the external Eigen research service (companies/markets/tech grounded
+    answers) and renders the answer + citations. 404 when off; People/Jobs modes are untouched."""
+    return os.environ.get("ROSTER_EIGEN_QA", "").lower() in ("1", "true", "yes")
+
+
+def eigen_api_url() -> str:
+    """Base URL of the Eigen research API that powers Q&A mode. Overridable via ROSTER_EIGEN_API_URL;
+    defaults to the prod deployment. Trailing slash trimmed so `{base}/research` joins cleanly."""
+    return os.environ.get("ROSTER_EIGEN_API_URL", "https://eigen-api-production.up.railway.app").rstrip("/")
+
+
 def agentic_jobs_enabled() -> bool:
     """Flag (default OFF, Rule 20) via ROSTER_AGENTIC_JOBS: when ON, /jobs runs the AGENTIC pipeline —
     the LLM understands + expands the query into multiple search angles, retrieves for each, then
@@ -1901,6 +1914,7 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             "dynamic_engines_enabled": (await _flag_live("reasoned_default_enabled")) and bool(getattr(svc, "reasoned_answer_format", None)),
             "people_geo_scope_enabled": people_geo_scope_enabled(),
             "jobs_enabled": jobs_enabled(),
+            "eigen_qa_enabled": eigen_qa_enabled(),
         }
 
     @app.post("/search")
@@ -2459,6 +2473,54 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         stats = await store.jobs_stats()
         await _save_job_session(rows, q)   # JOB searches appear in the user's private History
         return {"jobs": rows, "count": len(rows), "query": q, "semantic": bool(qvec), "stats": stats}
+
+    @app.post("/qa")
+    async def qa(body: ResearchIn) -> dict:
+        """Q&A MODE (flag ROSTER_EIGEN_QA): proxy the question to the external Eigen research service —
+        companies/markets/tech grounded answers — and return {answer, claims, grounded, coverage_gaps}.
+        Roster stays thin: Eigen owns retrieval/corpus/compose. 404 when off (People/Jobs untouched).
+        The turn is saved to the caller's private History (kind='qa') with the answer stored inline so
+        reopening it SHOWS the stored answer (never re-runs), consistent with jobs/people sessions."""
+        if not eigen_qa_enabled():
+            raise HTTPException(status_code=404, detail="Q&A mode not enabled")
+        import httpx, logging as _logging
+        _log = _logging.getLogger("api.qa")
+        question = (body.question or "").strip()
+        if not question:
+            return {"answer": "", "claims": [], "grounded": False, "coverage_gaps": [], "source": "eigen"}
+        # Eigen accepts an unauthenticated JSON body; engine="" inherits Eigen prod's configured
+        # answer quality (reasoned/golden). tenant_id namespaces the call as coming from Roster.
+        payload = {"question": question, "tenant_id": "roster",
+                   "engine": "", "user_name": body.user_name or "", "user_email": body.user_email or ""}
+        if body.history:
+            payload["history"] = body.history      # multi-turn: prior {question, answer} pairs
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(240.0, connect=10.0)) as client:
+                r = await client.post(f"{eigen_api_url()}/research", json=payload)
+                r.raise_for_status()
+                data = r.json()
+        except Exception as e:   # noqa: BLE001 — surface a clean error, never a 500 to the browser
+            _log.warning("eigen /research call failed: %s", e)
+            return {"answer": "", "claims": [], "grounded": False, "coverage_gaps": [],
+                    "source": "eigen", "error": "Eigen is unavailable right now — try again in a moment."}
+        answer = data.get("answer") or ""
+        claims = data.get("claims") or []
+        grounded = bool(data.get("grounded"))
+        coverage_gaps = data.get("coverage_gaps") or []
+        # Persist to the caller's private History so it appears alongside people/jobs searches and
+        # reopens to the STORED answer. Cap the stored claims payload so the row doesn't bloat.
+        try:
+            sstore = _store()
+            if sstore is not None:
+                await sstore.save(tenant_id=body.tenant_id, workspace_id=body.workspace_id,
+                    question=question, answer=answer, grounded=grounded, claims=[],
+                    source_stats={}, coverage_gaps=coverage_gaps, rejected=0,
+                    sources=body.sources, user_name=body.user_name, user_email=body.user_email,
+                    kind="qa", extra={"qa_claims": list(claims[:40]), "eigen_session_id": data.get("session_id")})
+        except Exception:   # noqa: BLE001 — History persistence is best-effort, never blocks the answer
+            pass
+        return {"answer": answer, "claims": claims, "grounded": grounded,
+                "coverage_gaps": coverage_gaps, "source": "eigen"}
 
     def _fetch_jd_text(url: str) -> str:
         """Fetch a JD page and strip it to text. SSRF-guarded: http(s) only, and the resolved host must
@@ -4491,7 +4553,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         email = (user or {}).get("email")
         if sstore is None or not email:
             return {"sessions": []}
-        knd = kind if kind in ("panel", "research", "crossview", "jobs", "people") else None
+        knd = kind if kind in ("panel", "research", "crossview", "jobs", "people", "qa") else None
         try:
             return {"sessions": await sstore.list(tenant_id="demo", limit=200, q=q or None,
                                                   kind=knd, user_email=email)}

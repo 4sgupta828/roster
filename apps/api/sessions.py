@@ -256,8 +256,10 @@ class SessionStore:
             where += " AND thread->0->>'kind' = 'crossview'"
         elif kind == "jobs":
             where += " AND thread->0->>'kind' = 'jobs'"
-        elif kind == "people":           # everything that ISN'T a job search (people_population, research, …)
-            where += " AND (thread->0->>'kind' IS NULL OR thread->0->>'kind' NOT IN ('jobs','panel','crossview'))"
+        elif kind == "qa":               # Q&A mode (Eigen-powered research answers)
+            where += " AND thread->0->>'kind' = 'qa'"
+        elif kind == "people":           # everything that ISN'T a job/qa/panel/crossview search (people_population, research, …)
+            where += " AND (thread->0->>'kind' IS NULL OR thread->0->>'kind' NOT IN ('jobs','qa','panel','crossview'))"
         elif kind == "research":
             where += " AND (thread->0->>'kind' IS NULL OR thread->0->>'kind' = 'research')"
         params.append(limit)
