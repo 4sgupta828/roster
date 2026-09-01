@@ -293,7 +293,9 @@ async def build_candidate_brief(resume_text: str, profile: dict, llm) -> dict | 
                 "major_achievements": b.major_achievements[:8],
                 # PLAIN lowercase role phrases (NOT snake_case) — role_keywords is substring-matched
                 # against job titles, so 'staff_ml_engineer' would never match "Staff ML Engineer".
-                "target_roles": [str(r).strip().lower() for r in (b.target_roles or []) if str(r).strip()][:6],
+                # underscores→spaces in CODE too (not just the prompt): role_keywords is substring-matched
+                # against job titles, so a leaked 'staff_ml_engineer' must still become 'staff ml engineer'.
+                "target_roles": [str(r).strip().lower().replace("_", " ") for r in (b.target_roles or []) if str(r).strip()][:6],
                 "seniority": sen if sen in _SEN_OK else "",
                 "search_text": (b.search_text or "").strip()}
     except Exception as e:   # noqa: BLE001 — never break matching; fall back to raw résumé
