@@ -2407,6 +2407,19 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 terms=q.get("title_keywords") or [], company=q.get("company") or None,
                 location=(q.get("location") or None), cap=80)
         stats = await store.jobs_stats()
+        # record a session so JOB searches appear in the user's private History (like people/research do)
+        try:
+            sstore = _store()
+            if sstore is not None:
+                at = (" at " + ", ".join(q.get("company"))) if q.get("company") else ""
+                await sstore.save(
+                    tenant_id=body.tenant_id, workspace_id=body.workspace_id, question=body.question,
+                    answer=f"Found {len(rows)} open role{'' if len(rows)==1 else 's'}{at}.",
+                    grounded=bool(rows), claims=[], source_stats={}, coverage_gaps=[], rejected=0,
+                    sources=body.sources, user_name=body.user_name, user_email=body.user_email,
+                    kind="jobs", extra={"jobs_count": len(rows), "query": q})
+        except Exception:   # noqa: BLE001 — history is best-effort, never blocks the jobs result
+            pass
         return {"jobs": rows, "count": len(rows), "query": q, "semantic": bool(qvec), "stats": stats}
 
     @app.post("/research/focus")

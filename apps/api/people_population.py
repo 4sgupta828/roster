@@ -137,8 +137,11 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
     (location/remote, seniority, role keywords, company type F500/public/startup, best-effort salary).
     Honest: salary is present on only a small % of jobs; company 'stage' is startup-vs-public only."""
     prefs = prefs or {}
-    # 1) build a résumé query string from the parsed profile (title + skills + summary + recent roles)
-    parts = [profile.get("summary", ""), profile.get("current_title", ""),
+    # 1) build a résumé query string. The RAW résumé text (when present) is the richest signal — it
+    #    works even when structured extraction is sparse (e.g. a one-line "Founder" title). Structured
+    #    fields are appended as reinforcement.
+    parts = [str(profile.get("_resume_text", "")),
+             profile.get("summary", ""), profile.get("current_title", ""),
              " ".join(profile.get("skills", []) if isinstance(profile.get("skills"), list) else [])]
     for w in (profile.get("work_history") or [])[:4]:
         if isinstance(w, dict):

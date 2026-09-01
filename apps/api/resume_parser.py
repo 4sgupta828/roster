@@ -85,10 +85,12 @@ async def run(user_id: str):
         if not text.strip():
             print("empty text", flush=True); await fail(); return
         fields = await asyncio.to_thread(llm_fields, text)
+        fields["_resume_text"] = text[:8000]   # keep the RAW résumé text — the richest match signal,
+                                                # robust even when structured extraction is sparse
         await c.execute(
             "UPDATE roster_candidate_profile SET parse_status='done', parsed_profile=$2::jsonb, "
             "parsed_at=now() WHERE user_id=$1", user_id, json.dumps(fields))
-        print(f"done: {len(fields)} fields", flush=True)
+        print(f"done: {len(fields)} fields + raw text", flush=True)
     except Exception as e:   # noqa: BLE001
         print("error:", str(e)[:120], flush=True); await fail()
     finally:

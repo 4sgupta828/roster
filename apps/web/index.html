@@ -2124,8 +2124,8 @@ function esc(s){const d=document.createElement("div");d.textContent=s??"";return
 // even for a stale cached config: /jobs 404s when the flag is off, and we fall through to research.
 async function runJobs(question){
   let r;
-  try{ r = await fetch("/jobs", {method:"POST", headers:{"content-type":"application/json"},
-      body: JSON.stringify({question, tenant_id:"demo"})}); }
+  try{ r = await fetch("/jobs", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
+      body: JSON.stringify({question, tenant_id:"demo", user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""})}); }
   catch(e){ return false; }
   if(!r || r.status === 404) return false;
   const out = $("#out");

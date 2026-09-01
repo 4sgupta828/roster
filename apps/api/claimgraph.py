@@ -1675,7 +1675,12 @@ class ClaimGraphStore:
                "FROM rs_job WHERE embedding IS NOT NULL ORDER BY embedding <=> $1::vector LIMIT $2")
         try:
             async with pool.acquire() as conn:
-                rows = await conn.fetch(sql, qvec, int(cap))
+                async with conn.transaction():
+                    # HNSW's ef_search (default 40) caps how many candidates the index returns REGARDLESS
+                    # of LIMIT — raise it so a large `cap` actually yields a real candidate pool. (int-only,
+                    # so string interpolation is safe; SET LOCAL doesn't accept bound parameters.)
+                    await conn.execute(f"SET LOCAL hnsw.ef_search = {max(int(cap) + 40, 100)}")
+                    rows = await conn.fetch(sql, qvec, int(cap))
         except Exception:
             return []
         return [dict(r) for r in rows]
