@@ -3466,12 +3466,28 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 except Exception:   # noqa: BLE001 — insights trouble → open-world research below
                     ires = None
                 if ires is not None and not ires.get("abstain"):
+                    # Markdown-shape the insights answer for the Q&A prose surface: blank lines
+                    # between narrative / ranked list / caveats so the list renders as a list.
+                    # Numbers stay CODE-OWNED (rows come from the store, never the model).
+                    _ans = ires.get("answer") or ""
+                    _rows = ires.get("rows") or []
+                    if _rows:
+                        _lbl = {"distinct_people": "people", "job_count": "open roles"}.get(
+                            ires.get("metric") or "", "")
+                        _cb = ires.get("coverage_basis") or {}
+                        _parts = [ires.get("narrative") or "",
+                                  "\n".join(f"{_i}. **{r.get('display') or r.get('value')}** — "
+                                            f"{int(r.get('n') or 0):,}{(' ' + _lbl) if _lbl else ''}"
+                                            for _i, r in enumerate(_rows, 1)),
+                                  "\n".join(f"⚠ {c}" for c in (ires.get("caveats") or [])),
+                                  _cb.get("population_statement") or ""]
+                        _ans = "\n\n".join(p for p in _parts if p).strip() or _ans
                     sid = await _persist_route(
-                        ires.get("answer") or "", bool(ires.get("grounded")), persist_kind or "qa",
-                        {"insights_rows": (ires.get("rows") or [])[:25], "insights": True,
+                        _ans, bool(ires.get("grounded")), persist_kind or "qa",
+                        {"insights_rows": _rows[:25], "insights": True,
                          "qa_route": _route.model_dump()})
                     return ResearchOut(grounded=bool(ires.get("grounded")),
-                                       answer=ires.get("answer") or "", claims=[],
+                                       answer=_ans, claims=[],
                                        coverage_gaps=[], rejected=0,
                                        coverage_basis=ires.get("coverage_basis"),
                                        session_id=sid, qa_route=_route.model_dump())
