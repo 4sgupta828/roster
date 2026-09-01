@@ -9,9 +9,12 @@ import sys, os, json, tempfile, asyncio, urllib.request
 import asyncpg
 
 DS = os.environ.get("DEEPSEEK_API_KEY", "")
-FIELDS = ["first_name", "last_name", "email", "phone", "city", "region", "country", "linkedin",
-          "github", "portfolio_website", "current_title", "current_company", "years_experience",
-          "highest_degree", "school", "field_of_study", "grad_year"]
+# flat fields (drive the Apply-Profile form + ATS autofill)
+FLAT = ["first_name", "last_name", "email", "phone", "city", "region", "country", "linkedin",
+        "github", "portfolio_website", "current_title", "current_company", "years_experience",
+        "highest_degree", "school", "field_of_study", "grad_year"]
+# structured fields (the FULL, rigorous mapping — every role & school, plus skills)
+STRUCT = ["work_history", "education", "skills", "summary"]
 
 
 def extract_text_docling(data: bytes, name: str) -> str:
@@ -30,18 +33,41 @@ def extract_text_docling(data: bytes, name: str) -> str:
 
 
 def llm_fields(text: str) -> dict:
-    prompt = ("Extract these fields from the résumé below. Return ONLY a JSON object containing the keys "
-              "you can confidently fill (OMIT any you can't): " + ", ".join(FIELDS) + ". Rules: values are "
-              "plain strings; `years_experience` a number as a string; `grad_year` a 4-digit year; "
-              "`linkedin`/`github`/`portfolio_website` full URLs. No commentary.\n\nRÉSUMÉ:\n" + text[:16000])
-    body = json.dumps({"model": "deepseek-chat", "temperature": 0, "max_tokens": 700,
+    """RIGOROUS extraction: every role and school, not just the current one. Returns flat fields for the
+    form/ATS autofill PLUS structured work_history / education / skills, so nothing is dropped."""
+    prompt = (
+        "You are a precise résumé parser. Read the ENTIRE résumé and extract a COMPLETE, structured "
+        "profile. Return ONLY a JSON object with these keys (omit a key only if truly absent):\n"
+        "  first_name, last_name, email, phone, city, region, country,\n"
+        "  linkedin, github, portfolio_website  (full URLs),\n"
+        "  current_title, current_company        (the MOST RECENT / present role),\n"
+        "  years_experience                       (integer as string; sum of professional experience),\n"
+        "  highest_degree, school, field_of_study, grad_year  (the highest/most recent degree),\n"
+        "  work_history: [ {title, company, location, start, end, description} ]  "
+        "(EVERY role, most-recent first; end='Present' if current; description = 1-2 line summary of impact),\n"
+        "  education:    [ {school, degree, field, start, end} ]  (EVERY entry),\n"
+        "  skills:       [ ... ]  (all technical skills/tools/languages),\n"
+        "  summary:      one-sentence professional summary.\n"
+        "RULES: be exhaustive — do NOT skip older roles; preserve dates verbatim (e.g. 'Jan 2021'); "
+        "infer years_experience from earliest job start to the present; no invented facts; no commentary.\n\n"
+        "RÉSUMÉ:\n" + text[:24000])
+    body = json.dumps({"model": "deepseek-chat", "temperature": 0, "max_tokens": 2400,
                        "messages": [{"role": "user", "content": prompt}]}).encode()
     req = urllib.request.Request("https://api.deepseek.com/chat/completions", data=body,
                                  headers={"Content-Type": "application/json", "Authorization": "Bearer " + DS})
-    t = json.load(urllib.request.urlopen(req, timeout=120))["choices"][0]["message"]["content"]
+    t = json.load(urllib.request.urlopen(req, timeout=180))["choices"][0]["message"]["content"]
     t = t[t.find("{"):t.rfind("}") + 1]
     d = json.loads(t)
-    return {k: str(v).strip() for k, v in d.items() if k in FIELDS and str(v).strip()}
+    out = {}
+    for k in FLAT:
+        v = d.get(k)
+        if v is not None and str(v).strip():
+            out[k] = str(v).strip()
+    for k in STRUCT:                       # keep the structured arrays/objects as-is
+        v = d.get(k)
+        if v:
+            out[k] = v
+    return out
 
 
 async def run(user_id: str):

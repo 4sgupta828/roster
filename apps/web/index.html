@@ -1426,10 +1426,13 @@
       </select>
     </label>
     <button type="button" class="histbtn newbtn" id="newbtn" style="margin-left:12px;">＋ New search</button>
-    <button type="button" class="histbtn" id="savedbtn" style="margin-left:0;" hidden title="Your shortlisted people & jobs and saved searches">◈ Saved</button>
-    <button type="button" class="histbtn" id="applybtn" style="margin-left:0;" hidden title="Your apply profile — fill once, autofill any job application">⚑ Apply Profile</button>
     <a class="histbtn" href="/admin" style="margin-left:0;text-decoration:none;">Coverage</a>
-    <button type="button" class="histbtn" id="histbtn" style="margin-left:0;">History</button>
+    <button type="button" class="histbtn" id="signinbtn" style="margin-left:0;" title="Sign in or create an account">Sign in</button>
+    <button type="button" class="histbtn" id="acctbtn" style="margin-left:0;" hidden title="Your account — shortlists, saved searches, apply profile">◈ Account</button>
+    <!-- legacy hidden hooks (handlers guard for null; kept out of the header) -->
+    <button type="button" id="savedbtn" hidden></button>
+    <button type="button" id="applybtn" hidden></button>
+    <button type="button" id="histbtn" hidden></button>
     <button type="button" class="histbtn setbtn" id="setbtn" style="margin-left:0;" title="Product settings (admin)" aria-label="Product settings">⚙</button>
     <button type="button" class="histbtn pulsebtn" id="pulsebell" style="margin-left:0;" hidden
             title="Evidence changes on your watched topics" aria-label="Pulse inbox">◉ Pulse<span class="pbadge" id="pbadge" hidden></span></button>
@@ -1632,16 +1635,27 @@
 <div class="idmodal" id="savedmodal" hidden>
   <div class="idcard" style="max-width:640px;width:92%;text-align:left;max-height:82vh;overflow:auto;">
     <div style="display:flex;align-items:center;justify-content:space-between;">
-      <h2 style="margin:0;">Your Roster</h2>
+      <h2 style="margin:0;">Your account</h2>
       <button type="button" class="histbtn" id="savedclose">Close</button>
     </div>
-    <div id="savedbody" style="margin-top:.6rem;">
-      <div style="display:flex;gap:.4rem;margin:.4rem 0;">
-        <input id="newbucket" type="text" placeholder="New bucket name (e.g. ML hires)" style="flex:1;" />
-        <button type="button" class="idgo" id="newbucketgo" style="width:auto;padding:.4rem .8rem;">Add bucket</button>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin:.6rem 0 .2rem;padding:.55rem .7rem;border:1px solid var(--hair);border-radius:10px;background:var(--panel2);">
+      <div style="min-width:0;">
+        <div style="font-size:.72rem;color:var(--muted);">Signed in as</div>
+        <div id="acctemail" style="font-weight:600;overflow:hidden;text-overflow:ellipsis;"></div>
+      </div>
+      <div style="display:flex;gap:.4rem;flex:none;">
+        <button type="button" class="idgo" id="acctapply" style="width:auto;padding:.4rem .8rem;">⚑ Apply profile</button>
+        <button type="button" class="histbtn" id="logoutbtn">Log out</button>
+      </div>
+    </div>
+    <div id="savedbody" style="margin-top:.7rem;">
+      <h3 style="margin:.4rem 0 .35rem;font-size:.92rem;">Shortlists <span style="font-weight:400;color:var(--muted);font-size:.8rem;">— saved people &amp; jobs</span></h3>
+      <div style="display:flex;gap:.4rem;margin:.3rem 0 .5rem;">
+        <input id="newbucket" type="text" placeholder="New shortlist (e.g. ML hires)" style="flex:1;" />
+        <button type="button" class="idgo" id="newbucketgo" style="width:auto;padding:.4rem .8rem;">Add</button>
       </div>
       <div id="bucketlist"></div>
-      <h3 style="margin:1rem 0 .3rem;font-size:.9rem;">Recent searches</h3>
+      <h3 style="margin:1.1rem 0 .35rem;font-size:.92rem;">Your searches <span style="font-weight:400;color:var(--muted);font-size:.8rem;">— private to you</span></h3>
       <div id="searchlist" style="font-size:.85rem;"></div>
     </div>
   </div>
@@ -1655,6 +1669,7 @@
     </div>
     <p style="font-size:.82rem;color:var(--muted);margin:.4rem 0;">Fill this once. Then on any job's application page, click your <b>Roster Autofill</b> bookmark to fill the form — you review &amp; submit. Nothing is sent anywhere automatically.</p>
     <div id="applyform"></div>
+    <div id="applyexp"></div>
     <div style="margin:.8rem 0;padding:.6rem;border:1px solid var(--hair);border-radius:8px;">
       <div style="font-weight:600;font-size:.85rem;margin-bottom:.3rem;">Résumé</div>
       <div id="resumestatus" style="font-size:.8rem;color:var(--muted);margin-bottom:.3rem;">No résumé uploaded.</div>
@@ -1976,7 +1991,8 @@ async function loadConfig(){
     }
     // vertical-supplied console copy (heading + placeholder) — keeps the shell domain-neutral
     const con = c.console || {};
-    if(con.heading){ HEADING_QA = con.heading; $("#heading").textContent = con.heading; }
+    // People/Jobs mode owns the heading now — ignore the legacy config heading (was "…evidence…").
+    if(typeof setSearchMode === "function") setSearchMode(SEARCH_MODE);
     // seed the intake prompt with a RANDOM real question from the vertical's picker (falls back
     // to the plain placeholder). Refreshed on each New chat for variety.
     EXAMPLES = Array.isArray(con.examples) ? con.examples : [];
@@ -4069,7 +4085,7 @@ function setMode(mode, opts){
     renderTriage(!!opts.fresh);
     q.focus();
   } else {
-    $("#heading").textContent = HEADING_QA;
+    if(typeof setSearchMode === "function") setSearchMode(SEARCH_MODE); else $("#heading").textContent = HEADING_QA;
     document.body.classList.toggle("chatting", THREAD.turns.length > 0);   // re-dock composer if a thread is live
     if(!THREAD.turns.length) q.setAttribute("placeholder", pickPlaceholder());
     syncComposerPad();
@@ -6091,10 +6107,26 @@ $("#idmodal").addEventListener("keydown", e=>{ if(e.key==="Enter") $("#idgo").cl
 function loggedIn(){ return !!(ACCOUNTS_ENABLED && USER && USER.token); }
 function maybeShowSavedBtn(){
   const on = loggedIn();
-  const b = $("#savedbtn"); if(b) b.hidden = !on;
-  const ab = $("#applybtn"); if(ab) ab.hidden = !on;
   document.body.classList.toggle("logged-in", on);
+  const acct = $("#acctbtn"); if(acct) acct.hidden = !on;                       // Account (signed in)
+  const sign = $("#signinbtn"); if(sign) sign.hidden = on || !ACCOUNTS_ENABLED;  // Sign in (signed out)
 }
+async function openAccount(){
+  if(!loggedIn()){ AUTH_MODE = "login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden = false; return; }
+  const em = $("#acctemail"); if(em) em.textContent = (USER && USER.email) || "";
+  await openSaved();
+}
+async function logout(){
+  try{ await fetch("/auth/logout", {method:"POST", headers: authHeaders()}); }catch(e){}
+  USER = null;
+  try{ localStorage.removeItem("roster_user"); }catch(e){}
+  $("#savedmodal").hidden = true;
+  maybeShowSavedBtn();
+}
+$("#acctbtn") && $("#acctbtn").addEventListener("click", openAccount);
+$("#signinbtn") && $("#signinbtn").addEventListener("click", ()=>{ AUTH_MODE = "login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden = false; });
+$("#logoutbtn") && $("#logoutbtn").addEventListener("click", logout);
+$("#acctapply") && $("#acctapply").addEventListener("click", ()=>{ $("#savedmodal").hidden = true; if(typeof openApply==="function") openApply(); });
 async function autoSaveSearch(query, mode){
   if(!loggedIn() || !query) return;
   try{ await fetch("/me/searches", {method:"POST",
@@ -6120,14 +6152,24 @@ async function renderBuckets(){
       </div><div class="bkt-items" hidden style="margin-top:.4rem;"></div></div>`).join("");
   }catch(e){ el.innerHTML = "<div style='color:var(--muted)'>Could not load buckets.</div>"; }
 }
+let SEARCH_TAB = "people", ALL_SEARCHES = [];
 async function renderSearches(){
-  const el = $("#searchlist");
   try{
     const r = await fetch("/me/searches", {headers: authHeaders()});
-    const d = await r.json(); const ss = d.searches||[];
-    el.innerHTML = ss.length ? ss.slice(0,40).map(s=>`<div class="srow" data-q="${esc(s.query)}" style="cursor:pointer;padding:.2rem 0;color:var(--muted);">↻ ${esc(s.query)}</div>`).join("")
-      : "<div style='color:var(--muted)'>No searches yet.</div>";
-  }catch(e){ el.innerHTML = ""; }
+    ALL_SEARCHES = (await r.json()).searches || [];
+  }catch(e){ ALL_SEARCHES = []; }
+  paintSearches();
+}
+function paintSearches(){
+  const el = $("#searchlist"); if(!el) return;
+  const isJob = s => (s.mode||"").toLowerCase() === "jobs";
+  const filt = ALL_SEARCHES.filter(s => SEARCH_TAB === "jobs" ? isJob(s) : !isJob(s));
+  const tab = (k,label)=>`<button type="button" class="pjbtn ${SEARCH_TAB===k?"on":""}" data-stab="${k}" style="font-size:.76rem;padding:.24rem .7rem;">${label}</button>`;
+  const tabs = `<div style="display:inline-flex;gap:.18rem;background:var(--panel2);border:1px solid var(--hair);border-radius:999px;padding:.16rem;margin-bottom:.45rem;">${tab("people","👤 People")}${tab("jobs","💼 Jobs")}</div>`;
+  const list = filt.length
+    ? filt.slice(0,40).map(s=>`<div class="srow" data-q="${esc(s.query)}" data-mode="${esc((s.mode||"people").toLowerCase()==="jobs"?"jobs":"people")}" style="cursor:pointer;padding:.24rem 0;color:var(--muted);">↻ ${esc(s.query)}</div>`).join("")
+    : `<div style='color:var(--muted)'>No ${SEARCH_TAB==="jobs"?"job":"people"} searches yet.</div>`;
+  el.innerHTML = tabs + `<div>${list}</div>`;
 }
 async function loadItems(bktEl){
   const id = bktEl.dataset.id, box = bktEl.querySelector(".bkt-items");
@@ -6158,7 +6200,10 @@ $("#bucketlist") && $("#bucketlist").addEventListener("click", async (e)=>{
   if(tog){ const bk = tog.closest(".bkt"); const box = bk.querySelector(".bkt-items"); box.hidden = !box.hidden; if(!box.hidden) await loadItems(bk); }
 });
 $("#searchlist") && $("#searchlist").addEventListener("click", (e)=>{
+  const tb = e.target.closest("[data-stab]");
+  if(tb){ SEARCH_TAB = tb.dataset.stab; paintSearches(); return; }
   const row = e.target.closest(".srow"); if(!row) return;
+  if(typeof setSearchMode === "function") setSearchMode(row.dataset.mode || "people");   // re-run in its own mode
   $("#savedmodal").hidden = true; const box = $("#q"); if(box){ box.value = row.dataset.q; box.focus(); }
 });
 
@@ -6286,6 +6331,28 @@ const APPLY_FIELDS = [
     {k:"veteran_status",l:"Veteran status"},{k:"disability_status",l:"Disability status"}]},
 ];
 let APPLY_PROFILE = {};
+let APPLY_STRUCT = {};                       // work_history / education / skills / summary (from résumé parse)
+const STRUCT_KEYS = ["summary","work_history","education","skills"];
+function renderApplyExp(){
+  const box = document.getElementById("applyexp"); if(!box) return;
+  const s = APPLY_STRUCT || {};
+  const wh = Array.isArray(s.work_history)?s.work_history:[];
+  const ed = Array.isArray(s.education)?s.education:[];
+  const sk = Array.isArray(s.skills)?s.skills:[];
+  if(!wh.length && !ed.length && !sk.length && !s.summary){ box.innerHTML = ""; return; }
+  const esc2 = (x)=>esc(x==null?"":String(x));
+  const dates = (o)=>[o.start,o.end].filter(Boolean).join(" – ");
+  let h = `<div style="margin:.6rem 0;padding:.6rem .7rem;border:1px solid var(--hair);border-radius:10px;background:var(--panel2);">
+    <div style="font-weight:600;font-size:.85rem;margin-bottom:.3rem;">Parsed from your résumé <span style="font-weight:400;color:var(--muted);font-size:.78rem;">— review; saved with your profile</span></div>`;
+  if(s.summary) h += `<div style="font-size:.83rem;margin:.2rem 0 .5rem;">${esc2(s.summary)}</div>`;
+  if(wh.length){ h += `<div style="font-size:.76rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:.3rem 0 .2rem;">Experience</div>`;
+    h += wh.map(w=>`<div style="margin:.25rem 0;font-size:.83rem;"><b>${esc2(w.title)}</b>${w.company?` · ${esc2(w.company)}`:""}${dates(w)?` <span style="color:var(--muted)">(${esc2(dates(w))})</span>`:""}${w.description?`<div style="color:var(--muted);font-size:.8rem;">${esc2(w.description)}</div>`:""}</div>`).join(""); }
+  if(ed.length){ h += `<div style="font-size:.76rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:.5rem 0 .2rem;">Education</div>`;
+    h += ed.map(e=>`<div style="margin:.2rem 0;font-size:.83rem;">${esc2(e.degree)}${e.field?` ${esc2(e.field)}`:""}${e.school?` · ${esc2(e.school)}`:""}${dates(e)?` <span style="color:var(--muted)">(${esc2(dates(e))})</span>`:""}</div>`).join(""); }
+  if(sk.length){ h += `<div style="font-size:.76rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:.5rem 0 .2rem;">Skills</div>`;
+    h += `<div style="font-size:.82rem;">${sk.map(esc2).join(" · ")}</div>`; }
+  box.innerHTML = h + "</div>";
+}
 function renderApplyForm(){
   const box = $("#applyform"); if(!box) return;
   box.innerHTML = APPLY_FIELDS.map(sec=>{
@@ -6309,17 +6376,23 @@ function collectApplyProfile(){
   APPLY_FIELDS.forEach(sec=>sec.fields.forEach(f=>{
     const el = document.getElementById("af_"+f.k); if(el && (el.value||"").trim()) out[f.k] = el.value.trim();
   }));
+  STRUCT_KEYS.forEach(k=>{ if(APPLY_STRUCT[k]!=null) out[k] = APPLY_STRUCT[k]; });   // keep parsed experience
   return out;
+}
+function splitStruct(profile){                 // pull struct keys out of a flat+struct profile blob
+  APPLY_STRUCT = {}; const flat = {};
+  Object.keys(profile||{}).forEach(k=>{ if(STRUCT_KEYS.includes(k)) APPLY_STRUCT[k]=profile[k]; else flat[k]=profile[k]; });
+  return flat;
 }
 async function openApply(){
   if(!loggedIn()) return;
   $("#applymodal").hidden = false;
   try{
     const r = await fetch("/me/profile", {headers: authHeaders()});
-    const d = await r.json(); APPLY_PROFILE = d.profile || {};
+    const d = await r.json(); APPLY_PROFILE = splitStruct(d.profile || {});
     $("#resumestatus").textContent = d.resume ? `On file: ${d.resume.name}` : "No résumé uploaded.";
-  }catch(e){ APPLY_PROFILE = {}; }
-  renderApplyForm(); refreshBookmarklet();
+  }catch(e){ APPLY_PROFILE = {}; APPLY_STRUCT = {}; }
+  renderApplyForm(); renderApplyExp(); refreshBookmarklet();
 }
 async function saveApplyProfile(){
   APPLY_PROFILE = collectApplyProfile();
@@ -6373,10 +6446,12 @@ async function parseResume(){
       let d; try{ d = await (await fetch("/me/profile/parse-resume", {headers: authHeaders()})).json(); }catch(e){ d = {}; }
       if(d.status === "done"){
         const parsed = d.profile || {}; let n = 0;
-        APPLY_PROFILE = collectApplyProfile();                 // keep what the user already typed
-        Object.keys(parsed).forEach(k=>{ if(!APPLY_PROFILE[k]){ APPLY_PROFILE[k] = parsed[k]; n++; } });
-        renderApplyForm();
-        note.textContent = n ? `Prefilled ${n} field${n===1?"":"s"} — review, then Save profile.` : "No new fields found in the résumé.";
+        // structured experience (work_history/education/skills/summary) → always take the parsed mapping
+        STRUCT_KEYS.forEach(k=>{ if(parsed[k]!=null){ APPLY_STRUCT[k] = parsed[k]; n++; } });
+        APPLY_PROFILE = collectApplyProfile();                 // keep what the user already typed (+ struct)
+        Object.keys(parsed).forEach(k=>{ if(!STRUCT_KEYS.includes(k) && !APPLY_PROFILE[k]){ APPLY_PROFILE[k] = parsed[k]; n++; } });
+        renderApplyForm(); renderApplyExp();
+        note.textContent = n ? `Mapped your résumé — review the fields & experience below, then Save.` : "No new details found in the résumé.";
         return;
       }
       if(d.status === "failed"){ note.textContent = "Couldn't read that résumé — please fill the form manually."; return; }
