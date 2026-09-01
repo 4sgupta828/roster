@@ -3395,6 +3395,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         """Shared research core: attachments → ask (optional live on_event) → persist → ResearchOut.
         Raises CassetteMiss / provider errors for the caller to handle. `persist_kind` overrides the
         History kind for the main research persistence (native /qa passes "qa")."""
+        if not persist_kind and (body.surface or "").strip().lower() == "qa":
+            persist_kind = "qa"       # Q&A-tab conversations file under the qa kind in History
 
         async def _people_population_route(*, fallthrough: bool, route_extra: dict | None = None):
             """The closed-world people-index engine (flag ROSTER_PEOPLE_POPULATION) shared by the

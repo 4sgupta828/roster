@@ -2065,13 +2065,22 @@ let MODE_VIEWS = {};            // per-mode result snapshot {html, hidden} — e
 function setSearchMode(m){
   const nm = PJ_COPY[m] ? m : "people";
   const outEl = document.getElementById("out");
-  if(outEl && nm !== SEARCH_MODE){
-    MODE_VIEWS[SEARCH_MODE] = {html: outEl.innerHTML, hidden: outEl.hidden};
-    const v = MODE_VIEWS[nm];
-    outEl.innerHTML = (v && v.html) || "";
-    outEl.hidden = v ? !!v.hidden : true;
+  const prev = SEARCH_MODE;
+  const switching = outEl && nm !== prev;
+  if(switching){
+    MODE_VIEWS[prev] = {html: outEl.innerHTML, hidden: outEl.hidden};
   }
   SEARCH_MODE = nm;   // validate against the known modes (not a people/jobs binary)
+  if(switching){
+    if(nm === "qa" && THREAD.turns.length){
+      renderThread();                    // the LIVE thread is the Q&A tab's source of truth
+    } else {
+      const v = MODE_VIEWS[nm];
+      outEl.innerHTML = (v && v.html) || "";
+      outEl.hidden = v ? !!v.hidden : true;
+      document.body.classList.remove("chatting");   // search tabs never use the chat layout
+    }
+  }
   document.querySelectorAll("#pjmode .pjbtn").forEach(b=>{
     const on = b.dataset.pj === SEARCH_MODE; b.classList.toggle("on", on); b.setAttribute("aria-selected", on);
   });
@@ -4107,6 +4116,7 @@ async function loadSharedSession(id){
     if(CONV_ENABLED && thread.length){          // resume the shared conversation (continuable)
       THREAD = {session_id:id, turns:thread.slice()};
       q.value=""; q.style.height="auto"; q.setAttribute("placeholder","");
+      if(typeof setSearchMode === "function") setSearchMode("qa");   // a thread lives in the Q&A tab
       renderThread(); loadSuggestions();
     } else {
       q.value = row.question; autoGrow();
@@ -5998,6 +6008,14 @@ function newConversation(){
   window.scrollTo({top:0}); q.focus();
 }
 function renderThread(){
+  // Q&A/chat content belongs to the Q&A tab. If an answer lands while the user is on a People/
+  // Jobs search tab, don't clobber their view — drop the stale Q&A snapshot; switching back to
+  // Q&A re-renders the live thread (setSearchMode).
+  if(typeof SEARCH_MODE !== "undefined" && (SEARCH_MODE === "people" || SEARCH_MODE === "jobs")){
+    delete MODE_VIEWS.qa;
+    return;
+  }
+  out.hidden = false;   // a tab switch may have hidden #out — the thread must render VISIBLY
   document.body.classList.toggle("chatting", THREAD.turns.length > 0);   // dock composer to bottom
   out.innerHTML = "";
   if(THREAD.session_id){                          // one shareable link + reset, per thread
@@ -6199,8 +6217,14 @@ function renderSearchSessionDetail(row, rowEl, t0){
       : `<div class="empty">This search's results weren't stored. Re-run it from the search box to see current openings.</div>`;
   } else if(kind === "qa"){
     const answer = t0.answer || row.answer || "";
-    body = answer
-      ? qaMarkup({answer, claims: t0.qa_claims || [], grounded: t0.grounded, coverage_gaps: t0.coverage_gaps || []}, row.question)
+    // Native turns store FULL claims on the turn (t0.claims) — render the same evidence cards as
+    // live so [n] refs get hover tooltips; legacy eigen rows only kept extra.qa_claims (fallback).
+    const claims = (t0.claims && t0.claims.length) ? t0.claims : (t0.qa_claims || []);
+    body = answer || (t0.people_rows||[]).length
+      ? qaMarkup({answer, claims, grounded: t0.grounded, coverage_gaps: t0.coverage_gaps || [],
+                  people_rows: t0.people_rows || [], coverage_basis: t0.coverage_basis || null,
+                  people: t0.people || [], clarification: t0.clarification || "",
+                  source: (t0.qa_route || t0.insights) ? "roster" : "eigen"}, row.question)
       : `<div class="empty">This answer wasn't stored. Ask it again from the Q&A search box.</div>`;
   } else {
     const rows = t0.people_rows || [];
@@ -6314,6 +6338,7 @@ function sessionWhereNext(sdbody, row, turns){
   const seed = ()=>{
     THREAD = {session_id: row.id, turns: (row.thread && row.thread.length ? row.thread : [row]).slice()};
     closeSessions();
+    if(typeof setSearchMode === "function") setSearchMode("qa");   // continue in the Q&A tab
     q.value=""; q.style.height="auto"; renderThread();
   };
   wr.querySelectorAll(".hopchip").forEach(b=>b.addEventListener("click", ()=>{
@@ -6382,6 +6407,7 @@ function buildSessionActions(box, row, firstTurn, firstAns, rowEl){
   if(ct) ct.addEventListener("click", ()=>{
     THREAD = {session_id: row.id, turns: (row.thread && row.thread.length ? row.thread : [row]).slice()};
     closeSessions();
+    if(typeof setSearchMode === "function") setSearchMode("qa");   // continue in the Q&A tab
     q.value=""; q.style.height="auto"; q.setAttribute("placeholder","");
     renderThread(); window.scrollTo({top:0}); q.focus();
   });
