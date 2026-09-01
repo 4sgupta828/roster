@@ -477,8 +477,9 @@ async def build_tailored_resume(jd_text: str, profile: dict, resume_text: str, l
                 "GROUNDING (hard rule): keep the SAME employers, titles, and date ranges as the original "
                 "(verbatim dates), and the same education. You MAY sharpen and rephrase how real work is "
                 "described, but you may NOT invent or add any employer, title, degree, named technology/tool, "
-                "certification, or numeric metric that is not in the original. Improve the WRITING of real "
-                "accomplishments; never add accomplishments or capabilities the original doesn't support. "
+                "certification, numeric metric, OR any capability/responsibility/system (what they "
+                "built/owned/led). If the role wants something the original doesn't show, DO NOT add it — a "
+                "gap stays a gap. Improve only the WRITING of the candidate's real accomplishments. "
                 "Include every real role and every real section (put non-standard sections in `extra`)."),
             messages=[{"role": "user", "content": f"TARGET ROLE (JOB DESCRIPTION):\n{jd[:9000]}\n\n"
                        f"ORIGINAL RÉSUMÉ (source of truth for all hard facts):\n{rt[:12000]}"}],
@@ -488,12 +489,16 @@ async def build_tailored_resume(jd_text: str, profile: dict, resume_text: str, l
         try:
             audit = await llm.complete(
                 system=(
-                    "Fact-check this structured résumé against the ORIGINAL. Correct ONLY invented HARD "
-                    "FACTS: any employer, job title, date range, degree/education, specific named technology "
-                    "or tool, certification, or numeric metric that the original does NOT support — replace "
-                    "with the original's value or remove it. Do NOT weaken, shorten, or genericize the "
-                    "improved wording, bullets, summary, or ordering — keep all of that. Return the corrected "
-                    "structured résumé."),
+                    "Fact-check this structured résumé against the ORIGINAL and remove anything the original "
+                    "does not support. Correct/remove any invented: employer, title, date, degree/education, "
+                    "named technology or tool, certification, numeric metric — AND any invented CAPABILITY, "
+                    "RESPONSIBILITY, or SCOPE (a claim of what they built/owned/led/drove that the original "
+                    "doesn't state, e.g. adding 'fault tolerance', 'orchestration', or a system they didn't "
+                    "mention just because the target role wants it). Rule: every bullet must describe the "
+                    "SAME real work as the original — stronger verbs and tighter, role-aligned WORDING are "
+                    "good, but NO new facts, capabilities, or responsibilities. Keep the improved wording, "
+                    "summary, and ordering; only strip/rewrite the unsupported additions. Return the "
+                    "corrected structured résumé."),
                 messages=[{"role": "user", "content":
                            f"ORIGINAL (ground truth):\n{rt[:12000]}\n\nSTRUCTURED DRAFT (JSON):\n{doc.model_dump_json()[:12000]}"}],
                 response_format=_ResumeDoc, max_tokens=4000)
