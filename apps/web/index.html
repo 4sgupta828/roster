@@ -1002,6 +1002,9 @@
   .aa-sec ul{margin:.25rem 0;padding-left:1.15rem;font-size:.86rem;line-height:1.55;color:var(--ink);}
   .aa-cl{white-space:pre-wrap;font-size:.88rem;line-height:1.6;background:var(--panel2);
     border:1px solid var(--hair);border-radius:10px;padding:.9rem;margin-top:.5rem;color:var(--ink);}
+  .aa-edit{width:100%;min-height:240px;font:13px/1.55 ui-monospace,Menlo,Consolas,monospace;
+    background:var(--panel2);color:var(--ink);border:1px solid var(--hair);border-radius:10px;
+    padding:.8rem;margin-top:.5rem;resize:vertical;}
   body.working .missionfoot{opacity:0;pointer-events:none;}   /* dissolve once the user engages */
   body.chatting .missionfoot,
   body.triage-live .missionfoot{display:none;}
@@ -6995,26 +6998,56 @@ function renderApplyAnalysis(a){
     + sec("Honest gaps to address", a.gaps)
     + sec("How to apply best", a.how_to_apply)
     + sec("Résumé tips (nothing fabricated)", a.resume_tips)
-    + `<div class="aa-sec"><button type="button" class="idgo" id="aaCover" style="padding:.5rem 1rem;">✍️ Draft a cover letter (with your approval)</button>
-        <div id="aaCoverBox"></div></div>`;
+    + `<div class="aa-sec"><h4>Apply with confidence — grounded in your résumé, yours to edit</h4>
+        <button type="button" class="idgo" id="aaResume" style="padding:.5rem 1rem;">📄 Tailor my résumé</button>
+        <button type="button" class="idgo" id="aaCover" style="padding:.5rem 1rem;margin-left:.4rem;">✍️ Draft cover letter</button>
+        <div id="aaResumeBox"></div><div id="aaCoverBox"></div></div>`;
+  const rb = $("#aaResume"); if(rb) rb.addEventListener("click", runTailoredResume);
   const cb = $("#aaCover"); if(cb) cb.addEventListener("click", runCoverLetter);
 }
-async function runCoverLetter(){
-  const url = ($("#aaUrl").value||"").trim(), text = ($("#aaText").value||"").trim();
-  const box = $("#aaCoverBox"); const btn = $("#aaCover");
-  if(btn){ btn.disabled = true; btn.textContent = "✍️ Drafting…"; }
-  try{
-    const r = await fetch("/me/apply-analysis/cover-letter", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
-      body: JSON.stringify({job_url:url, job_description:text})});
-    if(!r.ok){ const e = await r.json().catch(()=>({})); if(box) box.innerHTML = `<div class="pitem-empty">${esc(e.detail||"Couldn't draft a letter.")}</div>`; return; }
-    const d = await r.json();
-    if(box) box.innerHTML = `<div class="aa-cl">${esc(d.cover_letter||"")}</div>
-      <button type="button" class="histbtn" id="aaCopy" style="margin-top:.4rem;">Copy</button>
-      <span style="font-size:.74rem;color:var(--muted);margin-left:.5rem;">Review &amp; edit before sending — it’s a draft, grounded in your résumé.</span>`;
-    const cp = $("#aaCopy"); if(cp) cp.addEventListener("click", ()=>{ try{ navigator.clipboard.writeText(d.cover_letter||""); cp.textContent="Copied ✓"; }catch(e){} });
-  }catch(e){ if(box) box.innerHTML = `<div class="pitem-empty">Draft failed — try again.</div>`; }
-  finally{ if(btn){ btn.disabled = false; btn.textContent = "✍️ Draft a cover letter (with your approval)"; } }
+// Render a generated document as an EDITABLE textarea + Save-as-PDF + Copy (résumé & cover letter).
+function renderEditableDoc(box, title, text, filename){
+  if(!box) return;
+  box.innerHTML = `<textarea class="aa-edit" rows="16">${esc(text||"")}</textarea>
+    <div style="margin-top:.35rem;">
+      <button type="button" class="histbtn aa-pdf">⬇ Save as PDF</button>
+      <button type="button" class="histbtn aa-copy" style="margin-left:.4rem;">Copy</button>
+      <span style="font-size:.74rem;color:var(--muted);margin-left:.5rem;">Edit freely — grounded in your résumé; nothing fabricated. Review before you use it.</span>
+    </div>`;
+  const ta = box.querySelector(".aa-edit");
+  box.querySelector(".aa-pdf").addEventListener("click", ()=>saveAsPdf(title, ta.value, filename));
+  const cp = box.querySelector(".aa-copy");
+  cp.addEventListener("click", ()=>{ try{ navigator.clipboard.writeText(ta.value); cp.textContent="Copied ✓"; }catch(e){} });
 }
+// Save the current (edited) text as PDF via the browser's print → "Save as PDF". No library/deps.
+function saveAsPdf(title, text, filename){
+  const w = window.open("", "_blank"); if(!w) return;
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(filename||title)}</title>
+    <style>@page{margin:1in;} body{font:13px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#111;white-space:pre-wrap;word-wrap:break-word;}
+    h1{font-size:15px;margin:0 0 12px;} @media print{.noprint{display:none;}}</style></head>
+    <body><h1>${esc(title)}</h1><div>${esc(text||"")}</div>
+    <script>window.onload=function(){setTimeout(function(){window.print();},150);};<\/script></body></html>`);
+  w.document.close(); w.focus();
+}
+async function runAaDoc(kind){                 // kind: 'cover-letter' | 'tailored-resume'
+  const url = ($("#aaUrl").value||"").trim(), text = ($("#aaText").value||"").trim();
+  const isResume = kind === "tailored-resume";
+  const box = $(isResume ? "#aaResumeBox" : "#aaCoverBox");
+  const btn = $(isResume ? "#aaResume" : "#aaCover");
+  const label = btn ? btn.textContent : "";
+  if(btn){ btn.disabled = true; btn.textContent = isResume ? "📄 Tailoring…" : "✍️ Drafting…"; }
+  try{
+    const r = await fetch("/me/apply-analysis/"+kind, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
+      body: JSON.stringify({job_url:url, job_description:text})});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); if(box) box.innerHTML = `<div class="pitem-empty">${esc(e.detail||"Couldn't generate that.")}</div>`; return; }
+    const d = await r.json();
+    if(isResume) renderEditableDoc(box, "Tailored résumé", d.resume||"", "resume.pdf");
+    else renderEditableDoc(box, "Cover letter", d.cover_letter||"", "cover-letter.pdf");
+  }catch(e){ if(box) box.innerHTML = `<div class="pitem-empty">Generation failed — try again.</div>`; }
+  finally{ if(btn){ btn.disabled = false; btn.textContent = label; } }
+}
+function runCoverLetter(){ return runAaDoc("cover-letter"); }
+function runTailoredResume(){ return runAaDoc("tailored-resume"); }
 $("#applyhdr") && $("#applyhdr").addEventListener("click", ()=>openApplyAssist());
 $("#aaClose") && $("#aaClose").addEventListener("click", ()=>{ $("#applyassist").hidden = true; });
 $("#aaGo") && $("#aaGo").addEventListener("click", runApplyAnalysis);

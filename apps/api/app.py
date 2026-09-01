@@ -4902,6 +4902,21 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=400, detail="Couldn't draft a letter — check the résumé + job text.")
         return {"cover_letter": cl}
 
+    @app.post("/me/apply-analysis/tailored-resume")
+    async def me_apply_tailored_resume(body: ApplyIn, x_roster_token: str = Header(default="")) -> dict:
+        """Draft a résumé tailored to THIS job — grounded (reorganizes/emphasizes REAL experience, never
+        fabricates), generated only on the candidate's explicit request. Editable + savable in the UI.
+        404 when off."""
+        if not apply_assist_enabled():
+            raise HTTPException(status_code=404, detail="apply assistant not enabled")
+        store, user = await _require_user(x_roster_token)
+        jd, profile = await _apply_jd_and_profile(store, user, body)
+        from api.people_population import build_tailored_resume
+        rz = await build_tailored_resume(jd, profile, profile.get("_resume_text", ""), build_llm(mode=resolve_mode()))
+        if not rz:
+            raise HTTPException(status_code=400, detail="Couldn't tailor the résumé — check the résumé + job text.")
+        return {"resume": rz}
+
     @app.get("/me/history")
     async def me_history(q: str = "", kind: str = "", x_roster_token: str = Header(default="")) -> dict:
         """PRIVATE per-account history: the signed-in user's OWN research/search sessions only

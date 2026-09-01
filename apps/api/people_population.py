@@ -405,6 +405,39 @@ async def build_cover_letter(jd_text: str, profile: dict, resume_text: str, llm,
         return None
 
 
+class _TailoredResume(BaseModel):
+    resume: str = ""
+
+
+async def build_tailored_resume(jd_text: str, profile: dict, resume_text: str, llm) -> str | None:
+    """Produce a résumé tailored to THIS role — GROUNDED: reorder, re-emphasize, rephrase, and surface
+    the candidate's most-relevant REAL experience and align wording to the JD, WITHOUT inventing any
+    skill, title, employer, date, or achievement not in the original. Generated only on explicit request.
+    Returns the tailored résumé text (None on error/insufficient input)."""
+    jd = (jd_text or "").strip()
+    rt = _resume_text_of(profile, resume_text)
+    if len(jd) < 40 or len(rt) < 40 or llm is None:
+        return None
+    try:
+        comp = await llm.complete(
+            system=(
+                "Rewrite this candidate's résumé, tailored to the target role, in the `resume` field. "
+                "STRICT GROUNDING: use ONLY facts present in the original résumé — you may reorder, "
+                "re-emphasize, rephrase, tighten, and surface the most role-relevant experience and "
+                "achievements, and mirror the job's terminology where it TRUTHFULLY applies. You must NOT "
+                "invent or inflate any skill, title, employer, date, metric, or achievement, and must not "
+                "claim experience the original doesn't support. Keep it truthful and ATS-friendly with "
+                "clear sections (Summary, Experience with bullet points, Skills, Education). Return the "
+                "full résumé as plain text."),
+            messages=[{"role": "user", "content": f"TARGET ROLE (JOB DESCRIPTION):\n{jd[:9000]}\n\n"
+                       f"ORIGINAL RÉSUMÉ (the only source of truth):\n{rt[:12000]}"}],
+            response_format=_TailoredResume, max_tokens=2000)
+        return (comp.parsed.resume or "").strip() or None
+    except Exception as e:   # noqa: BLE001
+        _log.warning("build_tailored_resume failed: %s", e)
+        return None
+
+
 def _person_row_from_facets(r: dict) -> dict:
     """Build a people-card row (same shape as answer_people_population) from a people_by_ids row."""
     facets = r["facets"]
