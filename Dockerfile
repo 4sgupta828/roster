@@ -31,6 +31,7 @@ RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/wh
 COPY packages packages
 COPY apps apps
 COPY deploy deploy
+COPY scripts scripts   # committed ingest/maintenance engines (run in-container via `railway ssh`)
 RUN pip install --no-cache-dir "./packages/kernel[serve,postgres]" ./packages/vertical_roster
 
 # apps/ is not a pip package; put it on the path. Single vertical per deployment.
