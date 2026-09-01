@@ -1597,7 +1597,10 @@ class ClaimGraphStore:
             if t:
                 conds.append(f"title_norm ILIKE ${i}"); args.append(f"%{t}%"); i += 1
         where = (" WHERE " + " AND ".join(conds)) if conds else ""
-        sql = (f"SELECT company,title,location,department,url,source FROM rs_job{where} "
+        # updated_at rides as a date STRING so rows stay JSON-serializable everywhere (sessions,
+        # /jobs, Q&A) — the freshness disclosure ("postings as of …") depends on it.
+        sql = (f"SELECT company,title,location,department,url,source,"
+               f"to_char(updated_at,'YYYY-MM-DD') AS updated_at FROM rs_job{where} "
                f"ORDER BY updated_at DESC LIMIT {int(cap)}")
         try:
             async with pool.acquire() as conn:
@@ -1698,7 +1701,8 @@ class ClaimGraphStore:
             conds.append(f"lower(replace(company,' ','_')) = ANY(${i})"); args.append([str(c).lower().replace(' ', '_') for c in company]); i += 1
         args.append(qvec); qi = i; i += 1
         args.append(int(cap))
-        sql = (f"SELECT company,title,location,department,url,source FROM rs_job "
+        sql = (f"SELECT company,title,location,department,url,source,"
+               f"to_char(updated_at,'YYYY-MM-DD') AS updated_at FROM rs_job "
                f"WHERE {' AND '.join(conds)} ORDER BY embedding <=> ${qi}::vector LIMIT ${i}")
         try:
             async with pool.acquire() as conn:

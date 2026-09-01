@@ -2146,7 +2146,8 @@ async function loadConfig(){
     window.JOBS_ENABLED = !!c.jobs_enabled;   // jobs mode: route job-intent queries to /jobs
     window.EIGEN_QA_ENABLED = !!c.eigen_qa_enabled;   // Q&A mode: reveal the 💬 Q&A toggle
     window.INSIGHTS_QA_ENABLED = !!c.insights_qa_enabled;   // grounded people/jobs Q&A (default when on)
-    { const qb = document.getElementById("pjqa"); if(qb) qb.hidden = !(window.EIGEN_QA_ENABLED || window.INSIGHTS_QA_ENABLED); }
+    window.QA_ROUTER_ENABLED = !!c.qa_router_enabled;       // NATIVE Q&A: server-side intent router (no proxy)
+    { const qb = document.getElementById("pjqa"); if(qb) qb.hidden = !(window.EIGEN_QA_ENABLED || window.INSIGHTS_QA_ENABLED || window.QA_ROUTER_ENABLED); }
     window.JD_EXCLUDE_ENABLED = !!c.jd_exclude_source_co_enabled;   // Find candidates: source-company exclusion
     { const row = document.getElementById("jdSrcCoRow"); if(row) row.hidden = !window.JD_EXCLUDE_ENABLED; }
     window.RECRUITER_MATCH_ENABLED = !!c.recruiter_match_enabled;   // Find jobs: LLM recruiter brief + fine-tune
@@ -2276,13 +2277,19 @@ async function runJobs(question){
 const QA_PHASE_COPY = {
   step:"Reasoning…", search:"Searching the corpus & web…", found:"Reading sources…",
   verifying:"Verifying claims…", composing:"Composing the answer…", progress:"Working…",
+  route:"Understanding the question…", people:"Searching the people index…",
+  graph:"Checking the connection graph…", jobs:"Searching open roles…",
 };
 async function runQA(question){
-  // Grounded people/jobs Insights is the DEFAULT Q&A when enabled; Eigen is a separate optional mode.
-  if(window.INSIGHTS_QA_ENABLED){ return runInsights(question); }
+  // NATIVE router (ROSTER_QA_ROUTER): the server routes every question (incl. insights) itself.
+  // Otherwise: grounded people/jobs Insights is the DEFAULT Q&A when enabled; Eigen is optional.
+  if(window.INSIGHTS_QA_ENABLED && !window.QA_ROUTER_ENABLED){ return runInsights(question); }
   const out = $("#out");
+  const introCopy = window.QA_ROUTER_ENABLED
+    ? "💬 Roster Q&A — grounded answers about people, companies, jobs, and connections."
+    : "💬 Asking Eigen — grounded answer over the companies/markets/tech corpus.";
   const setStatus = (msg)=>{ if(out){ out.hidden = false;
-    out.innerHTML = `<div class="ppl-wrap"><div class="ppl-cov">💬 Asking Eigen — grounded answer over the companies/markets/tech corpus.</div><div class="status" style="margin-top:.6rem;">${esc(msg)}</div></div>`; } };
+    out.innerHTML = `<div class="ppl-wrap"><div class="ppl-cov">${introCopy}</div><div class="status" style="margin-top:.6rem;">${esc(msg)}</div></div>`; } };
   setStatus("Thinking…");
   if(typeof go !== "undefined" && go){ go.disabled = true; go.classList.add("loading"); }
   const payload = {question, tenant_id:"demo", user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""};
@@ -2303,7 +2310,7 @@ async function runQA(question){
       final = await r.json();
     }
     if(out) out.innerHTML = qaMarkup(final, question);
-  }catch(e){ if(out) out.innerHTML = `<div class="pitem-empty">Couldn't reach Eigen — ${esc((e&&e.message)||e)}</div>`; }
+  }catch(e){ if(out) out.innerHTML = `<div class="pitem-empty">Couldn't answer that — ${esc((e&&e.message)||e)}</div>`; }
   finally{ if(typeof go !== "undefined" && go){ go.disabled = false; go.classList.remove("loading"); } }
 }
 // Grounded Insights Q&A — analytical answers over Roster's own people/jobs index (/insights).
@@ -2346,8 +2353,17 @@ function insightsMarkup(d){
 function qaMarkup(d, question){
   d = d || {};
   if(d.error){ return `<div class="ppl-wrap"><div class="pitem-empty">${esc(d.error)}</div></div>`; }
+  // NATIVE payload surfaces (ROSTER_QA_ROUTER): a clarifying question, or structured people rows
+  // from the indexed-discovery route (rendered with the same enriched cards as People search).
+  if(d.clarification){
+    return `<div class="ppl-wrap"><div class="clarify"><div class="clarify-h">↳ One quick clarification</div><div class="clarify-q">${esc(d.clarification)}</div></div></div>`;
+  }
+  if(Array.isArray(d.people_rows) && d.people_rows.length){
+    const head = `<div class="ppl-head"><b>Q&amp;A</b> <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">✓ grounded in Roster's index</span></div>`;
+    return `<div class="ppl-wrap">${head}</div>` + peopleRowsMarkup(d);
+  }
   const answer = d.answer || "";
-  if(!answer){ return `<div class="ppl-wrap"><div class="pitem-empty">No answer came back for that question. Try rephrasing, or ask something more specific about a company, market, or technology.</div></div>`; }
+  if(!answer){ return `<div class="ppl-wrap"><div class="pitem-empty">No answer came back for that question. Try rephrasing, or ask something more specific about a person, company, role, or market.</div></div>`; }
   const claims = d.claims || [];
   // The answer prose carries inline [1][2]… markers that index the claims array by 1-based position,
   // so the Sources list is rendered IN ORDER with NO dedup — [N] must line up with source N.
@@ -2361,10 +2377,18 @@ function qaMarkup(d, question){
   const grounded = d.grounded
     ? `<span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">✓ grounded</span>`
     : `<span class="ppl-tag">model read — not corpus-verified</span>`;
-  const head = `<div class="ppl-head"><b>Q&amp;A</b> ${grounded} <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.10);">via Eigen</span></div>`;
+  const via = (d.source === "roster") ? "Roster" : "Eigen";
+  const head = `<div class="ppl-head"><b>Q&amp;A</b> ${grounded} <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.10);">via ${via}</span></div>`;
   const citesBlock = cites ? `<div class="qa-cites" style="margin-top:.9rem;"><div class="plain-h" style="margin-bottom:.3rem;">Sources (${claims.length})</div><ol style="margin:0;padding-left:1.2rem;display:flex;flex-direction:column;gap:.25rem;">${cites}</ol></div>` : "";
   const gapsBlock = gaps ? `<div class="ppl-cov" style="margin-top:.7rem;"><b>Coverage gaps</b><ul style="margin:.3rem 0 0;padding-left:1.1rem;">${gaps}</ul></div>` : "";
-  return `<div class="ppl-wrap">${head}<div class="rqanswer md" style="margin-top:.6rem;">${mdToHtml(answer)}</div>${citesBlock}${gapsBlock}</div>`;
+  // Secondary profile-search links on a person dossier (navigation aids, never the answer).
+  const pplLinks = (Array.isArray(d.people) ? d.people : [])
+    .filter(p => p && /^https?:\/\//i.test(p.url||""));   // http(s) only — same rule as citations
+  const ppl = pplLinks.length
+    ? `<div class="ppl-cov" style="margin-top:.7rem;">Profiles: ` + pplLinks.map(p=>
+        `<a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer" style="margin-right:.6rem;">${esc(p.host||p.name||"profile")} ↗</a>`).join("") + `</div>`
+    : "";
+  return `<div class="ppl-wrap">${head}<div class="rqanswer md" style="margin-top:.6rem;">${mdToHtml(answer)}</div>${citesBlock}${gapsBlock}${ppl}</div>`;
 }
 function jobsMarkup(d){
   const jobs = d.jobs||[], st = d.stats||{}, q = d.query||{};

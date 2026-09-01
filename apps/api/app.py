@@ -685,6 +685,18 @@ def insights_qa_enabled() -> bool:
     return os.environ.get("ROSTER_INSIGHTS_QA", "").lower() in ("1", "true", "yes")
 
 
+def qa_router_enabled() -> bool:
+    """Flag (default OFF, Rule 20) via ROSTER_QA_ROUTER: the NATIVE Q&A intent router
+    (docs/qa_improvements_amended_design.md). When ON: (1) /qa and /qa/stream become native Roster
+    routes (no Eigen proxy) sharing _do_research; (2) every question is classified into a
+    professional-intelligence route (people discovery / person dossier / company hiring / JD
+    analysis / connection path / insights / jobs / general research) BEFORE any engine
+    short-circuit — so the people-population flag no longer intercepts non-people questions, a
+    named person gets a grounded dossier instead of only a search-links card, and connection
+    questions try the claim graph first. OFF → all routing behavior is byte-identical to today."""
+    return os.environ.get("ROSTER_QA_ROUTER", "").lower() in ("1", "true", "yes")
+
+
 def jd_exclude_source_co_enabled() -> bool:
     """Flag (default OFF, Rule 20) via ROSTER_JD_EXCLUDE_SOURCE_CO: when ON, "Find candidates" hides
     people who currently work at the JD's HIRING company (recruiters don't poach from the client),
@@ -1401,6 +1413,9 @@ class ResearchOut(BaseModel):
     people: list = []                     # people profile links [{name,url,host}]
     reflection: dict = {}                 # ROSTER_REFLECTION=steer: {intent, answer_brief, confidence} — what
     #                                       the pass understood the user is really after (empty when off/low-conf)
+    qa_route: dict | None = None          # ROSTER_QA_ROUTER: the intent-router decision that shaped this
+    #                                       answer {route, subject_kind, entities, axes, confidence} —
+    #                                       observability/audit (None when the router did not run)
     unverified_priors: list = []          # ROSTER_PARAMETRIC_LED (T3): the model's OWN asserted facts that
     #                                       retrieval could NOT ground [{text,needs_freshness}] — the
     #                                       labeled register, kept OUT of `claims`/grounded prose (empty
@@ -2012,6 +2027,7 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             "jobs_enabled": jobs_enabled(),
             "eigen_qa_enabled": eigen_qa_enabled(),
             "insights_qa_enabled": insights_qa_enabled(),
+            "qa_router_enabled": qa_router_enabled(),
             "jd_exclude_source_co_enabled": jd_exclude_source_co_enabled(),
             "people_semantic_first_enabled": _people_semantic_first_enabled(),
             "recruiter_match_enabled": recruiter_match_enabled(),
@@ -2610,9 +2626,43 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             pass
         return res
 
+    def _qa_payload(out: ResearchOut) -> dict:
+        """The /qa response contract (native router mode): the classic {answer, claims, grounded,
+        coverage_gaps, source} shape the FE expects, plus the structured surfaces a routed answer
+        may carry (people rows/coverage for discovery, profile links, clarification, route audit)."""
+        return {"answer": out.answer, "claims": [c.model_dump() for c in out.claims],
+                "grounded": out.grounded, "coverage_gaps": out.coverage_gaps, "source": "roster",
+                "session_id": out.session_id, "people_rows": out.people_rows,
+                "coverage_basis": out.coverage_basis, "people": out.people,
+                "clarification": out.clarification, "qa_route": out.qa_route}
+
     @app.post("/qa")
     async def qa(body: ResearchIn) -> dict:
-        """Q&A MODE (flag ROSTER_EIGEN_QA): proxy the question to the external Eigen research service —
+        """Q&A. NATIVE mode (flag ROSTER_QA_ROUTER): the question runs Roster's own intent router +
+        grounded engines via _do_research — no external proxy — and persists as kind='qa' with
+        source='roster'. LEGACY mode (flag ROSTER_EIGEN_QA, only when the router is off): proxy to
+        the external Eigen research service. 404 when neither is on."""
+        if qa_router_enabled():
+            question = (body.question or "").strip()
+            if not question:
+                return {"answer": "", "claims": [], "grounded": False, "coverage_gaps": [],
+                        "source": "roster"}
+            try:
+                out = await _do_research(body, persist_kind="qa")
+            except CassetteMiss as e:
+                raise HTTPException(status_code=503, detail=(
+                    "No model available in replay mode. Set ROSTER_PROVIDER_MODE=live to answer "
+                    "live, or record cassettes first.")) from e
+            except Exception as e:   # noqa: BLE001 — surface a clean error, never a 500
+                __import__("logging").getLogger("api.qa").warning("native /qa failed: %s", e)
+                return {"answer": "", "claims": [], "grounded": False, "coverage_gaps": [],
+                        "source": "roster",
+                        "error": "Couldn't answer that right now — try again in a moment."}
+            return _qa_payload(out)
+        return await _qa_eigen_proxy(body)
+
+    async def _qa_eigen_proxy(body: ResearchIn) -> dict:
+        """LEGACY Q&A (flag ROSTER_EIGEN_QA): proxy the question to the external Eigen research service —
         companies/markets/tech grounded answers — and return {answer, claims, grounded, coverage_gaps}.
         Roster stays thin: Eigen owns retrieval/corpus/compose. 404 when off (People/Jobs untouched).
         The turn is saved to the caller's private History (kind='qa') with the answer stored inline so
@@ -2666,6 +2716,39 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         shared _SSE_RUNS buffer + GET /stream/{run_id} (Railway edge cuts long SSE); the Roster↔Eigen
         leg via _eigen_research_stream's run_id/_seq reconnect. The runner completes + persists to
         History regardless of client connection. 404 when off."""
+        if qa_router_enabled():
+            # NATIVE streaming Q&A: the same _SSE_RUNS buffering as /research/stream (resumable via
+            # GET /stream/{run_id}); router progress events (route/people/graph/jobs/step/…) stream
+            # live; the `final` event carries the same payload as POST /qa; persistence happens
+            # exactly once inside _do_research regardless of client disconnects.
+            from fastapi.responses import StreamingResponse
+            run = _sse_run_new()
+
+            async def _on_event(ev: dict) -> None:
+                _sse_push(run, ev)
+
+            async def _native_runner() -> None:
+                try:
+                    out = await _do_research(body, on_event=_on_event, persist_kind="qa")
+                    _sse_push(run, {"type": "final", "result": _qa_payload(out)})
+                except CassetteMiss:
+                    _sse_push(run, {"type": "error", "detail": "No model available in replay mode."})
+                except Exception as e:   # noqa: BLE001
+                    _sse_push(run, {"type": "error", "detail": f"provider error: {e}"})
+                finally:
+                    _sse_done(run)
+
+            run["task"] = asyncio.create_task(_native_runner())
+
+            async def _native_gen():
+                yield ": open\n\n"
+                yield f"data: {json.dumps({'type': 'run', 'run_id': run['id']})}\n\n"
+                async for chunk in _sse_follow(run, 0):
+                    yield chunk
+
+            return StreamingResponse(_native_gen(), media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+                         "Connection": "keep-alive"})
         if not eigen_qa_enabled():
             raise HTTPException(status_code=404, detail="Q&A mode not enabled")
         from fastapi.responses import StreamingResponse
@@ -3272,21 +3355,27 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         return StreamingResponse(gen(), media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"})
 
-    async def _do_research(body: ResearchIn, on_event=None, token: str = "") -> ResearchOut:
+    async def _do_research(body: ResearchIn, on_event=None, token: str = "",
+                           persist_kind: str = "") -> ResearchOut:
         """Shared research core: attachments → ask (optional live on_event) → persist → ResearchOut.
-        Raises CassetteMiss / provider errors for the caller to handle."""
-        # PEOPLE-ENUMERATION ROUTE (flag ROSTER_PEOPLE_POPULATION, Rule 20) — the SINGLE source of
-        # truth for people routing, shared by /research AND /research/stream (both funnel through
-        # here; the earlier /research-only fix missed /research/stream, the UI's real endpoint — the
-        # recurring "still prose" bug). On the flag path EVERY question (fresh AND threaded) is
-        # answered by FILTERING the grounded people index — NEVER web/prose: kind='person' → a profile
-        # card; everything else → ranked people_rows or an honest coverage-gap answer.
-        if people_population_enabled():
+        Raises CassetteMiss / provider errors for the caller to handle. `persist_kind` overrides the
+        History kind for the main research persistence (native /qa passes "qa")."""
+
+        async def _people_population_route(*, fallthrough: bool, route_extra: dict | None = None):
+            """The closed-world people-index engine (flag ROSTER_PEOPLE_POPULATION) shared by the
+            legacy intercept and the Q&A router. Returns (ResearchOut|None, raw_engine_result|None).
+            fallthrough=False reproduces the legacy behavior EXACTLY (always a ResearchOut: person
+            card, ranked rows, or an honest coverage gap). fallthrough=True (router ON) returns
+            (None, res) when the engine says this is a single named person or not a people query,
+            so the router can send it to the dossier / native-research path instead of dead-ending
+            (design routing rules 1–2). A store outage stays CLOSED-WORLD in both modes — discovery
+            must never silently become open-web people enumeration. `route_extra` (router mode)
+            rides the persisted session extra for auditability."""
             store = _claim_store_cached()
             if store is None:
                 return ResearchOut(grounded=False, answer="The people index is unavailable right now "
                                    "— please retry.", claims=[], coverage_gaps=[], rejected=0,
-                                   people_rows=[], coverage_basis=None)
+                                   people_rows=[], coverage_basis=None), None
             from api.people_population import answer_people_population
             # GEO SCOPE (flag ROSTER_PEOPLE_GEO_SCOPE, default OFF): restrict to ONE country (selector
             # default 'us'); a query-named country overrides it inside the engine. OFF → "" = no filter.
@@ -3295,11 +3384,15 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 question=body.question, tenant_id=body.tenant_id,
                 store=store, llm=build_llm(mode=resolve_mode()), scope_country=scope_country)
             if res.get("kind") == "person":
+                if fallthrough:
+                    return None, res      # router: grounded dossier, never only the static card
                 if on_event is not None:
                     await on_event({"type": "people", "count": 1})
                 return ResearchOut(grounded=True, answer="", claims=[], coverage_gaps=[],
                                    rejected=0, people_rows=[res["person_card"]],
-                                   coverage_basis=None, session_id=None)
+                                   coverage_basis=None, session_id=None), res
+            if fallthrough and res.get("not_people_query"):
+                return None, res          # router: fall through to native research (design rule 1)
             answer = res.get("answer") or ("No people matched — name a role, expertise, company, "
                                            "or location (e.g. 'ML directors in NYC').")
             if on_event is not None:
@@ -3316,13 +3409,182 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         user_name=body.user_name, user_email=body.user_email,
                         kind="people_population",
                         extra={"coverage_basis": res.get("coverage_basis") or {},
-                               "people_rows": res.get("people_rows") or []})
+                               "people_rows": res.get("people_rows") or [],
+                               **(route_extra or {})})
                 except Exception:   # noqa: BLE001
                     sid = None
             return ResearchOut(
                 grounded=res.get("grounded", False), answer=answer, claims=[],
                 coverage_gaps=[], rejected=0, people_rows=res.get("people_rows") or [],
-                coverage_basis=res.get("coverage_basis"), session_id=sid)
+                coverage_basis=res.get("coverage_basis"), session_id=sid), res
+
+        # ---- Q&A INTENT ROUTER (flag ROSTER_QA_ROUTER, default OFF — Rule 20) ----------------
+        # Classifies the question BEFORE any engine short-circuit and dispatches per
+        # docs/qa_improvements_amended_design.md. OFF → this whole block is skipped and the legacy
+        # people-population intercept below behaves byte-identically.
+        _route = None            # QaRoute (persisted in the session extra for auditability)
+        _route_afo = None        # route-selected compose directive (answer_format_override)
+        _route_links: list = []  # person_dossier: secondary profile-search links (never the answer)
+        _route_docs = None       # jd_analysis: the pasted JD as a per-request CITABLE document
+        _route_gaps: list = []   # route-derived coverage gaps (e.g. graph-coverage honesty)
+        _q_route = None          # jd_analysis: the leading ask (the JD itself rides as a document)
+        if qa_router_enabled():
+            from api import qa_router as _qr
+            from roster_vertical.professional_formats import ROUTE_ANSWER_FORMATS as _RAF
+            _route = await _qr.classify_qa_route(
+                body.question, build_llm(mode=resolve_mode()), history=body.history)
+            if on_event is not None:
+                await on_event({"type": "route", "route": _route.route,
+                                "confidence": _route.confidence})
+            _cstore = _claim_store_cached()
+
+            async def _persist_route(answer, grounded, kind, extra, claims=None, gaps=None):
+                sstore = _store()
+                if sstore is None:
+                    return None
+                try:
+                    return await sstore.save(
+                        tenant_id=body.tenant_id, workspace_id=body.workspace_id,
+                        question=body.question, answer=answer, grounded=grounded,
+                        claims=claims or [], source_stats={}, coverage_gaps=gaps or [],
+                        rejected=0, sources=body.sources, user_name=body.user_name,
+                        user_email=body.user_email, kind=kind, extra=extra)
+                except Exception:   # noqa: BLE001 — persistence is best-effort
+                    return None
+
+            _r = _route.route
+            if _r == "clarify":
+                return ResearchOut(grounded=False, answer="", claims=[], coverage_gaps=[],
+                                   rejected=0, clarification=_route.clarification,
+                                   qa_route=_route.model_dump())
+            if _r == "insights" and insights_qa_enabled() and _cstore is not None:
+                from api.people_population import answer_roster_insights
+                try:
+                    ires = await answer_roster_insights(
+                        question=body.question, tenant_id=body.tenant_id or "demo",
+                        store=_cstore, llm=build_llm(mode=resolve_mode()))
+                except Exception:   # noqa: BLE001 — insights trouble → open-world research below
+                    ires = None
+                if ires is not None and not ires.get("abstain"):
+                    sid = await _persist_route(
+                        ires.get("answer") or "", bool(ires.get("grounded")), persist_kind or "qa",
+                        {"insights_rows": (ires.get("rows") or [])[:25], "insights": True,
+                         "qa_route": _route.model_dump()})
+                    return ResearchOut(grounded=bool(ires.get("grounded")),
+                                       answer=ires.get("answer") or "", claims=[],
+                                       coverage_gaps=[], rejected=0,
+                                       coverage_basis=ires.get("coverage_basis"),
+                                       session_id=sid, qa_route=_route.model_dump())
+                if ires is not None and ires.get("abstain") and _route.confidence == "high":
+                    # Design matrix: a clearly-analytical index question the aggregator cannot
+                    # support gets an HONEST abstain — never a web search dressed up as a count.
+                    sid = await _persist_route(ires.get("answer") or "", False,
+                                               persist_kind or "qa",
+                                               {"insights": True, "qa_route": _route.model_dump()})
+                    return ResearchOut(grounded=False, answer=ires.get("answer") or "",
+                                       claims=[], coverage_gaps=[], rejected=0, session_id=sid,
+                                       qa_route=_route.model_dump())
+                # low/medium-confidence insights miss → fall through to native research
+            elif _r == "connection_path":
+                cres = None
+                if _cstore is not None:
+                    cres = await _qr.connection_path_answer(
+                        _cstore, list(_route.entities), tenant_id=body.tenant_id or "demo")
+                if cres and cres.get("paths"):
+                    if on_event is not None:
+                        await on_event({"type": "graph", "paths": len(cres["paths"])})
+                    claims = [Citation(text=h["text"], quote=h["quote"], atom_id=h["atom_id"],
+                                       source=h["source"], title=h["title"],
+                                       document_id=h["document_id"], tier=h["tier"])
+                              for h in cres["hops"]]
+                    sid = await _persist_route(
+                        cres["answer"], True, persist_kind or "research",
+                        {"qa_route": _route.model_dump(), "graph_paths": cres["paths"][:10]},
+                        claims=[c.model_dump() for c in claims])
+                    return ResearchOut(grounded=True, answer=cres["answer"], claims=claims,
+                                       coverage_gaps=[], rejected=0, session_id=sid,
+                                       qa_route=_route.model_dump())
+                if cres is not None:   # graph consulted, no fully-grounded path → honest gap + research
+                    _src_e, _tgt_e = cres.get("source"), cres.get("target")
+                    _e1 = _route.entities[0] if _route.entities else "the first entity"
+                    _e2 = _route.entities[1] if len(_route.entities) > 1 else "the second entity"
+                    if _src_e and _tgt_e:
+                        _route_gaps.append(
+                            f"No connection path between {_src_e.get('name') or _e1} and "
+                            f"{_tgt_e.get('name') or _e2} in Roster's claim graph yet — a "
+                            "graph-coverage gap, not evidence of no relationship.")
+                    else:
+                        _missing = _e1 if not _src_e else _e2
+                        _route_gaps.append(
+                            f"{_missing} isn't in Roster's claim graph yet, so no graph path could "
+                            "be checked — a coverage gap, not evidence of no relationship.")
+                _route_afo = _RAF.get("connection_path")
+            elif _r == "indexed_job_search" and jobs_enabled() and _cstore is not None:
+                jres = await _qr.indexed_jobs_answer(
+                    _cstore, body.question, build_llm(mode=resolve_mode()))
+                if jres is not None:
+                    if on_event is not None:
+                        await on_event({"type": "jobs", "count": len(jres.get("jobs") or [])})
+                    sid = await _persist_route(
+                        jres["answer"], bool(jres.get("grounded")), "jobs",
+                        {"jobs_count": len(jres.get("jobs") or []),
+                         "jobs": list(jres.get("jobs") or []),
+                         "query": jres.get("query") or {}, "qa_route": _route.model_dump()})
+                    return ResearchOut(grounded=bool(jres.get("grounded")), answer=jres["answer"],
+                                       claims=[], coverage_gaps=[], rejected=0, session_id=sid,
+                                       qa_route=_route.model_dump())
+                # jobs engine unavailable → fall through to native research
+            elif _r == "indexed_people_discovery":
+                if not people_population_enabled():
+                    # CLOSED-WORLD contract: an indexed-discovery ask on a deployment without the
+                    # people engine gets an honest "not available", never open-web enumeration.
+                    return ResearchOut(
+                        grounded=False, claims=[], rejected=0, people_rows=[],
+                        answer="People discovery over Roster's index isn't enabled on this "
+                               "deployment, so I can't enumerate matching people.",
+                        coverage_gaps=["people-index discovery engine disabled"],
+                        qa_route=_route.model_dump())
+                out, pres = await _people_population_route(
+                    fallthrough=True, route_extra={"qa_route": _route.model_dump()})
+                if out is not None:
+                    out.qa_route = _route.model_dump()
+                    return out
+                if pres and pres.get("kind") == "person":
+                    # The facet compiler says this is really ONE named person → grounded dossier
+                    # (design rule 2: the static card is secondary material, never the answer).
+                    _r = "person_dossier"
+                    _route.route = "person_dossier"
+                    if not _route.entities:
+                        _nm = ((pres.get("person_card") or {}).get("name") or "").strip()
+                        if _nm:
+                            _route.entities = [_nm]
+                # not_people_query → native research below (design rule 1)
+            if _r == "person_dossier":
+                _route_afo = _RAF.get("person_dossier")
+                _nm = (_route.entities[0] if _route.entities else "").strip()
+                if _nm:
+                    try:
+                        _route_links = _qr.person_profile_links(_nm)
+                    except Exception:   # noqa: BLE001
+                        _route_links = []
+            elif _r == "company_hiring":
+                _route_afo = _RAF.get("company_hiring")
+            elif _r == "jd_analysis":
+                _route_afo = _RAF.get("jd_analysis")
+                _ask_q, _jd = _qr.extract_jd_text(body.question)
+                if _jd:
+                    # The pasted JD becomes a per-request CITABLE document (the kernel's attachment
+                    # source span-verifies quotes from it) — claims cite the JD text itself.
+                    _route_docs = [{"name": "job-description (user-provided)", "text": _jd}]
+                    _q_route = _ask_q
+            # general_professional_qa (and every fallthrough above) → native research below.
+
+        # PEOPLE-ENUMERATION ROUTE (flag ROSTER_PEOPLE_POPULATION, Rule 20) — the legacy intercept,
+        # UNCHANGED when the Q&A router is off (byte-identical). With the router ON, people routing
+        # happened above and this block is skipped.
+        if people_population_enabled() and _route is None:
+            out, _ = await _people_population_route(fallthrough=False)
+            return out
         if app.state.service is None:
             app.state.service = build_default_service()
         images, docs, pdfs, attach_notes, previews = None, None, None, [], []
@@ -3331,6 +3593,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             images, docs, pdfs, attach_notes = attachments_to_media(
                 [a.model_dump() for a in body.attachments])
             previews = session_previews(images or [], (docs or []) + [{"name": x.get("name")} for x in (pdfs or [])])
+        if _route_docs:   # jd_analysis: the pasted JD rides as a citable per-request document
+            docs = (docs or []) + _route_docs
         history = body.history if conversation_enabled() else None
         # Effort is HONORED only when the flag is on; otherwise forced to 1.0 (byte-identical no-op).
         effort = body.effort if effort_scale_enabled() else 1.0
@@ -3360,9 +3624,13 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             _ask = app.state.service.ask_reasoned          # auto: the question picks the engine
         else:
             _ask = app.state.service.ask
+        # A routed answer CONTRACT (dossier/hiring/JD/connection) owns the compose directive — force
+        # the standard engine so the reasoned scaffold cannot overwrite the route's format override.
+        if _route_afo is not None:
+            _ask = app.state.service.ask
         # per-question integrative opt-in (double opt-in: live flag AND body.integrative). Steers the
         # search (question hint) + appends the section directive; persisted question stays the original.
-        _q, _extra = body.question, None
+        _q, _extra = (_q_route or body.question), None
         if body.integrative and await _flag_live("integrative_enabled"):
             svc_ = app.state.service
             _extra = getattr(svc_, "integrative_prompt", None)
@@ -3408,11 +3676,15 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             images=images, documents=docs, pdf_docs=pdfs, history=history, on_event=on_event,
             effort=effort, audience=audience, graph_question=_graph_q,
             answer_focus=focus, clarify=followup_clarify_enabled(), extra_directive=_extra,
+            answer_format_override=_route_afo,
             suppress_authority=_mode_suppress)
         # Ambiguous follow-up → return the clarifying question; no research ran, nothing to persist.
         if getattr(res, "clarification", ""):
             return ResearchOut(grounded=False, answer="", claims=[], coverage_gaps=[], rejected=0,
-                               clarification=res.clarification)
+                               clarification=res.clarification,
+                               qa_route=(_route.model_dump() if _route is not None else None))
+        if _route_gaps:   # route-derived honesty (e.g. graph-coverage gap) rides the answer
+            res.coverage_gaps = list(res.coverage_gaps or []) + _route_gaps
         ui = getattr(app.state.service, "ui", None)
         def _url(c):
             fn = getattr(ui, "source_url", None)
@@ -3449,6 +3721,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     ui=getattr(app.state.service, "ui", None), tenant_id=body.tenant_id)
             except Exception:
                 companies = []
+        # People profile links: research-produced profiles + the route's secondary dossier links.
+        _people_out = (getattr(res, "people_profiles", []) or []) + _route_links
         # Persist the Q&A (best-effort). Conversation follow-up (session_id + flag) APPENDS a turn.
         session_id = None
         store = _store()
@@ -3494,8 +3768,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 _extra["related_research"] = related
             if companies:                     # persist so a reopened session re-links the prose
                 _extra["companies"] = companies
-            if getattr(res, "people_profiles", None):
-                _extra["people"] = res.people_profiles
+            if _people_out:
+                _extra["people"] = _people_out
+            if _route is not None:
+                _extra["qa_route"] = _route.model_dump()   # audit: the route that shaped this answer
             turn.update(_extra)
             try:
                 # Audience-guarded append: only continue a thread whose audience MATCHES this turn's
@@ -3521,6 +3797,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         diagnostics=(getattr(res, "diagnostics", None) if diag_trace_enabled() else None),
                         question_contract=getattr(res, "question_contract", None),
                         web_providers=(getattr(res, "web_providers", {}) or None),
+                        kind=(persist_kind or "research"),
                         extra=(_extra or None))
             except Exception:
                 session_id = None
@@ -3563,7 +3840,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             freshness=(getattr(res, "freshness", None) if freshness_ranking_enabled() else None),
             related_research=related,
             companies=companies,
-            people=(getattr(res, "people_profiles", []) or []),
+            people=_people_out,
+            qa_route=(_route.model_dump() if _route is not None else None),
             reflection=(getattr(res, "reflection", {}) or {}),
             unverified_priors=((getattr(res, "unverified_priors", []) or [])
                                if parametric_led_enabled() else []),
