@@ -315,3 +315,65 @@ async def indexed_jobs_answer(store, question: str, llm) -> dict | None:
     except Exception as e:  # noqa: BLE001
         _log.warning("indexed_jobs_answer failed: %s", e)
         return None
+
+
+# ---------------------------------------------------------------------------
+# INDEX-DRAW documents — the people/jobs corpus feeds Q&A answers wherever it can (design goal:
+# "draw from our people and job corpus to the best extent possible"). Each helper renders grounded
+# index rows into a per-request CITABLE document (the kernel's attachment source span-verifies
+# quotes from it), so a dossier can cite the person's indexed profile and a hiring answer can cite
+# the live indexed openings — clearly labeled as Roster-index data with honest caveats.
+async def person_index_document(store, name: str, *, tenant_id: str = "demo") -> dict | None:
+    """The name-matched person's GROUNDED Roster-index profile as a citable document, or None when
+    the index holds nothing. Identity discipline: the header names the matched entity id and warns
+    that a same-named different person must not be merged (the dossier format's ambiguity rule)."""
+    name = (name or "").strip()
+    if not name:
+        return None
+    try:
+        ent = await store.find_entity(name, tenant_id=tenant_id)
+        if not ent or (ent.get("kind") or "person") != "person":
+            return None
+        rows = await store.people_by_ids([ent["entity_id"]], tenant_id=tenant_id)
+        if not rows or not rows[0].get("facets"):
+            return None
+        r = rows[0]
+        lines = [f"Roster people-index profile matched by name for '{name}': {r['name']} "
+                 f"(entity {r['entity_id']}). Facts below were extracted from public sources and "
+                 f"grounded at ingest. IDENTITY CAUTION: this is a NAME match — if other evidence "
+                 f"suggests a different person with the same name, do not merge these facts."]
+        for f in r["facets"][:60]:
+            v = (f.get("display_value") or f.get("facet_value_norm") or "").strip()
+            if v:
+                lines.append(f"- {f['facet_key'].replace('_', ' ')}: {v}")
+        if len(lines) < 2:
+            return None
+        return {"name": f"roster-index profile: {r['name']}", "text": "\n".join(lines)}
+    except Exception as e:  # noqa: BLE001 — index trouble must never block the answer
+        _log.warning("person_index_document failed: %s", e)
+        return None
+
+
+async def company_jobs_document(store, company: str, *, tenant_id: str = "demo") -> dict | None:
+    """The company's live indexed OPENINGS as a citable document (title/location/as-of), or None
+    when the index holds none. Honest framing: aggregated public ATS postings, not exhaustive."""
+    company = (company or "").strip()
+    if not company:
+        return None
+    try:
+        rows = await store.search_jobs(company=[company], cap=40)
+        if not rows:
+            return None
+        stats = await store.jobs_stats()
+        lines = [f"Roster jobs index — open roles at {company} (aggregated public ATS postings; "
+                 f"index holds {stats.get('jobs', 0):,} roles across {stats.get('companies', 0):,} "
+                 f"companies; NOT an exhaustive market view; dates are last index refresh)."]
+        for r in rows[:30]:
+            loc = (r.get("location") or "").strip()
+            upd = (str(r.get("updated_at") or "")[:10])
+            lines.append(f"- {r.get('title') or ''}" + (f" — {loc}" if loc else "") +
+                         (f" (as of {upd})" if upd else ""))
+        return {"name": f"roster-index open roles: {company}", "text": "\n".join(lines)}
+    except Exception as e:  # noqa: BLE001
+        _log.warning("company_jobs_document failed: %s", e)
+        return None

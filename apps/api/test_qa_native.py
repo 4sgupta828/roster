@@ -335,3 +335,53 @@ def test_connection_path_drops_quoteless_hops(monkeypatch):
     data = r.json()
     assert len(svc.calls) == 1                       # fell through to research
     assert data["claims"] == [] or all(c.get("quote") for c in data["claims"])
+
+
+def test_dossier_draws_person_profile_from_index(monkeypatch):
+    """Index draw: a dossier run receives the person's grounded Roster-index profile as a citable
+    per-request document."""
+    class _PeopleStore:
+        async def find_entity(self, ref, *, tenant_id):
+            return {"entity_id": "github:jroe", "name": "Jane Roe", "kind": "person"}
+
+        async def people_by_ids(self, ids, *, tenant_id):
+            return [{"entity_id": "github:jroe", "name": "Jane Roe", "facets": [
+                {"facet_key": "role", "facet_value_norm": "software_engineer",
+                 "display_value": "Software Engineer", "document_id": "gh1", "block_id": "p"},
+                {"facet_key": "company", "facet_value_norm": "acme",
+                 "display_value": "Acme", "document_id": "gh1", "block_id": "p"}]}]
+
+    svc = _AskSpy(answer="dossier prose")
+    client = _client(monkeypatch, svc,
+                     {"route": "person_dossier", "subject_kind": "person",
+                      "entities": ["Jane Roe"], "confidence": "high"})
+    client.app.state.claim_store = _PeopleStore()
+    r = client.post("/qa", json={"question": "who is Jane Roe?", "tenant_id": "demo"})
+    assert r.status_code == 200
+    docs = svc.calls[0].get("documents") or []
+    assert docs and "Roster people-index profile" in docs[0]["text"]
+    assert "Software Engineer" in docs[0]["text"]
+    assert "IDENTITY CAUTION" in docs[0]["text"]     # name-match honesty rides with the facts
+
+
+def test_company_hiring_draws_open_roles_from_index(monkeypatch):
+    class _JobsStore:
+        async def search_jobs(self, *, terms=None, company=None, location=None, cap=60):
+            assert company == ["Acme"]
+            return [{"company": "Acme", "title": "Staff Engineer", "location": "NYC",
+                     "url": "https://x/apply", "source": "greenhouse", "updated_at": "2026-09-01"}]
+
+        async def jobs_stats(self):
+            return {"jobs": 100, "companies": 10}
+
+    svc = _AskSpy(answer="hiring prose")
+    client = _client(monkeypatch, svc,
+                     {"route": "company_hiring", "subject_kind": "company",
+                      "entities": ["Acme"], "confidence": "high"})
+    client.app.state.claim_store = _JobsStore()
+    r = client.post("/qa", json={"question": "what is Acme like as an employer?",
+                                 "tenant_id": "demo"})
+    assert r.status_code == 200
+    docs = svc.calls[0].get("documents") or []
+    assert docs and "roster-index open roles: Acme" == docs[0]["name"]
+    assert "Staff Engineer" in docs[0]["text"] and "as of 2026-09-01" in docs[0]["text"]

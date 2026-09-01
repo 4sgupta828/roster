@@ -3583,8 +3583,22 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         _route_links = _qr.person_profile_links(_nm)
                     except Exception:   # noqa: BLE001
                         _route_links = []
+                    # INDEX DRAW: the person's grounded Roster-index profile rides as a citable
+                    # per-request document, so the dossier can cite what the index already knows.
+                    if _cstore is not None:
+                        _idoc = await _qr.person_index_document(
+                            _cstore, _nm, tenant_id=body.tenant_id or "demo")
+                        if _idoc:
+                            _route_docs = (_route_docs or []) + [_idoc]
             elif _r == "company_hiring":
                 _route_afo = _RAF.get("company_hiring")
+                # INDEX DRAW: the company's live indexed openings ride as citable evidence.
+                _co = (_route.entities[0] if _route.entities else "").strip()
+                if _co and _cstore is not None:
+                    _jdoc = await _qr.company_jobs_document(
+                        _cstore, _co, tenant_id=body.tenant_id or "demo")
+                    if _jdoc:
+                        _route_docs = (_route_docs or []) + [_jdoc]
             elif _r == "jd_analysis":
                 _route_afo = _RAF.get("jd_analysis")
                 _ask_q, _jd = _qr.extract_jd_text(body.question)
