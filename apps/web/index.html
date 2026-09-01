@@ -111,6 +111,25 @@
   .rsave.saved{color:var(--gold);border-color:var(--gold);background:rgba(var(--gold-rgb),.13);}
   #bucketpick .pickrow{cursor:pointer;padding:.32rem .4rem;border-radius:7px;font-size:.82rem;}
   #bucketpick .pickrow:hover{background:var(--panel2);}
+  /* Account — a dedicated full page (not a modal) */
+  .acctpage{position:fixed;inset:0;z-index:1000;background:var(--bg);overflow:auto;padding:2.2rem 1.2rem 3rem;}
+  .acctwrap{max-width:880px;margin:0 auto;}
+  .accttop{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem;}
+  .acctid{display:flex;gap:.9rem;align-items:center;}
+  .acctavatar{width:54px;height:54px;border-radius:15px;background:var(--gold);color:var(--on-accent);display:flex;align-items:center;justify-content:center;font-size:1.35rem;font-weight:700;flex:none;text-transform:uppercase;}
+  .accth1{font-family:var(--serif);font-size:1.75rem;margin:0;letter-spacing:-.01em;}
+  .acctsub{color:var(--muted);font-size:.9rem;margin-top:.15rem;}
+  .acctbtns{display:flex;gap:.5rem;flex-wrap:wrap;}
+  .acctgrid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}
+  .acctcard{border:1px solid var(--hair);border-radius:14px;padding:1.15rem 1.25rem;background:var(--panel);}
+  .acctwide{grid-column:1 / -1;}
+  .acctcard h3{margin:0 0 .55rem;font-size:1.02rem;font-family:var(--sans);font-weight:650;}
+  .acctmuted{font-weight:400;color:var(--muted);font-size:.8rem;margin-left:.3rem;}
+  .acctcardsub{color:var(--muted);font-size:.85rem;margin:.1rem 0 .85rem;line-height:1.5;}
+  .acctcardbtns{display:flex;gap:.5rem;flex-wrap:wrap;}
+  .acctrow{display:flex;gap:.5rem;margin:.3rem 0 .7rem;}
+  .acctrow input{flex:1;}
+  @media(max-width:640px){.acctgrid{grid-template-columns:1fr;}}
   .newbtn{color:var(--gold);border-color:rgba(var(--gold-rgb),.5);}
   .newbtn:hover{color:var(--on-accent);background:var(--gold);border-color:var(--gold);}
 
@@ -1633,35 +1652,45 @@
 </div>
 
 <!-- Saved: shortlist buckets (people & jobs) + saved searches -->
-<div class="idmodal" id="savedmodal" hidden>
-  <div class="idcard" style="max-width:640px;width:92%;text-align:left;max-height:82vh;overflow:auto;">
-    <div style="display:flex;align-items:center;justify-content:space-between;">
-      <h2 style="margin:0;">Your account</h2>
-      <button type="button" class="histbtn" id="savedclose">Close</button>
-    </div>
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin:.6rem 0 .2rem;padding:.55rem .7rem;border:1px solid var(--hair);border-radius:10px;background:var(--panel2);">
-      <div style="min-width:0;">
-        <div style="font-size:.72rem;color:var(--muted);">Signed in as</div>
-        <div id="acctemail" style="font-weight:600;overflow:hidden;text-overflow:ellipsis;"></div>
+<section class="acctpage" id="savedmodal" hidden aria-label="Your account">
+  <div class="acctwrap">
+    <div class="accttop">
+      <div class="acctid">
+        <div class="acctavatar" id="acctavatar">◈</div>
+        <div>
+          <h1 class="accth1">Your account</h1>
+          <div class="acctsub" id="acctemail"></div>
+        </div>
       </div>
-      <div style="display:flex;gap:.4rem;flex:none;">
-        <button type="button" class="idgo" id="acctapply" style="width:auto;padding:.4rem .8rem;">⚑ Apply profile</button>
-        <button type="button" class="histbtn" id="acctmatch">🎯 Match jobs</button>
+      <div class="acctbtns">
         <button type="button" class="histbtn" id="logoutbtn">Log out</button>
+        <button type="button" class="histbtn" id="savedclose">← Back to search</button>
       </div>
     </div>
-    <div id="savedbody" style="margin-top:.7rem;">
-      <h3 style="margin:.4rem 0 .35rem;font-size:.92rem;">Shortlists <span style="font-weight:400;color:var(--muted);font-size:.8rem;">— saved people &amp; jobs</span></h3>
-      <div style="display:flex;gap:.4rem;margin:.3rem 0 .5rem;">
-        <input id="newbucket" type="text" placeholder="New shortlist (e.g. ML hires)" style="flex:1;" />
-        <button type="button" class="idgo" id="newbucketgo" style="width:auto;padding:.4rem .8rem;">Add</button>
-      </div>
-      <div id="bucketlist"></div>
-      <h3 style="margin:1.1rem 0 .35rem;font-size:.92rem;">Your searches <span style="font-weight:400;color:var(--muted);font-size:.8rem;">— private to you</span></h3>
-      <div id="searchlist" style="font-size:.85rem;"></div>
+    <div class="acctgrid">
+      <section class="acctcard">
+        <h3>Apply profile</h3>
+        <p class="acctcardsub">Fill it once — then autofill any job application, and match open roles to your résumé.</p>
+        <div class="acctcardbtns">
+          <button type="button" class="idgo" id="acctapply" style="width:auto;">⚑ Edit apply profile</button>
+          <button type="button" class="histbtn" id="acctmatch">🎯 Match jobs to my résumé</button>
+        </div>
+      </section>
+      <section class="acctcard">
+        <h3>Shortlists <span class="acctmuted">saved people &amp; jobs</span></h3>
+        <div class="acctrow">
+          <input id="newbucket" type="text" placeholder="New shortlist (e.g. ML hires)" />
+          <button type="button" class="idgo" id="newbucketgo" style="width:auto;">Add</button>
+        </div>
+        <div id="bucketlist"></div>
+      </section>
+      <section class="acctcard acctwide">
+        <h3>Your searches <span class="acctmuted">private to you</span></h3>
+        <div id="searchlist"></div>
+      </section>
     </div>
   </div>
-</div>
+</section>
 <!-- Apply Profile: superset of ATS fields, filled once → autofill any application -->
 <div class="idmodal" id="applymodal" hidden>
   <div class="idcard" style="max-width:720px;width:94%;text-align:left;max-height:86vh;overflow:auto;">
@@ -6150,6 +6179,7 @@ $("#histbtn2") && $("#histbtn2").addEventListener("click", openSessions);
 async function openAccount(){
   if(!loggedIn()){ AUTH_MODE = "login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden = false; return; }
   const em = $("#acctemail"); if(em) em.textContent = (USER && USER.email) || "";
+  const av = $("#acctavatar"); if(av) av.textContent = ((USER && USER.email) || "◈").slice(0,1);
   await openSaved();
 }
 async function logout(){
@@ -6500,10 +6530,40 @@ async function parseResume(){
 $("#autofillresume") && $("#autofillresume").addEventListener("click", parseResume);
 
 // ===== Match jobs to résumé (on-demand, preference-ranked) =====
-function openMatch(){
+function feTitleSeniority(t){
+  t = (t||"").toLowerCase();
+  if(/\b(principal|staff|distinguished|fellow)\b/.test(t)) return "staff_plus";
+  if(/\b(director|vp|vice president|head|chief|cto|ceo)\b/.test(t)) return "leadership";
+  if(/\b(senior|sr\.?|lead)\b/.test(t)) return "senior";
+  if(/\bintern/.test(t)) return "intern";
+  if(/\b(junior|jr\.?|entry|associate)\b/.test(t)) return "junior";
+  return t.trim() ? "mid" : "";
+}
+async function openMatch(){
   if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
   $("#matchmodal").hidden = false;
+  $("#matchresults").innerHTML = ""; $("#matchnote").textContent = "Loading your profile…";
+  let prof = {};
+  try{ prof = await (await fetch("/me/profile", {headers: authHeaders()})).json(); }catch(e){}
+  const profile = prof.profile || {};
+  const hasContent = !!prof.resume || Object.keys(profile).length >= 3;
+  if(!hasContent){
+    $("#matchnote").innerHTML = "To match jobs, add your résumé first — the matcher reads it. "
+      + "<button type='button' class='idgo' id='matchgotoapply' style='width:auto;padding:.3rem .8rem;margin-left:.3rem;'>⚑ Add résumé</button>";
+    return;
+  }
+  // intelligent defaults from the parsed résumé (only fill empties, so the user's edits stick)
+  if(!$("#mLoc").value && profile.city) $("#mLoc").value = [profile.city, profile.region].filter(Boolean).join(", ");
+  if(!$("#mRole").value){
+    const sk = Array.isArray(profile.skills) ? profile.skills : [];
+    const kws = sk.length ? sk.slice(0,3)
+      : (profile.current_title||"").split(/\s+/).filter(w=>w.length>3 && !/engineer|manager|senior/i.test(w)).slice(0,2);
+    $("#mRole").value = kws.join(", ");
+  }
+  if(!$("#mSen").value){ const s = feTitleSeniority(profile.current_title||""); if(s) $("#mSen").value = s; }
+  $("#matchnote").textContent = "Defaults set from your résumé — adjust preferences, then Find matches.";
 }
+document.addEventListener("click", (e)=>{ if(e.target && e.target.id==="matchgotoapply"){ $("#matchmodal").hidden=true; if(typeof openApply==="function") openApply(); } });
 async function runMatch(){
   const prefs = {
     locations: ($("#mLoc").value||"").split(",").map(s=>s.trim()).filter(Boolean),
