@@ -98,6 +98,56 @@ PROBES = {"greenhouse": ij.fetch_greenhouse, "lever": ij.fetch_lever, "ashby": i
           "smartrecruiters": fetch_smartrecruiters, "workable": fetch_workable,
           "breezy": fetch_breezy}
 
+
+# ---- WRONG-COMPANY GUARD (evidence-identity directive) ------------------------------------------
+# A slug variant ("eli", "alphabet") can be owned by an UNRELATED small company on that ATS; blindly
+# upserting its jobs under the F2000 display name is wrong-company attribution — the exact failure
+# class the repo's evidence discipline forbids. Every hit is verified against the board OWNER's own
+# name (fetched cheaply, hits only) before ingestion.
+def _norm_name(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", _SUFFIX.sub(" ", (s or "").lower()))
+
+
+def identity_ok(board_name: str, company: str, token: str) -> bool:
+    """True iff the board plausibly belongs to `company`. Unverifiable boards (no name surfaced)
+    are accepted only on the full-name slug (≥6 chars) — never on a short first-word variant."""
+    base = _norm_name(company)
+    if not board_name:
+        full = slug_variants(company)
+        return bool(full) and token == full[0] and len(token) >= 6
+    b = _norm_name(re.sub(r"\b(jobs?|careers?|career page|job board|at)\b", " ", board_name, flags=re.I))
+    if not b or not base:
+        return False
+    if b == base or b in base or _norm_name(board_name) == base:
+        return True
+    # "openai" ⊂ "openaijobs" fine; "alphabet" ⊂ "alphabettranslationservices" is NOT — bound the
+    # length ratio so a generic-word company name can't swallow an unrelated longer board name.
+    return base in b and len(b) <= 1.5 * len(base)
+
+
+def board_identity(ats: str, token: str) -> str:
+    """The board OWNER's display name — API metadata where available, else the hosted page title."""
+    try:
+        if ats == "greenhouse":
+            return ij._http_json(f"https://boards-api.greenhouse.io/v1/boards/{token}").get("name") or ""
+        if ats == "workable":
+            return ij._http_json("https://apply.workable.com/api/v1/widget/accounts/"
+                                 f"{token}?details=false").get("name") or ""
+        if ats == "smartrecruiters":
+            d = ij._http_json(f"https://api.smartrecruiters.com/v1/companies/{token}/postings?limit=1")
+            return (((d.get("content") or [{}])[0]).get("company") or {}).get("name") or ""
+        page = {"lever": f"https://jobs.lever.co/{token}",
+                "ashby": f"https://jobs.ashbyhq.com/{token}",
+                "breezy": f"https://{token}.breezy.hr"}.get(ats)
+        if page:
+            req = urllib.request.Request(page, headers={**_UA, "Accept": "text/html"})
+            with urllib.request.urlopen(req, timeout=12) as r:
+                m = re.search(rb"<title>([^<]{1,160})</title>", r.read(40000))
+            return m.group(1).decode("utf-8", "ignore").strip() if m else ""
+    except Exception:   # noqa: BLE001 — unverifiable, not fatal; identity_ok falls back strict
+        pass
+    return ""
+
 # ---- Workday tenant discovery (the F2000 heavyweight ATS; custom per-tenant configs) ------------
 _WD_HOSTS = ("wd1", "wd5", "wd3", "wd2", "wd12")
 _WD_SITES = ("External", "careers", "Careers", "External_Career_Site", "ExternalCareerSite",
@@ -216,13 +266,24 @@ async def main() -> None:
             except Exception:          # noqa: BLE001 — miss (404/timeout/parse) = probed, no hit
                 rows = []
         stats["probed"] += 1
-        async with lock:
-            await record_probe(conn, ats, token, len(rows))
+        if live:                       # dry runs record NOTHING — they must not poison live resume
+            async with lock:
+                await record_probe(conn, ats, token, len(rows))
         if not rows:
+            return
+        ident = await asyncio.to_thread(board_identity, ats, token)
+        if not identity_ok(ident, company, token):
+            stats["rejected"] = stats.get("rejected", 0) + 1
+            print(f"[rej ] {ats:16s} {token:24s} board='{(ident or '?')[:32]}' ≠ {company[:28]} "
+                  f"— wrong-company guard", flush=True)
+            if live:                              # remember the rejection (never re-probed)
+                async with lock:
+                    await record_probe(conn, ats, token, -len(rows))
             return
         stats["hits"] += 1
         stats["jobs"] += len(rows)
-        print(f"[hit ] {ats:16s} {token:24s} {company[:28]:28s} {len(rows):5d} jobs", flush=True)
+        print(f"[hit ] {ats:16s} {token:24s} {company[:28]:28s} {len(rows):5d} jobs "
+              f"(board='{(ident or token)[:28]}')", flush=True)
         if not live:
             return
         texts = [f"{r.get('title','')} at {company}. {r.get('location','')}. {r.get('department','')}"
@@ -302,8 +363,9 @@ async def main() -> None:
         await conn.close()
     est_cost = stats["jobs"] * 20 / 1_000_000 * 0.02
     print(f"\n=== sweep summary ===\nprobed: {stats['probed']} | boards hit: {stats['hits']} | "
-          f"jobs seen: {stats['jobs']} | upserted: {stats['written'] if live else 0} "
-          f"({'DRY' if not live else 'live'}) | est. embed cost: ~${est_cost:.2f}", flush=True)
+          f"wrong-company rejected: {stats.get('rejected', 0)} | jobs seen: {stats['jobs']} | "
+          f"upserted: {stats['written'] if live else 0} ({'DRY' if not live else 'live'}) | "
+          f"est. embed cost: ~${est_cost:.2f}", flush=True)
 
 
 if __name__ == "__main__":
