@@ -3534,9 +3534,11 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                             ires.get("metric") or "", "")
                         _cb = ires.get("coverage_basis") or {}
                         _parts = [ires.get("narrative") or "",
-                                  "\n".join(f"{_i}. **{r.get('display') or r.get('value')}** — "
-                                            f"{int(r.get('n') or 0):,}{(' ' + _lbl) if _lbl else ''}"
-                                            for _i, r in enumerate(_rows, 1)),
+                                  # blank line per row: the FE renderer treats single newlines as
+                                  # spaces, which squashed the ranking into one inline paragraph
+                                  "\n\n".join(f"{_i}. **{r.get('display') or r.get('value')}** — "
+                                              f"{int(r.get('n') or 0):,}{(' ' + _lbl) if _lbl else ''}"
+                                              for _i, r in enumerate(_rows, 1)),
                                   "\n".join(f"⚠ {c}" for c in (ires.get("caveats") or [])),
                                   _cb.get("population_statement") or ""]
                         _ans = "\n\n".join(p for p in _parts if p).strip() or _ans
