@@ -637,3 +637,25 @@ def test_geo_scope_keeps_unknown_country_people(monkeypatch):
         scope_country="us"))
     names = {p["name"] for p in res["people_rows"]}
     assert names == {"US Alum", "Untagged Alum"}    # unknown kept, known-foreign dropped
+
+
+def test_empty_insights_falls_through_to_research_with_gap(monkeypatch):
+    """An insights-routed question the index can't support (zero rows) answers from open-world
+    research with the index gap disclosed — never a dead-end 'no match' (session 34f20ddb)."""
+    svc = _AskSpy(answer="AI skills in demand, from grounded research")
+
+    async def _empty_insights(**kw):
+        return {"grounded": False, "abstain": False, "rows": [], "coverage_basis": {},
+                "answer": "No people in Roster's index match that yet."}
+
+    import api.people_population as pp
+    monkeypatch.setattr(pp, "answer_roster_insights", _empty_insights)
+    client = _client(monkeypatch, svc, {"route": "insights", "confidence": "high"},
+                     ROSTER_INSIGHTS_QA="1")
+    client.app.state.claim_store = object()
+    r = client.post("/qa", json={"question": "Top AI skills for engineers in demand",
+                                 "tenant_id": "demo"})
+    data = r.json()
+    assert len(svc.calls) == 1                       # research ran
+    assert data["answer"].startswith("AI skills in demand")
+    assert any("couldn't support" in g for g in data["coverage_gaps"])

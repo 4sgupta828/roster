@@ -3523,7 +3523,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         store=_cstore, llm=build_llm(mode=resolve_mode()))
                 except Exception:   # noqa: BLE001 — insights trouble → open-world research below
                     ires = None
-                if ires is not None and not ires.get("abstain"):
+                if ires is not None and not ires.get("abstain") and (ires.get("rows") or []):
                     # Markdown-shape the insights answer for the Q&A prose surface: blank lines
                     # between narrative / ranked list / caveats so the list renders as a list.
                     # Numbers stay CODE-OWNED (rows come from the store, never the model).
@@ -3558,6 +3558,13 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     return ResearchOut(grounded=False, answer=ires.get("answer") or "",
                                        claims=[], coverage_gaps=[], rejected=0, session_id=sid,
                                        qa_route=_route.model_dump())
+                if ires is not None and not ires.get("abstain") and not (ires.get("rows") or []):
+                    # The index simply lacks coverage for this aggregate (sparse dimension, zero
+                    # rows) — OPEN-WORLD contract: answer from research, disclose the index gap
+                    # (the "Top AI skills in demand" dead-end, session 34f20ddb).
+                    _route_gaps.append("Roster's index couldn't support this as a computed "
+                                       "aggregate (sparse or missing dimension) — answered from "
+                                       "grounded research instead.")
                 # low/medium-confidence insights miss → fall through to native research
             elif _r == "connection_path":
                 cres = None
