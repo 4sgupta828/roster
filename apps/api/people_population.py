@@ -355,7 +355,7 @@ async def build_apply_analysis(jd_text: str, profile: dict, resume_text: str, ll
                 "reorder, or surface the candidate's REAL experience for this role — never invent anything. "
                 "Ground every statement in the two documents."),
             messages=[{"role": "user", "content": f"JOB DESCRIPTION:\n{jd[:9000]}\n\nCANDIDATE RÉSUMÉ:\n{rt[:9000]}"}],
-            response_format=_ApplyAnalysis, max_tokens=1600)
+            response_format=_ApplyAnalysis, max_tokens=4000)
         a = comp.parsed
         reqs = []
         for r in (a.requirements or []):
@@ -440,7 +440,7 @@ async def build_tailored_resume(jd_text: str, profile: dict, resume_text: str, l
                 "in the original. The result must be a faithful résumé the candidate could send as-is."),
             messages=[{"role": "user", "content": f"TARGET ROLE (JOB DESCRIPTION):\n{jd[:9000]}\n\n"
                        f"ORIGINAL RÉSUMÉ (the ONLY source of truth — preserve structure + every detail, add nothing):\n{rt[:12000]}"}],
-            response_format=_TailoredResume, max_tokens=2200)
+            response_format=_TailoredResume, max_tokens=4000)
         draft = (comp.parsed.resume or "").strip()
         if not draft:
             return None
@@ -459,7 +459,7 @@ async def build_tailored_resume(jd_text: str, profile: dict, resume_text: str, l
                     "anything of your own. When in doubt, defer to the original's wording."),
                 messages=[{"role": "user", "content":
                            f"ORIGINAL (ground truth):\n{rt[:12000]}\n\nDRAFT (verify + correct):\n{draft[:12000]}"}],
-                response_format=_TailoredResume, max_tokens=2200)
+                response_format=_TailoredResume, max_tokens=4000)
             corrected = (audit.parsed.resume or "").strip()
             return corrected or draft
         except Exception:   # noqa: BLE001 — if the audit fails, fall back to the (prompt-grounded) draft
