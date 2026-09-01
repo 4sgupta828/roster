@@ -1115,24 +1115,44 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     if scope_country and not facets.get("country"):
         facets["country"] = [scope_country]
 
+    _worked_at_union_used = False
+
     async def _enum_recall(fs: dict, cap: int = 200):
-        """AND-enumerate with RECALL-PRESERVING country semantics: an entity with NO country facet
-        is KEPT unless known-foreign (semantic-first's rule). Requiring the country KEY silently
-        excluded almost every match — 'worked at Apple' collapsed to 1 row because most Apple
-        alumni carry no country facet (session b5353056). A country/geo-only filter stays strict
-        (never 'everyone')."""
+        """AND-enumerate with two RECALL-PRESERVING rules:
+        1. Country never hard-gates: an entity with NO country facet is KEPT unless known-foreign
+           (semantic-first's rule) — requiring the country KEY excluded almost every match
+           (session b5353056). A country/geo-only filter stays strict (never 'everyone').
+        2. worked_at unions in current-company matches: past-employer tagging is SPARSE in the
+           index (worked_at=apple → 1 person; company=apple → 1,363) and 'worked at X' includes
+           people still there — tagged alumni lead, current-X people follow, disclosed in
+           coverage. Skipped when the query names company separately (ex-X now-at-Y stays exact)."""
+        nonlocal _worked_at_union_used
         want = set(fs.get("country") or [])
         rest = {k: v for k, v in fs.items() if k != "country"}
-        if not want or not rest:
+        if not rest:
             return await store.enumerate_by_facets(fs, tenant_id=tenant_id, cap=cap)
-        rows_ = await store.enumerate_by_facets(rest, tenant_id=tenant_id, cap=max(cap, 1000))
-        out = []
-        for r in rows_:
-            cv = {(f.get("value_norm") or "") for f in r["facets"] if f["facet_key"] == "country"}
-            cv.discard("")
-            if not cv or (cv & want):    # unknown country keeps the person (recall)
-                out.append(r)
-        return out[:cap]
+        variants = [rest]
+        if rest.get("worked_at") and not rest.get("company"):
+            v2 = {k: v for k, v in rest.items() if k != "worked_at"}
+            v2["company"] = rest["worked_at"]
+            variants.append(v2)
+        rows_, seen = [], set()
+        for i, fs2 in enumerate(variants):
+            for r in await store.enumerate_by_facets(fs2, tenant_id=tenant_id, cap=max(cap, 1000)):
+                if r["entity_id"] not in seen:
+                    seen.add(r["entity_id"])
+                    rows_.append(r)
+                    if i > 0:
+                        _worked_at_union_used = True
+        if want:
+            kept = []
+            for r in rows_:
+                cv = {(f.get("value_norm") or "") for f in r["facets"] if f["facet_key"] == "country"}
+                cv.discard("")
+                if not cv or (cv & want):   # unknown country keeps the person (recall)
+                    kept.append(r)
+            rows_ = kept
+        return rows_[:cap]
 
     # DEEP SEMANTIC SEARCH (flag ROSTER_SEMANTIC): filter by ALL facets (attributes), THEN rank by
     # OpenAI-embedding similarity — the eigen/noesis typed-block pattern (attributes filter, meaning
@@ -1212,6 +1232,10 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                 break
 
     coverage = _coverage_basis(facets, stats, len(rows))
+    if _worked_at_union_used:
+        coverage["population_statement"] = (coverage.get("population_statement", "") +
+            " Past-employer (worked-at) tagging is sparse in the index, so results include people "
+            "CURRENTLY at the named company as well as tagged alumni (alumni listed first).")
     if relaxed_from:
         coverage["relaxed_from"] = relaxed_from
     coverage["semantic_used"] = semantic_used   # observability: did embedding ranking engage?

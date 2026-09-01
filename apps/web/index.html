@@ -2069,18 +2069,11 @@ function setSearchMode(m){
   const switching = outEl && nm !== prev;
   if(switching){
     MODE_VIEWS[prev] = {html: outEl.innerHTML, hidden: outEl.hidden};
+    const v = MODE_VIEWS[nm];
+    outEl.innerHTML = (v && v.html) || "";
+    outEl.hidden = v ? !!v.hidden : true;
   }
   SEARCH_MODE = nm;   // validate against the known modes (not a people/jobs binary)
-  if(switching){
-    if(nm === "qa" && THREAD.turns.length){
-      renderThread();                    // the LIVE thread is the Q&A tab's source of truth
-    } else {
-      const v = MODE_VIEWS[nm];
-      outEl.innerHTML = (v && v.html) || "";
-      outEl.hidden = v ? !!v.hidden : true;
-      document.body.classList.remove("chatting");   // search tabs never use the chat layout
-    }
-  }
   document.querySelectorAll("#pjmode .pjbtn").forEach(b=>{
     const on = b.dataset.pj === SEARCH_MODE; b.classList.toggle("on", on); b.setAttribute("aria-selected", on);
   });
@@ -6008,14 +6001,10 @@ function newConversation(){
   window.scrollTo({top:0}); q.focus();
 }
 function renderThread(){
-  // Q&A/chat content belongs to the Q&A tab. If an answer lands while the user is on a People/
-  // Jobs search tab, don't clobber their view — drop the stale Q&A snapshot; switching back to
-  // Q&A re-renders the live thread (setSearchMode).
-  if(typeof SEARCH_MODE !== "undefined" && (SEARCH_MODE === "people" || SEARCH_MODE === "jobs")){
-    delete MODE_VIEWS.qa;
-    return;
-  }
-  out.hidden = false;   // a tab switch may have hidden #out — the thread must render VISIBLY
+  // ALL tabs render results through this thread view (People searches included — the server
+  // routes per surface). The one real bug was visibility: a tab switch could leave #out hidden,
+  // so the question+answer rendered invisibly ("only findable in History"). Always unhide.
+  out.hidden = false;
   document.body.classList.toggle("chatting", THREAD.turns.length > 0);   // dock composer to bottom
   out.innerHTML = "";
   if(THREAD.session_id){                          // one shareable link + reset, per thread

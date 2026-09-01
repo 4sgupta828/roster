@@ -539,7 +539,11 @@ def test_identity_facets_gate_semantic_first(monkeypatch):
 
         async def enumerate_by_facets(self, facets, *, tenant_id, cap):
             calls["enum"] += 1
-            assert facets.get("worked_at") == ["apple"]     # identity facet gates
+            # identity facet gates: either the worked_at variant or the sparse-tag union's
+            # company variant — never an ungated whole-index scan
+            assert facets.get("worked_at") == ["apple"] or facets.get("company") == ["apple"]
+            if facets.get("company"):
+                return []                                   # union variant: no current-apple rows
             return [{"entity_id": "github:x", "name": "Xa", "facets": [
                 {"facet_key": "worked_at", "facet_value_norm": "apple",
                  "display_value": "Apple", "document_id": "d", "block_id": "b"}]}]
@@ -659,3 +663,40 @@ def test_empty_insights_falls_through_to_research_with_gap(monkeypatch):
     assert len(svc.calls) == 1                       # research ran
     assert data["answer"].startswith("AI skills in demand")
     assert any("couldn't support" in g for g in data["coverage_gaps"])
+
+
+def test_worked_at_unions_current_company(monkeypatch):
+    """'People who worked at Apple' includes people currently there: worked_at matches lead,
+    company=apple people follow, and the coverage discloses the union (worked_at is sparse)."""
+    from roster_kernel.providers.llm import LLMResult
+    from api.people_population import _FacetParse, answer_people_population
+
+    class _LLM:
+        async def complete(self, *, system, messages, response_format, max_tokens=2048,
+                           temperature=None):
+            return LLMResult(parsed=_FacetParse(worked_at=["apple"]), output_tokens=5)
+
+    def _p(eid, name, key, val):
+        return {"entity_id": eid, "name": name, "facets": [
+            {"facet_key": key, "facet_value_norm": val, "value_norm": val,
+             "display_value": val.title(), "document_id": "d", "block_id": "b"}]}
+
+    class _Store:
+        async def people_index_stats(self, *, tenant_id):
+            return {"persons_indexed": 9, "source_documents": 3, "facet_coverage": {}}
+
+        async def enumerate_by_facets(self, facets, *, tenant_id, cap):
+            if "worked_at" in facets:
+                return [_p("gh:alum", "Ada Alum", "worked_at", "apple")]
+            assert facets.get("company") == ["apple"]
+            return [_p("gh:cur", "Cara Current", "company", "apple"),
+                    _p("gh:alum", "Ada Alum", "worked_at", "apple")]   # dedup by entity_id
+
+    import asyncio
+    monkeypatch.delenv("ROSTER_SEMANTIC", raising=False)
+    monkeypatch.delenv("ROSTER_PEOPLE_SEMANTIC_FIRST", raising=False)
+    res = asyncio.get_event_loop().run_until_complete(answer_people_population(
+        question="people who worked at Apple", tenant_id="demo", store=_Store(), llm=_LLM()))
+    names = [p["name"] for p in res["people_rows"]]
+    assert names[0] == "Ada Alum" and "Cara Current" in names and len(names) == 2
+    assert "CURRENTLY at the named company" in res["coverage_basis"]["population_statement"]
