@@ -7006,27 +7006,40 @@ function renderApplyAnalysis(a){
   const cb = $("#aaCover"); if(cb) cb.addEventListener("click", runCoverLetter);
 }
 // Render a generated document as an EDITABLE textarea + Save-as-PDF + Copy (résumé & cover letter).
-function renderEditableDoc(box, title, text, filename){
+function renderEditableDoc(box, title, text, filename, isResume){
   if(!box) return;
+  const hint = isResume ? "Markdown (##, **bold**, - bullets) — Save as PDF renders it formatted. Grounded in your résumé; nothing fabricated."
+                        : "Edit freely — grounded in your résumé. Review before you send.";
   box.innerHTML = `<textarea class="aa-edit" rows="16">${esc(text||"")}</textarea>
     <div style="margin-top:.35rem;">
       <button type="button" class="histbtn aa-pdf">⬇ Save as PDF</button>
       <button type="button" class="histbtn aa-copy" style="margin-left:.4rem;">Copy</button>
-      <span style="font-size:.74rem;color:var(--muted);margin-left:.5rem;">Edit freely — grounded in your résumé; nothing fabricated. Review before you use it.</span>
+      <span style="font-size:.74rem;color:var(--muted);margin-left:.5rem;">${esc(hint)}</span>
     </div>`;
   const ta = box.querySelector(".aa-edit");
-  box.querySelector(".aa-pdf").addEventListener("click", ()=>saveAsPdf(title, ta.value, filename));
+  box.querySelector(".aa-pdf").addEventListener("click", ()=>saveAsPdf(title, ta.value, filename, isResume));
   const cp = box.querySelector(".aa-copy");
   cp.addEventListener("click", ()=>{ try{ navigator.clipboard.writeText(ta.value); cp.textContent="Copied ✓"; }catch(e){} });
 }
 // Save the current (edited) text as PDF via the browser's print → "Save as PDF". No library/deps.
-function saveAsPdf(title, text, filename){
-  // Print the content EXACTLY as-is (no injected heading/label) — the title is only the browser/file
-  // name for the print dialog. The document IS the résumé/letter, ready to send.
+function saveAsPdf(title, text, filename, isResume){
+  // The title is only the print-dialog/file name (no injected heading in the body). The résumé text is
+  // Markdown (docling export_to_markdown) — RENDER it to formatted HTML with résumé typography; the
+  // cover letter is prose — keep it plain (pre-wrap). Then print → the user saves as PDF. No deps.
   const w = window.open("", "_blank"); if(!w) return;
+  const body = isResume
+    ? `<div class="doc">${mdToHtml(text||"")}</div>`
+    : `<div class="doc" style="white-space:pre-wrap">${esc(text||"")}</div>`;
+  const css = `@page{margin:0.8in;}
+    body{font:12px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#111;}
+    .doc{max-width:8in;margin:0 auto;} .doc h1{font-size:20px;margin:0 0 2px;} .doc h2{font-size:13px;
+    text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #999;padding-bottom:2px;margin:14px 0 6px;}
+    .doc h3{font-size:12.5px;margin:8px 0 2px;} .doc p{margin:3px 0;} .doc ul{margin:4px 0 8px;padding-left:18px;}
+    .doc li{margin:2px 0;} .doc strong{font-weight:700;} .doc a{color:#111;text-decoration:none;}
+    .doc table{width:100%;border-collapse:collapse;} .doc td,.doc th{padding:2px 4px;text-align:left;}`;
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(filename||title||"document")}</title>
-    <style>@page{margin:1in;} body{font:12.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#111;white-space:pre-wrap;word-wrap:break-word;}</style></head>
-    <body>${esc(text||"")}<script>window.onload=function(){setTimeout(function(){window.print();},150);};<\/script></body></html>`);
+    <style>${css}</style></head><body>${body}
+    <script>window.onload=function(){setTimeout(function(){window.print();},200);};<\/script></body></html>`);
   w.document.close(); w.focus();
 }
 async function runAaDoc(kind){                 // kind: 'cover-letter' | 'tailored-resume'
@@ -7041,8 +7054,8 @@ async function runAaDoc(kind){                 // kind: 'cover-letter' | 'tailor
       body: JSON.stringify({job_url:url, job_description:text})});
     if(!r.ok){ const e = await r.json().catch(()=>({})); if(box) box.innerHTML = `<div class="pitem-empty">${esc(e.detail||"Couldn't generate that.")}</div>`; return; }
     const d = await r.json();
-    if(isResume) renderEditableDoc(box, "Tailored résumé", d.resume||"", "resume.pdf");
-    else renderEditableDoc(box, "Cover letter", d.cover_letter||"", "cover-letter.pdf");
+    if(isResume) renderEditableDoc(box, "Résumé", d.resume||"", "resume.pdf", true);
+    else renderEditableDoc(box, "Cover letter", d.cover_letter||"", "cover-letter.pdf", false);
   }catch(e){ if(box) box.innerHTML = `<div class="pitem-empty">Generation failed — try again.</div>`; }
   finally{ if(btn){ btn.disabled = false; btn.textContent = label; } }
 }
