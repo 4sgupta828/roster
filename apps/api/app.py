@@ -1094,6 +1094,8 @@ class ResearchIn(BaseModel):
     mode: str = ""                        # analytical lens, e.g. "acquirer" (M&A); "" = default investor lens
     company: str = ""                     # single-company DILIGENCE subject (name / entity_id); used only by /research/diligence
     country: str = ""                     # people geo-scope from the top-right selector (default 'us' when the flag is on)
+    surface: str = ""                     # which UI tab asked: "people" | "jobs" | "qa" | "" — People/Jobs are
+    #                                       SEARCH surfaces (never prose answers); Q&A owns questions
 
 
 class FocusIn(BaseModel):
@@ -1416,6 +1418,8 @@ class ResearchOut(BaseModel):
     qa_route: dict | None = None          # ROSTER_QA_ROUTER: the intent-router decision that shaped this
     #                                       answer {route, subject_kind, entities, axes, confidence} —
     #                                       observability/audit (None when the router did not run)
+    redirect_to_qa: bool = False          # a SEARCH surface (People/Jobs tab) received a QUESTION —
+    #                                       no research ran; the FE offers a one-click hop to Q&A
     unverified_priors: list = []          # ROSTER_PARAMETRIC_LED (T3): the model's OWN asserted facts that
     #                                       retrieval could NOT ground [{text,needs_freshness}] — the
     #                                       labeled register, kept OUT of `claims`/grounded prose (empty
@@ -2536,6 +2540,17 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         filters `rs_job`, each result carries an apply link. 404 when off."""
         if not jobs_enabled():
             raise HTTPException(status_code=404, detail="jobs mode not enabled")
+        # JOBS TAB IS A SEARCH SURFACE (native-Q&A deployments): clearly question-shaped input with
+        # no job-search vocabulary gets a no-cost redirect to Q&A instead of an irrelevant row list.
+        if qa_router_enabled():
+            _q = (body.question or "").strip()
+            if re.match(r"(?i)^(what|why|how|who|whose|when|explain|compare|analy[sz]e|tell me|"
+                        r"describe|should|is|are|does|do)\b", _q) and not \
+                    re.search(r"(?i)\b(job|jobs|role|roles|opening|openings|position|positions|"
+                              r"hiring|career|careers|vacanc|intern|apply|remote|engineer|salary)\b", _q):
+                return {"jobs": [], "count": 0, "query": {}, "stats": {}, "redirect_to_qa": True,
+                        "note": "That reads like a question — Jobs mode searches open roles. "
+                                "Ask it in 💬 Q&A for a grounded answer."}
         store = _claim_store_cached()
         if store is None:
             return {"jobs": [], "count": 0, "query": {}, "stats": {"jobs": 0, "companies": 0}}
@@ -3425,12 +3440,32 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         _route = None            # QaRoute (persisted in the session extra for auditability)
         _route_afo = None        # route-selected compose directive (answer_format_override)
         _route_links: list = []  # person_dossier: secondary profile-search links (never the answer)
-        _route_docs = None       # jd_analysis: the pasted JD as a per-request CITABLE document
+        _route_docs = None       # jd/match routes: pasted JD/résumé + match rows as CITABLE documents
         _route_gaps: list = []   # route-derived coverage gaps (e.g. graph-coverage honesty)
-        _q_route = None          # jd_analysis: the leading ask (the JD itself rides as a document)
+        _route_rows: list = []   # candidates_for_jd: ranked candidate CARDS shown beside the analysis
+        _q_route = None          # jd/match routes: the leading ask (the paste rides as a document)
         if qa_router_enabled():
             from api import qa_router as _qr
             from roster_vertical.professional_formats import ROUTE_ANSWER_FORMATS as _RAF
+            # PEOPLE TAB IS A SEARCH SURFACE, NOT AN ORACLE: it only ever runs the closed people
+            # engine (rows / person card / coverage gap). A question-shaped input gets a no-cost
+            # redirect to Q&A — never a prose answer inside People mode. No router LLM call needed.
+            if (body.surface or "").strip().lower() == "people" and people_population_enabled():
+                out, pres = await _people_population_route(fallthrough=True)
+                if out is not None:
+                    return out
+                if pres and pres.get("kind") == "person":
+                    if on_event is not None:
+                        await on_event({"type": "people", "count": 1})
+                    return ResearchOut(grounded=True, answer="", claims=[], coverage_gaps=[],
+                                       rejected=0, people_rows=[pres["person_card"]],
+                                       coverage_basis=None, session_id=None)
+                return ResearchOut(
+                    grounded=False, claims=[], coverage_gaps=[], rejected=0, people_rows=[],
+                    answer="That reads like a question rather than a people search. People mode "
+                           "searches Roster's grounded people index — ask this in 💬 Q&A to get a "
+                           "grounded, cited answer.",
+                    redirect_to_qa=True)
             _route = await _qr.classify_qa_route(
                 body.question, build_llm(mode=resolve_mode()), history=body.history)
             if on_event is not None:
@@ -3607,6 +3642,72 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     # source span-verifies quotes from it) — claims cite the JD text itself.
                     _route_docs = [{"name": "job-description (user-provided)", "text": _jd}]
                     _q_route = _ask_q
+            elif _r == "candidates_for_jd":
+                # CONNECT THE DOTS: JD → ranked candidates from the grounded people index, then a
+                # critical fit analysis over BOTH as citable documents. No JD text → ask for it.
+                _ask_q, _jd = _qr.extract_jd_text(body.question)
+                if not _jd and len(body.question) > 200:
+                    _jd = body.question            # long but marker-less paste — match on it anyway
+                if not _jd:
+                    return ResearchOut(
+                        grounded=False, answer="", claims=[], coverage_gaps=[], rejected=0,
+                        clarification="Paste the job description (or its key requirements) and "
+                                      "I'll match candidates from Roster's index against it.",
+                        qa_route=_route.model_dump())
+                if _cstore is not None:
+                    from api.people_population import match_jd_people
+                    try:
+                        mres = await match_jd_people(_cstore, _jd, {"limit": 12})
+                    except Exception:   # noqa: BLE001
+                        mres = {}
+                    _rows = (mres.get("people_rows") or [])[:12]
+                    if _rows:
+                        if on_event is not None:
+                            await on_event({"type": "people", "count": len(_rows)})
+                        _route_rows = _rows
+                        _route_docs = [{"name": "job-description (user-provided)", "text": _jd},
+                                       _qr.candidates_document(_rows)]
+                        _route_afo = _RAF.get("candidates_for_jd")
+                        _q_route = (_ask_q or "Who are the ideal candidates for this role?") + \
+                            " (Critically analyze the fit of the matched candidates.)"
+                    else:
+                        _route_gaps.append("No indexed candidates matched this JD — a people-index "
+                                           "coverage gap, not proof no candidates exist.")
+                        _route_afo = _RAF.get("jd_analysis")
+                        _route_docs = [{"name": "job-description (user-provided)", "text": _jd}]
+                        _q_route = _ask_q
+            elif _r == "jobs_for_profile":
+                # CONNECT THE DOTS: résumé → ranked open roles from the jobs index, then a critical
+                # fit analysis (technical gems, ideal roles) over BOTH as citable documents.
+                _ask_q, _cv = _qr.extract_resume_text(body.question)
+                if not _cv and len(body.question) > 200:
+                    _cv = body.question
+                if not _cv:
+                    return ResearchOut(
+                        grounded=False, answer="", claims=[], coverage_gaps=[], rejected=0,
+                        clarification="Paste the résumé (or a summary of the person's background) "
+                                      "and I'll match open roles from Roster's jobs index.",
+                        qa_route=_route.model_dump())
+                if _cstore is not None:
+                    from api.people_population import match_resume_jobs
+                    try:
+                        mres = await match_resume_jobs(_cstore, {"_resume_text": _cv}, {"limit": 15})
+                    except Exception:   # noqa: BLE001
+                        mres = {}
+                    _jobs = (mres.get("jobs") or [])[:15]
+                    if _jobs:
+                        if on_event is not None:
+                            await on_event({"type": "jobs", "count": len(_jobs)})
+                        _route_docs = [{"name": "resume (user-provided)", "text": _cv},
+                                       _qr.jobs_matches_document(_jobs)]
+                        _route_afo = _RAF.get("jobs_for_profile")
+                        _q_route = (_ask_q or "What are the ideal roles for this background?") + \
+                            " (Critically analyze the fit of the matched roles.)"
+                    else:
+                        _route_gaps.append("No indexed open roles matched this résumé — a jobs-index "
+                                           "coverage gap, not proof no matching jobs exist.")
+                        _route_docs = [{"name": "resume (user-provided)", "text": _cv}]
+                        _q_route = _ask_q
             # general_professional_qa (and every fallthrough above) → native research below.
 
         # PEOPLE-ENUMERATION ROUTE (flag ROSTER_PEOPLE_POPULATION, Rule 20) — the legacy intercept,
@@ -3800,6 +3901,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 _extra["companies"] = companies
             if _people_out:
                 _extra["people"] = _people_out
+            if _route_rows:
+                _extra["people_rows"] = _route_rows        # match-route candidate cards persist too
             if _route is not None:
                 _extra["qa_route"] = _route.model_dump()   # audit: the route that shaped this answer
             turn.update(_extra)
@@ -3847,6 +3950,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     pass
         return ResearchOut(
             grounded=res.grounded, answer=res.composed_answer, claims=claims,
+            people_rows=_route_rows,
             coverage_gaps=res.coverage_gaps, rejected=len(res.rejected_claims),
             source_stats=res.source_stats, session_id=session_id,
             stopped_reason=res.stopped_reason, atoms_gathered=res.atoms_gathered,

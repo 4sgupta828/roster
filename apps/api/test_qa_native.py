@@ -385,3 +385,84 @@ def test_company_hiring_draws_open_roles_from_index(monkeypatch):
     docs = svc.calls[0].get("documents") or []
     assert docs and "roster-index open roles: Acme" == docs[0]["name"]
     assert "Staff Engineer" in docs[0]["text"] and "as of 2026-09-01" in docs[0]["text"]
+
+
+def test_people_surface_never_answers_questions(monkeypatch):
+    """People tab is a SEARCH surface: a question-shaped input gets a no-cost redirect to Q&A —
+    research never runs, no router LLM call is made."""
+    from roster_kernel.providers.llm import LLMResult
+    from api.people_population import _FacetParse
+
+    class _FacetOnlyLLM:
+        async def complete(self, *, system, messages, response_format, max_tokens=2048,
+                           temperature=None):
+            assert response_format is _FacetParse, "router must NOT be consulted on the people surface"
+            return LLMResult(parsed=_FacetParse(), output_tokens=5)   # {} facets, no person
+
+    class _Store:
+        async def people_index_stats(self, *, tenant_id):
+            return {"persons_indexed": 3, "source_documents": 2, "facet_coverage": {}}
+
+    svc = _AskSpy(answer="MUST NOT RUN")
+    monkeypatch.setenv("ROSTER_QA_ROUTER", "1")
+    monkeypatch.setenv("ROSTER_PEOPLE_POPULATION", "1")
+    monkeypatch.delenv("ROSTER_REASONED_DEFAULT", raising=False)
+    monkeypatch.setattr(appmod, "build_llm", lambda *a, **k: _FacetOnlyLLM())
+    app = create_app(svc)
+    app.state.claim_store = _Store()
+    client = TestClient(app)
+    r = client.post("/research", json={"question": "what are the ideal skills of a director of "
+                                       "engineering?", "tenant_id": "demo", "surface": "people"})
+    data = r.json()
+    assert data["redirect_to_qa"] is True
+    assert svc.calls == []
+
+
+def test_candidates_for_jd_matches_and_analyzes(monkeypatch):
+    jd = ("Who fits this role?\n\nAbout the role\nStaff payments engineer.\n\nRequirements\n"
+          "- Distributed systems\n- Payments domain\n" + "filler requirement line\n" * 30)
+    card = {"entity_id": "github:ada", "name": "Ada Byte", "match_pct": 87,
+            "blurb": "Staff engineer, payments infra",
+            "attributes": [{"key": "role", "display": "Staff Engineer"}], "links": []}
+
+    async def _fake_match(store, jd_text, prefs):
+        assert "Distributed systems" in jd_text
+        return {"people_rows": [card]}
+
+    import api.people_population as pp
+    monkeypatch.setattr(pp, "match_jd_people", _fake_match)
+    svc = _AskSpy(answer="critical fit analysis")
+    client = _client(monkeypatch, svc,
+                     {"route": "candidates_for_jd", "subject_kind": "job", "confidence": "high"})
+    client.app.state.claim_store = object()
+    r = client.post("/qa", json={"question": jd, "tenant_id": "demo"})
+    data = r.json()
+    assert data["answer"] == "critical fit analysis"
+    assert data["people_rows"][0]["name"] == "Ada Byte"          # cards ride beside the analysis
+    docs = svc.calls[0].get("documents") or []
+    assert any("candidate matches" in d["name"] for d in docs)   # matches are citable evidence
+    assert any("job-description" in d["name"] for d in docs)
+    assert "recruiter-analyst" in (svc.calls[0].get("answer_format_override") or "")
+
+
+def test_jobs_for_profile_matches_and_analyzes(monkeypatch):
+    cv = ("Best roles for this resume?\n\nSummary: infra engineer.\n\nWork Experience\n"
+          "Built Kafka pipelines at Acme.\n\nEducation\nBS CS\n\nSkills: Kafka, Go\n" + "resume detail line\n" * 30)
+
+    async def _fake_match(store, profile, prefs):
+        assert "Kafka" in profile["_resume_text"]
+        return {"jobs": [{"title": "Staff Infra Engineer", "company": "Stripe", "location": "SF",
+                          "url": "https://x/apply", "match_pct": 91, "reasons": ["role match"]}]}
+
+    import api.people_population as pp
+    monkeypatch.setattr(pp, "match_resume_jobs", _fake_match)
+    svc = _AskSpy(answer="gems + ideal roles")
+    client = _client(monkeypatch, svc,
+                     {"route": "jobs_for_profile", "subject_kind": "person", "confidence": "high"})
+    client.app.state.claim_store = object()
+    r = client.post("/qa", json={"question": cv, "tenant_id": "demo"})
+    assert r.json()["answer"] == "gems + ideal roles"
+    docs = svc.calls[0].get("documents") or []
+    assert any("job matches" in d["name"] for d in docs)
+    assert any("resume" in d["name"] for d in docs)
+    assert "career-analyst" in (svc.calls[0].get("answer_format_override") or "")

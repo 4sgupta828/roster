@@ -32,6 +32,8 @@ QA_ROUTES = (
     "jd_analysis",
     "connection_path",
     "insights",
+    "candidates_for_jd",
+    "jobs_for_profile",
     "general_professional_qa",
     "clarify",
 )
@@ -76,6 +78,10 @@ does this role require".
 "who has X worked with", "who at A also worked at B".
 - insights — an AGGREGATE over Roster's index: counts, rankings, distributions, "how many", "top \
 companies by", "breakdown of".
+- candidates_for_jd — MATCH PEOPLE TO A JOB: "who would be ideal for this role", "find candidates \
+for this JD", a pasted job description asking who fits it.
+- jobs_for_profile — MATCH JOBS TO A PERSON/RÉSUMÉ: "what jobs fit this resume", "ideal roles for \
+this background", a pasted résumé/CV asking where this person should apply.
 - general_professional_qa — any other professional/company/market/technology question.
 - clarify — genuinely ambiguous (e.g. a bare name shared by many people, or person-vs-company \
 ambiguity that would misdirect research). Provide the clarifying question.
@@ -377,3 +383,75 @@ async def company_jobs_document(store, company: str, *, tenant_id: str = "demo")
     except Exception as e:  # noqa: BLE001
         _log.warning("company_jobs_document failed: %s", e)
         return None
+
+
+# ---------------------------------------------------------------------------
+# MATCH-CONVERSATION helpers — the "connect the dots" routes: candidates_for_jd (JD → ideal indexed
+# people) and jobs_for_profile (résumé → ideal indexed roles). The match engines' ranked results are
+# materialized as CITABLE documents so the expert analysis can cite each match's grounded facets,
+# similarity, and links — critical reasoning over real rows, never invented candidates or jobs.
+_RESUME_MARKERS = re.compile(
+    r"(work experience|professional experience|employment history|education\b|"
+    r"skills?\s*[:\n]|summary\s*[:\n]|certifications?|b\.?s\.?|m\.?s\.?|ph\.?d|bachelor|master)", re.I)
+
+
+def extract_resume_text(question: str) -> tuple[str, str]:
+    """Detect a PASTED résumé/CV in the question. Returns (ask, resume_text); resume_text == ""
+    when none is embedded. Structural heuristic (no LLM): long body + résumé-shaped markers.
+    (A JD also has sections — the ROUTER decides jd-vs-résumé intent; this just splits the paste.)"""
+    q = (question or "").strip()
+    if len(q) < 400 or len(_RESUME_MARKERS.findall(q)) < 2:
+        return q, ""
+    lines = q.splitlines()
+    ask_lines: list[str] = []
+    for ln in lines[:4]:
+        if _RESUME_MARKERS.search(ln):
+            break
+        ask_lines.append(ln)
+        if not ln.strip():
+            break
+    ask = " ".join(l.strip() for l in ask_lines if l.strip()) or "Find the best-fit roles for this résumé."
+    return ask, q
+
+
+def candidates_document(rows: list[dict]) -> dict:
+    """Ranked candidate matches → one citable document: per-person grounded facets + similarity."""
+    lines = ["Roster index — candidate matches for the supplied job description (semantic match over "
+             "grounded public profiles; match % = embedding similarity; facts per candidate were "
+             "grounded at ingest; the index is NOT exhaustive — absence here ≠ no candidates exist)."]
+    for i, r in enumerate(rows, 1):
+        bits = [f"{i}. {r.get('name') or r.get('entity_id')}"]
+        if r.get("match_pct"):
+            bits.append(f"match {r['match_pct']}%")
+        if r.get("blurb"):
+            bits.append(str(r["blurb"])[:300])
+        attrs = ", ".join(f"{a.get('key')}: {a.get('display')}"
+                          for a in (r.get("attributes") or [])[:10] if a.get("display"))
+        if attrs:
+            bits.append(attrs)
+        links = " ".join((l.get("url") or "") for l in (r.get("links") or [])[:2])
+        if links:
+            bits.append(links)
+        lines.append(" — ".join(bits))
+    return {"name": "roster-index candidate matches", "text": "\n".join(lines)}
+
+
+def jobs_matches_document(jobs: list[dict]) -> dict:
+    """Ranked job matches → one citable document: title/company/location/similarity/apply link."""
+    lines = ["Roster index — job matches for the supplied résumé (semantic match over aggregated "
+             "public ATS postings; match % = embedding similarity; dates are last index refresh; "
+             "the index is NOT exhaustive — absence here ≠ no matching jobs exist)."]
+    for i, j in enumerate(jobs, 1):
+        bits = [f"{i}. {j.get('title') or ''} at {(j.get('company') or '').replace('_', ' ')}"]
+        if j.get("location"):
+            bits.append(str(j["location"]))
+        if j.get("match_pct"):
+            bits.append(f"match {j['match_pct']}%")
+        if j.get("reasons"):
+            bits.append(", ".join(map(str, j["reasons"][:4])))
+        if j.get("updated_at"):
+            bits.append(f"as of {str(j['updated_at'])[:10]}")
+        if j.get("url"):
+            bits.append(str(j["url"]))
+        lines.append(" — ".join(bits))
+    return {"name": "roster-index job matches", "text": "\n".join(lines)}

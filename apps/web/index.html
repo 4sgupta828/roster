@@ -2410,7 +2410,17 @@ function qaMarkup(d, question){
     : "";
   return `<div class="ppl-wrap">${head}<div class="rqanswer md" style="margin-top:.6rem;">${mdToHtml(answer)}</div>${citesBlock}${gapsBlock}${ppl}</div>`;
 }
+// One-click hop from a search surface to Q&A: switch the tab and re-ask the same question there.
+function hopToQA(){
+  const question = CURRENT_Q || (document.getElementById("q")||{}).value || "";
+  setSearchMode("qa");
+  if(question) askQuestion(question, {skipRefine:true});
+}
 function jobsMarkup(d){
+  if(d.redirect_to_qa){
+    return `<div class="ppl-wrap"><div class="ppl-cov">${esc(d.note||"That reads like a question — ask it in Q&A.")}</div>
+      <button type="button" class="histbtn" style="margin-top:.6rem;" onclick="hopToQA()">💬 Ask in Q&amp;A</button></div>`;
+  }
   const jobs = d.jobs||[], st = d.stats||{}, q = d.query||{};
   const cards = jobs.map(j=>{
     const co = esc((j.company||"").replace(/_/g," "));
@@ -3064,6 +3074,13 @@ function render(data, target, opts){
   // when an elliptical follow-up was resolved to a self-contained question, show it (transparency)
   if(data.resolved_question){
     parts.push(`<div class="rqnote">↳ Interpreted your follow-up as: <b>${esc(data.resolved_question)}</b></div>`);
+  }
+  // SEARCH-surface guard: a question typed in People mode → a one-click hop to Q&A (no answer ran).
+  if(data.redirect_to_qa){
+    parts.push(`<div class="ppl-wrap"><div class="ppl-cov">${esc(data.answer||"That reads like a question — ask it in Q&A.")}</div>
+      <button type="button" class="histbtn" style="margin-top:.6rem;" onclick="hopToQA()">💬 Ask in Q&amp;A</button></div>`);
+    target.innerHTML = parts.join("");
+    return;
   }
   // PEOPLE-ENUMERATION result — enriched cards (name→profile link, role, tags) + honest coverage
   // banner, instead of the plain-text answer wall.
@@ -5398,8 +5415,11 @@ async function askQuestion(question, opts){
   // EXPLICIT mode: the People/Jobs toggle decides routing — no keyword guessing. Jobs → ATS search;
   // People → the grounded people index (server routes it). (Legacy keyword fallback kept for safety.)
   if(SEARCH_MODE === "jobs"){ await runJobs(question); return; }
-  if(SEARCH_MODE === "qa"){ await runQA(question); return; }   // Q&A → Eigen research proxy (/qa)
-  if(SEARCH_MODE !== "people" &&
+  // Q&A: with the NATIVE router live, fall THROUGH to the full conversational research flow below
+  // (thread, follow-ups, streaming, suggestions — the eigen experience); the server's intent router
+  // picks the engine per question. Legacy (router off) keeps the one-shot runQA path.
+  if(SEARCH_MODE === "qa" && !window.QA_ROUTER_ENABLED){ await runQA(question); return; }
+  if(SEARCH_MODE !== "people" && SEARCH_MODE !== "qa" &&
      (/\b(jobs?|hiring|openings?|positions?|careers?|vacanc|apply)\b|\bopen roles?\b/i.test(question)) && await runJobs(question)){
     return;
   }
@@ -5415,6 +5435,7 @@ async function askQuestion(question, opts){
   if(DUEL_ENABLED && !opts.skipDuel && APP_MODE === "qa" && !THREAD.turns.length){ return runDuel(question); }
   const conv = CONV_ENABLED;
   const payload = {question, tenant_id:"demo", sources: chosen(), country: (window.ROSTER_COUNTRY||"us"),
+    surface: SEARCH_MODE,   // which tab asked — People/Jobs are SEARCH surfaces; Q&A owns questions
     user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""};   // attribute sessions to the user
   if(EFFORT_ENABLED && EFFORT > 1) payload.effort = EFFORT;
   if(ATTACHMENTS.length) payload.attachments = ATTACHMENTS.slice();
