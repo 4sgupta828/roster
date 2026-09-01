@@ -304,23 +304,15 @@ async def indexed_jobs_answer(store, question: str, llm, *, country: str = "") -
                                f"{stats.get('companies', 0):,} companies indexed; not every job on "
                                "the market)."),
                     "jobs": [], "query": q, "stats": stats, "grounded": False}
-        lines = []
-        for r in rows[:25]:
-            loc = (r.get("location") or "").strip()
-            url = (r.get("url") or "").strip()
-            title = r.get("title") or ""
-            entry = f"- **{title}** — {r.get('company') or ''}" + (f" · {loc}" if loc else "")
-            if url:
-                entry += f" · [apply]({url})"
-            lines.append(entry)
         upd = ""
         newest = max((str(r.get("updated_at") or "") for r in rows), default="")
         if newest:
             upd = f" Postings as of their last index refresh (newest {newest[:10]})."
+        # The rows render as job CARDS in the UI (apply links clickable) — the answer is just the
+        # honest lead, never a markdown wall of links.
         answer = (f"{len(rows)} matching open role{'s' if len(rows) != 1 else ''} in Roster's job "
-                  f"index:\n\n" + "\n".join(lines) +
-                  f"\n\nFrom Roster's aggregated public-ATS index ({stats.get('jobs', 0):,} roles, "
-                  f"{stats.get('companies', 0):,} companies) — not an exhaustive market view.{upd}")
+                  f"index ({stats.get('jobs', 0):,} roles across {stats.get('companies', 0):,} "
+                  f"companies — not an exhaustive market view).{upd}")
         return {"answer": answer, "jobs": rows[:25], "query": q, "stats": stats, "grounded": True}
     except Exception as e:  # noqa: BLE001
         _log.warning("indexed_jobs_answer failed: %s", e)

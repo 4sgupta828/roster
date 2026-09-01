@@ -1381,6 +1381,7 @@ class ResearchOut(BaseModel):
     grounded: bool
     answer: str = ""                 # synthesized prose answer, grounded in findings
     people_rows: list = []           # people-enumeration rows (empty unless ROSTER_PEOPLE_POPULATION routed here)
+    jobs: list = []                  # indexed-job rows (the Q&A jobs route) — rendered as job cards, not prose
     coverage_basis: dict | None = None  # honest coverage facts for a people-enumeration answer (else None)
     claims: list[Citation]           # the verified findings (evidence for the answer)
     coverage_gaps: list[str]
@@ -2676,7 +2677,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         may carry (people rows/coverage for discovery, profile links, clarification, route audit)."""
         return {"answer": out.answer, "claims": [c.model_dump() for c in out.claims],
                 "grounded": out.grounded, "coverage_gaps": out.coverage_gaps, "source": "roster",
-                "session_id": out.session_id, "people_rows": out.people_rows,
+                "session_id": out.session_id, "people_rows": out.people_rows, "jobs": out.jobs,
                 "coverage_basis": out.coverage_basis, "people": out.people,
                 "clarification": out.clarification, "qa_route": out.qa_route}
 
@@ -3625,6 +3626,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                          "jobs": list(jres.get("jobs") or []),
                          "query": jres.get("query") or {}, "qa_route": _route.model_dump()})
                     return ResearchOut(grounded=bool(jres.get("grounded")), answer=jres["answer"],
+                                       jobs=list(jres.get("jobs") or []),
                                        claims=[], coverage_gaps=[], rejected=0, session_id=sid,
                                        qa_route=_route.model_dump())
                 # jobs engine unavailable → fall through to native research

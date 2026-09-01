@@ -11,7 +11,7 @@
   :root{
     color-scheme:light;
     --bg:#F7F8FB; --panel:#FFFFFF; --panel2:#F1F3F9; --ink:#0E1726; --muted:#5B6675;
-    --gold:#4F46E5; --gold-strong:#4338CA; --gold-rgb:79,70,229; --verified:#0E9F6E; --gap:#C2701C;
+    --gold:#4F46E5; --gold-strong:#4338CA; --gold-rgb:79,70,229; --verified:#08744E; --gap:#C2701C;
     --on-accent:#FFFFFF; --on-accent-rgb:255,255,255;   /* white text on the indigo accent */
     --hair:#E4E7EE; --hair-soft:rgba(14,23,38,.05);
     --hl-f:14,159,110; --hl-r:194,112,28; --hl-k:79,70,229;   /* darker tints stay legible on white */
@@ -2393,6 +2393,11 @@ function qaMarkup(d, question){
     const head = `<div class="ppl-head"><b>Q&amp;A</b> <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">✓ grounded in Roster's index</span></div>`;
     return `<div class="ppl-wrap">${head}</div>` + peopleRowsMarkup(d);
   }
+  if(Array.isArray(d.jobs) && d.jobs.length){
+    const head = `<div class="ppl-head"><b>Q&amp;A</b> <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">✓ grounded in Roster's index</span></div>`;
+    const lead = d.answer ? `<div class="ppl-cov" style="margin-top:.5rem;">${esc(d.answer)}</div>` : "";
+    return `<div class="ppl-wrap">${head}${lead}</div>` + jobsMarkup(d);
+  }
   const answer = d.answer || "";
   if(!answer){ return `<div class="ppl-wrap"><div class="pitem-empty">No answer came back for that question. Try rephrasing, or ask something more specific about a person, company, role, or market.</div></div>`; }
   const claims = d.claims || [];
@@ -2533,6 +2538,12 @@ function linkCitationRefs(s, cls){
 // ALREADY-ESCAPED text (XSS-safe) — the [[F]]/[[R]]/[[K]] markers survive esc()
 // (literal brackets) and never collide with [n] refs (F/R/K aren't digits).
 function mdInline(s){
+  // CLICKABLE LINKS (operates on already-ESCAPED text; http(s) only): markdown [label](url) first,
+  // then bare URLs (guarded so a URL inside a just-built href/label is never re-linked).
+  s = s.replace(/\[([^\]\n]{1,120})\]\((https?:\/\/[^\s)<>"']+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  s = s.replace(/(^|[\s(])((https?:\/\/)[^\s<>"')]+)/g,
+    '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
   s = linkCitationRefs(s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>'));
   s = s.replace(/\[\[F\]\]([\s\S]*?)\[\[\/F\]\]/g,'<mark class="hl hl-f">$1</mark>')
        .replace(/\[\[R\]\]([\s\S]*?)\[\[\/R\]\]/g,'<mark class="hl hl-r">$1</mark>')
@@ -3045,9 +3056,11 @@ function render(data, target, opts){
       + `<div class="answer${STRUCTURED?" md":""}">${html}</div>`;
     return;
   }
-  // JOBS turn (the Jobs tab is a conversation too): stored rows render as the jobs cards.
-  if(data.kind === "jobs"){
-    target.innerHTML = jobsMarkup(data);
+  // JOBS rows (the Jobs tab's turns AND the Q&A jobs route) render as job CARDS with clickable
+  // apply links — never a prose wall. A short lead (data.answer) sits above the cards when present.
+  if(data.kind === "jobs" || (Array.isArray(data.jobs) && data.jobs.length)){
+    const lead = data.answer ? `<div class="ppl-cov" style="margin-bottom:.6rem;">${esc(data.answer)}</div>` : "";
+    target.innerHTML = lead + jobsMarkup(data);
     if(typeof wireSaveButtons === "function") wireSaveButtons(target);
     return;
   }
@@ -6017,7 +6030,8 @@ function newConversation(){
 }
 // One-line summary for a FOLDED earlier turn: what it returned, at a glance.
 function turnFoldLabel(t){
-  if(t.kind === "jobs")  return `▸ ${(t.jobs||[]).length} role${(t.jobs||[]).length===1?"":"s"} — expand`;
+  if(t.kind === "jobs" || (Array.isArray(t.jobs) && t.jobs.length))
+    return `▸ ${(t.jobs||[]).length} role${(t.jobs||[]).length===1?"":"s"} — expand`;
   if(Array.isArray(t.people_rows) && t.people_rows.length)
     return `▸ ${t.people_rows.length} ${t.people_rows.length===1?"person":"people"} — expand`;
   if(t.clarification) return `▸ asked to clarify — expand`;
