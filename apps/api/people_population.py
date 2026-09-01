@@ -77,6 +77,102 @@ def embed_query(text: str) -> str | None:
         return None
 
 
+# ---- Résumé → matched jobs, preference-ranked -------------------------------------------------------
+# A compact curated Fortune-500 / big-public-employer slug set (most F500 are public companies). Used
+# only to TAG a job's company for optional preference bonuses — never as a hard gate.
+_F500 = {
+    "walmart","amazon","apple","cvshealth","unitedhealth","exxonmobil","berkshirehathaway","alphabet",
+    "google","mckesson","chevron","att","ford","gm","generalmotors","costco","cigna","microsoft","cardinalhealth",
+    "meta","facebook","comcast","phillips66","valero","dell","target","fanniemae","ups","lowes","jpmorgan",
+    "jpmorganchase","fedex","humana","wellsfargo","citigroup","citi","pepsico","procterandgamble","pg","disney",
+    "walgreens","boeing","tesla","nvidia","intel","ibm","oracle","cisco","pfizer","merck","abbvie","johnsonandjohnson",
+    "jnj","coca","cocacola","abbott","broadcom","qualcomm","amd","salesforce","adobe","netflix","paypal","starbucks",
+    "nike","mcdonalds","americanexpress","goldmansachs","morganstanley","blackrock","3m","mmm","honeywell","caterpillar",
+    "lockheedmartin","rtx","deere","ge","hp","hpe","dell","texasinstruments","ti","micron","appliedmaterials",
+    "generalmills","kraftheinz","mondelez","colgate","kimberly_clark","clorox","unitedairlines","delta","americanairlines",
+    "marriott","hilton","accenture","deloitte","pwc","ey","kpmg","capitalone","americanexpress","visa","mastercard",
+    "servicenow","intuit","booking","uber","airbnb","doordash","spotify","snap","pinterest","zoom","workday",
+    "verizon","tmobile","charter","progressive","allstate","travelers","metlife","prudential","statestreet",
+}
+_SEN_RE = [
+    (re.compile(r"\b(intern|internship|co-?op)\b", re.I), "intern"),
+    (re.compile(r"\b(junior|jr\.?|entry[- ]?level|new ?grad|graduate|associate)\b", re.I), "junior"),
+    (re.compile(r"\b(principal|staff|distinguished|fellow)\b", re.I), "staff_plus"),
+    (re.compile(r"\b(director|vp|vice ?president|head of|chief|cto|ceo|cfo)\b", re.I), "leadership"),
+    (re.compile(r"\b(senior|sr\.?|lead)\b", re.I), "senior"),
+]
+def _title_seniority(title: str) -> str:
+    for rx, lvl in _SEN_RE:
+        if rx.search(title or ""):
+            return lvl
+    return "mid"
+
+
+async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
+    """On-demand: embed the user's résumé profile → most-similar jobs → re-rank by explicit preferences
+    (location/remote, seniority, role keywords, company type F500/public/startup, best-effort salary).
+    Honest: salary is present on only a small % of jobs; company 'stage' is startup-vs-public only."""
+    prefs = prefs or {}
+    # 1) build a résumé query string from the parsed profile (title + skills + summary + recent roles)
+    parts = [profile.get("summary", ""), profile.get("current_title", ""),
+             " ".join(profile.get("skills", []) if isinstance(profile.get("skills"), list) else [])]
+    for w in (profile.get("work_history") or [])[:4]:
+        if isinstance(w, dict):
+            parts.append(" ".join(str(w.get(k, "")) for k in ("title", "company", "description")))
+    for k in ("field_of_study", "highest_degree"):
+        parts.append(str(profile.get(k, "")))
+    qtext = " ".join(p for p in parts if p).strip()
+    if not qtext:
+        return {"jobs": [], "note": "Add or parse a résumé first — no profile content to match on."}
+    qvec = embed_query(qtext)
+    if not qvec:
+        return {"jobs": [], "note": "Matching is unavailable right now."}
+    cands = await store.match_jobs_scored(qvec, cap=int(prefs.get("candidate_cap", 400)))
+    if not cands:
+        return {"jobs": []}
+    # 2) company-type sets (startup from accelerator/stage facets; f500/public from the curated set)
+    startup = await store.companies_with_facet(("accelerator",)) | \
+              await store.companies_with_facet(("stage",), ["startup"])
+    want = set(prefs.get("company_types") or [])          # subset of {f500,public,startup}
+    locs = [str(l).lower() for l in (prefs.get("locations") or []) if str(l).strip()]
+    want_remote = bool(prefs.get("remote"))
+    want_sen = (prefs.get("seniority") or "").lower()
+    role_kw = [str(k).lower() for k in (prefs.get("role_keywords") or []) if str(k).strip()]
+    # 3) score = semantic similarity + preference bonuses (with human-readable reasons)
+    out = []
+    for j in cands:
+        title, loc, co = j.get("title") or "", (j.get("location") or "").lower(), (j.get("company") or "")
+        sim = float(j.get("sim") or 0.0)
+        score, reasons = sim, []
+        is_f500 = co in _F500
+        is_startup = co in startup
+        is_public = is_f500 and not is_startup
+        if want_remote and "remote" in loc:
+            score += 0.15; reasons.append("remote")
+        if locs and any(l in loc for l in locs):
+            score += 0.15; reasons.append("location")
+        jsen = _title_seniority(title)
+        if want_sen and jsen == want_sen:
+            score += 0.12; reasons.append(f"{jsen.replace('_', ' ')} level")
+        if role_kw and any(k in title.lower() for k in role_kw):
+            score += 0.10; reasons.append("role match")
+        if "f500" in want and is_f500:
+            score += 0.12; reasons.append("Fortune 500")
+        if "public" in want and is_public:
+            score += 0.08; reasons.append("public company")
+        if "startup" in want and is_startup:
+            score += 0.12; reasons.append("startup")
+        types = [t for t, ok in (("F500", is_f500), ("Startup", is_startup), ("Public", is_public)) if ok]
+        out.append({**{k: j.get(k) for k in ("id", "company", "title", "location", "url", "source")},
+                    "score": round(score, 4), "match_pct": min(99, round(sim * 100)),
+                    "seniority": jsen, "company_types": types, "reasons": reasons})
+    out.sort(key=lambda x: -x["score"])
+    return {"jobs": out[: int(prefs.get("limit", 40))],
+            "matched_on": qtext[:180],
+            "note": ("Salary preferences are best-effort — most public listings don't publish pay."
+                     if prefs.get("min_salary") else "")}
+
+
 async def parse_people_facets(question: str, llm) -> tuple[dict[str, list[str]], str, str]:
     """LLM query-compiler: free-text people question → (facet filter, person, person_context).
     `facets` is a normalized enumeration filter (empty when the question is not enumeration); `person`

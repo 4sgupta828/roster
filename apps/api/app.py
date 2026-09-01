@@ -1092,6 +1092,16 @@ class OutreachIn(BaseModel):
     message: str = ""
 
 
+class MatchIn(BaseModel):
+    locations: list[str] = []
+    remote: bool = False
+    seniority: str = ""             # intern|junior|mid|senior|staff_plus|leadership
+    role_keywords: list[str] = []
+    company_types: list[str] = []   # subset of {f500, public, startup}
+    min_salary: int = 0
+    limit: int = 40
+
+
 class SettingIn(BaseModel):
     key: str
     value: str = ""     # "on" | "off" | "" (empty = follow the env default)
@@ -4339,6 +4349,21 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     async def me_parse_status(x_roster_token: str = Header(default="")) -> dict:
         store, user = await _require_user(x_roster_token)
         return await store.get_parse(user["id"])
+
+    @app.post("/me/match-jobs")
+    async def me_match_jobs(body: MatchIn, x_roster_token: str = Header(default="")) -> dict:
+        """On-demand résumé → best-matching jobs, ranked by the user's preferences (location/remote,
+        seniority, role, company type, best-effort salary). Uses the stored parsed profile + embeddings."""
+        store, user = await _require_user(x_roster_token)
+        profile = (await store.get_profile(user["id"])).get("profile") or {}
+        cstore = _claim_store_cached()
+        if cstore is None:
+            raise HTTPException(status_code=503, detail="job index unavailable")
+        from api.people_population import match_resume_jobs
+        try:
+            return await match_resume_jobs(cstore, profile, body.model_dump())
+        except Exception as e:   # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"match failed: {e}") from e
 
     # ---- outreach log (draft + handoff only; Roster never sends on the user's behalf) ----
     @app.post("/me/outreach")

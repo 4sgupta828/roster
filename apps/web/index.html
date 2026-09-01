@@ -89,6 +89,7 @@
     cursor:pointer;background:transparent;border:1px solid var(--hair);border-radius:9px;
     padding:.38rem .8rem;color:var(--muted);transition:all .13s;}
   .histbtn:hover{color:var(--ink);border-color:var(--muted);background:var(--panel2);}
+  #effort{display:none !important;}   /* Effort dial removed from the UI */
   /* People / Jobs segmented mode toggle — one click, no ambiguity */
   .pjmode{display:inline-flex;gap:.22rem;background:var(--panel2);border:1px solid var(--hair);
     border-radius:999px;padding:.22rem;margin:0 0 1.05rem;}
@@ -1426,7 +1427,6 @@
       </select>
     </label>
     <button type="button" class="histbtn newbtn" id="newbtn" style="margin-left:12px;">＋ New search</button>
-    <a class="histbtn" href="/admin" style="margin-left:0;text-decoration:none;">Coverage</a>
     <button type="button" class="histbtn" id="signinbtn" style="margin-left:0;" title="Sign in or create an account">Sign in</button>
     <button type="button" class="histbtn" id="acctbtn" style="margin-left:0;" hidden title="Your account — shortlists, saved searches, apply profile">◈ Account</button>
     <!-- legacy hidden hooks (handlers guard for null; kept out of the header) -->
@@ -1645,6 +1645,7 @@
       </div>
       <div style="display:flex;gap:.4rem;flex:none;">
         <button type="button" class="idgo" id="acctapply" style="width:auto;padding:.4rem .8rem;">⚑ Apply profile</button>
+        <button type="button" class="histbtn" id="acctmatch">🎯 Match jobs</button>
         <button type="button" class="histbtn" id="logoutbtn">Log out</button>
       </div>
     </div>
@@ -1679,8 +1680,9 @@
         <span id="autofillnote" style="font-size:.78rem;color:var(--muted);margin-left:.4rem;"></span>
       </div>
     </div>
-    <div style="display:flex;gap:.5rem;align-items:center;margin:.6rem 0;">
+    <div style="display:flex;gap:.5rem;align-items:center;margin:.6rem 0;flex-wrap:wrap;">
       <button type="button" class="idgo" id="applysave" style="width:auto;padding:.45rem 1rem;">Save profile</button>
+      <button type="button" class="histbtn" id="matchbtn2" style="margin-left:0;">🎯 Match jobs to my résumé</button>
       <span id="applysaved" style="font-size:.8rem;color:var(--gold);"></span>
     </div>
     <div style="margin-top:.8rem;padding:.6rem;border:1px dashed var(--muted);border-radius:8px;">
@@ -1689,6 +1691,33 @@
       <a id="bookmarklet" href="#" style="display:inline-block;padding:.35rem .8rem;border:1px solid var(--gold);border-radius:6px;color:var(--gold);text-decoration:none;font-weight:600;">⚡ Roster Autofill</a>
       <div style="font-size:.72rem;color:var(--muted);margin-top:.3rem;">Re-save your profile to refresh the bookmark after edits.</div>
     </div>
+  </div>
+</div>
+<!-- Match jobs to résumé: on-demand, preference-ranked -->
+<div class="idmodal" id="matchmodal" hidden>
+  <div class="idcard" style="max-width:720px;width:94%;text-align:left;max-height:88vh;overflow:auto;">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <h2 style="margin:0;">Match jobs to your résumé</h2>
+      <button type="button" class="histbtn" id="matchclose">Close</button>
+    </div>
+    <p style="font-size:.8rem;color:var(--muted);margin:.3rem 0;">We rank open roles by how closely they fit your résumé, weighted by your preferences.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem .7rem;margin:.4rem 0;">
+      <label style="font-size:.8rem;">Preferred locations <input id="mLoc" type="text" placeholder="e.g. San Francisco, New York" style="width:100%;"/></label>
+      <label style="font-size:.8rem;">Role keywords <input id="mRole" type="text" placeholder="e.g. machine learning, backend" style="width:100%;"/></label>
+      <label style="font-size:.8rem;">Seniority
+        <select id="mSen" style="width:100%;"><option value="">Any</option><option value="intern">Intern</option><option value="junior">Junior</option><option value="mid">Mid</option><option value="senior">Senior</option><option value="staff_plus">Staff+</option><option value="leadership">Leadership</option></select>
+      </label>
+      <label style="font-size:.8rem;">Min salary (best-effort) <input id="mSal" type="number" placeholder="optional" style="width:100%;"/></label>
+    </div>
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center;margin:.3rem 0 .5rem;font-size:.82rem;">
+      <label><input type="checkbox" id="mRemote"/> Remote</label>
+      <label><input type="checkbox" id="mF500"/> Fortune 500</label>
+      <label><input type="checkbox" id="mPublic"/> Public company</label>
+      <label><input type="checkbox" id="mStartup"/> Startup</label>
+      <button type="button" class="idgo" id="mGo" style="width:auto;padding:.45rem 1.1rem;margin-left:auto;">🎯 Find matches</button>
+    </div>
+    <div id="matchnote" style="font-size:.78rem;color:var(--muted);"></div>
+    <div id="matchresults" style="margin-top:.4rem;"></div>
   </div>
 </div>
 <!-- Reach out: draft a message → hand off to whatever channel the person shared (no auto-send) -->
@@ -1717,7 +1746,8 @@
 <!-- product settings (admin, password-gated) — live flag toggles, no redeploy -->
 <div class="idmodal" id="setmodal" hidden>
   <div class="idcard">
-    <h2>⚙ Product settings</h2>
+    <h2>⚙ Project settings</h2>
+    <a href="/admin" style="display:inline-block;margin:0 0 .7rem;font-weight:600;color:var(--gold);text-decoration:none;">◈ Coverage — what Roster has indexed ↗</a>
     <div id="setlock">
       <p>Admin only — enter the settings password.</p>
       <input id="setpw" type="password" placeholder="Admin password" autocomplete="off" />
@@ -6127,6 +6157,7 @@ $("#acctbtn") && $("#acctbtn").addEventListener("click", openAccount);
 $("#signinbtn") && $("#signinbtn").addEventListener("click", ()=>{ AUTH_MODE = "login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden = false; });
 $("#logoutbtn") && $("#logoutbtn").addEventListener("click", logout);
 $("#acctapply") && $("#acctapply").addEventListener("click", ()=>{ $("#savedmodal").hidden = true; if(typeof openApply==="function") openApply(); });
+$("#acctmatch") && $("#acctmatch").addEventListener("click", ()=>{ $("#savedmodal").hidden = true; if(typeof openMatch==="function") openMatch(); });
 async function autoSaveSearch(query, mode){
   if(!loggedIn() || !query) return;
   try{ await fetch("/me/searches", {method:"POST",
@@ -6461,6 +6492,49 @@ async function parseResume(){
   }catch(e){ note.textContent = "Parse failed — try again."; }
 }
 $("#autofillresume") && $("#autofillresume").addEventListener("click", parseResume);
+
+// ===== Match jobs to résumé (on-demand, preference-ranked) =====
+function openMatch(){
+  if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
+  $("#matchmodal").hidden = false;
+}
+async function runMatch(){
+  const prefs = {
+    locations: ($("#mLoc").value||"").split(",").map(s=>s.trim()).filter(Boolean),
+    role_keywords: ($("#mRole").value||"").split(",").map(s=>s.trim().toLowerCase()).filter(Boolean),
+    seniority: $("#mSen").value||"",
+    min_salary: parseInt($("#mSal").value||"0",10)||0,
+    remote: $("#mRemote").checked,
+    company_types: [$("#mF500").checked&&"f500", $("#mPublic").checked&&"public", $("#mStartup").checked&&"startup"].filter(Boolean),
+    limit: 40,
+  };
+  $("#matchnote").textContent = "Matching your résumé to open roles…"; $("#matchresults").innerHTML = "";
+  try{
+    const r = await fetch("/me/match-jobs", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(prefs)});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); $("#matchnote").textContent = e.detail || "Add or parse a résumé first (Apply Profile → Autofill from résumé)."; return; }
+    renderMatchResults(await r.json());
+  }catch(e){ $("#matchnote").textContent = "Match failed — try again."; }
+}
+function renderMatchResults(d){
+  const jobs = d.jobs||[];
+  $("#matchnote").textContent = jobs.length ? (d.note||`Top ${jobs.length} matches for your résumé.`) : (d.note || "No matches yet — add or parse a résumé, or loosen preferences.");
+  $("#matchresults").innerHTML = jobs.map(j=>{
+    const co = esc((j.company||"").replace(/_/g," "));
+    const tags = (j.company_types||[]).map(t=>`<span class="ppl-tag">${esc(t)}</span>`).join("");
+    const reasons = (j.reasons||[]).length ? `<span style="color:var(--muted);font-size:.76rem;"> · ${(j.reasons||[]).map(esc).join(" · ")}</span>` : "";
+    const jref = j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||""));
+    const save = `<div class="ppl-acts"><button type="button" class="rsave" data-kind="job" data-ref="${esc(String(jref))}" data-label="${esc(j.title||"")}" data-sub="${esc(co+(j.location?" · "+j.location:""))}" data-url="${esc(j.url||"")}" title="Save to a shortlist">☆</button></div>`;
+    const apply = j.url?`<a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer">Apply ↗</a>`:"";
+    return `<div class="ppl-card">${save}<span class="ppl-body">
+      <span class="ppl-name">${esc(j.title)} <span style="color:var(--gold);font-weight:700;font-size:.78rem;">${j.match_pct}% match</span></span>
+      <span class="ppl-blurb">${co}${j.location?` · ${esc(j.location)}`:""}${reasons}</span>
+      ${tags?`<span class="ppl-tags">${tags}</span>`:""}
+      ${apply?`<span class="ppl-links">${apply}</span>`:""}</span></div>`;
+  }).join("");
+}
+$("#matchclose") && $("#matchclose").addEventListener("click", ()=>{ $("#matchmodal").hidden = true; });
+$("#mGo") && $("#mGo").addEventListener("click", runMatch);
+$("#matchbtn2") && $("#matchbtn2").addEventListener("click", ()=>{ $("#applymodal").hidden=true; openMatch(); });
 
 // ---- product settings (⚙, password-gated): live flag toggles served by /admin/settings ----
 const SET_LABELS = {

@@ -1666,6 +1666,37 @@ class ClaimGraphStore:
             return []
         return [dict(r) for r in rows]
 
+    async def match_jobs_scored(self, qvec: str, *, cap: int = 400) -> list[dict]:
+        """Top `cap` jobs by cosine similarity to the résumé embedding, WITH the similarity score and
+        id, so the caller can re-rank by user preferences (location/seniority/company-type/…)."""
+        pool = await self._get_pool()
+        sql = ("SELECT id, company, title, location, department, url, source, "
+               "1 - (embedding <=> $1::vector) AS sim "
+               "FROM rs_job WHERE embedding IS NOT NULL ORDER BY embedding <=> $1::vector LIMIT $2")
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(sql, qvec, int(cap))
+        except Exception:
+            return []
+        return [dict(r) for r in rows]
+
+    async def companies_with_facet(self, facet_keys: "tuple[str, ...]", values=None) -> set:
+        """Set of company slugs that carry any of `facet_keys` (optionally restricted to `values`) on
+        the people index — used to tag jobs as startup/accelerator-backed for match ranking."""
+        pool = await self._get_pool()
+        conds, args, i = ["facet_key = ANY($1)"], [list(facet_keys)], 2
+        if values:
+            conds.append(f"facet_value_norm = ANY(${i})"); args.append(list(values)); i += 1
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    f"SELECT DISTINCT facet_value_norm FROM roster_entity_facet WHERE facet_key='company' "
+                    f"AND entity_id IN (SELECT entity_id FROM roster_entity_facet WHERE {' AND '.join(conds)})",
+                    *args)
+        except Exception:
+            return set()
+        return {r["facet_value_norm"] for r in rows if r["facet_value_norm"]}
+
     async def jobs_stats(self) -> dict:
         pool = await self._get_pool()
         try:
