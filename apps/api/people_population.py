@@ -427,16 +427,40 @@ async def build_tailored_resume(jd_text: str, profile: dict, resume_text: str, l
                 "PRESERVE the original's structure, sections, section order, and formatting, and KEEP EVERY "
                 "factual detail — name, contact, every employer, title, date range, education, and each "
                 "experience bullet. Do NOT drop content and do NOT reformat into a different template. "
-                "Your job is to REPRIORITIZE and HIGHLIGHT: reorder bullets within a role so the most "
-                "role-relevant ones come first, sharpen wording to mirror the job's terminology WHERE IT "
-                "TRUTHFULLY APPLIES, and (if the original has a summary) tune it toward this role. "
-                "STRICT GROUNDING: use ONLY facts present in the original — never invent, inflate, or imply "
-                "any skill, title, employer, date, metric, or achievement the original doesn't state. "
-                "The result must be a faithful, high-quality résumé the candidate could send as-is."),
+                "Your job is to REPRIORITIZE and HIGHLIGHT only: reorder bullets within a role so the most "
+                "role-relevant come first, and rephrase EXISTING bullets to mirror the job's terminology "
+                "WHERE IT TRUTHFULLY APPLIES (same meaning, better-matched words). "
+                "ABSOLUTE RULE — add NOTHING new: do NOT introduce any technology, tool, capability, "
+                "responsibility, metric, or achievement that is not EXPLICITLY in the original — NOT EVEN "
+                "if the target role asks for it. If the role wants X and the original doesn't show X, leave "
+                "it out; a gap stays a gap. Every sentence in your output must be traceable to a sentence "
+                "in the original. The result must be a faithful résumé the candidate could send as-is."),
             messages=[{"role": "user", "content": f"TARGET ROLE (JOB DESCRIPTION):\n{jd[:9000]}\n\n"
-                       f"ORIGINAL RÉSUMÉ (the ONLY source of truth — preserve its structure + every detail):\n{rt[:12000]}"}],
+                       f"ORIGINAL RÉSUMÉ (the ONLY source of truth — preserve structure + every detail, add nothing):\n{rt[:12000]}"}],
             response_format=_TailoredResume, max_tokens=2200)
-        return (comp.parsed.resume or "").strip() or None
+        draft = (comp.parsed.resume or "").strip()
+        if not draft:
+            return None
+        # GROUNDING AUDIT (2nd pass): strip anything the original doesn't support. The candidate SENDS
+        # this document, so a subtle fabricated claim (e.g. a capability the role wants but the résumé
+        # never mentioned) is unacceptable — this pass removes/rewords any unsupported content.
+        try:
+            audit = await llm.complete(
+                system=(
+                    "You are a strict fact-checker. Compare the DRAFT résumé against the ORIGINAL résumé. "
+                    "Return, in `resume`, a corrected version that keeps ONLY claims SUPPORTED by the "
+                    "original. Remove or reword to the original's meaning ANY technology, tool, capability, "
+                    "responsibility, metric, achievement, title, date, or employer in the draft that the "
+                    "original does not state — even subtle additions. Preserve the draft's structure, "
+                    "ordering, and role-relevant emphasis; only strip the unsupported content. Do not add "
+                    "anything of your own. When in doubt, defer to the original's wording."),
+                messages=[{"role": "user", "content":
+                           f"ORIGINAL (ground truth):\n{rt[:12000]}\n\nDRAFT (verify + correct):\n{draft[:12000]}"}],
+                response_format=_TailoredResume, max_tokens=2200)
+            corrected = (audit.parsed.resume or "").strip()
+            return corrected or draft
+        except Exception:   # noqa: BLE001 — if the audit fails, fall back to the (prompt-grounded) draft
+            return draft
     except Exception as e:   # noqa: BLE001
         _log.warning("build_tailored_resume failed: %s", e)
         return None
