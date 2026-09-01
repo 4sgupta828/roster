@@ -119,6 +119,46 @@ def fetch_ashby(token: str) -> list[dict]:
 _FETCHERS = {"greenhouse": fetch_greenhouse, "lever": fetch_lever, "ashby": fetch_ashby}
 
 
+# WORKDAY tenants — the single biggest source in the existing corpus (~17k). Each is
+# (company, host, wd_num, tenant, site); the public jobs API is a POST to the cxs endpoint. Tenant
+# configs vary per company and must be sourced/verified (dry-run weeds out wrong ones); extend via
+# --workday-file (company<TAB>host<TAB>wd<TAB>tenant<TAB>site).
+WORKDAY_TENANTS: list[tuple[str, str, str, str, str]] = [
+    ("NVIDIA", "nvidia", "5", "nvidia", "NVIDIAExternalCareerSite"),
+    ("Salesforce", "salesforce", "1", "salesforce", "External_Career_Site"),
+    ("Workday", "workday", "5", "workday", "Workday"),
+    ("Adobe", "adobe", "5", "adobe", "external_experienced"),
+    ("Dell", "dell", "1", "dell", "External"),
+    ("Nike", "nike", "1", "nike", "nike"),
+]
+
+
+def fetch_workday(cfg: tuple[str, str, str, str, str]) -> list[dict]:
+    """POST-paginate a Workday cxs job board → normalized rows. company is the tenant's display name."""
+    company, host, wd, tenant, site = cfg
+    base = f"https://{host}.wd{wd}.myworkdayjobs.com"
+    api = f"{base}/wday/cxs/{tenant}/{site}/jobs"
+    out, offset = [], 0
+    for _ in range(60):   # bounded: up to 60*20 = 1200 postings/tenant
+        body = json.dumps({"appliedFacets": {}, "limit": 20, "offset": offset, "searchText": ""}).encode()
+        req = urllib.request.Request(api, data=body, headers={**_UA, "Content-Type": "application/json",
+                                                              "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            d = json.load(r)
+        posts = d.get("jobPostings") or []
+        if not posts:
+            break
+        for j in posts:
+            path = j.get("externalPath") or ""
+            out.append({"company": company, "title": j.get("title") or "",
+                        "location": j.get("locationsText") or "", "department": "",
+                        "url": (base + "/" + site + path) if path else base})
+        offset += 20
+        if offset >= int(d.get("total") or 0):
+            break
+    return out
+
+
 # ---- AGGREGATOR sources: single public JSON feeds (no per-company token), each job carries its own
 # company. These are the volume drivers for a 2x (the existing corpus came largely from these). Each
 # returns normalized {company, title, location, url}; pagination is bounded to keep runs finite. ----
@@ -252,6 +292,8 @@ async def main() -> None:
     ap.add_argument("--refresh", action="store_true", help="re-process boards already marked done")
     ap.add_argument("--boards-file", default="", help="TSV of ats<TAB>token<TAB>company to use instead of STARTER_BOARDS")
     ap.add_argument("--no-aggregators", action="store_true", help="skip the aggregator feeds (RemoteOK/Remotive/…)")
+    ap.add_argument("--no-workday", action="store_true", help="skip the Workday tenant sweep")
+    ap.add_argument("--workday-file", default="", help="TSV company<TAB>host<TAB>wd<TAB>tenant<TAB>site to use instead of WORKDAY_TENANTS")
     args = ap.parse_args()
     live = args.live and not args.dry
 
@@ -263,6 +305,15 @@ async def main() -> None:
                 p = ln.rstrip("\n").split("\t")
                 if len(p) >= 3 and p[0] in _FETCHERS:
                     boards.append((p[0], p[1], p[2]))
+
+    workday_tenants = list(WORKDAY_TENANTS)
+    if args.workday_file:
+        workday_tenants = []
+        with open(args.workday_file) as fh:
+            for ln in fh:
+                p = ln.rstrip("\n").split("\t")
+                if len(p) >= 5:
+                    workday_tenants.append((p[0], p[1], p[2], p[3], p[4]))
 
     dsn = os.environ.get("ROSTER_CORPUS_DSN")
     if not dsn:
@@ -344,6 +395,41 @@ async def main() -> None:
                         key, len(rows), w)
                 total_written += w
                 print(f"[live] {key:28s} {'(aggregator)':20s} {len(rows):4d} jobs → {w} upserted")
+
+        # WORKDAY pass (skip with --no-workday): the biggest single source. Per-tenant cxs API,
+        # checkpointed per tenant, resumable. Tenant configs from WORKDAY_TENANTS or --workday-file.
+        if not args.no_workday:
+            for cfg in workday_tenants:
+                company = cfg[0]; key = f"workday:{cfg[1]}"
+                if key in already:
+                    continue
+                if args.limit and boards_done >= args.limit:
+                    break
+                boards_done += 1
+                try:
+                    rows = fetch_workday(cfg)
+                except Exception as e:   # noqa: BLE001 — a wrong/renamed tenant must not abort the sweep
+                    print(f"[skip] {key} ({company}): fetch failed: {e}", file=sys.stderr)
+                    continue
+                total_seen += len(rows)
+                if args.dry:
+                    print(f"[dry ] {key:28s} {company:20s} {len(rows):4d} jobs")
+                    continue
+                vecs = [None] * len(rows)
+                texts = [f"{r.get('title','')} at {company}. {r.get('location','')}." for r in rows]
+                for i in range(0, len(texts), 100):
+                    vecs[i:i + 100] = embed_batch(texts[i:i + 100])
+                total_embedded += sum(1 for v in vecs if v is not None)
+                async with conn.transaction():
+                    w = await upsert_jobs(conn, "workday", rows, vecs, company_default=company)
+                    await conn.execute(
+                        """INSERT INTO rs_ingest_checkpoint (source, cursor_key, status, n_seen, n_written)
+                           VALUES ('jobs',$1,'done',$2,$3)
+                           ON CONFLICT (source, cursor_key) DO UPDATE SET
+                             status='done', n_seen=EXCLUDED.n_seen, n_written=EXCLUDED.n_written, updated_at=now()""",
+                        key, len(rows), w)
+                total_written += w
+                print(f"[live] {key:28s} {company:20s} {len(rows):4d} jobs → {w} upserted")
     finally:
         await conn.close()
 
