@@ -1095,9 +1095,11 @@ class OutreachIn(BaseModel):
 class MatchIn(BaseModel):
     locations: list[str] = []
     remote: bool = False
-    seniority: str = ""             # intern|junior|mid|senior|staff_plus|leadership
+    seniority: str = ""              # legacy single (kept for back-compat)
+    seniorities: list[str] = []      # multi-select: intern|junior|mid|senior|staff_plus|leadership
     role_keywords: list[str] = []
-    company_types: list[str] = []   # subset of {f500, public, startup}
+    company_types: list[str] = []    # subset of {f500, public, startup}
+    country: str = "us"              # honor the country scope (default US)
     min_salary: int = 0
     limit: int = 40
 

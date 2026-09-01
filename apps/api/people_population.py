@@ -108,6 +108,29 @@ def _title_seniority(title: str) -> str:
             return lvl
     return "mid"
 
+# job-location → country, from explicit geography tokens (parse, not semantic inference). Used to
+# honor the country scope in match; a location we can't place stays ambiguous and is NOT dropped.
+_COUNTRY_RX = {
+    "us": re.compile(r"\b(united states|u\.?s\.?a?\.?|usa)\b|,\s*(A[LKZR]|C[AOT]|DE|FL|GA|HI|I[ADLN]|K[SY]|"
+                     r"LA|M[ADEINOST]|N[CDEHJMVY]|O[HKR]|PA|RI|S[CD]|T[NX]|UT|V[AT]|W[AIVY]|DC)\b", re.I),
+    "uk": re.compile(r"\b(united kingdom|england|scotland|wales|\buk\b|london|manchester|edinburgh|cambridge, uk)\b", re.I),
+    "ca": re.compile(r"\b(canada|toronto|vancouver|montreal|ottawa|waterloo|ontario|quebec|british columbia)\b", re.I),
+    "de": re.compile(r"\b(germany|berlin|munich|münchen|hamburg|frankfurt|cologne)\b", re.I),
+    "fr": re.compile(r"\b(france|paris|lyon|toulouse)\b", re.I),
+    "in": re.compile(r"\b(india|bengaluru|bangalore|hyderabad|mumbai|delhi|pune|chennai|gurgaon|noida)\b", re.I),
+    "jp": re.compile(r"\b(japan|tokyo|osaka|kyoto)\b", re.I),
+}
+def _job_country(loc: str) -> str:
+    for c, rx in _COUNTRY_RX.items():
+        if rx.search(loc or ""):
+            return c
+    return ""
+def _country_ok(loc: str, want: str) -> bool:
+    if not want:
+        return True
+    jc = _job_country(loc)
+    return True if jc == "" else jc == want   # drop ONLY jobs clearly in a DIFFERENT country
+
 
 async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
     """On-demand: embed the user's résumé profile → most-similar jobs → re-rank by explicit preferences
@@ -137,12 +160,19 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
     want = set(prefs.get("company_types") or [])          # subset of {f500,public,startup}
     locs = [str(l).lower() for l in (prefs.get("locations") or []) if str(l).strip()]
     want_remote = bool(prefs.get("remote"))
-    want_sen = (prefs.get("seniority") or "").lower()
+    # seniority is MULTI-select (list); keep single `seniority` for back-compat
+    want_sens = {str(s).lower() for s in (prefs.get("seniorities") or []) if str(s).strip()}
+    if prefs.get("seniority"):
+        want_sens.add(str(prefs["seniority"]).lower())
     role_kw = [str(k).lower() for k in (prefs.get("role_keywords") or []) if str(k).strip()]
+    want_country = (prefs.get("country") or "").lower()
+    dropped_country = 0
     # 3) score = semantic similarity + preference bonuses (with human-readable reasons)
     out = []
     for j in cands:
         title, loc, co = j.get("title") or "", (j.get("location") or "").lower(), (j.get("company") or "")
+        if not _country_ok(loc, want_country):     # honor the country scope — drop clearly-foreign jobs
+            dropped_country += 1; continue
         sim = float(j.get("sim") or 0.0)
         score, reasons = sim, []
         is_f500 = co in _F500
@@ -153,7 +183,7 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
         if locs and any(l in loc for l in locs):
             score += 0.15; reasons.append("location")
         jsen = _title_seniority(title)
-        if want_sen and jsen == want_sen:
+        if want_sens and jsen in want_sens:
             score += 0.12; reasons.append(f"{jsen.replace('_', ' ')} level")
         if role_kw and any(k in title.lower() for k in role_kw):
             score += 0.10; reasons.append("role match")
@@ -168,10 +198,14 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
                     "score": round(score, 4), "match_pct": min(99, round(sim * 100)),
                     "seniority": jsen, "company_types": types, "reasons": reasons})
     out.sort(key=lambda x: -x["score"])
+    notes = []
+    if want_country:
+        notes.append(f"{want_country.upper()} only")
+    if prefs.get("min_salary"):
+        notes.append("salary is best-effort — most listings don't publish pay")
     return {"jobs": out[: int(prefs.get("limit", 40))],
-            "matched_on": qtext[:180],
-            "note": ("Salary preferences are best-effort — most public listings don't publish pay."
-                     if prefs.get("min_salary") else "")}
+            "matched_on": qtext[:180], "dropped_out_of_country": dropped_country,
+            "note": " · ".join(notes)}
 
 
 async def parse_people_facets(question: str, llm) -> tuple[dict[str, list[str]], str, str]:

@@ -130,6 +130,17 @@
   .acctrow{display:flex;gap:.5rem;margin:.3rem 0 .7rem;}
   .acctrow input{flex:1;}
   @media(max-width:640px){.acctgrid{grid-template-columns:1fr;}}
+  /* Match — multi-select chip inputs + seniority toggles */
+  .mlabel{display:block;font-size:.76rem;font-weight:600;color:var(--muted);margin:.6rem 0 .2rem;text-transform:uppercase;letter-spacing:.04em;}
+  .chipbox{display:flex;flex-wrap:wrap;gap:.3rem;border:1px solid var(--hair);border-radius:9px;padding:.32rem .4rem;min-height:2.1rem;align-items:center;background:var(--panel);}
+  .chipbox input{border:0;background:transparent;flex:1;min-width:90px;outline:none;color:inherit;font:inherit;font-size:.86rem;}
+  .chip{display:inline-flex;align-items:center;gap:.3rem;background:var(--panel2);border:1px solid var(--hair);border-radius:999px;padding:.14rem .55rem;font-size:.8rem;}
+  .chip b{cursor:pointer;color:var(--muted);font-weight:700;}
+  .chip b:hover{color:var(--gold);}
+  .sentogs{display:flex;flex-wrap:wrap;gap:.35rem;}
+  .sentog{cursor:pointer;background:var(--panel2);border:1px solid var(--hair);border-radius:999px;padding:.32rem .8rem;font-size:.82rem;user-select:none;}
+  .sentog.on{background:var(--gold);color:var(--on-accent);border-color:var(--gold);}
+  .matchresume{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;padding:.6rem .7rem;border:1px solid var(--hair);border-radius:10px;background:var(--panel2);margin:.4rem 0 .2rem;}
   .newbtn{color:var(--gold);border-color:rgba(var(--gold-rgb),.5);}
   .newbtn:hover{color:var(--on-accent);background:var(--gold);border-color:var(--gold);}
 
@@ -1446,6 +1457,7 @@
       </select>
     </label>
     <button type="button" class="histbtn newbtn" id="newbtn" style="margin-left:12px;">＋ New search</button>
+    <button type="button" class="histbtn" id="matchhdr" style="margin-left:0;" title="Upload your résumé → get ranked matching jobs">🎯 Match my résumé</button>
     <button type="button" class="histbtn" id="signinbtn" style="margin-left:0;" title="Sign in or create an account">Sign in</button>
     <button type="button" class="histbtn" id="histbtn2" style="margin-left:0;" hidden title="Your search history — private to your account">⧗ History</button>
     <button type="button" class="histbtn" id="acctbtn" style="margin-left:0;" hidden title="Your account — shortlists, saved searches, apply profile">◈ Account</button>
@@ -1730,22 +1742,28 @@
       <h2 style="margin:0;">Match jobs to your résumé</h2>
       <button type="button" class="histbtn" id="matchclose">Close</button>
     </div>
-    <p style="font-size:.8rem;color:var(--muted);margin:.3rem 0;">We rank open roles by how closely they fit your résumé, weighted by your preferences.</p>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem .7rem;margin:.4rem 0;">
-      <label style="font-size:.8rem;">Preferred locations <input id="mLoc" type="text" placeholder="e.g. San Francisco, New York" style="width:100%;"/></label>
-      <label style="font-size:.8rem;">Role keywords <input id="mRole" type="text" placeholder="e.g. machine learning, backend" style="width:100%;"/></label>
-      <label style="font-size:.8rem;">Seniority
-        <select id="mSen" style="width:100%;"><option value="">Any</option><option value="intern">Intern</option><option value="junior">Junior</option><option value="mid">Mid</option><option value="senior">Senior</option><option value="staff_plus">Staff+</option><option value="leadership">Leadership</option></select>
-      </label>
-      <label style="font-size:.8rem;">Min salary (best-effort) <input id="mSal" type="number" placeholder="optional" style="width:100%;"/></label>
+    <p style="font-size:.8rem;color:var(--muted);margin:.3rem 0;">Drop in your résumé and we rank open roles by fit — weighted by your preferences. Country follows your top-right selector.</p>
+    <div class="matchresume">
+      <span style="font-size:1.3rem;">📄</span>
+      <div style="flex:1;min-width:120px;"><div id="matchresumestatus" style="font-size:.85rem;font-weight:600;">Checking your résumé…</div>
+        <div style="font-size:.74rem;color:var(--muted);">PDF, DOCX, or TXT — parsed with docling.</div></div>
+      <input type="file" id="matchfile" accept=".pdf,.doc,.docx,.txt" style="font-size:.8rem;max-width:210px;"/>
     </div>
-    <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center;margin:.3rem 0 .5rem;font-size:.82rem;">
+    <span class="mlabel">Locations</span>
+    <div class="chipbox" id="mLocBox"><input id="mLoc" type="text" placeholder="Add a city, press Enter"/></div>
+    <span class="mlabel">Roles</span>
+    <div class="chipbox" id="mRoleBox"><input id="mRole" type="text" placeholder="Add a role, press Enter"/></div>
+    <span class="mlabel">Seniority (pick any)</span>
+    <div class="sentogs" id="mSenBox"></div>
+    <span class="mlabel">Company &amp; more</span>
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center;margin:.15rem 0 .3rem;font-size:.83rem;">
       <label><input type="checkbox" id="mRemote"/> Remote</label>
       <label><input type="checkbox" id="mF500"/> Fortune 500</label>
-      <label><input type="checkbox" id="mPublic"/> Public company</label>
+      <label><input type="checkbox" id="mPublic"/> Public</label>
       <label><input type="checkbox" id="mStartup"/> Startup</label>
-      <button type="button" class="idgo" id="mGo" style="width:auto;padding:.45rem 1.1rem;margin-left:auto;">🎯 Find matches</button>
+      <label style="display:inline-flex;align-items:center;gap:.3rem;">Min salary <input id="mSal" type="number" placeholder="optional" style="width:90px;"/></label>
     </div>
+    <div style="margin:.5rem 0;"><button type="button" class="idgo" id="mGo" style="width:100%;padding:.55rem;">🎯 Find matching jobs</button></div>
     <div id="matchnote" style="font-size:.78rem;color:var(--muted);"></div>
     <div id="matchresults" style="margin-top:.4rem;"></div>
   </div>
@@ -6530,6 +6548,8 @@ async function parseResume(){
 $("#autofillresume") && $("#autofillresume").addEventListener("click", parseResume);
 
 // ===== Match jobs to résumé (on-demand, preference-ranked) =====
+const SEN_OPTS = [["intern","Intern"],["junior","Junior"],["mid","Mid"],["senior","Senior"],["staff_plus","Staff+"],["leadership","Leadership"]];
+let MATCH_LOCS = [], MATCH_ROLES = [], MATCH_SENS = new Set();
 function feTitleSeniority(t){
   t = (t||"").toLowerCase();
   if(/\b(principal|staff|distinguished|fellow)\b/.test(t)) return "staff_plus";
@@ -6539,46 +6559,75 @@ function feTitleSeniority(t){
   if(/\b(junior|jr\.?|entry|associate)\b/.test(t)) return "junior";
   return t.trim() ? "mid" : "";
 }
+function renderChips(boxId, arr){
+  const box = $("#"+boxId); if(!box) return; const input = box.querySelector("input");
+  box.querySelectorAll(".chip").forEach(c=>c.remove());
+  arr.forEach((v,i)=>{ const el=document.createElement("span"); el.className="chip";
+    el.innerHTML = esc(v)+' <b data-i="'+i+'">×</b>'; box.insertBefore(el, input); });
+}
+function wireChipInput(boxId, arr){
+  const box = $("#"+boxId); if(!box) return; const input = box.querySelector("input");
+  const add = ()=>{ const v=input.value.trim(); if(v && !arr.includes(v)){ arr.push(v); renderChips(boxId,arr); } input.value=""; };
+  input.addEventListener("keydown",(e)=>{
+    if(e.key==="Enter"||e.key===","){ e.preventDefault(); add(); }
+    else if(e.key==="Backspace" && !input.value && arr.length){ arr.pop(); renderChips(boxId,arr); } });
+  input.addEventListener("blur", add);
+  box.addEventListener("click",(e)=>{ const b=e.target.closest("b[data-i]"); if(b){ arr.splice(+b.dataset.i,1); renderChips(boxId,arr); } else input.focus(); });
+}
+function renderSenToggles(){
+  const box=$("#mSenBox"); if(!box) return;
+  box.innerHTML = SEN_OPTS.map(([k,l])=>`<span class="sentog ${MATCH_SENS.has(k)?"on":""}" data-sen="${k}">${esc(l)}</span>`).join("");
+}
+function applyMatchDefaults(profile){
+  if(!MATCH_LOCS.length && profile.city){ MATCH_LOCS.push([profile.city,profile.region].filter(Boolean).join(", ")); renderChips("mLocBox",MATCH_LOCS); }
+  if(!MATCH_ROLES.length){ const sk=Array.isArray(profile.skills)?profile.skills:[];
+    const kws = sk.length? sk.slice(0,3) : (profile.current_title||"").split(/\s+/).filter(w=>w.length>3 && !/engineer|manager|senior/i.test(w)).slice(0,2);
+    kws.forEach(k=>{ if(k && !MATCH_ROLES.includes(k)) MATCH_ROLES.push(k); }); renderChips("mRoleBox",MATCH_ROLES); }
+  if(!MATCH_SENS.size){ const s=feTitleSeniority(profile.current_title||""); if(s){ MATCH_SENS.add(s); renderSenToggles(); } }
+}
+async function matchUploadResume(file){
+  $("#matchresumestatus").textContent = "Uploading & reading your résumé…";
+  try{
+    const b64 = await new Promise((res,rej)=>{ const rd=new FileReader(); rd.onload=()=>res((rd.result+"").split(",")[1]); rd.onerror=rej; rd.readAsDataURL(file); });
+    const up = await fetch("/me/resume",{method:"POST",headers:{"content-type":"application/json",...authHeaders()},body:JSON.stringify({name:file.name,content_type:file.type||"application/pdf",data_b64:b64})});
+    if(!up.ok){ const e=await up.json().catch(()=>({})); $("#matchresumestatus").textContent=e.detail||"Upload failed — try a PDF/DOCX."; return; }
+    await fetch("/me/profile/parse-resume",{method:"POST",headers:authHeaders()});
+    for(let i=0;i<24;i++){ await new Promise(r=>setTimeout(r,2500));
+      const d = await (await fetch("/me/profile/parse-resume",{headers:authHeaders()})).json();
+      if(d.status==="done"){ $("#matchresumestatus").textContent="Résumé ready — "+file.name; applyMatchDefaults(d.profile||{}); $("#matchnote").textContent="Defaults set — adjust and Find matches."; return; }
+      if(d.status==="failed"){ $("#matchresumestatus").textContent="Couldn't read that résumé — try another file."; return; }
+    }
+    $("#matchresumestatus").textContent="Still reading — press Find matches in a moment.";
+  }catch(e){ $("#matchresumestatus").textContent="Upload failed — try again."; }
+}
 async function openMatch(){
   if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
-  $("#matchmodal").hidden = false;
-  $("#matchresults").innerHTML = ""; $("#matchnote").textContent = "Loading your profile…";
+  $("#matchmodal").hidden = false; $("#matchresults").innerHTML = ""; renderSenToggles();
+  $("#matchnote").textContent = "";
   let prof = {}, parsed = {};
   try{ prof = await (await fetch("/me/profile", {headers: authHeaders()})).json(); }catch(e){}
   try{ parsed = (await (await fetch("/me/profile/parse-resume", {headers: authHeaders()})).json()).profile || {}; }catch(e){}
-  const profile = {...parsed, ...(prof.profile||{})};   // merge parsed résumé data (saved edits win)
-  const hasContent = !!prof.resume || Object.keys(profile).length >= 3;
-  if(!hasContent){
-    $("#matchnote").innerHTML = "To match jobs, add your résumé first — the matcher reads it. "
-      + "<button type='button' class='idgo' id='matchgotoapply' style='width:auto;padding:.3rem .8rem;margin-left:.3rem;'>⚑ Add résumé</button>";
-    return;
-  }
-  // intelligent defaults from the parsed résumé (only fill empties, so the user's edits stick)
-  if(!$("#mLoc").value && profile.city) $("#mLoc").value = [profile.city, profile.region].filter(Boolean).join(", ");
-  if(!$("#mRole").value){
-    const sk = Array.isArray(profile.skills) ? profile.skills : [];
-    const kws = sk.length ? sk.slice(0,3)
-      : (profile.current_title||"").split(/\s+/).filter(w=>w.length>3 && !/engineer|manager|senior/i.test(w)).slice(0,2);
-    $("#mRole").value = kws.join(", ");
-  }
-  if(!$("#mSen").value){ const s = feTitleSeniority(profile.current_title||""); if(s) $("#mSen").value = s; }
-  $("#matchnote").textContent = "Defaults set from your résumé — adjust preferences, then Find matches.";
+  const profile = {...parsed, ...(prof.profile||{})};
+  const hasResume = !!prof.resume;
+  $("#matchresumestatus").textContent = hasResume ? ("Résumé on file"+(prof.resume&&prof.resume.name?" — "+prof.resume.name:"")) : "No résumé yet — upload one to the right →";
+  if(hasResume || Object.keys(profile).length>=3){ applyMatchDefaults(profile); $("#matchnote").textContent="Adjust your preferences, then Find matches."; }
+  else { $("#matchnote").textContent="Upload your résumé above to get matches."; }
 }
-document.addEventListener("click", (e)=>{ if(e.target && e.target.id==="matchgotoapply"){ $("#matchmodal").hidden=true; if(typeof openApply==="function") openApply(); } });
 async function runMatch(){
   const prefs = {
-    locations: ($("#mLoc").value||"").split(",").map(s=>s.trim()).filter(Boolean),
-    role_keywords: ($("#mRole").value||"").split(",").map(s=>s.trim().toLowerCase()).filter(Boolean),
-    seniority: $("#mSen").value||"",
+    locations: MATCH_LOCS.slice(),
+    role_keywords: MATCH_ROLES.map(s=>s.toLowerCase()),
+    seniorities: Array.from(MATCH_SENS),
     min_salary: parseInt($("#mSal").value||"0",10)||0,
     remote: $("#mRemote").checked,
     company_types: [$("#mF500").checked&&"f500", $("#mPublic").checked&&"public", $("#mStartup").checked&&"startup"].filter(Boolean),
+    country: (window.ROSTER_COUNTRY||"us"),
     limit: 40,
   };
   $("#matchnote").textContent = "Matching your résumé to open roles…"; $("#matchresults").innerHTML = "";
   try{
     const r = await fetch("/me/match-jobs", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(prefs)});
-    if(!r.ok){ const e = await r.json().catch(()=>({})); $("#matchnote").textContent = e.detail || "Add or parse a résumé first (Apply Profile → Autofill from résumé)."; return; }
+    if(!r.ok){ const e = await r.json().catch(()=>({})); $("#matchnote").textContent = e.detail || "Upload your résumé above first."; return; }
     renderMatchResults(await r.json());
   }catch(e){ $("#matchnote").textContent = "Match failed — try again."; }
 }
@@ -6602,6 +6651,11 @@ function renderMatchResults(d){
 $("#matchclose") && $("#matchclose").addEventListener("click", ()=>{ $("#matchmodal").hidden = true; });
 $("#mGo") && $("#mGo").addEventListener("click", runMatch);
 $("#matchbtn2") && $("#matchbtn2").addEventListener("click", ()=>{ $("#applymodal").hidden=true; openMatch(); });
+$("#mSenBox") && $("#mSenBox").addEventListener("click",(e)=>{ const t=e.target.closest(".sentog"); if(!t) return;
+  const k=t.dataset.sen; MATCH_SENS.has(k)?MATCH_SENS.delete(k):MATCH_SENS.add(k); renderSenToggles(); });
+$("#matchfile") && $("#matchfile").addEventListener("change",(e)=>{ if(e.target.files&&e.target.files[0]) matchUploadResume(e.target.files[0]); });
+$("#matchhdr") && $("#matchhdr").addEventListener("click", openMatch);   // top-level header button
+wireChipInput("mLocBox", MATCH_LOCS); wireChipInput("mRoleBox", MATCH_ROLES);
 
 // ---- product settings (⚙, password-gated): live flag toggles served by /admin/settings ----
 const SET_LABELS = {
