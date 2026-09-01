@@ -2164,22 +2164,40 @@ async function runJobs(question){
     catch(e){ out.innerHTML = `<div class="pitem-empty">Couldn't load jobs — ${esc(e.message||e)}</div>`; } }
   return true;
 }
-// Q&A MODE: proxy the question to the Eigen research service (/qa) and render the grounded answer
-// (prose + citations) into #out. Eigen owns retrieval/corpus/compose; Roster renders. Runs can take
-// a while — show a thinking state on the Go button and in the results pane.
+// Q&A MODE: STREAM the question through Roster's /qa/stream (SSE relay of Eigen's /research/stream).
+// Eigen owns retrieval/corpus/compose; Roster renders. streamRun handles the run_id + _seq + resume
+// loop (edge cuts on a ~90s run become blips). Progress events update a live status line; the `final`
+// event carries the same payload as POST /qa → qaMarkup. Falls back to the non-stream /qa on failure.
+const QA_PHASE_COPY = {
+  step:"Reasoning…", search:"Searching the corpus & web…", found:"Reading sources…",
+  verifying:"Verifying claims…", composing:"Composing the answer…", progress:"Working…",
+};
 async function runQA(question){
   const out = $("#out");
-  if(out){ out.hidden = false; out.innerHTML = `<div class="ppl-wrap"><div class="ppl-cov">💬 Asking Eigen — grounded answer over the companies/markets/tech corpus. This can take a bit…</div><div class="status" style="margin-top:.6rem;">Thinking…</div></div>`; }
+  const setStatus = (msg)=>{ if(out){ out.hidden = false;
+    out.innerHTML = `<div class="ppl-wrap"><div class="ppl-cov">💬 Asking Eigen — grounded answer over the companies/markets/tech corpus.</div><div class="status" style="margin-top:.6rem;">${esc(msg)}</div></div>`; } };
+  setStatus("Thinking…");
   if(typeof go !== "undefined" && go){ go.disabled = true; go.classList.add("loading"); }
-  let d;
+  const payload = {question, tenant_id:"demo", user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""};
+  const onEvent = (ev)=>{ const c = QA_PHASE_COPY[ev.phase] || QA_PHASE_COPY[ev.type] || (ev.detail||"").slice(0,80);
+    if(c) setStatus(c); };
   try{
-    const r = await fetch("/qa", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
-      body: JSON.stringify({question, tenant_id:"demo", user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""})});
-    if(!r || r.status === 404){ if(out) out.innerHTML = `<div class="pitem-empty">Q&A mode isn't enabled.</div>`; return; }
-    d = await r.json();
-  }catch(e){ if(out) out.innerHTML = `<div class="pitem-empty">Couldn't reach Eigen — ${esc(e.message||e)}</div>`; return; }
+    let final;
+    try{
+      // 90s per-connection idle watchdog: the server pings every 15s, so true silence = a dead edge
+      // connection → abort + resume via run_id (streamRun's loop). The final event returns the payload.
+      final = await streamRun("/qa/stream", payload, onEvent, null, null, 90000);
+    }catch(streamErr){
+      // Streaming unavailable/failed → one-shot non-stream fallback so Q&A still answers.
+      setStatus("Finishing up…");
+      const r = await fetch("/qa", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
+        body: JSON.stringify(payload)});
+      if(!r || r.status === 404){ if(out) out.innerHTML = `<div class="pitem-empty">Q&A mode isn't enabled.</div>`; return; }
+      final = await r.json();
+    }
+    if(out) out.innerHTML = qaMarkup(final, question);
+  }catch(e){ if(out) out.innerHTML = `<div class="pitem-empty">Couldn't reach Eigen — ${esc((e&&e.message)||e)}</div>`; }
   finally{ if(typeof go !== "undefined" && go){ go.disabled = false; go.classList.remove("loading"); } }
-  if(out) out.innerHTML = qaMarkup(d, question);
 }
 // Render an Eigen answer as a grounded card: markdown prose + a numbered source list. Mirrors the
 // research answer surface's look without pulling in its flag-gated machinery (predictable + self-contained).

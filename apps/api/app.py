@@ -86,6 +86,49 @@ async def _sse_follow(run: dict, since: int = 0):
                 last_beat = time.time()
 
 
+async def _eigen_research_stream(base_url: str, payload: dict):
+    """Async generator of Eigen /research/stream events (parsed dicts), RESUMABLE on the Roster↔Eigen
+    leg: capture Eigen's run_id from its first `run` event and track the highest `_seq`; on any drop
+    before a terminal `final`/`error`, reconnect to Eigen's own GET /stream/{run_id}?since=<seq+1> and
+    keep reading (deduping by _seq). This is the client-side mirror of Roster's own resume machinery —
+    Eigen's runner persists + buffers server-side, so a dropped outbound stream is a blip, not a loss.
+    Yields until a terminal event; emits a synthetic error event if it truly cannot complete."""
+    import httpx
+    eigen_run_id = None
+    seq = -1
+    timeout = httpx.Timeout(300.0, connect=10.0, read=90.0)
+    for attempt in range(6):
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                if eigen_run_id is None:
+                    ctx = client.stream("POST", f"{base_url}/research/stream", json=payload)
+                else:
+                    ctx = client.stream("GET", f"{base_url}/stream/{eigen_run_id}", params={"since": seq + 1})
+                async with ctx as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line or line[0] == ":" or not line.startswith("data:"):
+                            continue   # blank line, ": ping"/": open" comment, or non-data frame
+                        try:
+                            ev = json.loads(line[5:].strip())
+                        except Exception:   # noqa: BLE001 — skip an unparseable frame, keep reading
+                            continue
+                        s = ev.get("_seq")
+                        if isinstance(s, int):
+                            if s <= seq:
+                                continue   # already relayed on a prior connection — dedupe
+                            seq = s
+                        if ev.get("type") == "run" and ev.get("run_id"):
+                            eigen_run_id = ev["run_id"]
+                        yield ev
+                        if ev.get("type") in ("final", "error"):
+                            return
+            # stream ended with no terminal event → loop to reconnect (resume if we have a run_id)
+        except Exception:   # noqa: BLE001 — connection/HTTP error; retry (POST again, or resume)
+            await asyncio.sleep(1.0)
+    yield {"type": "error", "detail": "Eigen stream ended without a final answer."}
+
+
 def structured_answers() -> bool:
     """Flag (default OFF, Rule 20): when ON, the active vertical's answer_format
     directive shapes the synthesized answer (markdown sections). OFF = flat prose,
@@ -2531,6 +2574,76 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             pass
         return {"answer": answer, "claims": claims, "grounded": grounded,
                 "coverage_gaps": coverage_gaps, "source": "eigen"}
+
+    @app.post("/qa/stream")
+    async def qa_stream(body: ResearchIn):
+        """Streaming Q&A (flag ROSTER_EIGEN_QA): SSE relay of Eigen's /research/stream. Emits progress
+        events as Eigen searches/composes, then a `final` event with the same {answer,claims,grounded,
+        coverage_gaps} payload as POST /qa. RESUMABLE on BOTH legs: the browser↔Roster leg via Roster's
+        shared _SSE_RUNS buffer + GET /stream/{run_id} (Railway edge cuts long SSE); the Roster↔Eigen
+        leg via _eigen_research_stream's run_id/_seq reconnect. The runner completes + persists to
+        History regardless of client connection. 404 when off."""
+        if not eigen_qa_enabled():
+            raise HTTPException(status_code=404, detail="Q&A mode not enabled")
+        from fastapi.responses import StreamingResponse
+        question = (body.question or "").strip()
+        run = _sse_run_new()
+        payload = {"question": question, "tenant_id": "roster", "engine": "",
+                   "user_name": body.user_name or "", "user_email": body.user_email or ""}
+        if body.history:
+            payload["history"] = body.history
+
+        async def runner() -> None:
+            final_result = None
+            try:
+                if not question:
+                    _sse_push(run, {"type": "final", "result": {"answer": "", "claims": [],
+                              "grounded": False, "coverage_gaps": [], "source": "eigen"}})
+                    return
+                async for ev in _eigen_research_stream(eigen_api_url(), payload):
+                    t = ev.get("type")
+                    if t == "final":
+                        res = ev.get("result") or {}
+                        final_result = {"answer": res.get("answer") or "", "claims": res.get("claims") or [],
+                                        "grounded": bool(res.get("grounded")),
+                                        "coverage_gaps": res.get("coverage_gaps") or [], "source": "eigen",
+                                        "eigen_session_id": res.get("session_id")}
+                        _sse_push(run, {"type": "final", "result": final_result})
+                    elif t == "error":
+                        _sse_push(run, {"type": "error", "detail": ev.get("detail") or "Eigen error"})
+                    elif t != "run":
+                        # relay progress only (phase label) — never any unverified claim text
+                        _sse_push(run, {"type": "progress", "phase": t or "",
+                                        "detail": str(ev.get("detail") or ev.get("message") or "")[:200]})
+            except Exception as e:   # noqa: BLE001
+                _sse_push(run, {"type": "error", "detail": f"stream error: {e}"})
+            finally:
+                _sse_done(run)
+                # Persist to History once, best-effort, independent of the client (mirrors POST /qa).
+                if final_result is not None:
+                    try:
+                        sstore = _store()
+                        if sstore is not None:
+                            await sstore.save(tenant_id=body.tenant_id, workspace_id=body.workspace_id,
+                                question=question, answer=final_result["answer"],
+                                grounded=final_result["grounded"], claims=[], source_stats={},
+                                coverage_gaps=final_result["coverage_gaps"], rejected=0, sources=body.sources,
+                                user_name=body.user_name, user_email=body.user_email, kind="qa",
+                                extra={"qa_claims": list((final_result["claims"] or [])[:40]),
+                                       "eigen_session_id": final_result.get("eigen_session_id")})
+                    except Exception:   # noqa: BLE001
+                        pass
+
+        run["task"] = asyncio.create_task(runner())
+
+        async def gen():
+            yield ": open\n\n"
+            yield f"data: {json.dumps({'type': 'run', 'run_id': run['id']})}\n\n"
+            async for chunk in _sse_follow(run, 0):
+                yield chunk
+
+        return StreamingResponse(gen(), media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"})
 
     def _fetch_jd_text(url: str) -> str:
         """Fetch a JD page and strip it to text. SSRF-guarded: http(s) only, and the resolved host must
