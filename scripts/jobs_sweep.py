@@ -118,11 +118,16 @@ def identity_ok(board_name: str, company: str, token: str) -> bool:
     b = _norm_name(re.sub(r"\b(jobs?|careers?|career page|job board|at)\b", " ", board_name, flags=re.I))
     if not b or not base:
         return False
-    if b == base or b in base or _norm_name(board_name) == base:
+    if b == base or _norm_name(board_name) == base:
         return True
     # "openai" ⊂ "openaijobs" fine; "alphabet" ⊂ "alphabettranslationservices" is NOT — bound the
     # length ratio so a generic-word company name can't swallow an unrelated longer board name.
-    return base in b and len(b) <= 1.5 * len(base)
+    if base in b and len(b) <= 1.5 * len(base):
+        return True
+    # Board name ⊂ company base ("Intuitive" ⊂ intuitivesurgical ✓) — but a SHORT brand fragment
+    # ("Novo" ⊂ novonordisk, an unrelated fintech's board) must not pass: require the board name to
+    # cover at least half the company base and 5+ chars.
+    return b in base and len(b) >= max(5, 0.5 * len(base))
 
 
 def board_identity(ats: str, token: str) -> str:
