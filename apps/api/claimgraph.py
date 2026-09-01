@@ -304,6 +304,43 @@ CREATE TABLE IF NOT EXISTS roster_entity_facet (
 -- Facet-filter index: the hot enumeration path is `WHERE facet_key=$ AND facet_value_norm=$` per facet,
 -- intersected on entity_id — this covers each leg of the intersection.
 CREATE INDEX IF NOT EXISTS ix_roster_facet_kv ON roster_entity_facet (tenant_id, facet_key, facet_value_norm);
+
+-- Committed DDL for the JOBS + PEOPLE-VECTOR + INGEST-CHECKPOINT tables. These exist in prod but were
+-- created ad-hoc (no committed DDL); this mirrors the LIVE schema exactly so `CREATE ... IF NOT EXISTS`
+-- is a no-op on prod and a fresh DB is reproducible. (Verified via /admin/schema.)
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE TABLE IF NOT EXISTS rs_job (
+    id          bigserial PRIMARY KEY,
+    company     text NOT NULL,
+    title       text NOT NULL,
+    location    text,
+    department  text,
+    url         text,
+    source      text,
+    title_norm  text,
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    embedding   vector(1536)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS rs_job_company_title_location_source_key ON rs_job (company, title, location, source);
+CREATE INDEX IF NOT EXISTS idx_rs_job_company   ON rs_job (company);
+CREATE INDEX IF NOT EXISTS idx_rs_job_titlenorm ON rs_job (title_norm);
+CREATE INDEX IF NOT EXISTS idx_job_vec ON rs_job USING hnsw (embedding vector_cosine_ops);
+
+CREATE TABLE IF NOT EXISTS rs_person_vec (
+    entity_id text PRIMARY KEY,
+    embedding vector(1536)
+);
+CREATE INDEX IF NOT EXISTS idx_person_vec ON rs_person_vec USING hnsw (embedding vector_cosine_ops);
+
+CREATE TABLE IF NOT EXISTS rs_ingest_checkpoint (
+    source     text NOT NULL,          -- engine: 'jobs' | 'people'
+    cursor_key text NOT NULL,          -- board 'greenhouse:stripe' or a people search window
+    status     text NOT NULL DEFAULT 'done',
+    n_seen     int  NOT NULL DEFAULT 0,
+    n_written  int  NOT NULL DEFAULT 0,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (source, cursor_key)
+);
 """
 
 # Whitelisted numeric counters finish_run() may update (guards the dynamic SET).
@@ -1549,7 +1586,9 @@ class ClaimGraphStore:
         pool = await self._get_pool()
         conds, args, i = [], [], 1
         if company:
-            conds.append(f"company = ANY(${i})")
+            # normalize BOTH sides — rs_job.company is stored as a display name ("Stripe") but the
+            # query compiler emits canonical slugs ("stripe"); compare on lower(replace(' ','_')).
+            conds.append(f"lower(replace(company,' ','_')) = ANY(${i})")
             args.append([str(c).lower().replace(" ", "_") for c in company]); i += 1
         if location:
             conds.append(f"lower(location) ILIKE ${i}"); args.append(f"%{str(location).lower()}%"); i += 1
@@ -1656,7 +1695,7 @@ class ClaimGraphStore:
         pool = await self._get_pool()
         conds, args, i = ["embedding IS NOT NULL"], [], 1
         if company:
-            conds.append(f"company = ANY(${i})"); args.append([str(c).lower().replace(' ', '_') for c in company]); i += 1
+            conds.append(f"lower(replace(company,' ','_')) = ANY(${i})"); args.append([str(c).lower().replace(' ', '_') for c in company]); i += 1
         args.append(qvec); qi = i; i += 1
         args.append(int(cap))
         sql = (f"SELECT company,title,location,department,url,source FROM rs_job "
