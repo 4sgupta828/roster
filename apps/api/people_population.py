@@ -982,9 +982,11 @@ async def answer_roster_insights(*, question: str, tenant_id: str, store, llm) -
     narrative = ""
     try:
         comp = await llm.complete(
-            system=("Write ONE short paragraph (2–4 sentences) summarizing this ranking for the user. Use "
-                    "ONLY the provided numbers — do NOT invent or extrapolate any figure. Neutral, factual, "
-                    "no hype. If caveats are given, reflect them honestly."),
+            system=("Write ONE short paragraph (2–4 sentences) summarizing this ranking QUALITATIVELY. "
+                    "Do NOT include ANY numbers, counts, totals, sums, averages, or percentages — the exact "
+                    "figures are shown separately in a chart. Describe the PATTERN in words only: which "
+                    "entries lead, how concentrated or spread the distribution is, notable names or gaps. "
+                    "Neutral and factual, no hype. If caveats are given, reflect them honestly."),
             messages=[{"role": "user", "content": json.dumps({
                 "question": question[:400], "group_by": spec.group_by, "metric": spec.metric,
                 "rows": rows[:15], "caveats": caveats})}],
