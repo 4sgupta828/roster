@@ -91,6 +91,7 @@
   .histbtn:hover{color:var(--ink);border-color:var(--muted);background:var(--panel2);}
   #effort{display:none !important;}   /* Effort dial removed from the UI */
   #heading{display:none;}             /* heading is redundant — the mode toggle + placeholder say it */
+  .wherenext, #wherenext{display:none !important;}   /* inherited "Where next" follow-ups — N/A for people/jobs */
   /* People / Jobs segmented mode toggle — one click, no ambiguity */
   .pjmode{display:inline-flex;gap:.22rem;background:var(--panel2);border:1px solid var(--hair);
     border-radius:999px;padding:.22rem;margin:0 0 1.05rem;}
@@ -1762,8 +1763,9 @@
       <h2 style="margin:0;">Find candidates for a role</h2>
       <button type="button" class="histbtn" id="jdclose">Close</button>
     </div>
-    <p style="font-size:.8rem;color:var(--muted);margin:.3rem 0;">Paste a job description — we rank people whose grounded profile best fits it. Country follows your top-right selector.</p>
-    <textarea id="jdText" rows="7" style="width:100%;font-size:.9rem;" placeholder="Paste the full job description here — title, responsibilities, required skills…"></textarea>
+    <p style="font-size:.8rem;color:var(--muted);margin:.3rem 0;">Paste a job description <b>or a link to it</b> — we rank people whose grounded profile best fits it. Country follows your top-right selector.</p>
+    <input id="jdUrl" type="url" style="width:100%;font-size:.86rem;margin-bottom:.4rem;" placeholder="Link to the JD (Greenhouse/Lever/company careers URL) — optional" />
+    <textarea id="jdText" rows="6" style="width:100%;font-size:.9rem;" placeholder="…or paste the full job description here — title, responsibilities, required skills"></textarea>
     <span class="mlabel">Seniority (pick any)</span>
     <div class="sentogs" id="jdSenBox"></div>
     <span class="mlabel">Locations</span>
@@ -6672,9 +6674,11 @@ function renderJDSen(){ const box=$("#jdSenBox"); if(!box) return;
 function openJD(){ $("#jdmodal").hidden=false; $("#jdresults").innerHTML=""; $("#jdnote").textContent=""; renderJDSen(); }
 async function runJDMatch(){
   const jd = ($("#jdText").value||"").trim();
-  if(jd.length < 20){ $("#jdnote").textContent = "Paste a fuller job description (a sentence or more)."; return; }
-  $("#jdnote").textContent = "Finding matching candidates…"; $("#jdresults").innerHTML = "";
-  const prefs = { job_description: jd, seniorities: Array.from(JD_SENS), locations: JD_LOCS.slice(),
+  const url = ($("#jdUrl").value||"").trim();
+  if(jd.length < 20 && !url){ $("#jdnote").textContent = "Paste a job description, or a link to it."; return; }
+  $("#jdnote").textContent = (url && jd.length<20) ? "Fetching the JD from the link…" : "Finding matching candidates…";
+  $("#jdresults").innerHTML = "";
+  const prefs = { job_description: jd, job_url: url, seniorities: Array.from(JD_SENS), locations: JD_LOCS.slice(),
                   country: (window.ROSTER_COUNTRY||"us"), limit: 40 };
   try{
     const r = await fetch("/match-people", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(prefs)});

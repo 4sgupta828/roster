@@ -1100,7 +1100,8 @@ class OutreachIn(BaseModel):
 
 
 class MatchPeopleIn(BaseModel):        # recruiter reverse-match: JD → candidate people
-    job_description: str
+    job_description: str = ""
+    job_url: str = ""                  # OR a link to the JD (fetched server-side, SSRF-guarded)
     seniorities: list[str] = []
     locations: list[str] = []
     country: str = "us"
@@ -2455,15 +2456,48 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         await _save_job_session(len(rows), q)   # JOB searches appear in the user's private History
         return {"jobs": rows, "count": len(rows), "query": q, "semantic": bool(qvec), "stats": stats}
 
+    def _fetch_jd_text(url: str) -> str:
+        """Fetch a JD page and strip it to text. SSRF-guarded: http(s) only, and the resolved host must
+        be a PUBLIC address (blocks localhost / private / link-local / internal). Size + time bounded."""
+        import urllib.parse, urllib.request, socket, ipaddress, re as _re
+        u = (url or "").strip()
+        pr = urllib.parse.urlparse(u)
+        if pr.scheme not in ("http", "https") or not pr.hostname:
+            return ""
+        try:
+            for res in socket.getaddrinfo(pr.hostname, None):
+                ip = ipaddress.ip_address(res[4][0])
+                if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+                    return ""
+        except Exception:
+            return ""
+        try:
+            req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0 (roster JD fetch)"})
+            with urllib.request.urlopen(req, timeout=12) as r:
+                raw = r.read(2_000_000).decode("utf-8", "ignore")
+        except Exception:
+            return ""
+        raw = _re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\1>", " ", raw)
+        text = _re.sub(r"(?s)<[^>]+>", " ", raw)
+        text = _re.sub(r"&[a-z#0-9]+;", " ", text)
+        return _re.sub(r"\s+", " ", text).strip()[:8000]
+
     @app.post("/match-people")
     async def match_people(body: MatchPeopleIn) -> dict:
-        """RECRUITER reverse-match: a job description → ranked candidate people from the grounded index."""
+        """RECRUITER reverse-match: a job description (pasted OR fetched from a link) → ranked candidate
+        people from the grounded index."""
         cstore = _claim_store_cached()
         if cstore is None:
             raise HTTPException(status_code=503, detail="people index unavailable")
+        jd = (body.job_description or "").strip()
+        if not jd and body.job_url.strip():
+            jd = await asyncio.to_thread(_fetch_jd_text, body.job_url)
+            if len(jd) < 40:
+                raise HTTPException(status_code=400,
+                    detail="Couldn't read a job description from that link — paste the text instead.")
         from api.people_population import match_jd_people
         try:
-            return await match_jd_people(cstore, body.job_description, body.model_dump())
+            return await match_jd_people(cstore, jd, body.model_dump())
         except Exception as e:   # noqa: BLE001
             raise HTTPException(status_code=502, detail=f"match failed: {e}") from e
 
