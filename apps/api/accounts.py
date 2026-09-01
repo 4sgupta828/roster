@@ -418,8 +418,11 @@ class AccountStore:
         if not token:
             return
         await self._ensure()
+        h = _hash(token)
         async with (await self._get_pool()).acquire() as conn:
-            await conn.execute("DELETE FROM roster_user_token WHERE token_hash=$1", _hash(token))
+            await conn.execute("DELETE FROM roster_user_token WHERE token_hash=$1", h)
+            # ALSO clear the legacy single-column token, or user_by_token's fallback keeps it valid
+            await conn.execute("UPDATE roster_user SET token_hash='' WHERE token_hash=$1", h)
 
     # ---- saved searches ----
     async def add_search(self, user_id: str, query: str, mode: str = "research") -> None:
