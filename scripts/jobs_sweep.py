@@ -152,6 +152,11 @@ async def already_probed(conn) -> set[str]:
         """CREATE TABLE IF NOT EXISTS rs_ats_probed (
              ats text NOT NULL, token text NOT NULL, hit int NOT NULL DEFAULT 0,
              probed_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (ats, token))""")
+    # The table may pre-exist from the 2026-08-31 in-container sweep with a leaner schema —
+    # migrate additively so that sweep's ~140k probe records still count as done.
+    await conn.execute("ALTER TABLE rs_ats_probed ADD COLUMN IF NOT EXISTS hit int NOT NULL DEFAULT 0")
+    await conn.execute("ALTER TABLE rs_ats_probed ADD COLUMN IF NOT EXISTS probed_at timestamptz "
+                       "NOT NULL DEFAULT now()")
     rows = await conn.fetch("SELECT ats, token FROM rs_ats_probed")
     return {f"{r['ats']}:{r['token']}" for r in rows}
 
