@@ -489,15 +489,16 @@ async def build_tailored_resume(jd_text: str, profile: dict, resume_text: str, l
         try:
             audit = await llm.complete(
                 system=(
-                    "Fact-check this structured résumé against the ORIGINAL and remove anything the original "
-                    "does not support. Correct/remove any invented: employer, title, date, degree/education, "
-                    "named technology or tool, certification, numeric metric — AND any invented CAPABILITY, "
-                    "RESPONSIBILITY, or SCOPE (a claim of what they built/owned/led/drove that the original "
-                    "doesn't state, e.g. adding 'fault tolerance', 'orchestration', or a system they didn't "
-                    "mention just because the target role wants it). Rule: every bullet must describe the "
-                    "SAME real work as the original — stronger verbs and tighter, role-aligned WORDING are "
-                    "good, but NO new facts, capabilities, or responsibilities. Keep the improved wording, "
-                    "summary, and ordering; only strip/rewrite the unsupported additions. Return the "
+                    "Reconcile this rewritten structured résumé against the ORIGINAL so it is impactful AND "
+                    "perfectly faithful. Do BOTH: "
+                    "(1) RE-ADD anything real the rewrite dropped — every concrete fact in the original must "
+                    "survive: each numeric metric (e.g. '40% latency', '1000s of GPUs'), every named "
+                    "technology/tool (e.g. CUDA, Kubernetes), employer, title, date, degree, and each "
+                    "distinct achievement. If the draft lost one, put it back (in the relevant bullet). "
+                    "(2) REMOVE anything invented — any technology, tool, metric, capability, responsibility, "
+                    "or system the original does NOT state (even if the target role wants it). "
+                    "Keep the draft's stronger verbs, tighter wording, role-aligned emphasis, and ordering — "
+                    "improve the WRITING, but the SET OF FACTS must exactly equal the original's. Return the "
                     "corrected structured résumé."),
                 messages=[{"role": "user", "content":
                            f"ORIGINAL (ground truth):\n{rt[:12000]}\n\nSTRUCTURED DRAFT (JSON):\n{doc.model_dump_json()[:12000]}"}],
