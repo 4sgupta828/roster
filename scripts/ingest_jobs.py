@@ -119,6 +119,69 @@ def fetch_ashby(token: str) -> list[dict]:
 _FETCHERS = {"greenhouse": fetch_greenhouse, "lever": fetch_lever, "ashby": fetch_ashby}
 
 
+# ---- AGGREGATOR sources: single public JSON feeds (no per-company token), each job carries its own
+# company. These are the volume drivers for a 2x (the existing corpus came largely from these). Each
+# returns normalized {company, title, location, url}; pagination is bounded to keep runs finite. ----
+def agg_remoteok() -> list[dict]:
+    d = _http_json("https://remoteok.com/api")
+    out = []
+    for j in (d if isinstance(d, list) else []):
+        if not isinstance(j, dict) or not j.get("position"):
+            continue   # first element is a legal-notice object
+        out.append({"company": j.get("company") or "", "title": j.get("position") or "",
+                    "location": j.get("location") or "Remote", "department": "", "url": j.get("url") or ""})
+    return out
+
+
+def agg_remotive() -> list[dict]:
+    d = _http_json("https://remotive.com/api/remote-jobs")
+    return [{"company": j.get("company_name") or "", "title": j.get("title") or "",
+             "location": j.get("candidate_required_location") or "Remote", "department": j.get("category") or "",
+             "url": j.get("url") or ""} for j in d.get("jobs", [])]
+
+
+def agg_arbeitnow() -> list[dict]:
+    out, url = [], "https://www.arbeitnow.com/api/job-board-api"
+    for _ in range(20):   # bounded pagination
+        d = _http_json(url)
+        for j in d.get("data", []):
+            out.append({"company": j.get("company_name") or "", "title": j.get("title") or "",
+                        "location": j.get("location") or "", "department": "", "url": j.get("url") or ""})
+        url = (d.get("links") or {}).get("next")
+        if not url:
+            break
+    return out
+
+
+def agg_jobicy() -> list[dict]:
+    d = _http_json("https://jobicy.com/api/v2/remote-jobs?count=100")
+    return [{"company": j.get("companyName") or "", "title": j.get("jobTitle") or "",
+             "location": j.get("jobGeo") or "Remote", "department": (j.get("jobIndustry") or [""])[0]
+             if isinstance(j.get("jobIndustry"), list) else (j.get("jobIndustry") or ""),
+             "url": j.get("url") or ""} for j in d.get("jobs", [])]
+
+
+def agg_themuse() -> list[dict]:
+    out = []
+    for page in range(1, 40):   # bounded pagination
+        try:
+            d = _http_json(f"https://www.themuse.com/api/public/jobs?page={page}")
+        except Exception:   # noqa: BLE001 — themuse 404s past the last page
+            break
+        results = d.get("results", [])
+        if not results:
+            break
+        for j in results:
+            out.append({"company": (j.get("company") or {}).get("name") or "", "title": j.get("name") or "",
+                        "location": ", ".join(l.get("name", "") for l in (j.get("locations") or [])),
+                        "department": j.get("category") or "", "url": (j.get("refs") or {}).get("landing_page") or ""})
+    return out
+
+
+_AGGREGATORS = {"remoteok": agg_remoteok, "remotive": agg_remotive, "arbeitnow": agg_arbeitnow,
+                "jobicy": agg_jobicy, "themuse": agg_themuse}
+
+
 def embed_batch(texts: list[str]) -> list[str | None]:
     """Embed a batch with text-embedding-3-small → pgvector literals. One HTTP call per batch.
     Returns None entries on failure so upsert can still write the row (embedding NULL, backfilled later)."""
@@ -158,13 +221,16 @@ async def done_boards(conn) -> set[str]:
     return {r["cursor_key"] for r in rows}
 
 
-async def upsert_jobs(conn, company: str, source: str, rows: list[dict], vecs: list[str | None]) -> int:
-    """Idempotent upsert on the real unique key (company, title, location, source). location/department
-    coalesced to '' so the unique key actually dedups (NULLs never collide in a unique index)."""
+async def upsert_jobs(conn, source: str, rows: list[dict], vecs: list[str | None],
+                      company_default: str = "") -> int:
+    """Idempotent upsert on the real unique key (company, title, location, source). Company is per-row
+    (aggregators) falling back to company_default (single-company boards). location/department coalesced
+    to '' so the unique key actually dedups (NULLs never collide in a unique index)."""
     n = 0
     for r, vec in zip(rows, vecs):
         title = (r.get("title") or "").strip()
-        if not title:
+        company = (r.get("company") or company_default or "").strip()
+        if not title or not company:
             continue
         await conn.execute(
             """INSERT INTO rs_job (company, title, location, department, url, source, title_norm, embedding, updated_at)
@@ -185,6 +251,7 @@ async def main() -> None:
     ap.add_argument("--limit", type=int, default=0, help="max boards to process this run (0 = all)")
     ap.add_argument("--refresh", action="store_true", help="re-process boards already marked done")
     ap.add_argument("--boards-file", default="", help="TSV of ats<TAB>token<TAB>company to use instead of STARTER_BOARDS")
+    ap.add_argument("--no-aggregators", action="store_true", help="skip the aggregator feeds (RemoteOK/Remotive/…)")
     args = ap.parse_args()
     live = args.live and not args.dry
 
@@ -232,7 +299,7 @@ async def main() -> None:
                     vecs[i:i + 100] = embed_batch(texts[i:i + 100])
                 total_embedded += sum(1 for v in vecs if v is not None)
                 async with conn.transaction():
-                    w = await upsert_jobs(conn, company, ats, rows, vecs)
+                    w = await upsert_jobs(conn, ats, rows, vecs, company_default=company)
                     await conn.execute(
                         """INSERT INTO rs_ingest_checkpoint (source, cursor_key, status, n_seen, n_written)
                            VALUES ('jobs',$1,'done',$2,$3)
@@ -241,6 +308,42 @@ async def main() -> None:
                         key, len(rows), w)
                 total_written += w
                 print(f"[live] {key:28s} {company:20s} {len(rows):4d} jobs → {w} upserted")
+
+        # AGGREGATOR pass (skip with --no-aggregators): single public feeds, each job carries its own
+        # company — the volume drivers for a 2x. Checkpointed per aggregator, resumable.
+        if not args.no_aggregators:
+            for name, fetch in _AGGREGATORS.items():
+                key = f"agg:{name}"
+                if key in already:
+                    continue
+                if args.limit and boards_done >= args.limit:
+                    break
+                boards_done += 1
+                try:
+                    rows = fetch()
+                except Exception as e:   # noqa: BLE001
+                    print(f"[skip] {key}: fetch failed: {e}", file=sys.stderr)
+                    continue
+                total_seen += len(rows)
+                if args.dry:
+                    print(f"[dry ] {key:28s} {'(per-job company)':20s} {len(rows):4d} jobs")
+                    continue
+                vecs = [None] * len(rows)
+                texts = [f"{r.get('title','')} at {r.get('company','')}. {r.get('location','')}. {r.get('department','')}"
+                         for r in rows]
+                for i in range(0, len(texts), 100):
+                    vecs[i:i + 100] = embed_batch(texts[i:i + 100])
+                total_embedded += sum(1 for v in vecs if v is not None)
+                async with conn.transaction():
+                    w = await upsert_jobs(conn, name, rows, vecs)
+                    await conn.execute(
+                        """INSERT INTO rs_ingest_checkpoint (source, cursor_key, status, n_seen, n_written)
+                           VALUES ('jobs',$1,'done',$2,$3)
+                           ON CONFLICT (source, cursor_key) DO UPDATE SET
+                             status='done', n_seen=EXCLUDED.n_seen, n_written=EXCLUDED.n_written, updated_at=now()""",
+                        key, len(rows), w)
+                total_written += w
+                print(f"[live] {key:28s} {'(aggregator)':20s} {len(rows):4d} jobs → {w} upserted")
     finally:
         await conn.close()
 
