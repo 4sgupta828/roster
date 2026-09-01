@@ -405,15 +405,63 @@ async def build_cover_letter(jd_text: str, profile: dict, resume_text: str, llm,
         return None
 
 
-class _TailoredResume(BaseModel):
-    resume: str = ""
+class _ResumeRole(BaseModel):
+    company: str = ""
+    title: str = ""
+    dates: str = ""            # verbatim from the original (e.g. "2021–Present")
+    location: str = ""
+    bullets: list[str] = []    # impactful, role-aligned bullets — grounded in this role's real work
+
+
+class _ResumeSection(BaseModel):
+    heading: str = ""          # any extra original section (Projects, Publications, Certifications, …)
+    items: list[str] = []
+
+
+class _ResumeDoc(BaseModel):
+    """STRUCTURED résumé → rendered through a fixed template so formatting is consistent regardless of how
+    messy the parsed source was. The LLM improves wording within these fields; hard facts stay grounded."""
+    name: str = ""
+    contact: str = ""          # one line: email · phone · location · links (only what's in the original)
+    summary: str = ""          # compelling, role-aligned professional summary (grounded)
+    experience: list[_ResumeRole] = []
+    skills: list[str] = []
+    education: list[str] = []
+    extra: list[_ResumeSection] = []
+
+
+def _render_resume_md(doc: "_ResumeDoc") -> str:
+    """Render the structured résumé to CLEAN, CONSISTENT Markdown (controlled template → reliable PDF)."""
+    out = []
+    if doc.name:
+        out.append(f"# {doc.name}")
+    if doc.contact:
+        out.append(doc.contact)
+    if doc.summary:
+        out += ["", "## Summary", doc.summary]
+    if doc.experience:
+        out += ["", "## Experience"]
+        for r in doc.experience:
+            hdr = " — ".join(x for x in [r.company, r.title] if x)
+            meta = " | ".join(x for x in [r.dates, r.location] if x)
+            out.append(f"**{hdr}**" + (f"  ·  {meta}" if meta else ""))
+            out += [f"- {b}" for b in (r.bullets or []) if b]
+            out.append("")
+    if doc.skills:
+        out += ["## Skills", ", ".join(doc.skills)]
+    if doc.education:
+        out += ["", "## Education"] + [f"- {e}" for e in doc.education if e]
+    for s in (doc.extra or []):
+        if s.heading and s.items:
+            out += ["", f"## {s.heading}"] + [f"- {i}" for i in s.items if i]
+    return "\n".join(out).strip()
 
 
 async def build_tailored_resume(jd_text: str, profile: dict, resume_text: str, llm) -> str | None:
-    """Produce a résumé tailored to THIS role — GROUNDED: reorder, re-emphasize, rephrase, and surface
-    the candidate's most-relevant REAL experience and align wording to the JD, WITHOUT inventing any
-    skill, title, employer, date, or achievement not in the original. Generated only on explicit request.
-    Returns the tailored résumé text (None on error/insufficient input)."""
+    """Produce a genuinely improved, role-tailored résumé — as STRUCTURED data rendered through a fixed
+    template (consistent formatting), then a SURGICAL fact-check. The wording is strengthened and
+    reprioritized for the role; hard facts (employers/titles/dates/degrees/named tech/metrics) stay
+    grounded in the original. Returns clean Markdown (None on error/insufficient input)."""
     jd = (jd_text or "").strip()
     rt = _resume_text_of(profile, resume_text)
     if len(jd) < 40 or len(rt) < 40 or llm is None:
@@ -421,49 +469,39 @@ async def build_tailored_resume(jd_text: str, profile: dict, resume_text: str, l
     try:
         comp = await llm.complete(
             system=(
-                "Produce a READY-TO-SEND résumé for this candidate, in the `resume` field — the SAME résumé, "
-                "carefully reprioritized to foreground what THIS target role needs. Return ONLY the résumé "
-                "itself: NO title/label like 'Tailored Résumé', no preamble, no commentary. "
-                "PRESERVE the original's structure, sections, section order, and formatting, and KEEP EVERY "
-                "factual detail — name, contact, every employer, title, date range, education, and each "
-                "experience bullet. Do NOT drop content and do NOT reformat into a different template. "
-                "The original is Markdown — return clean Markdown so it renders as a proper résumé: '# Name' "
-                "then a contact line, '## SECTION' headings, '**Employer** — Title | dates' lines, and '- ' "
-                "bullet points. "
-                "Your job is to REPRIORITIZE and HIGHLIGHT only: reorder bullets within a role so the most "
-                "role-relevant come first, and rephrase EXISTING bullets to mirror the job's terminology "
-                "WHERE IT TRUTHFULLY APPLIES (same meaning, better-matched words). "
-                "ABSOLUTE RULE — add NOTHING new: do NOT introduce any technology, tool, capability, "
-                "responsibility, metric, or achievement that is not EXPLICITLY in the original — NOT EVEN "
-                "if the target role asks for it. If the role wants X and the original doesn't show X, leave "
-                "it out; a gap stays a gap. Every sentence in your output must be traceable to a sentence "
-                "in the original. The result must be a faithful résumé the candidate could send as-is."),
+                "You are an expert résumé writer tailoring THIS candidate's résumé to THIS role. Fill the "
+                "structured fields from the ORIGINAL résumé. Make it GENUINELY BETTER, not a copy: write a "
+                "compelling role-aligned summary; rewrite each experience bullet with a strong action verb + "
+                "concrete impact; ORDER roles and bullets so the most role-relevant come first; mirror the "
+                "job's terminology where it truthfully fits; drop filler. "
+                "GROUNDING (hard rule): keep the SAME employers, titles, and date ranges as the original "
+                "(verbatim dates), and the same education. You MAY sharpen and rephrase how real work is "
+                "described, but you may NOT invent or add any employer, title, degree, named technology/tool, "
+                "certification, or numeric metric that is not in the original. Improve the WRITING of real "
+                "accomplishments; never add accomplishments or capabilities the original doesn't support. "
+                "Include every real role and every real section (put non-standard sections in `extra`)."),
             messages=[{"role": "user", "content": f"TARGET ROLE (JOB DESCRIPTION):\n{jd[:9000]}\n\n"
-                       f"ORIGINAL RÉSUMÉ (the ONLY source of truth — preserve structure + every detail, add nothing):\n{rt[:12000]}"}],
-            response_format=_TailoredResume, max_tokens=4000)
-        draft = (comp.parsed.resume or "").strip()
-        if not draft:
-            return None
-        # GROUNDING AUDIT (2nd pass): strip anything the original doesn't support. The candidate SENDS
-        # this document, so a subtle fabricated claim (e.g. a capability the role wants but the résumé
-        # never mentioned) is unacceptable — this pass removes/rewords any unsupported content.
+                       f"ORIGINAL RÉSUMÉ (source of truth for all hard facts):\n{rt[:12000]}"}],
+            response_format=_ResumeDoc, max_tokens=4000)
+        doc = comp.parsed
+        # SURGICAL fact-check: fix ONLY invented hard facts; PRESERVE all the improved wording/ordering.
         try:
             audit = await llm.complete(
                 system=(
-                    "You are a strict fact-checker. Compare the DRAFT résumé against the ORIGINAL résumé. "
-                    "Return, in `resume`, a corrected version that keeps ONLY claims SUPPORTED by the "
-                    "original. Remove or reword to the original's meaning ANY technology, tool, capability, "
-                    "responsibility, metric, achievement, title, date, or employer in the draft that the "
-                    "original does not state — even subtle additions. Preserve the draft's structure, "
-                    "ordering, and role-relevant emphasis; only strip the unsupported content. Do not add "
-                    "anything of your own. When in doubt, defer to the original's wording."),
+                    "Fact-check this structured résumé against the ORIGINAL. Correct ONLY invented HARD "
+                    "FACTS: any employer, job title, date range, degree/education, specific named technology "
+                    "or tool, certification, or numeric metric that the original does NOT support — replace "
+                    "with the original's value or remove it. Do NOT weaken, shorten, or genericize the "
+                    "improved wording, bullets, summary, or ordering — keep all of that. Return the corrected "
+                    "structured résumé."),
                 messages=[{"role": "user", "content":
-                           f"ORIGINAL (ground truth):\n{rt[:12000]}\n\nDRAFT (verify + correct):\n{draft[:12000]}"}],
-                response_format=_TailoredResume, max_tokens=4000)
-            corrected = (audit.parsed.resume or "").strip()
-            return corrected or draft
-        except Exception:   # noqa: BLE001 — if the audit fails, fall back to the (prompt-grounded) draft
-            return draft
+                           f"ORIGINAL (ground truth):\n{rt[:12000]}\n\nSTRUCTURED DRAFT (JSON):\n{doc.model_dump_json()[:12000]}"}],
+                response_format=_ResumeDoc, max_tokens=4000)
+            doc = audit.parsed or doc
+        except Exception:   # noqa: BLE001 — keep the (grounded-by-prompt) draft if the audit call fails
+            pass
+        md = _render_resume_md(doc)
+        return md or None
     except Exception as e:   # noqa: BLE001
         _log.warning("build_tailored_resume failed: %s", e)
         return None
