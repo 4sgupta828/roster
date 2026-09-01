@@ -52,24 +52,56 @@ WINDOWS: list[str] = [f'location:"{c}" language:{lang}' for c in _CITIES for lan
 _GH = "https://api.github.com"
 
 
+_MAX_SLEEP = 3660   # cap any single rate-limit sleep at ~61 min (a full GitHub window) — never spin
+
+
+def _sleep_until_reset(headers, *, retry_after: str = "") -> None:
+    """Sleep until a GitHub bucket resets. Honors Retry-After (secondary-limit / abuse) first, else
+    X-RateLimit-Reset. GitHub explicitly warns NOT to keep calling before the reset — doing so risks a
+    ban — so we sleep the FULL window (bounded to _MAX_SLEEP), never a fixed short cap."""
+    wait = 0
+    try:
+        if retry_after:
+            wait = int(float(retry_after)) + 2
+        else:
+            reset = int(headers.get("X-RateLimit-Reset", "0"))
+            wait = max(0, reset - int(time.time())) + 2
+    except Exception:   # noqa: BLE001
+        wait = 60
+    wait = max(1, min(wait, _MAX_SLEEP))
+    print(f"  … rate-limited; sleeping {wait}s (until bucket reset)", file=sys.stderr)
+    time.sleep(wait)
+
+
 def _gh_get(path: str, *, token: str, params: dict | None = None):
+    """GitHub GET honoring per-bucket limits + Retry-After. On 403/429 (primary or secondary limit),
+    sleep until the bucket resets and retry once; the search bucket (30/min) and core bucket (5k/hr) are
+    handled naturally because each response carries its OWN bucket's headers."""
     url = _GH + path + ("?" + urllib.parse.urlencode(params) if params else "")
-    req = urllib.request.Request(url, headers={
-        "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
-        "User-Agent": "roster-people-ingest/1.0"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.load(r), dict(r.headers)
+    for attempt in (1, 2):
+        req = urllib.request.Request(url, headers={
+            "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
+            "User-Agent": "roster-people-ingest/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.load(r), dict(r.headers)
+        except urllib.error.HTTPError as e:
+            hdr = dict(e.headers or {})
+            # 403 with remaining=0 OR 429 = rate/secondary limit → wait for reset, then retry once.
+            rem = hdr.get("X-RateLimit-Remaining")
+            if e.code in (403, 429) and (e.code == 429 or rem == "0" or hdr.get("Retry-After")) and attempt == 1:
+                _sleep_until_reset(hdr, retry_after=hdr.get("Retry-After", ""))
+                continue
+            raise
 
 
 def _throttle(headers: dict) -> None:
-    """Respect GitHub's rate limit: if the remaining budget is low, sleep until reset."""
+    """Proactively pace: when the just-used bucket is nearly exhausted, sleep until it resets so the
+    NEXT call doesn't trip a 403/429. Search calls carry the 30/min bucket, hydrate the 5k/hr core."""
     try:
-        rem = int(headers.get("X-RateLimit-Remaining", "1"))
+        rem = int(headers.get("X-RateLimit-Remaining", "999"))
         if rem <= 1:
-            reset = int(headers.get("X-RateLimit-Reset", "0"))
-            wait = max(1, reset - int(time.time()) + 2)
-            print(f"  … rate-limited; sleeping {wait}s", file=sys.stderr)
-            time.sleep(min(wait, 90))
+            _sleep_until_reset(headers)
     except Exception:   # noqa: BLE001
         pass
 
@@ -204,6 +236,9 @@ async def upsert_person(conn, profile: dict, fac: dict, vec: str | None) -> None
     login = profile["login"]
     eid = "github:" + login
     name = profile.get("name") or login
+    # TAKEDOWN honored across re-ingest: a suppressed person is never re-added (opt-out is durable).
+    if (await conn.fetchval("SELECT status FROM rs_entity WHERE entity_id=$1", eid)) == "suppressed":
+        return
     await conn.execute(
         """INSERT INTO rs_entity (entity_id, tenant_id, kind, name, facets, retrieved_at)
            VALUES ($1,'demo','person',$2,$3::jsonb, now())
@@ -225,6 +260,38 @@ async def upsert_person(conn, profile: dict, fac: dict, vec: str | None) -> None
                ON CONFLICT (entity_id) DO UPDATE SET embedding=EXCLUDED.embedding""", eid, vec)
 
 
+async def backfill_embeddings(conn, limit: int) -> tuple[int, int]:
+    """Embed people who have NO rs_person_vec row (embed failed at ingest, or never ran) so they become
+    visible to semantic search. Blurb is rebuilt from stored facets — no GitHub/LLM calls, embeddings
+    only. Returns (embedded, seen)."""
+    rows = await conn.fetch(
+        """SELECT e.entity_id, e.name, e.facets FROM rs_entity e
+           WHERE e.kind='person'
+             AND NOT EXISTS (SELECT 1 FROM rs_person_vec v WHERE v.entity_id = e.entity_id)
+           LIMIT $1""", int(limit))
+    n = 0
+    for r in rows:
+        fj = r["facets"]
+        if isinstance(fj, str):
+            try:
+                fj = json.loads(fj)
+            except Exception:   # noqa: BLE001
+                fj = {}
+        fj = fj if isinstance(fj, dict) else {}
+        frows = await conn.fetch(
+            "SELECT facet_key, display_value FROM roster_entity_facet WHERE entity_id=$1", r["entity_id"])
+        parts = [r["name"]] + [str(fj.get(k, "")) for k in ("bio", "company", "location")]
+        parts += [f["display_value"] for f in frows if not f["facet_key"].startswith("link_")]
+        blurb = " ".join(p for p in parts if p).strip()
+        vec = embed_one(blurb)
+        if vec:
+            await conn.execute(
+                """INSERT INTO rs_person_vec (entity_id, embedding) VALUES ($1,$2::vector)
+                   ON CONFLICT (entity_id) DO UPDATE SET embedding=EXCLUDED.embedding""", r["entity_id"], vec)
+            n += 1
+    return n, len(rows)
+
+
 async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--live", action="store_true")
@@ -232,6 +299,8 @@ async def main() -> None:
     ap.add_argument("--limit", type=int, default=0, help="max PEOPLE to process this run (0 = all in the windows)")
     ap.add_argument("--per-window", type=int, default=1000, help="max logins pulled per search window (cap 1000)")
     ap.add_argument("--refresh", action="store_true")
+    ap.add_argument("--backfill", type=int, default=0,
+                    help="embed N people who have no vector yet (no GitHub/LLM; embeddings only) and exit")
     args = ap.parse_args()
     live = args.live and not args.dry
 
@@ -239,12 +308,23 @@ async def main() -> None:
     if not dsn:
         print("ROSTER_CORPUS_DSN not set — run via `railway run --service roster-api ...`", file=sys.stderr)
         sys.exit(2)
+
+    import asyncpg
+    # BACKFILL mode: embeddings only, no GitHub — safe to run without a token.
+    if args.backfill:
+        conn = await asyncpg.connect(dsn)
+        try:
+            n, seen = await backfill_embeddings(conn, args.backfill)
+        finally:
+            await conn.close()
+        print(f"backfill: embedded {n} of {seen} vectorless people (~${n*60/1_000_000*0.02:.4f})")
+        return
+
     token = os.environ.get("ROSTER_GITHUB_TOKEN", "")
     if not token:
         print("ROSTER_GITHUB_TOKEN not set — GitHub search needs it (5000/hr).", file=sys.stderr)
         sys.exit(2)
 
-    import asyncpg
     conn = await asyncpg.connect(dsn)
     await ensure_checkpoint(conn)
     already = set() if args.refresh else await done_windows(conn)

@@ -84,4 +84,6 @@ def run_bulk_ingest_loop() -> None:
         if people_on:
             _run_chunk(["scripts/ingest_people.py", "--live", "--limit", str(people_chunk),
                         "--per-window", str(per_window)])
+            # self-heal: embed any people written without a vector (embed hiccups) so they're searchable
+            _run_chunk(["scripts/ingest_people.py", "--backfill", str(people_chunk)])
         time.sleep(interval)

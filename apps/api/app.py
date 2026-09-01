@@ -4000,6 +4000,32 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         want = os.environ.get("ROSTER_ADMIN_TOKEN", "")
         return (not want) or tok == want
 
+    @app.post("/admin/people/takedown")
+    async def admin_people_takedown(body: dict, x_admin_token: str = Header(default="")) -> dict:
+        """Opt-out / takedown (GitHub-ToS mitigation): remove a person from search. Accepts
+        {"entity_id": "github:<login>"} or {"login": "<login>"}. Deletes their embedding + facets and
+        marks the identity 'suppressed' (never hard-deleted); the ingester won't re-add a suppressed
+        person, so the opt-out is durable. Admin-token gated."""
+        if not _admin_ok(x_admin_token):
+            raise HTTPException(status_code=401, detail="admin token required")
+        eid = str(body.get("entity_id") or "").strip()
+        if not eid and body.get("login"):
+            eid = "github:" + str(body["login"]).strip()
+        if not eid:
+            raise HTTPException(status_code=400, detail="provide entity_id or login")
+        dsn = os.environ.get("ROSTER_CORPUS_DSN")
+        if not dsn:
+            raise HTTPException(status_code=503, detail="needs ROSTER_CORPUS_DSN")
+        import asyncpg
+        conn = await asyncpg.connect(dsn)
+        try:
+            v = await conn.execute("DELETE FROM rs_person_vec WHERE entity_id=$1", eid)
+            f = await conn.execute("DELETE FROM roster_entity_facet WHERE entity_id=$1", eid)
+            e = await conn.execute("UPDATE rs_entity SET status='suppressed' WHERE entity_id=$1", eid)
+        finally:
+            await conn.close()
+        return {"entity_id": eid, "vector": v, "facets": f, "entity": e, "status": "removed from search"}
+
     @app.get("/admin/schema/{table}")
     async def admin_schema(table: str, x_admin_token: str = Header(default="")) -> dict:
         """READ-ONLY schema introspection (admin token) — columns + indexes for one allowlisted table.
