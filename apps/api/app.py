@@ -3976,6 +3976,33 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         want = os.environ.get("ROSTER_ADMIN_TOKEN", "")
         return (not want) or tok == want
 
+    @app.get("/admin/schema/{table}")
+    async def admin_schema(table: str, x_admin_token: str = Header(default="")) -> dict:
+        """READ-ONLY schema introspection (admin token) — columns + indexes for one allowlisted table.
+        Used to author correct DDL/upserts for the ingest engines against the REAL prod schema (rs_job /
+        rs_person_vec were created ad-hoc and have no committed DDL)."""
+        if not _admin_ok(x_admin_token):
+            raise HTTPException(status_code=401, detail="admin token required")
+        allow = {"rs_job", "rs_person_vec", "rs_entity", "roster_entity_facet", "rs_ingest_checkpoint"}
+        if table not in allow:
+            raise HTTPException(status_code=400, detail=f"table not allowlisted (allowed: {sorted(allow)})")
+        dsn = os.environ.get("ROSTER_CORPUS_DSN")
+        if not dsn:
+            raise HTTPException(status_code=503, detail="needs ROSTER_CORPUS_DSN")
+        import asyncpg
+        conn = await asyncpg.connect(dsn)
+        try:
+            cols = await conn.fetch(
+                "SELECT column_name, data_type, udt_name, is_nullable, column_default "
+                "FROM information_schema.columns WHERE table_name=$1 ORDER BY ordinal_position", table)
+            idx = await conn.fetch(
+                "SELECT indexname, indexdef FROM pg_indexes WHERE tablename=$1", table)
+            n = await conn.fetchval(f'SELECT count(*) FROM "{table}"') if cols else 0  # noqa: S608 allowlisted
+        finally:
+            await conn.close()
+        return {"table": table, "exists": bool(cols), "row_count": n,
+                "columns": [dict(c) for c in cols], "indexes": [dict(i) for i in idx]}
+
     import re as _re
     def _clean_snip(t: str, n: int = 400) -> str:
         """Tidy a raw block chunk for display: collapse runs of spaces/newlines so it reads as clean
