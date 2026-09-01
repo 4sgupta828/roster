@@ -1724,11 +1724,11 @@
   </div>
 </div>
 <!-- Match jobs to résumé: on-demand, preference-ranked -->
-<div class="idmodal" id="matchmodal" hidden>
-  <div class="idcard" style="max-width:720px;width:94%;text-align:left;max-height:88vh;overflow:auto;">
+<div class="acctpage" id="matchmodal" hidden aria-label="Find jobs">
+  <div class="acctwrap" style="max-width:760px;">
     <div style="display:flex;align-items:center;justify-content:space-between;">
       <h2 style="margin:0;">Match jobs to your résumé</h2>
-      <button type="button" class="histbtn" id="matchclose">Close</button>
+      <button type="button" class="histbtn" id="matchclose">← Back</button>
     </div>
     <p style="font-size:.8rem;color:var(--muted);margin:.3rem 0;">Drop in your résumé and we rank open roles by fit — weighted by your preferences. Country follows your top-right selector.</p>
     <div class="matchresume">
@@ -1757,11 +1757,11 @@
   </div>
 </div>
 <!-- Recruiter reverse-match: a job description → ranked candidate people -->
-<div class="idmodal" id="jdmodal" hidden>
-  <div class="idcard" style="max-width:760px;width:94%;text-align:left;max-height:88vh;overflow:auto;">
+<div class="acctpage" id="jdmodal" hidden aria-label="Find candidates">
+  <div class="acctwrap" style="max-width:760px;">
     <div style="display:flex;align-items:center;justify-content:space-between;">
       <h2 style="margin:0;">Find candidates for a role</h2>
-      <button type="button" class="histbtn" id="jdclose">Close</button>
+      <button type="button" class="histbtn" id="jdclose">← Back</button>
     </div>
     <p style="font-size:.8rem;color:var(--muted);margin:.3rem 0;">Paste a job description <b>or a link to it</b> — we rank people whose grounded profile best fits it. Country follows your top-right selector.</p>
     <input id="jdUrl" type="url" style="width:100%;font-size:.86rem;margin-bottom:.4rem;" placeholder="Link to the JD (Greenhouse/Lever/company careers URL) — optional" />
@@ -6530,8 +6530,10 @@ async function saveApplyProfile(){
 // current page's fields and fills those it can match by name/label/placeholder. User reviews & submits.
 function refreshBookmarklet(){
   const a = $("#bookmarklet"); if(!a) return;
-  const P = JSON.stringify(APPLY_PROFILE);
-  const code = "(function(){var P="+P+";var M=[[/first.?name|given.?name|fname/i,'first_name'],[/last.?name|surname|family.?name|lname/i,'last_name'],[/preferred|nick/i,'preferred_name'],[/e.?mail/i,'email'],[/phone|mobile|\\btel\\b/i,'phone'],[/\\bcity\\b/i,'city'],[/state|province|region/i,'region'],[/country/i,'country'],[/linkedin/i,'linkedin'],[/github/i,'github'],[/portfolio|website|personal.?site/i,'portfolio_website'],[/current.?title|job.?title|\\btitle\\b|position|role/i,'current_title'],[/current.?company|employer|company/i,'current_company'],[/years?.?(of.?)?exp/i,'years_experience'],[/cover.?letter/i,'cover_letter'],[/degree/i,'highest_degree'],[/school|university|college/i,'school'],[/field.?of.?study|major/i,'field_of_study'],[/grad.*year|graduation/i,'grad_year'],[/authoriz|eligible.*work|legally/i,'us_authorized_to_work'],[/sponsor/i,'requires_sponsorship'],[/visa/i,'visa_status'],[/relocat/i,'willing_to_relocate'],[/remote|on.?site|hybrid/i,'remote_preference'],[/start.?date|available/i,'earliest_start_date'],[/notice.?period/i,'notice_period'],[/salary|compensation|desired.?pay/i,'desired_salary'],[/how.?did.?you.?hear|referr|source/i,'source'],[/gender/i,'gender'],[/race|ethnic/i,'race_ethnicity'],[/hispanic|latino/i,'hispanic_latino'],[/veteran/i,'veteran_status'],[/disab/i,'disability_status']];function txt(el){var s=[el.name,el.id,el.placeholder,el.getAttribute('aria-label')].join(' ');if(el.labels)for(var i=0;i<el.labels.length;i++)s+=' '+el.labels[i].textContent;var p=el.closest('label');if(p)s+=' '+p.textContent;return s;}function setv(el,v){var pr=el.tagName==='TEXTAREA'?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype;var d=Object.getOwnPropertyDescriptor(pr,'value');if(d&&d.set)d.set.call(el,v);else el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}var n=0;document.querySelectorAll('input,textarea,select').forEach(function(el){var t=(el.type||'').toLowerCase();if(['hidden','password','file','submit','button','image'].indexOf(t)>=0)return;var h=txt(el);for(var i=0;i<M.length;i++){if(M[i][0].test(h)){var v=P[M[i][1]];if(!v)break;if(el.tagName==='SELECT'){for(var j=0;j<el.options.length;j++){if(el.options[j].text.toLowerCase().indexOf((''+v).toLowerCase())>=0||(''+v).toLowerCase().indexOf(el.options[j].text.toLowerCase())>=0){el.selectedIndex=j;el.dispatchEvent(new Event('change',{bubbles:true}));n++;break;}}}else if(t==='checkbox'){if(/^y/i.test(v))if(!el.checked){el.click();n++;}}else if(t==='radio'){var rv=(el.value||'')+' '+txt(el);if(rv.toLowerCase().indexOf((''+v).toLowerCase())>=0){el.click();n++;}}else{setv(el,''+v);n++;}break;}}});alert('Roster Autofill: filled '+n+' fields. Please review everything before submitting.');})();";
+  const prof = {...APPLY_PROFILE};   // synthesize a full name for single-field forms (Lever etc.)
+  if(prof.first_name || prof.last_name) prof.full_name = ((prof.first_name||"")+" "+(prof.last_name||"")).trim();
+  const P = JSON.stringify(prof);
+  const code = "(function(){var P="+P+";var M=[[/first.?name|given.?name|fname/i,'first_name'],[/last.?name|surname|family.?name|lname/i,'last_name'],[/preferred|nick/i,'preferred_name'],[/e.?mail/i,'email'],[/phone|mobile|\\btel\\b/i,'phone'],[/\\bcity\\b/i,'city'],[/state|province|region/i,'region'],[/country/i,'country'],[/linkedin/i,'linkedin'],[/github/i,'github'],[/portfolio|website|personal.?site/i,'portfolio_website'],[/current.?title|job.?title|\\btitle\\b|position|role/i,'current_title'],[/current.?company|employer|company/i,'current_company'],[/years?.?(of.?)?exp/i,'years_experience'],[/cover.?letter/i,'cover_letter'],[/degree/i,'highest_degree'],[/school|university|college/i,'school'],[/field.?of.?study|major/i,'field_of_study'],[/grad.*year|graduation/i,'grad_year'],[/authoriz|eligible.*work|legally/i,'us_authorized_to_work'],[/sponsor/i,'requires_sponsorship'],[/visa/i,'visa_status'],[/relocat/i,'willing_to_relocate'],[/remote|on.?site|hybrid/i,'remote_preference'],[/start.?date|available/i,'earliest_start_date'],[/notice.?period/i,'notice_period'],[/salary|compensation|desired.?pay/i,'desired_salary'],[/how.?did.?you.?hear|referr|source/i,'source'],[/gender/i,'gender'],[/race|ethnic/i,'race_ethnicity'],[/hispanic|latino/i,'hispanic_latino'],[/veteran/i,'veteran_status'],[/disab/i,'disability_status'],[/full.?name|legal.?name|your.?name|^\\s*name\\s*$/i,'full_name']];function txt(el){var s=[el.name,el.id,el.placeholder,el.getAttribute('aria-label')].join(' ');if(el.labels)for(var i=0;i<el.labels.length;i++)s+=' '+el.labels[i].textContent;var p=el.closest('label');if(p)s+=' '+p.textContent;return s;}function setv(el,v){var pr=el.tagName==='TEXTAREA'?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype;var d=Object.getOwnPropertyDescriptor(pr,'value');if(d&&d.set)d.set.call(el,v);else el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}var n=0;document.querySelectorAll('input,textarea,select').forEach(function(el){var t=(el.type||'').toLowerCase();if(['hidden','password','file','submit','button','image'].indexOf(t)>=0)return;var h=txt(el);for(var i=0;i<M.length;i++){if(M[i][0].test(h)){var v=P[M[i][1]];if(!v)break;if(el.tagName==='SELECT'){for(var j=0;j<el.options.length;j++){if(el.options[j].text.toLowerCase().indexOf((''+v).toLowerCase())>=0||(''+v).toLowerCase().indexOf(el.options[j].text.toLowerCase())>=0){el.selectedIndex=j;el.dispatchEvent(new Event('change',{bubbles:true}));n++;break;}}}else if(t==='checkbox'){if(/^y/i.test(v))if(!el.checked){el.click();n++;}}else if(t==='radio'){var rv=(el.value||'')+' '+txt(el);if(rv.toLowerCase().indexOf((''+v).toLowerCase())>=0){el.click();n++;}}else{setv(el,''+v);n++;}break;}}});alert('Roster Autofill: filled '+n+' fields. Please review everything before submitting.');})();";
   a.href = "javascript:" + encodeURIComponent(code);
 }
 function maybeShowApplyBtn(){ const b=$("#applybtn"); if(b) b.hidden = !loggedIn(); }
