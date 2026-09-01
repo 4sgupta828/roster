@@ -628,6 +628,13 @@ def jobs_enabled() -> bool:
     return os.environ.get("ROSTER_JOBS", "").lower() in ("1", "true", "yes")
 
 
+def agentic_jobs_enabled() -> bool:
+    """Flag (default OFF, Rule 20) via ROSTER_AGENTIC_JOBS: when ON, /jobs runs the AGENTIC pipeline —
+    the LLM understands + expands the query into multiple search angles, retrieves for each, then
+    dedupes/reranks with reasons — instead of a single-shot direct search. OFF → direct search (no-op)."""
+    return os.environ.get("ROSTER_AGENTIC_JOBS", "").lower() in ("1", "true", "yes")
+
+
 def enum_entity_probe_enabled() -> bool:
     """Flag (default OFF, Rule 20) via ROSTER_ENUM_ENTITY_PROBE: for an enumerative "table of the main X"
     ask with no user-named items, the derivation ALSO proposes `probe_entities` (candidate row instances)
@@ -2400,6 +2407,36 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         store = _claim_store_cached()
         if store is None:
             return {"jobs": [], "count": 0, "query": {}, "stats": {"jobs": 0, "companies": 0}}
+
+        async def _save_job_session(count: int, qdesc: dict):
+            try:
+                sstore = _store()
+                if sstore is not None:
+                    at = (" at " + ", ".join(qdesc.get("company"))) if qdesc.get("company") else ""
+                    await sstore.save(tenant_id=body.tenant_id, workspace_id=body.workspace_id,
+                        question=body.question, answer=f"Found {count} open role{'' if count==1 else 's'}{at}.",
+                        grounded=bool(count), claims=[], source_stats={}, coverage_gaps=[], rejected=0,
+                        sources=body.sources, user_name=body.user_name, user_email=body.user_email,
+                        kind="jobs", extra={"jobs_count": count})
+            except Exception:   # noqa: BLE001
+                pass
+
+        # AGENTIC mode (flag): LLM expands the query into multiple angles → multi-leg retrieval → rerank
+        if agentic_jobs_enabled():
+            from api.people_population import agentic_job_search
+            try:
+                res = await agentic_job_search(store, body.question, build_llm(mode=resolve_mode()),
+                                               country=(body.country or "us"))
+                res["count"] = len(res.get("jobs", []))
+                res["agentic"] = True
+                res["query"] = {}
+                res["stats"] = await store.jobs_stats()
+                await _save_job_session(res["count"], {})
+                return res
+            except Exception as e:   # noqa: BLE001 — fall through to direct search on any failure
+                _log = __import__("logging").getLogger("api.jobs")
+                _log.warning("agentic job search failed, falling back to direct: %s", e)
+
         from api.people_population import parse_job_query, semantic_enabled, embed_query
         try:
             q = await parse_job_query(body.question, build_llm(mode=resolve_mode()))
@@ -2415,19 +2452,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 terms=q.get("title_keywords") or [], company=q.get("company") or None,
                 location=(q.get("location") or None), cap=80)
         stats = await store.jobs_stats()
-        # record a session so JOB searches appear in the user's private History (like people/research do)
-        try:
-            sstore = _store()
-            if sstore is not None:
-                at = (" at " + ", ".join(q.get("company"))) if q.get("company") else ""
-                await sstore.save(
-                    tenant_id=body.tenant_id, workspace_id=body.workspace_id, question=body.question,
-                    answer=f"Found {len(rows)} open role{'' if len(rows)==1 else 's'}{at}.",
-                    grounded=bool(rows), claims=[], source_stats={}, coverage_gaps=[], rejected=0,
-                    sources=body.sources, user_name=body.user_name, user_email=body.user_email,
-                    kind="jobs", extra={"jobs_count": len(rows), "query": q})
-        except Exception:   # noqa: BLE001 — history is best-effort, never blocks the jobs result
-            pass
+        await _save_job_session(len(rows), q)   # JOB searches appear in the user's private History
         return {"jobs": rows, "count": len(rows), "query": q, "semantic": bool(qvec), "stats": stats}
 
     @app.post("/match-people")

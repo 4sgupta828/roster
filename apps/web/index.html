@@ -1456,7 +1456,7 @@
       </select>
     </label>
     <button type="button" class="histbtn newbtn" id="newbtn" style="margin-left:12px;">＋ New search</button>
-    <button type="button" class="histbtn" id="matchhdr" style="margin-left:0;" title="Upload your résumé → get ranked matching jobs">🎯 Match my résumé</button>
+    <button type="button" class="histbtn" id="matchhdr" style="margin-left:0;" title="Upload your résumé → get ranked matching jobs">🎯 Find jobs</button>
     <button type="button" class="histbtn" id="candhdr" style="margin-left:0;" title="Recruiter: paste a job description → ranked candidate people">🧲 Find candidates</button>
     <button type="button" class="histbtn" id="signinbtn" style="margin-left:0;" title="Sign in or create an account">Sign in</button>
     <button type="button" class="histbtn" id="histbtn2" style="margin-left:0;" hidden title="Your search history — private to your account">⧗ History</button>
@@ -1672,13 +1672,12 @@
     <div class="acctgrid">
       <section class="acctcard">
         <h3>Apply profile</h3>
-        <p class="acctcardsub">Fill it once — then autofill any job application, and match open roles to your résumé.</p>
+        <p class="acctcardsub">Fill it once — then autofill any job application. (Find jobs & History are in the top bar.)</p>
         <div class="acctcardbtns">
           <button type="button" class="idgo" id="acctapply" style="width:auto;">⚑ Edit apply profile</button>
-          <button type="button" class="histbtn" id="acctmatch">🎯 Match jobs to my résumé</button>
         </div>
       </section>
-      <section class="acctcard">
+      <section class="acctcard acctwide">
         <h3>Shortlists <span class="acctmuted">saved people &amp; jobs</span></h3>
         <div class="acctrow">
           <input id="newbucket" type="text" placeholder="New shortlist (e.g. ML hires)" />
@@ -1686,11 +1685,8 @@
         </div>
         <div id="bucketlist"></div>
       </section>
-      <section class="acctcard acctwide">
-        <h3>Your searches <span class="acctmuted">private to you</span></h3>
-        <div id="searchlist"></div>
-      </section>
     </div>
+    <span id="searchlist" hidden></span>
   </div>
 </section>
 <!-- Apply Profile: superset of ATS fields, filled once → autofill any application -->
@@ -2151,15 +2147,19 @@ function jobsMarkup(d){
     const apply = j.url?`<a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer">Apply ↗</a>`:"";
     const jref = j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||""));
     const jsave = `<div class="ppl-acts"><button type="button" class="rsave" data-kind="job" data-ref="${esc(String(jref))}" data-label="${esc(j.title||"")}" data-sub="${esc(((j.company||"").replace(/_/g," "))+(j.location?" · "+j.location:""))}" data-url="${esc(j.url||"")}" title="Save to a shortlist">☆</button></div>`;
+    const pct = j.match_pct ? ` <span style="color:var(--gold);font-weight:700;font-size:.76rem;">${j.match_pct}% match</span>` : "";
+    const jr = (j.reasons&&j.reasons.length) ? ` <span style="color:var(--muted);font-size:.74rem;">· ${j.reasons.map(esc).join(" · ")}</span>` : "";
     return `<div class="ppl-card">${jsave}<span class="ppl-body">
-      <span class="ppl-name">${esc(j.title)}</span>
-      <span class="ppl-blurb">${co}${j.source?` · via ${esc(j.source)}`:""}</span>
+      <span class="ppl-name">${esc(j.title)}${pct}</span>
+      <span class="ppl-blurb">${co}${j.source?` · via ${esc(j.source)}`:""}${jr}</span>
       ${loc||dept?`<span class="ppl-tags">${loc}${dept}</span>`:""}
       ${apply?`<span class="ppl-links">${apply}</span>`:""}</span></div>`;
   }).join("");
   const at = (q.company&&q.company.length)?` at ${esc(q.company.join(", ").replace(/_/g," "))}`:"";
-  const head = `<div class="ppl-head"><b>${jobs.length}</b> open role${jobs.length===1?"":"s"}${at}</div>`
-    + `<div class="ppl-cov">◔ Aggregated from public ATS boards (Greenhouse / Ashby / Lever) — ${st.jobs||0} jobs across ${st.companies||0} companies indexed. Each links to the company's apply page.</div>`;
+  const intentHtml = d.intent ? `<div class="ppl-cov" style="border-left-color:var(--gold);">🧭 ${esc(d.intent)}${(d.query_angles&&d.query_angles.length>1)?` <span style="color:var(--muted)">· searched ${d.query_angles.length} angles</span>`:""}</div>` : "";
+  const head = `<div class="ppl-head"><b>${jobs.length}</b> open role${jobs.length===1?"":"s"}${at}${d.agentic?` <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">⚡ smart search</span>`:""}</div>`
+    + intentHtml
+    + `<div class="ppl-cov">◔ Aggregated from public ATS boards — ${st.jobs||0} jobs across ${st.companies||0} companies indexed. Each links to the company's apply page.</div>`;
   return `<div class="ppl-wrap">${head}<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.</div>'}</div></div>`;
 }
 function peopleRowsMarkup(data){

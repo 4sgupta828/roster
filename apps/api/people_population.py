@@ -330,6 +330,87 @@ async def parse_job_query(question: str, llm) -> dict:
         return {"company": [], "title_keywords": [w for w in question.lower().split() if len(w) > 2][:3], "location": ""}
 
 
+# ---- Agentic job search: LLM understands + expands → multi-leg semantic retrieval → rerank ------------
+class _JobPlan(BaseModel):
+    intent: str = ""
+    query_variants: list[str] = []   # alternative phrasings / adjacent titles that surface good matches
+    must_have: list[str] = []        # key terms a strong match's title should contain
+    company: list[str] = []
+    seniority: str = ""
+    location: str = ""
+
+
+async def _llm_job_plan(question: str, llm) -> dict:
+    prompt = (
+        "Plan an INTELLIGENT job search. Return JSON: `intent` (one sentence — what the seeker really "
+        "wants). `query_variants` (3-5 ALTERNATIVE search phrasings AND adjacent job titles that would "
+        "surface strong matches — e.g. 'ML infra' → ['machine learning infrastructure engineer','ML "
+        "platform engineer','MLOps engineer','distributed training engineer']). `must_have` (2-4 key "
+        "terms a strong match's TITLE should contain). `company` (member companies if a GROUP is named "
+        "e.g. FAANG/big tech, else []). `seniority` (senior/staff/leadership/… or ''). `location` (a "
+        "city, 'remote', or ''). JSON only.\n\nQuery: " + question)
+    try:
+        comp = await llm.complete(system="You plan an intelligent, multi-angle job search. Return only the object.",
+                                  messages=[{"role": "user", "content": prompt}],
+                                  response_format=_JobPlan, max_tokens=450)
+        p = comp.parsed
+        return {"intent": (p.intent or "").strip(),
+                "variants": [str(v).strip() for v in (p.query_variants or []) if str(v).strip()][:5],
+                "must_have": [str(m).strip().lower() for m in (p.must_have or []) if str(m).strip()][:4],
+                "company": [str(c).strip().lower().replace(" ", "_") for c in (p.company or []) if str(c).strip()],
+                "seniority": (p.seniority or "").strip().lower(), "location": (p.location or "").strip()}
+    except Exception:   # noqa: BLE001
+        return {"intent": "", "variants": [], "must_have": [], "company": [], "seniority": "", "location": ""}
+
+
+async def agentic_job_search(store, question: str, llm, country: str = "us") -> dict:
+    """LLM reasons about the query, generates multiple search angles, retrieves for EACH (multi-leg),
+    then dedupes and reranks — rewarding cross-angle agreement + must-have title hits. Returns the
+    ranked jobs WITH the reasoning (intent + angles + per-job why)."""
+    plan = await _llm_job_plan(question, llm)
+    legs, seen = [], set()
+    for l in [question] + plan["variants"]:
+        lk = (l or "").strip().lower()
+        if lk and lk not in seen:
+            seen.add(lk); legs.append(l.strip())
+    legs = legs[:6]
+    pool: dict = {}
+    for leg in legs:
+        qv = embed_query(leg)
+        if not qv:
+            continue
+        for j in await store.match_jobs_scored(qv, cap=60):
+            key = (j.get("company") or "", j.get("title") or "", j.get("location") or "")
+            sim = float(j.get("sim") or 0.0)
+            e = pool.get(key)
+            if e is None:
+                pool[key] = {"job": j, "best": sim, "legs": 1}
+            else:
+                e["legs"] += 1
+                if sim > e["best"]:
+                    e["best"] = sim; e["job"] = j
+    want_country = (country or "").lower()
+    out, dropped = [], 0
+    for e in pool.values():
+        j = e["job"]; loc = (j.get("location") or "").lower(); title_l = (j.get("title") or "").lower()
+        if not _country_ok(loc, want_country):
+            dropped += 1; continue
+        score = e["best"] + 0.04 * min(e["legs"] - 1, 3)      # cross-angle agreement
+        reasons = []
+        hits = [m for m in plan["must_have"] if m in title_l]
+        if hits:
+            score += 0.08 * len(hits); reasons.append("matches " + ", ".join(hits))
+        if e["legs"] > 1:
+            reasons.append(f"{e['legs']} search angles")
+        out.append({**{k: j.get(k) for k in ("id", "company", "title", "location", "url", "source")},
+                    "score": round(score, 4), "match_pct": min(99, round(e["best"] * 100)), "reasons": reasons})
+    out.sort(key=lambda x: -x["score"])
+    note = ((f"{want_country.upper()} only · " if want_country else "")
+            + f"agentic — {len(legs)} angles, {len(pool)} candidates")
+    return {"jobs": out[:60], "intent": plan["intent"], "query_angles": legs, "note": note,
+            "dropped_out_of_country": dropped}
+
+
 def build_person_profile_card(name: str, context: str = "") -> dict:
     """A single-person profile card built from EXPLICIT profile searches — GitHub (direct user search),
     X (direct search), and LinkedIn (Google search over name + hints, since LinkedIn has no open
