@@ -817,7 +817,23 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
     if not cands:
         return {"people_rows": []}
     sim_map = {c["entity_id"]: c["sim"] for c in cands}
-    rows = await store.people_by_ids([c["entity_id"] for c in cands])
+    cand_ids = [c["entity_id"] for c in cands]
+    # LOCAL RECALL (recruiter's metro / state, no explicit locations): the JD cohort is drawn before
+    # the scope applies, so add the best-matching people we can PLACE locally on the same scale
+    _pm = str(prefs.get("metro") or "").lower(); _ps = str(prefs.get("state") or "").lower()
+    if (_pm or _ps) and not [l for l in (prefs.get("locations") or []) if str(l).strip()] \
+            and (prefs.get("country") or "us").lower() == "us":
+        try:
+            local_ids = await store.people_by_geo(metro=_pm, state=_ps)
+            extra = [i for i in local_ids if i not in sim_map]
+            if extra:
+                top_local = await store.semantic_people(qvec, candidate_ids=extra, cap=250)
+                if top_local:
+                    sim_map.update(await store.similarity_for(qvec, top_local))
+                    cand_ids += top_local
+        except Exception as ex:  # noqa: BLE001 — additive
+            _log.info("candidate local recall skipped: %s", ex)
+    rows = await store.people_by_ids(cand_ids)
     want_sens = {str(s).lower() for s in (prefs.get("seniorities") or []) if str(s).strip()}
     want_country = (prefs.get("country") or "").lower()
     locs = [str(l).lower() for l in (prefs.get("locations") or []) if str(l).strip()]
