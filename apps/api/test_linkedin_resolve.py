@@ -48,6 +48,9 @@ def test_hints_and_query_come_from_grounded_attributes():
     h = hints_from_row(row)
     assert h == {"company": ["anthropic"], "worked_at": ["OpenAI"], "metro": ["bay area"]}
     assert build_query("Tom Brown", h) == '"Tom Brown" anthropic site:linkedin.com/in'
+    assert build_query("Tom B Brown", h) == '"Tom Brown" anthropic site:linkedin.com/in'      # initials dropped
+    assert build_query("Tom B. Brown", {}) == '"Tom Brown" site:linkedin.com/in'
+    assert build_query("Mary Jane Watson", {}) == '"Mary Watson" site:linkedin.com/in'        # first + last (recall)
     assert hint_hits(h, "Co-Founder at Anthropic, previously OpenAI") == {"company": ["anthropic"], "worked_at": ["OpenAI"]}
 
 
@@ -65,6 +68,11 @@ def test_resolve_linkedin_uses_search_and_frames_evidence():
     assert d["status"] == "resolved" and d["evidence"]["type"] == "self_stated" and d["evidence"]["family"] == "linkedin"
     one = loop.run_until_complete(resolve_linkedin({"name": "Prince"}, search=fake_search))
     assert one["status"] == "none"                                              # single-token names never resolve
+
+    async def blocked(q):
+        return []                                                               # anti-bot page / rate limit
+    ua = loop.run_until_complete(resolve_linkedin(row, search=blocked))
+    assert ua["status"] == "unavailable" and ua["match"] is None                # never reads as 'no profile'
 
 
 def test_calibration_bands_and_consistency_vs_corroboration():

@@ -8029,6 +8029,9 @@ async function openMapsList(){
           if(o) o.innerHTML = `<div class="er-src">Resolved from a search-engine snippet: “${esc(d.match.headline||"")}” — matched on ${esc(Object.entries(d.match.hits||{}).map(([k,v])=>k.replace(/_/g," ")+": "+v.join(", ")).join("; "))}. Self-stated; never read from linkedin.com.</div>`;
         } else if(d.status === "already"){
           out.innerHTML = `<div class="er-src">A LinkedIn link is already on file.</div>`;
+        } else if(d.status === "unavailable"){
+          out.innerHTML = `<div class="er-gap">The search leg is unavailable right now (${esc(d.note||"no results returned")}) — not evidence of absence. Try again later.</div>`;
+          liB.disabled = false; liB.textContent = "Resolve LinkedIn ⌕";
         } else if(d.status === "ambiguous" && (d.candidates||[]).length){
           out.innerHTML = `<div class="er-gap">No confident match — ${d.candidates.length} same-named profile${d.candidates.length===1?"":"s"} found, none carrying the company on file. Unverified possibilities:</div>`
             + d.candidates.slice(0,4).map(c=>`<div class="er-art"><a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.name)} ↗</a><span class="er-art-m">${esc(c.headline||"")}</span></div>`).join("");

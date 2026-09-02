@@ -134,8 +134,13 @@ async def search_snippets(query: str, *, max_results: int = 10) -> list[dict]:
 
 
 def build_query(name: str, hints: dict[str, list[str]]) -> str:
+    """'"First Last" <company> site:linkedin.com/in' — middle initials are dropped from the quoted
+    phrase ("Tom B Brown" would miss the 'Tom Brown - …' title) while name_matches still accepts them."""
+    toks = name.split()
+    if len(toks) >= 3:
+        toks = [toks[0], toks[-1]]        # first + last: recall first; name_matches accepts middles
     co = (hints.get("company") or [""])[0]
-    return f'"{name}" {co} site:linkedin.com/in'.replace("  ", " ").strip()
+    return f'"{" ".join(toks)}" {co} site:linkedin.com/in'.replace("  ", " ").strip()
 
 
 async def resolve_linkedin(row: dict, *, search=search_snippets) -> dict:
@@ -147,6 +152,13 @@ async def resolve_linkedin(row: dict, *, search=search_snippets) -> dict:
     hints = hints_from_row(row)
     q = build_query(name, hints)
     results = await search(q)
+    if not results:
+        # An empty leg is far more often a BLOCKED search (the keyless DuckDuckGo leg serves an
+        # anti-bot page from datacenter IPs after a few calls) than a true zero — say so; never
+        # let 'search unavailable' read as 'no such profile'.
+        return {"status": "unavailable", "match": None, "candidates": [], "query": q,
+                "note": "the search leg returned nothing (keyless DuckDuckGo is rate-limited from "
+                        "the server; set BRAVE_API_KEY for a reliable leg)"}
     dec = choose(name, hints, results)
     dec["query"] = q
     dec["evidence"] = {"type": "self_stated", "family": "linkedin",
