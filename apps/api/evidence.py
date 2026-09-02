@@ -68,6 +68,12 @@ FAMILY_LABELS = {
 }
 
 
+# facet key → CLAIM AXIS: enrichment facets that restate an existing claim under their own key (the
+# facet table's key is (entity, key, value) without the source) count toward that claim's
+# agreement across families. Display stays per facet key; agreement is per axis.
+CLAIM_AXIS = {"linkedin_company": "company"}
+
+
 def facet_family(source_document_id: str, entity_id: str = "") -> str:
     """The source FAMILY a facet came from — per-facet provenance first, entity prefix fallback."""
     doc = (source_document_id or "").lower()
@@ -99,7 +105,7 @@ def evidence_packet(facet_rows: list[dict], entity_id: str = "") -> dict:
             families.add(fam)
         val = (f.get("value_norm") or f.get("facet_value_norm")
                or (f.get("display_value") or "").lower())
-        fams_by_keyval.setdefault((key, val), set()).add(fam)
+        fams_by_keyval.setdefault((CLAIM_AXIS.get(key, key), val), set()).add(fam)
         cur = per_key.get(key)
         if cur is None or _STRENGTH_RANK.get(etype, 0) > _STRENGTH_RANK.get(cur["type"], 0):
             per_key[key] = {"type": etype, "family": fam}

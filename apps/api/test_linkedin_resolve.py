@@ -128,12 +128,12 @@ def test_persist_writes_link_headline_and_company_facets_from_the_linkedin_famil
     loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
     loop.run_until_complete(persist_resolution(st, "github:nottombrown", match))
     keys = [c["facet_key"] for c in st.calls]
-    assert keys == ["link_linkedin", "linkedin_headline", "company"]
+    assert keys == ["link_linkedin", "linkedin_headline", "linkedin_company"]   # own key: never overwrites the GitHub row
     assert all(c["source_document_id"] == match["url"] for c in st.calls)         # family 'linkedin'
     assert st.calls[2]["facet_value_norm"] == "anthropic"                          # ingester's norm
     # the packet then sees github + linkedin agreeing on company → consistent, not corroborated
     pk = evidence_packet([
         {"facet_key": "company", "value_norm": "anthropic", "document_id": "https://github.com/nottombrown"},
-        {"facet_key": "company", "value_norm": "anthropic", "document_id": match["url"]},
+        {"facet_key": "linkedin_company", "value_norm": "anthropic", "document_id": match["url"]},
     ], "github:nottombrown")
-    assert pk["consistent_keys"] == ["company"] and pk["corroborated_keys"] == []
+    assert pk["consistent_keys"] == ["company"] and pk["corroborated_keys"] == []   # claim-axis mapping
