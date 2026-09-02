@@ -2282,9 +2282,11 @@ async function loadConfig(){
       const cs = document.getElementById("countryscope"), sel = document.getElementById("countrysel");
       if(cs && sel){
         cs.style.display = "inline-flex";
-        const applySel = () => { const v = sel.value || "us"; window.ROSTER_SCOPE = v; window.ROSTER_COUNTRY = v.startsWith("metro:")||v.startsWith("state:") ? "us" : v;
+        const applySel = () => { const v = sel.value; if(!v) return;   // never store a phantom 'us' when the option is missing
+          window.ROSTER_SCOPE = v; window.ROSTER_COUNTRY = v.startsWith("metro:")||v.startsWith("state:") ? "us" : v;
           try{ localStorage.setItem("roster_scope", v); localStorage.setItem("roster_country", window.ROSTER_COUNTRY); }catch(e){} };
-        sel.addEventListener("change", applySel);
+        // only a choice the USER makes is remembered as explicit; the detected metro stays the default otherwise
+        sel.addEventListener("change", () => { try{ localStorage.setItem("roster_scope_explicit", "1"); }catch(e){} applySel(); });
         initLocalScope(sel, applySel);
       }
     }
@@ -8182,7 +8184,7 @@ document.addEventListener("click", e => {
   if(rr){ e.preventDefault(); rerankShown(rr.dataset.pid); }
 });
 // ---- LOCAL SCOPE (where the user is → default metro; expandable) -------------------------------
-window.ROSTER_GEO = null;
+window.ROSTER_GEO = window.ROSTER_GEO || null;   // the config block may run before this line
 async function initLocalScope(sel, applySel){
   let geo = null;
   try{ const g = JSON.parse(localStorage.getItem("roster_geo")||"null"); if(g && g.ts && Date.now()-g.ts < 86400000) geo = g; }catch(e){}
@@ -8197,8 +8199,9 @@ async function initLocalScope(sel, applySel){
     if(geo.state && geo.state_label){ const o = document.createElement("option"); o.value = "state:" + geo.state; o.textContent = "🗺 " + geo.state_label; sel.insertBefore(o, sel.firstChild); }
     if(geo.metro && geo.metro_label){ const o = document.createElement("option"); o.value = "metro:" + geo.metro; o.textContent = "📍 Near me · " + geo.metro_label; sel.insertBefore(o, sel.firstChild); }
   }
-  // default: the stored choice; else the user's metro (or state) when detected; else all US
-  const stored = window.ROSTER_SCOPE;
+  // default: a choice the user made explicitly; else the user's metro (or state) when detected; else all US
+  let explicit = false; try{ explicit = localStorage.getItem("roster_scope_explicit") === "1"; }catch(e){}
+  const stored = explicit ? window.ROSTER_SCOPE : "";
   const want = stored && sel.querySelector(`option[value="${CSS.escape(stored)}"]`) ? stored
              : (geo && geo.country === "us" && geo.metro ? "metro:" + geo.metro : (geo && geo.country === "us" && geo.state ? "state:" + geo.state : (window.ROSTER_COUNTRY || "us")));
   sel.value = want; applySel();
