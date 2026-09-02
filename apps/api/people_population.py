@@ -220,6 +220,26 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
     _seen_n = len(prefs.get("seen_ids") or [])
     cands = await store.match_jobs_scored(
         qvec, cap=int(prefs.get("candidate_cap", 400)) + min(3 * _seen_n, 800))
+    # ROLE-KEYWORD pool widening: the semantic top-N may hold only a HANDFUL of jobs actually titled
+    # what the user asked for (verified live: ~10 'payments' titles in a 430-job pool → rotation had
+    # nothing fresh to promote). Pull a title-keyword slice of the WHOLE index per named role and
+    # union it in at the pool's median similarity — the role-lead partition owns their placement,
+    # rotation + preference scoring order them within it.
+    _role_kw_early = [str(k).lower() for k in (prefs.get("role_keywords") or []) if str(k).strip()]
+    if _role_kw_early and cands:
+        _have = {(_norm_co(c.get("company") or ""), _norm_title(c.get("title") or "")) for c in cands}
+        _sims = sorted(float(c.get("sim") or 0.0) for c in cands)
+        _med = _sims[len(_sims) // 2]
+        for _kw in _role_kw_early[:3]:
+            try:
+                _kw_rows = await store.search_jobs(terms=[_kw], cap=150)
+            except Exception:   # noqa: BLE001 — widening is best-effort
+                _kw_rows = []
+            for _r in _kw_rows:
+                _k2 = (_norm_co(_r.get("company") or ""), _norm_title(_r.get("title") or ""))
+                if _k2 not in _have:
+                    _have.add(_k2)
+                    cands.append({**_r, "sim": _med})
     if not cands:
         return {"jobs": []}
     # 2) company-type sets (startup from accelerator/stage facets; f500/public from the curated set)
