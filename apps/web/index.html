@@ -2636,7 +2636,7 @@ function peopleRowsMarkup(data){
     lkHead = `<div class="ppl-head">Profile — <b>${esc(lk.name)}</b> <span class="ppl-fc" style="text-transform:none;">resolved from Roster's index${lk.context?` · context: ${esc(lk.context)}`:""}</span></div>`
       + `<div class="ppl-cov">◔ Everything the index holds on this person: grounded facets, public links, and linked artifacts (scanned on demand). Not a claim of completeness — “Inspect evidence” shows types and gaps. ${qaBtn}</div>`;
   } else if(lk && lk.resolution === "ambiguous"){
-    lkHead = `<div class="ppl-head">Which <b>${esc(lk.name)}</b>?</div>`
+    lkHead = `<div class="ppl-head">Which ${esc(lk.name)}?</div>`
       + `<div class="ppl-cov" style="border-left-color:var(--gold);">❓ ${esc(lk.clarify||"")} <span class="ppl-fc" style="text-transform:none;">Type the hint in the box below, or pick a card.</span></div>`;
   } else if(lk){
     lkHead = `<div class="ppl-head">Not indexed — <b>${esc(lk.name)}</b></div>`
@@ -2647,7 +2647,7 @@ function peopleRowsMarkup(data){
     : (lkHead || `<div class="ppl-head">Profile</div>`);   // single-person profile card (no enumeration coverage)
   // ambiguous lookup: each candidate card gets a PICK control (sends its entity id back as the choice)
   const pickCards = (lk && lk.resolution === "ambiguous")
-    ? rows.map(p => `<div class="ppl-pick"><button type="button" class="ppl-pickbtn" data-pick="${esc(p.entity_id||"")}" title="This is the one">✓ This one — ${esc(p.distinguisher||"")}</button>${cardHtml(p)}</div>`).join("")
+    ? rows.map(p => `<div class="ppl-pick"><button type="button" class="ppl-pickbtn" data-pick="${esc(`${p.name||lk.name} — ${p.distinguisher||""} [${p.entity_id||""}]`)}" title="This is the one">✓ This one — ${esc(p.distinguisher||"")}</button>${cardHtml(p)}</div>`).join("")
     : "";
   // TALENT CLUSTERS: a multi-company staffing comparison renders per-company sections — index
   // headcount + code-computed seniority/function mix, then that company's people cards.

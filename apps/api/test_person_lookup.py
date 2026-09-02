@@ -119,7 +119,8 @@ def test_people_surface_person_lookup_end_to_end(monkeypatch):
     r2 = client.post("/research", json={"question": "the one at Anthropic", "tenant_id": "demo",
                                         "surface": "people", "prior_person": "Tom Brown"}).json()
     assert r2["person_lookup"]["resolution"] == "resolved" and r2["people_rows"][0]["entity_id"] == "openalex:A1"
-    r3 = client.post("/research", json={"question": "yc:1", "tenant_id": "demo", "surface": "people",
+    r3 = client.post("/research", json={"question": "Tom Brown — SolidStage · Founder [yc:1]",
+                                        "tenant_id": "demo", "surface": "people",
                                         "prior_person": "Tom Brown"}).json()          # a picked card
     assert r3["person_lookup"]["resolution"] == "resolved" and r3["people_rows"][0]["entity_id"] == "yc:1"
     assert svc.calls == []

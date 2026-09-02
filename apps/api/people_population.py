@@ -1050,6 +1050,17 @@ def build_person_profile_card(name: str, context: str = "") -> dict:
 
 
 _ENTITY_ID_RE = re.compile(r"^(github|openalex|theorg|npi|yc|sec|ef|aifund|sosv|pear|person):\S+$", re.I)
+# a PICKED candidate as the UI submits it: "<name> — <distinguisher> [<entity id>]" (readable turn label)
+_PICK_RE = re.compile(r"\[((?:github|openalex|theorg|npi|yc|sec|ef|aifund|sosv|pear|person):[^\]\s]+)\]\s*$", re.I)
+
+
+def picked_entity_id(question: str) -> str:
+    """The entity id a People-mode utterance PICKS: a bare id, or a trailing '[id]'; else ''."""
+    q = (question or "").strip()
+    if _ENTITY_ID_RE.match(q):
+        return q
+    m = _PICK_RE.search(q)
+    return m.group(1) if m else ""
 _CTX_STOP = {"the", "one", "who", "works", "worked", "work", "from", "with", "and", "for", "that",
              "this", "guy", "person", "at", "in", "of", "is", "was", "a", "an", "his", "her", "their",
              "based", "located", "university", "college", "company", "school", "studied", "went"}
@@ -1099,7 +1110,9 @@ def _distinguisher(row: dict) -> str:
     """A one-line, grounded 'which one' label for a candidate: company · role · place · source."""
     attrs = row.get("attributes") or []
     def g(k):
-        return next((a.get("display") for a in attrs if a.get("key") == k and a.get("display")), "")
+        v = next((a.get("display") for a in attrs if a.get("key") == k and a.get("display")), "")
+        v = str(v).replace("_", " ")
+        return v.title() if v == v.lower() else v      # 'ai_researcher' → 'Ai Researcher', keep 'Bay Area'
     src = (row.get("entity_id") or "").split(":", 1)[0]
     from api.evidence import FAMILY_LABELS
     bits = [g("company"), g("role") or g("seniority"), g("metro") or g("country")]
@@ -1403,9 +1416,10 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                   if k in _ok and isinstance(vals, (list, tuple))}
         _prior = {k: v[:6] for k, v in _prior.items() if v}
     _q = (question or "").strip()
-    if _ENTITY_ID_RE.match(_q):
+    _picked = picked_entity_id(_q)
+    if _picked:
         # a PICKED candidate from a clarifying question (entity id) — no compile, direct lookup
-        return await lookup_person(store, _q, "", tenant_id=tenant_id)
+        return await lookup_person(store, _picked, "", tenant_id=tenant_id)
     if prior_person and not _prior:
         # PERSON-LOOKUP CONVERSATION: the previous turn asked "which <name>?" (or found none). This
         # utterance is disambiguating CONTEXT for that name ("the one at Anthropic", "IIT Delhi")
