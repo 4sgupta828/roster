@@ -12,7 +12,7 @@
     color-scheme:light;
     --bg:#F7F8FB; --panel:#FFFFFF; --panel2:#F1F3F9; --ink:#0E1726; --muted:#5B6675;
     --gold:#4F46E5; --gold-strong:#4338CA; --gold-rgb:79,70,229; --verified:#08744E; --gap:#C2701C;
-    --person:#9F1239; --person-rgb:159,18,57;   /* deep rose — replaces the illegible teal */
+    --person:#0B5CAD; --person-rgb:11,92,173;   /* deep azure blue (distinct from the indigo accent) */
     --on-accent:#FFFFFF; --on-accent-rgb:255,255,255;   /* white text on the indigo accent */
     --hair:#E4E7EE; --hair-soft:rgba(14,23,38,.05);
     --hl-f:14,159,110; --hl-r:194,112,28; --hl-k:79,70,229;   /* darker tints stay legible on white */
@@ -33,7 +33,7 @@
     color-scheme:dark;
     --bg:#0A0F1E; --panel:#131C30; --panel2:#0F1728; --ink:#EAECF2; --muted:#8B96A9;
     --gold:#818CF8; --gold-strong:#A5B0FF; --gold-rgb:129,140,248; --verified:#4ADE9E; --gap:#E0A55E;
-    --person:#FDA4AF; --person-rgb:253,164,175;   /* soft rose on the dark ground */
+    --person:#8AB8F8; --person-rgb:138,184,248;   /* soft azure on the dark ground */
     --on-accent:#0B1020; --on-accent-rgb:11,16,32;
     --hair:#26314C; --hair-soft:rgba(255,255,255,.06);
     --hl-f:74,222,158; --hl-r:224,165,94; --hl-k:129,140,248;
@@ -49,7 +49,7 @@
     color-scheme:light;
     --bg:#F6F3EA; --panel:#FDFBF5; --panel2:#F0ECE0; --ink:#221D12; --muted:#6E6550;
     --gold:#8A6A1F; --gold-strong:#6E5314; --gold-rgb:138,106,31; --verified:#2E6B4F; --gap:#A05C24;
-    --person:#7A1B33; --person-rgb:122,27,51;   /* darker rose for the paper theme */
+    --person:#123F73; --person-rgb:18,63,115;   /* darker azure for the paper theme */
     --on-accent:#FDF8EA; --on-accent-rgb:253,248,234;
     --hair:#DCD4C0; --hair-soft:rgba(34,29,18,.06);
     --hl-f:46,107,79; --hl-r:138,106,31; --hl-k:63,94,150;
@@ -502,7 +502,7 @@
   .ppl-title{font-size:.82rem;line-height:1.42;color:var(--ink);opacity:.86;}
   .ppl-blurb{display:block;font-size:.82rem;line-height:1.45;color:var(--ink);opacity:.82;margin:.15rem 0;}
   .ppl-tags{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.16rem;}
-  .ppl-tag{font-size:.64rem;font-weight:600;color:var(--person,#9F1239);background:rgba(var(--person-rgb,159,18,57),.10);padding:.1rem .42rem;border-radius:4px;}
+  .ppl-tag{font-size:.64rem;font-weight:600;color:var(--person,#0B5CAD);background:rgba(var(--person-rgb,11,92,173),.10);padding:.1rem .42rem;border-radius:4px;}
   .ppl-links{display:flex;flex-wrap:wrap;gap:.32rem;margin-top:.32rem;}
   .ppl-lnk{font-size:.66rem;font-weight:600;text-decoration:none;padding:.14rem .46rem;border-radius:5px;border:1px solid var(--hair);color:var(--faint,#8a93ad);background:rgba(138,147,173,.08);transition:all .12s;line-height:1.3;}
   .ppl-lnk:hover{border-color:currentColor;transform:translateY(-1px);}
@@ -511,7 +511,7 @@
   .ppl-lnk.lnk-x_search{color:var(--ink);background:transparent;border:1px dashed rgba(160,170,190,.5);}
   .ppl-lnk.lnk-github_search{color:var(--gold);background:transparent;border:1px dashed rgba(var(--gold-rgb,255,207,107),.5);}
   .ppl-lnk.lnk-x,.ppl-lnk.lnk-twitter{color:var(--ink);background:rgba(138,147,173,.16);}
-  .ppl-lnk.lnk-website,.ppl-lnk.lnk-medium{color:var(--person,#9F1239);background:rgba(var(--person-rgb,159,18,57),.08);}
+  .ppl-lnk.lnk-website,.ppl-lnk.lnk-medium{color:var(--person,#0B5CAD);background:rgba(var(--person-rgb,11,92,173),.08);}
   .ppl-lnk.lnk-github{color:var(--gold);background:rgba(var(--gold-rgb,255,207,107),.12);}
   /* grounded chart (inline SVG) — framed as a figure with a caption + legend */
   .chartfig{margin:1.1rem 0 1.3rem;border:1px solid var(--hair);border-radius:12px;
@@ -775,14 +775,14 @@
   /* grounded company hyperlinks in answer prose */
   .answer .colink{color:var(--ink);text-decoration:none;border-bottom:1px solid rgba(var(--gold-rgb,255,207,107),.45);font-weight:600;}
   .answer .colink:hover{color:var(--gold);border-bottom-color:var(--gold);}
-  .answer .coroster{color:var(--person,#9F1239);text-decoration:none;font-size:.72em;margin-left:.12em;vertical-align:super;opacity:.8;}
+  .answer .coroster{color:var(--person,#0B5CAD);text-decoration:none;font-size:.72em;margin-left:.12em;vertical-align:super;opacity:.8;}
   .answer .coroster:hover{opacity:1;}
   /* unknown company (no graph entity) → links to a web search: dotted underline, muted */
   .answer .colink.colink-search{border-bottom:1px dotted var(--faint,#5c6688);font-weight:600;}
   .answer .colink.colink-search:hover{color:var(--gold);border-bottom-color:var(--gold);}
   /* grounded person hyperlinks → their public profile (LinkedIn/X/GitHub) — person-teal underline */
-  .answer .pplink{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--person,#9F1239);font-weight:600;}
-  .answer .pplink:hover{color:var(--person,#9F1239);border-bottom-color:var(--person,#9F1239);}
+  .answer .pplink{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--person,#0B5CAD);font-weight:600;}
+  .answer .pplink:hover{color:var(--person,#0B5CAD);border-bottom-color:var(--person,#0B5CAD);}
   /* citation hover card — a quick non-truncated depth view of the [n] evidence */
   #citehover{position:fixed;z-index:1300;max-width:min(440px,92vw);display:none;background:var(--panel);
     border:1px solid var(--hair);border-left:3px solid var(--gold);border-radius:10px;padding:11px 13px;
@@ -820,26 +820,26 @@
     font-weight:680;margin:0;padding:0;display:flex;align-items:center;gap:.55rem;}
   .evhint{font-size:.8rem;color:var(--muted);margin-top:.45rem;line-height:1.5;}
   /* Top related public research section (mirrors the evidence block; teal accent to read as distinct) */
-  .rrblock{margin:.7rem 0 0;border:1px solid var(--hair);border-left:3px solid var(--person,#9F1239);
+  .rrblock{margin:.7rem 0 0;border:1px solid var(--hair);border-left:3px solid var(--person,#0B5CAD);
     border-radius:12px;background:var(--panel2);overflow:hidden;}
   .rrblock>summary{list-style:none;cursor:pointer;padding:.85rem 1rem;transition:background .15s;}
   .rrblock>summary::-webkit-details-marker{display:none;}
-  .rrblock>summary:hover{background:rgba(var(--person-rgb,159,18,57),.05);}
+  .rrblock>summary:hover{background:rgba(var(--person-rgb,11,92,173),.05);}
   .rrhead{font-family:var(--mono);font-size:.66rem;text-transform:uppercase;letter-spacing:.1em;
-    color:var(--person,#9F1239);font-weight:680;margin:0;padding:0;display:flex;align-items:center;gap:.55rem;}
+    color:var(--person,#0B5CAD);font-weight:680;margin:0;padding:0;display:flex;align-items:center;gap:.55rem;}
   .rr-list{list-style:none;margin:0;padding:.2rem 1rem 1rem;display:flex;flex-direction:column;gap:.7rem;}
   .rr-item{display:flex;flex-direction:column;gap:.28rem;padding:.6rem .75rem;border:1px solid var(--hair);
     border-radius:9px;background:var(--panel);}
   .rr-title{font-family:var(--serif,Georgia,serif);font-size:1rem;line-height:1.35;color:var(--ink);
     text-decoration:none;font-weight:600;overflow-wrap:anywhere;display:block;}
-  a.rr-title:hover{color:var(--person,#9F1239);text-decoration:underline;}
+  a.rr-title:hover{color:var(--person,#0B5CAD);text-decoration:underline;}
   .rr-why{font-size:.82rem;line-height:1.45;color:var(--ink);opacity:.9;margin:.1rem 0 .1rem;}
   .rr-why .rr-why-k{font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;
-    color:var(--person,#9F1239);font-weight:600;margin-right:.35rem;}
+    color:var(--person,#0B5CAD);font-weight:600;margin-right:.35rem;}
   .rr-meta{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem .6rem;font-size:.74rem;color:var(--muted);}
   .rr-badge{font-family:var(--mono);font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;
     border:1px solid var(--hair);border-radius:999px;padding:.08rem .5rem;color:var(--muted);}
-  .rr-badge.rr-peer{color:var(--person,#9F1239);border-color:color-mix(in srgb,var(--person,#9F1239) 45%,transparent);}
+  .rr-badge.rr-peer{color:var(--person,#0B5CAD);border-color:color-mix(in srgb,var(--person,#0B5CAD) 45%,transparent);}
   .rr-badge.rr-domain{color:var(--muted);border-style:dashed;}   /* domain context, not directly about the subject */
   .rr-m{font-variant-numeric:tabular-nums;}
   /* explicit clickable pill so it's obvious the evidence section expands */
