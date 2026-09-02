@@ -2398,7 +2398,8 @@ async function runJobs(question){
     // (New search clears it). Redirects don't advance the conversation.
     if(!d.redirect_to_qa && d.query) JOBS_CTX = d.query;
     THREAD.turns.push({question, kind: "jobs", jobs: d.jobs||[], query: d.query||{},
-                       stats: d.stats||{}, semantic: d.semantic,
+                       stats: d.stats||{}, semantic: d.semantic, geo_scope: d.geo_scope||null,
+                       agentic: !!d.agentic, intent: d.intent||"", query_angles: d.query_angles||[],
                        redirect_to_qa: !!d.redirect_to_qa, note: d.note||"", answer: ""});
     renderThread();
   }
