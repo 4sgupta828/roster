@@ -94,9 +94,58 @@ def fetch_breezy(token: str) -> list[dict]:
             for j in (d if isinstance(d, list) else [])]
 
 
+# ---- Eightfold (Netflix, Micron, PayPal, … — the enterprise "talent intelligence" ATS). Boards live
+# on a per-company host (a custom careers domain or <slug>.eightfold.ai) and answer a public JSON
+# search API; `domain=<slug>.com` selects the tenant. A hit's host names the company itself, which is
+# the identity guard's strongest signal. Paginated (start/num), bounded to 2,000 postings. ----
+_EF_HOSTS = ("{t}.eightfold.ai", "careers.{t}.com", "jobs.{t}.com", "explore.jobs.{t}.net",
+             "careers.{t}.net", "jobs.{t}.net")
+_EF_FOUND: dict[str, str] = {}      # token → host that answered (for board identity)
+
+
+def _eightfold_page(host: str, domain: str, start: int, num: int) -> dict:
+    return ij._http_json(f"https://{host}/api/apply/v2/jobs?domain={domain}&start={start}&num={num}")
+
+
+def fetch_eightfold(token: str) -> list[dict]:
+    domain = f"{token}.com"
+    host_hit, first = "", None
+    for pat in _EF_HOSTS:
+        host = pat.format(t=token)
+        try:
+            d = _eightfold_page(host, domain, 0, 100)
+        except Exception:  # noqa: BLE001 — DNS/404/HTML → not this host
+            continue
+        if isinstance(d, dict) and isinstance(d.get("positions"), list) and "count" in d:
+            host_hit, first = host, d
+            break
+    if not host_hit:
+        return []
+    _EF_FOUND[token] = host_hit
+    out, start, total = [], 0, int(first.get("count") or 0)
+    d = first
+    while True:
+        for j in d.get("positions") or []:
+            out.append({"title": j.get("name") or j.get("posting_name") or "",
+                        "location": j.get("location") or ", ".join(j.get("locations") or []),
+                        "department": j.get("department") or "",
+                        "url": j.get("canonicalPositionUrl") or f"https://{host_hit}/careers/job/{j.get('id')}"})
+        got = len(d.get("positions") or [])
+        if not got:
+            break
+        start += got                       # the API may page fewer than requested (50 for Netflix)
+        if start >= min(total, 2000):
+            break
+        try:
+            d = _eightfold_page(host_hit, domain, start, 100)
+        except Exception:  # noqa: BLE001
+            break
+    return out
+
+
 PROBES = {"greenhouse": ij.fetch_greenhouse, "lever": ij.fetch_lever, "ashby": ij.fetch_ashby,
           "smartrecruiters": fetch_smartrecruiters, "workable": fetch_workable,
-          "breezy": fetch_breezy}
+          "breezy": fetch_breezy, "eightfold": fetch_eightfold}
 
 
 # ---- WRONG-COMPANY GUARD (evidence-identity directive) ------------------------------------------
@@ -133,6 +182,11 @@ def identity_ok(board_name: str, company: str, token: str) -> bool:
 def board_identity(ats: str, token: str) -> str:
     """The board OWNER's display name — API metadata where available, else the hosted page title."""
     try:
+        if ats == "eightfold":
+            host = _EF_FOUND.get(token, "")
+            # a custom careers domain (careers.netflix.com / explore.jobs.netflix.net) IS the company;
+            # <slug>.eightfold.ai only proves the slug — report the slug and let identity_ok decide
+            return token if host else ""
         if ats == "greenhouse":
             return ij._http_json(f"https://boards-api.greenhouse.io/v1/boards/{token}").get("name") or ""
         if ats == "workable":
@@ -223,6 +277,9 @@ async def record_probe(conn, ats: str, token: str, hit: int) -> None:
         ats, token, hit)
 
 
+_TICKERS: dict[str, str] = {}   # company title → ticker (SEC list) — an extra Workday tenant guess
+
+
 def load_universe(top: int, names_file: str) -> list[str]:
     if names_file:
         with open(names_file) as fh:
@@ -230,7 +287,12 @@ def load_universe(top: int, names_file: str) -> list[str]:
     req = urllib.request.Request(_SEC_TICKERS, headers=_UA)
     with urllib.request.urlopen(req, timeout=30) as r:
         d = json.load(r)
-    return [v["title"] for v in list(d.values())[: top or 2000]]
+    rows = list(d.values())[: top or 2000]
+    for v in rows:
+        t = str(v.get("ticker") or "").lower().replace("-", "").replace(".", "")
+        if 2 <= len(t) <= 12:
+            _TICKERS[v["title"]] = t
+    return [v["title"] for v in rows]
 
 
 async def main() -> None:
@@ -308,8 +370,14 @@ async def main() -> None:
         stats["written"] += w
 
     async def workday_one(company: str) -> None:
-        slugs = slug_variants(company)
-        for slug in slugs[:2]:
+        # tenant guesses: full slug, first word, and the stock ticker (Workday tenants are very often
+        # the ticker or the short brand — 'nvidia', 'wm', 'pfizer'); every guess is verified by the
+        # tenant's own site redirect before any job is read
+        slugs = slug_variants(company)[:2]
+        tk = _TICKERS.get(company)
+        if tk and tk not in slugs:
+            slugs.append(tk)
+        for slug in slugs:
             key = f"workday:{slug}"
             if key in done:
                 continue
