@@ -223,7 +223,7 @@ async def widen_jobs_locally(store, rows: list[dict], *, qvec: str | None, terms
 
 
 def apply_job_scope(rows: list[dict], *, country: str = "", metro: str = "", state: str = "",
-                    query_location: str = "") -> tuple[list[dict], dict | None]:
+                    query_location: str = "", query_company: bool = False) -> tuple[list[dict], dict | None]:
     """Country + LOCAL scope for job rows: drop the clearly-elsewhere, lead with the local, keep
     remote/unplaced after. A location the query names wins (no scope applied). Returns
     (rows, geo_scope|None) where geo_scope carries the label/counts/statement for the UI."""
@@ -236,7 +236,15 @@ def apply_job_scope(rows: list[dict], *, country: str = "", metro: str = "", sta
     if not (metro or state) or want_c not in ("", "us"):
         return rows, None
     from api.geo import job_geo_status, partition_local, scope_label, scope_statement
-    rows, c = partition_local(rows, lambda j: job_geo_status(j.get("location") or "", metro=metro, state=state))
+    if query_company:
+        # the user named a company: keep ALL its roles (local first, elsewhere after) — never drop
+        inn, rest = [], []
+        for j in rows:
+            (inn if job_geo_status(j.get("location") or "", metro=metro, state=state) == "in" else rest).append(j)
+        c = {"in": len(inn), "remote": 0, "unknown": len(rest), "out": 0}
+        rows = inn + rest
+    else:
+        rows, c = partition_local(rows, lambda j: job_geo_status(j.get("location") or "", metro=metro, state=state))
     for j in rows[:c["in"]]:
         j["local"] = True
     st = state or US_METROS.get(metro, {}).get("state", "")

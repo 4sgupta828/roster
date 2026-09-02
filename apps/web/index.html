@@ -2397,6 +2397,7 @@ async function runJobs(question){
     // thread. The merged query behind THIS result set is what the next utterance refines
     // (New search clears it). Redirects don't advance the conversation.
     if(!d.redirect_to_qa && d.query) JOBS_CTX = d.query;
+    if(d.session_id && !THREAD.session_id) THREAD.session_id = d.session_id;   // the shareable link, like people
     THREAD.turns.push({question, kind: "jobs", jobs: d.jobs||[], query: d.query||{},
                        stats: d.stats||{}, semantic: d.semantic, geo_scope: d.geo_scope||null,
                        agentic: !!d.agentic, intent: d.intent||"", query_angles: d.query_angles||[],

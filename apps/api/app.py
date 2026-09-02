@@ -2626,40 +2626,63 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         async def _save_job_session(rows: list, qdesc: dict):
             # Store the actual job rows on the session so History can SHOW the stored results
             # on click (never re-run the search). Cap the stored payload so a huge result set
-            # doesn't bloat the row.
+            # doesn't bloat the row. Returns the session id (the shareable link), or None.
             count = len(rows)
             try:
                 sstore = _store()
                 if sstore is not None:
                     at = (" at " + ", ".join(qdesc.get("company"))) if qdesc.get("company") else ""
-                    await sstore.save(tenant_id=body.tenant_id, workspace_id=body.workspace_id,
+                    return await sstore.save(tenant_id=body.tenant_id, workspace_id=body.workspace_id,
                         question=body.question, answer=f"Found {count} open role{'' if count==1 else 's'}{at}.",
                         grounded=bool(count), claims=[], source_stats={}, coverage_gaps=[], rejected=0,
                         sources=body.sources, user_name=body.user_name, user_email=body.user_email,
                         kind="jobs", extra={"jobs_count": count, "jobs": list(rows[:60]), "query": qdesc})
             except Exception:   # noqa: BLE001
                 pass
+            return None
 
         # AGENTIC mode (flag): LLM expands the query into multiple angles → multi-leg retrieval → rerank
         if agentic_jobs_enabled():
-            from api.people_population import agentic_job_search
+            from api.people_population import agentic_job_search, parse_job_query
             try:
                 res = await agentic_job_search(store, body.question, build_llm(mode=resolve_mode()),
                                                country=(body.country or "us"))
+                # A NAMED company is the user's intent, not a hint: parse it and lead with that
+                # company's indexed roles (exact company search), whatever the semantic legs found
+                # ("Jobs at Tubi" returned Twitch/Databricks — session report). Those rows are also
+                # exempt from the local-scope drop (local ones still lead).
+                try:
+                    _q = await parse_job_query(body.question, build_llm(mode=resolve_mode()))
+                except Exception:  # noqa: BLE001
+                    _q = {"company": [], "title_keywords": [], "location": ""}
+                _cos = [c for c in (_q.get("company") or []) if str(c).strip()]
+                if _cos:
+                    _lead = []
+                    for _co in _cos[:3]:
+                        _lead += await store.search_jobs(company=_co, cap=120)
+                    _seen = {(j.get("company"), j.get("title"), j.get("location")) for j in _lead}
+                    res["jobs"] = _lead + [j for j in (res.get("jobs") or [])
+                                           if (j.get("company"), j.get("title"), j.get("location")) not in _seen]
+                    res["company_rows"] = len(_lead)
                 if people_geo_scope_enabled():
                     from api.people_population import (apply_job_scope, embed_query as _eq,
                                                        semantic_enabled as _sem, widen_jobs_locally)
-                    res["jobs"] = await widen_jobs_locally(
-                        store, res.get("jobs") or [], qvec=(_eq(body.question) if _sem() else None),
-                        country=(body.country or "us"), metro=(body.metro or ""), state=(body.state or ""))
+                    if not _cos:
+                        res["jobs"] = await widen_jobs_locally(
+                            store, res.get("jobs") or [], qvec=(_eq(body.question) if _sem() else None),
+                            country=(body.country or "us"), metro=(body.metro or ""), state=(body.state or ""))
                     res["jobs"], res["geo_scope"] = apply_job_scope(
                         res.get("jobs") or [], metro=(body.metro or ""), state=(body.state or ""),
-                        country=(body.country or "us"))
+                        country=(body.country or "us"), query_location=(_q.get("location") or ""),
+                        query_company=bool(_cos))
                 res["count"] = len(res.get("jobs", []))
                 res["agentic"] = True
-                res["query"] = {}
+                res["query"] = _q if _cos else {}
+                if _cos and not res.get("company_rows"):
+                    res["note"] = (f"No open roles from {', '.join(_cos)} in Roster's job index yet — a coverage "
+                                   f"gap, not proof of no hiring. Related roles from other companies follow.")
                 res["stats"] = await store.jobs_stats()
-                await _save_job_session(res.get("jobs") or [], {})
+                res["session_id"] = await _save_job_session(res.get("jobs") or [], res["query"])
                 return res
             except Exception as e:   # noqa: BLE001 — fall through to direct search on any failure
                 _log = __import__("logging").getLogger("api.jobs")
@@ -2710,9 +2733,9 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                         query_location=(q.get("location") or ""))   # an explicit location wins
         rows = rows[:80]
         stats = await store.jobs_stats()
-        await _save_job_session(rows, q)   # JOB searches appear in the user's private History
+        sid = await _save_job_session(rows, q)   # JOB searches appear in the user's private History
         return {"jobs": rows, "count": len(rows), "query": q, "semantic": bool(qvec), "stats": stats,
-                "geo_scope": _gs}
+                "geo_scope": _gs, "session_id": sid}
 
     @app.post("/insights")
     async def insights(body: ResearchIn) -> dict:
