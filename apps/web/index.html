@@ -8026,9 +8026,11 @@ async function openMapsList(){
       const fam = famOf("company") || famOf("role");
       const src = SAYS[fam] || "a source in the index";
       const t = typeOf("company") === "corroborated" || typeOf("role") === "corroborated";
-      sure.push(t ? `${what[0].toUpperCase()+what.slice(1)} are confirmed by two independent sources.`
-        : /^self-described/.test(src) ? `${what[0].toUpperCase()+what.slice(1)} come only from what the person wrote about themselves (${src}).`
-        : `${what[0].toUpperCase()+what.slice(1)} are ${src} — reliable for that listing, but no second source confirms them.`);
+      const pl = (role && co);   // plural when both the role and the employer are on record
+      const W = what[0].toUpperCase()+what.slice(1);
+      sure.push(t ? `${W} ${pl?"are":"is"} confirmed by two independent sources.`
+        : /^self-described/.test(src) ? `${W} ${pl?"come":"comes"} only from what the person wrote about themselves (${src}).`
+        : `${W} ${pl?"are":"is"} ${src} — reliable for that listing, but no second source confirms ${pl?"them":"it"}.`);
     }
     if(cal && cal.band === "consistent") sure.push("Independent signals agree with their self-description: " + cal.reasons.filter(r=>!/^note:/.test(r)).map(esc).join("; ") + ".");
     if(fp && fp.total) sure.push(`Public work is linked to them by identity (${Object.entries(fp.counts||{}).map(([k,n])=>`${n} ${FP_LABEL[k]||k}`).join(", ")}), newest ${esc(String(fp.newest||"undated").slice(0,4))} — the strongest evidence of what they can do.`);

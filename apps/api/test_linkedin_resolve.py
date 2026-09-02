@@ -239,3 +239,21 @@ def test_rank_read_bands_then_evidence():
     # unscanned is neutral: no penalty, no footprint claim
     un = rank_read({"match_pct": 70, "evidence": {"types": ["self_stated"]}, "artifacts": {"scanned": [], "total": 0}})
     assert un["within"] == 0.0 and not any("scanned" in x for x in un["reasons"])
+
+
+def test_headline_for_known_url_reads_only_that_profile():
+    from api.linkedin_resolve import headline_for_url
+    row = {"name": "Tom Brown", "attributes": [{"key": "company", "display": "Anthropic"}]}
+    seen = {}
+
+    async def search(q):
+        seen["q"] = q
+        return [R_SF, R_ANTHROPIC]                                            # both same-named; URL decides
+    loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
+    h, hits = loop.run_until_complete(headline_for_url(row, "https://www.linkedin.com/in/nottombrown/", search=search))
+    assert seen["q"] == "site:www.linkedin.com/in/nottombrown"
+    assert h == "Co-Founder at Anthropic" and hits == {"company": ["Anthropic"]}
+    h2, _ = loop.run_until_complete(headline_for_url(row, "https://www.linkedin.com/in/someone-else", search=search))
+    assert h2 == ""                                                            # a different profile: nothing
+    h3, _ = loop.run_until_complete(headline_for_url({"name": "Ada Byte"}, "https://www.linkedin.com/in/nottombrown", search=search))
+    assert h3 == ""                                                            # name mismatch: nothing

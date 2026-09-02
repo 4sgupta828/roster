@@ -193,6 +193,25 @@ async def resolve_linkedin(row: dict, *, search=search_snippets) -> dict:
     return dec
 
 
+async def headline_for_url(row: dict, url: str, *, search=search_snippets) -> tuple[str, dict]:
+    """The snippet headline for a profile URL we ALREADY hold (no identity decision to make):
+    search `site:<that exact path>`, accept only a result whose URL is that profile and whose
+    result-name matches the person. Returns (headline, hint hits) or ('', {})."""
+    path = re.sub(r"^https?://", "", (url or "").strip()).rstrip("/")
+    if "/in/" not in path:
+        return "", {}
+    results = await search(f"site:{path}")
+    want = path.lower().split("/in/", 1)[1].split("/")[0]
+    for r in results or []:
+        u = (r.get("url") or "").lower()
+        if "/in/" not in u or u.split("/in/", 1)[1].split("/")[0].rstrip("/") != want:
+            continue
+        rname, headline = parse_title(r.get("title") or "")
+        if headline and name_matches(row.get("name") or "", rname):
+            return headline, hint_hits(hints_from_row(row), headline + " " + (r.get("snippet") or ""))
+    return "", {}
+
+
 async def persist_resolution(store, entity_id: str, match: dict, *, tenant_id: str = "demo") -> None:
     """Write the resolved profile as SELF-STATED facets (family 'linkedin' via the URL)."""
     url = match["url"]
@@ -325,8 +344,25 @@ async def enrich_cohort(store, entity_ids: list[str], brief: str, *, tenant_id: 
             li.update({"status": prior["status"], "url": prior["url"] or has_link,
                        "headline": prior["headline"] or headline_facet})
         elif has_link:
-            li.update({"status": "already", "url": has_link, "headline": headline_facet})
-            await store.record_linkedin_scan(eid, "already", url=has_link, headline=headline_facet)
+            # a LinkedIn link already on file (from the person's own GitHub/OpenAlex profile) but no
+            # headline yet → one search pinned to that exact profile URL to read its snippet headline
+            headline = headline_facet
+            if not headline and used_today < cap:
+                wait = (1.0 / qps) - (time.time() - last_call)
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                last_call = time.time()
+                used_today += 1
+                headline, hits = await headline_for_url(row, has_link, search=search)
+                if headline:
+                    await persist_resolution(store, eid, {"url": has_link, "headline": headline, "hits": hits},
+                                             tenant_id=tenant_id)
+                    fresh = await store.people_by_ids([eid], tenant_id=tenant_id)
+                    if fresh:
+                        row = _person_row_from_facets(fresh[0])
+                    li["hits"] = hits
+            li.update({"status": "already", "url": has_link, "headline": headline})
+            await store.record_linkedin_scan(eid, "already", url=has_link, headline=headline)
         elif used_today >= cap:
             li["status"] = "quota"
         else:
@@ -361,6 +397,19 @@ async def enrich_cohort(store, entity_ids: list[str], brief: str, *, tenant_id: 
                 li["status"] = st          # unavailable: not recorded → retried next time
         row["linkedin"] = li
         out_rows.append(row)
+    # PUBLIC WORK for the people shown: scan anyone not yet scanned (OpenAlex works / GitHub repos +
+    # orgs by identity key — 1–2 metadata calls each, bounded) so 'What they've done' is filled for
+    # the visible cohort rather than 'not checked yet'.
+    get_pool = getattr(store, "_get_pool", None)
+    if get_pool is not None:
+        try:
+            from api.artifacts import scan_person_now
+            pool = await get_pool()
+            for r in out_rows:
+                if not (r.get("artifacts") or {}).get("scanned"):
+                    await scan_person_now(pool, r["entity_id"], timeout=8.0)
+        except Exception as e:  # noqa: BLE001 — best-effort
+            _log.info("cohort artifact scan skipped: %s", e)
     await attach_artifacts(store, out_rows)
     # HEADLINE ↔ BRIEF fit: what the person says they do vs what the brief asks for (one batch call)
     heads = [(r["linkedin"].get("headline") or "") for r in out_rows]
