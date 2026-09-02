@@ -1874,7 +1874,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                                  "state_label": US_STATES.get(_local_state or US_METROS.get(_local_metro, {}).get("state", ""), ""),
                                  "counts": _gc, "source": "selector",
                                  "statement": scope_statement("people", _local_metro, _local_state, _gc)}
-        coverage["population_statement"] = coverage["geo_scope"]["statement"] + " " + coverage.get("population_statement", "")
+        people_rows = people_rows[:200]          # the local recall widened the cohort; cut to the page budget
 
     # TOPIC ANCHOR partition (LAST, so it wins over the country / primary-role partitions): people
     # whose grounded text mentions the brief's subject lead; the coverage statement says how many the

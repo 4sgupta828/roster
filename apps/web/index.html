@@ -8230,7 +8230,7 @@ function scopeChip(gs){
   const btns = [];
   if(gs.metro && gs.state_label) btns.push(`<button type="button" class="ppl-scope" data-scope="state:${esc(gs.state)}">Expand to ${esc(gs.state_label)}</button>`);
   if(gs.metro || gs.state) btns.push(`<button type="button" class="ppl-scope" data-scope="us">All US</button>`);
-  return `<div class="ppl-cov ppl-scopebar">📍 Scoped to <b>${esc(gs.label)}</b>${gs.source==="query"?"":" (your location)"} — ${esc(gs.statement||"")} ${btns.join(" ")}</div>`;
+  return `<div class="ppl-cov ppl-scopebar">📍 <b>${esc(gs.label)}</b>${gs.source==="query"?"":" (your location)"}: ${esc(gs.statement||"")} ${btns.join(" ")}</div>`;
 }
 document.addEventListener("click", e => {
   const b = e.target.closest && e.target.closest(".ppl-scope");

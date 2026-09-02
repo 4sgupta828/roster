@@ -58,8 +58,8 @@ def test_partition_and_statement():
     rows, c = partition_local(jobs, lambda j: job_geo_status(j["location"], metro="bay_area"))
     assert [r["location"] for r in rows] == ["Palo Alto, CA", "Remote", ""] and c == {"in": 1, "remote": 1, "unknown": 1, "out": 1}
     st = scope_statement("jobs", "bay_area", "", c)
-    assert st.startswith("Scoped to Bay Area: 1 roles located there lead") and "Expand to California or all US" in st
-    assert scope_statement("people", "", "wa", {"in": 3, "unknown": 2, "out": 1}).startswith("Scoped to Washington: 3 people placed there lead")
+    assert st.startswith("1 roles located there lead") and "Expand to California or all US" in st
+    assert scope_statement("people", "", "wa", {"in": 3, "unknown": 2, "out": 1}).startswith("3 people placed there lead")
     assert scope_statement("people", "", "", {}) == ""
 
 
@@ -70,7 +70,7 @@ def test_apply_job_scope_leads_local_keeps_remote_and_respects_query_location():
     rows, gs = apply_job_scope(jobs, country="us", metro="bay_area")
     assert [r["location"] for r in rows] == ["San Jose, CA", "Remote", ""]     # Berlin (country) + Seattle (metro) out
     assert rows[0].get("local") is True and gs["label"] == "Bay Area" and gs["counts"]["in"] == 1
-    assert gs["state"] == "ca" and gs["state_label"] == "California" and "Scoped to Bay Area" in gs["statement"]
+    assert gs["state"] == "ca" and gs["state_label"] == "California" and "1 roles located there lead" in gs["statement"]
     rows2, gs2 = apply_job_scope(jobs, country="us", metro="bay_area", query_location="Seattle")
     assert gs2 is None and len(rows2) == 5                                     # the query's own place wins
     rows3, gs3 = apply_job_scope(jobs, country="de", metro="bay_area")

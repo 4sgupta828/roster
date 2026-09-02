@@ -237,7 +237,7 @@ def scope_statement(kind: str, metro: str, state: str, counts: dict) -> str:
     st = US_STATES.get(US_METROS.get(metro, {}).get("state", ""), "") if metro else ""
     wider = f"Expand to {st} or all US from the scope selector." if metro and st else "Expand to all US from the scope selector."
     if kind == "jobs":
-        return (f"Scoped to {lab}: {counts.get('in', 0)} roles located there lead; {counts.get('remote', 0)} remote and "
+        return (f"{counts.get('in', 0)} roles located there lead; {counts.get('remote', 0)} remote and "
                 f"{counts.get('unknown', 0)} unplaced follow; {counts.get('out', 0)} elsewhere were left out. {wider}")
-    return (f"Scoped to {lab}: {counts.get('in', 0)} people placed there lead; {counts.get('unknown', 0)} with no "
+    return (f"{counts.get('in', 0)} people placed there lead; {counts.get('unknown', 0)} with no "
             f"location on record are kept (they may be local); {counts.get('out', 0)} placed elsewhere were left out. {wider}")
