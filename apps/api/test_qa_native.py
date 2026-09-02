@@ -1037,3 +1037,43 @@ def test_multi_company_query_builds_talent_clusters():
     assert a["count"] == 2 and set(a["entity_ids"]) == {"a1", "a2"}
     assert a["seniority_mix"][0][0] == "Staff" and a["seniority_mix"][0][1] == 2
     assert cl[1]["count"] == 1
+
+
+def test_cluster_query_relaxes_low_yield_seniority_first(monkeypatch):
+    """'Top X at A and B': a compiler-emitted seniority AND-gate that starves the comparison (1 row)
+    relaxes — seniority drops first, clusters fill; the relaxation is disclosed."""
+    from roster_kernel.providers.llm import LLMResult
+    from api.people_population import _FacetParse, answer_people_population
+
+    class _LLM:
+        async def complete(self, *, system, messages, response_format, max_tokens=2048,
+                           temperature=None):
+            return LLMResult(parsed=_FacetParse(role=["researcher"],
+                                                seniority=["c_level", "vp", "principal"],
+                                                company=["anthropic", "openai"]), output_tokens=5)
+
+    def _p(eid, co):
+        return {"entity_id": eid, "name": eid, "facets": [
+            {"facet_key": "company", "facet_value_norm": co, "value_norm": co,
+             "display_value": co.title(), "document_id": "d", "block_id": "b"},
+            {"facet_key": "role", "facet_value_norm": "researcher", "value_norm": "researcher",
+             "display_value": "Researcher", "document_id": "d", "block_id": "b"}]}
+
+    class _Store:
+        async def people_index_stats(self, *, tenant_id):
+            return {"persons_indexed": 30, "source_documents": 5, "facet_coverage": {}}
+
+        async def enumerate_by_facets(self, facets, *, tenant_id, cap):
+            if "seniority" in facets:      # the strict gate → starving
+                return [_p("only_one", "openai")]
+            return [_p(f"a{i}", "anthropic") for i in range(8)] + \
+                   [_p(f"o{i}", "openai") for i in range(6)]
+
+    import asyncio
+    res = asyncio.get_event_loop().run_until_complete(answer_people_population(
+        question="top researchers at Anthropic and OpenAI", tenant_id="demo",
+        store=_Store(), llm=_LLM()))
+    assert len(res["people_rows"]) == 14                     # relaxed past the seniority gate
+    assert res["coverage_basis"]["relaxed_from"] == ["seniority"]
+    cl = res["coverage_basis"]["clusters"]
+    assert cl[0]["count"] == 8 and cl[1]["count"] == 6       # both clusters filled

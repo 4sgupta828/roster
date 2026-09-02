@@ -2504,7 +2504,9 @@ function peopleRowsMarkup(data){
     // plus the GitHub source itself — each a clickable badge. THIS is the engagement surface.
     const LABEL={linkedin:"in",linkedin_search:"find on LinkedIn ⌕",x:"𝕏",x_search:"find on X ⌕",twitter:"𝕏",website:"site",medium:"medium",mastodon:"mastodon",email:"email",github:"github",github_search:"find on GitHub ⌕"};
     const badge=(kind,href)=>`<a class="ppl-lnk lnk-${esc(kind)}" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="${esc(href)}">${LABEL[kind]||esc(kind)}</a>`;
-    const linkBadges = (isGh?badge("github",citeUrl):"") + (p.links||[]).map(l=>badge(l.kind,l.url)).join("");
+    // citation-derived github badge only when the server links don't ALREADY carry one ('github github')
+    const hasGhLink = (p.links||[]).some(l=>(l.kind||"")==="github");
+    const linkBadges = (isGh&&!hasGhLink?badge("github",citeUrl):"") + (p.links||[]).map(l=>badge(l.kind,l.url)).join("");
     // Name links to a real profile: the citation URL if it is one, else the person's best public
     // link (LinkedIn/X/GitHub, server-ordered). Never a bare provenance tag. Plain text if neither.
     const profileUrl = citeUrl || ((p.links&&p.links[0]&&p.links[0].url)||"");

@@ -1404,10 +1404,18 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     # filter (which would return "everyone"). Returns the closest honest match + a note of what relaxed.
     _TIERS = [("industry", "metro", "state"), ("skill",), ("function",), ("role", "seniority")]
     _GEO_ONLY = {"country", "state", "metro"}   # never relax down to a geo/country-only filter
+    # MULTI-COMPANY (talent-cluster) queries relax on LOW yield, not only zero — "top X at A and B"
+    # compiles into a seniority AND-gate that starves the comparison (1 row total, empty clusters).
+    # Seniority relaxes FIRST there ("top" is a ranking wish, not a hard filter); role+company stay.
+    _multi_co = len([c for c in (facets.get("company") or []) if str(c).strip()]) > 1
+    _relax_floor = 12 if _multi_co else 1
+    _tiers = ([("seniority",), ("skill",), ("industry", "metro", "state"), ("function",)]
+              if _multi_co else _TIERS)
     relaxed_from: list[str] = []
-    if not rows:
+    if len(rows) < _relax_floor:
         kept, dropped = dict(facets), []
-        for tier in _TIERS:
+        best_rows, best_from, best_kept = rows, [], facets
+        for tier in _tiers:
             drop_now = [k for k in tier if k in kept]
             if not drop_now:
                 continue
@@ -1415,10 +1423,13 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                 kept.pop(k, None); dropped.append(k)
             if not any(k not in _GEO_ONLY for k in kept):     # nothing meaningful left → stop
                 break
-            r2 = await _enum_recall(kept, cap=200)
-            if r2:
-                rows, relaxed_from, facets = r2, list(dropped), kept
+            r2 = await _enum_recall(kept, cap=300 if _multi_co else 200)
+            if len(r2) > len(best_rows):
+                best_rows, best_from, best_kept = r2, list(dropped), dict(kept)
+            if len(r2) >= _relax_floor:
                 break
+        if len(best_rows) > len(rows):
+            rows, relaxed_from, facets = best_rows, best_from, best_kept
 
     coverage = _coverage_basis(facets, stats, len(rows))
     if _worked_at_union_used:
