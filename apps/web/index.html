@@ -8267,7 +8267,9 @@ function gotoPeoplePage(pid, page){
   const n = Math.max(1, Math.ceil((data.people_rows||[]).length / 20));
   data._page = Math.min(n - 1, Math.max(0, page || 0));
   const wrap = rerenderPeople(pid);
-  if(wrap){ const y = wrap.getBoundingClientRect().top + window.scrollY - 80; window.scrollTo({top: Math.max(0, y), behavior: "smooth"}); }
+  // land on the first card of the new page (the top pager sits just above it), not on the head/map bar
+  const anchor = wrap && (wrap.querySelector(".ppl-pager") || wrap.querySelector(".ppl-grid") || wrap);
+  if(anchor){ const y = anchor.getBoundingClientRect().top + window.scrollY - 72; window.scrollTo({top: Math.max(0, y), behavior: "smooth"}); }
   setTimeout(() => enrichVisible(pid), 60);
 }
 // A 401 from any signed-in call means THIS device's token is no longer valid (rotated or removed):
