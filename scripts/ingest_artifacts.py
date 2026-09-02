@@ -35,41 +35,10 @@ sys.path.insert(0, _HERE)                                            # sibling: 
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "apps"))     # api.artifacts parsers
 
 from ingest_people import _gh_get, _throttle  # noqa: E402
-from api.artifacts import _DDL, github_org_artifact, openalex_work_artifact, select_repos  # noqa: E402
+from api.artifacts import (_DDL, fetch_openalex_works, github_org_artifact,  # noqa: E402
+                           openalex_work_artifact, select_repos, write_person_artifacts)
 
-_OA_WORKS = "https://api.openalex.org/works"
-_OA_SELECT = ("id,doi,title,display_name,publication_year,publication_date,type,cited_by_count,"
-              "primary_location,authorships")
 _PREFIX = {"openalex": "openalex:", "github": "github:"}
-
-
-# ---- OpenAlex ----
-def oa_works(author_id: str) -> tuple[list[dict], int]:
-    """Top-25 works by citations for one author id → (works, total works count)."""
-    params = {"filter": f"authorships.author.id:{author_id}", "per-page": 25,
-              "sort": "cited_by_count:desc", "select": _OA_SELECT}
-    if os.environ.get("ROSTER_OPENALEX_MAILTO"):
-        params["mailto"] = os.environ["ROSTER_OPENALEX_MAILTO"]
-    if os.environ.get("ROSTER_OPENALEX_KEY"):
-        params["api_key"] = os.environ["ROSTER_OPENALEX_KEY"]
-    url = _OA_WORKS + "?" + urllib.parse.urlencode(params)
-    for attempt in range(3):
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "roster-artifacts/1.0"})
-            with urllib.request.urlopen(req, timeout=30) as r:
-                data = json.load(r)
-            return data.get("results") or [], int((data.get("meta") or {}).get("count") or 0)
-        except urllib.error.HTTPError as e:
-            if e.code in (429, 500, 502, 503) and attempt < 2:
-                time.sleep(2 * (attempt + 1)); continue
-            if e.code == 404:
-                return [], 0
-            raise
-        except (urllib.error.URLError, TimeoutError):
-            if attempt < 2:
-                time.sleep(2 * (attempt + 1)); continue
-            raise
-    return [], 0
 
 
 # ---- GitHub ----
@@ -110,35 +79,6 @@ async def candidates(conn, source: str, *, limit: int, refresh: bool) -> list[st
     return [r["entity_id"] for r in rows]
 
 
-def _as_date(s):
-    """ISO 'YYYY-MM-DD' (or None/garbage) → datetime.date | None — asyncpg binds a date column
-    from a date object, never from a string."""
-    from datetime import date
-    try:
-        return date.fromisoformat(str(s)[:10]) if s else None
-    except ValueError:
-        return None
-
-
-async def write_person(conn, eid: str, source: str, arts: list[dict], n_total: int, status: str = "done") -> None:
-    async with conn.transaction():
-        for a in arts:
-            await conn.execute(
-                """INSERT INTO rs_person_artifact (entity_id, kind, artifact_key, title, url, date, venue,
-                                                   role, detail, link_method, confidence, source_family, fetched_at)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12, now())
-                   ON CONFLICT (entity_id, kind, artifact_key) DO UPDATE SET
-                     title=EXCLUDED.title, url=EXCLUDED.url, date=EXCLUDED.date, venue=EXCLUDED.venue,
-                     role=EXCLUDED.role, detail=EXCLUDED.detail, fetched_at=now()""",
-                eid, a["kind"], a["artifact_key"], a["title"], a["url"], _as_date(a.get("date")), a["venue"],
-                a["role"], json.dumps(a["detail"]), a["link_method"], float(a["confidence"]), a["source_family"])
-        await conn.execute(
-            """INSERT INTO rs_artifact_scan (entity_id, source, status, n_found, n_total, scanned_at)
-               VALUES ($1,$2,$3,$4,$5, now())
-               ON CONFLICT (entity_id, source) DO UPDATE SET status=EXCLUDED.status, n_found=EXCLUDED.n_found,
-                 n_total=EXCLUDED.n_total, scanned_at=now()""", eid, source, status, len(arts), int(n_total))
-
-
 async def run_source(conn, source: str, ids: list[str], *, dry: bool, token: str) -> tuple[int, int]:
     """Scan `ids` for one source. Returns (people scanned, artifacts written)."""
     n_people = n_art = 0
@@ -147,7 +87,7 @@ async def run_source(conn, source: str, ids: list[str], *, dry: bool, token: str
         key = eid.split(":", 1)[1]
         try:
             if source == "openalex":
-                works, total = oa_works(key)
+                works, total = fetch_openalex_works(key)
                 arts = [a for a in (openalex_work_artifact(w, key) for w in works) if a]
                 time.sleep(0.11)                                   # ≤10 req/s (polite-pool ceiling)
             else:
@@ -158,7 +98,7 @@ async def run_source(conn, source: str, ids: list[str], *, dry: bool, token: str
             break
         except urllib.error.HTTPError as e:
             if e.code == 404 and not dry:                          # account gone: record, move on
-                await write_person(conn, eid, source, [], 0, status="error")
+                await write_person_artifacts(conn, eid, source, [], 0, status="error")
             print(f"  ! {eid}: HTTP {e.code}", file=sys.stderr)
             continue
         except Exception as e:  # noqa: BLE001 — one bad person never aborts the run
@@ -172,7 +112,7 @@ async def run_source(conn, source: str, ids: list[str], *, dry: bool, token: str
                 print(f"   - {a['kind']} {a['date'] or '----'} {a['title'][:70]}  {a['url']}")
             continue
         try:
-            await write_person(conn, eid, source, arts, total)
+            await write_person_artifacts(conn, eid, source, arts, total)
         except Exception as e:  # noqa: BLE001 — a write error on one person must not abort the run
             print(f"  ! {eid}: write failed: {e}", file=sys.stderr)
             continue

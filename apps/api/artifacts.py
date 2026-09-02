@@ -298,6 +298,135 @@ async def attach_artifacts(store, rows: list[dict]) -> None:
             apply_artifacts_to_packet(r["evidence"], s)
 
 
+# --------------------------------------------------------------------------- #
+# Fetchers (HTTP metadata only — no LLM) + ON-DEMAND scan for one person       #
+# --------------------------------------------------------------------------- #
+_OA_WORKS = "https://api.openalex.org/works"
+_OA_SELECT = ("id,doi,title,display_name,publication_year,publication_date,type,cited_by_count,"
+              "primary_location,authorships")
+_GH = "https://api.github.com"
+
+
+def fetch_openalex_works(author_id: str, *, retries: int = 3, timeout: int = 30) -> tuple[list[dict], int]:
+    """Top-25 works by citations for one OpenAlex author id → (works, total works count)."""
+    import time
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    params = {"filter": f"authorships.author.id:{author_id}", "per-page": 25,
+              "sort": "cited_by_count:desc", "select": _OA_SELECT}
+    import os
+    if os.environ.get("ROSTER_OPENALEX_MAILTO"):
+        params["mailto"] = os.environ["ROSTER_OPENALEX_MAILTO"]
+    if os.environ.get("ROSTER_OPENALEX_KEY"):
+        params["api_key"] = os.environ["ROSTER_OPENALEX_KEY"]
+    url = _OA_WORKS + "?" + urllib.parse.urlencode(params)
+    for attempt in range(max(1, retries)):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "roster-artifacts/1.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                data = json.load(r)
+            return data.get("results") or [], int((data.get("meta") or {}).get("count") or 0)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return [], 0
+            if e.code in (429, 500, 502, 503) and attempt < retries - 1:
+                time.sleep(2 * (attempt + 1)); continue
+            raise
+        except (urllib.error.URLError, TimeoutError):
+            if attempt < retries - 1:
+                time.sleep(2 * (attempt + 1)); continue
+            raise
+    return [], 0
+
+
+def _gh_json(path: str, *, token: str, params: dict | None = None, timeout: int = 15):
+    import urllib.parse
+    import urllib.request
+    url = _GH + path + ("?" + urllib.parse.urlencode(params) if params else "")
+    req = urllib.request.Request(url, headers={
+        "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
+        "User-Agent": "roster-artifacts/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.load(r), dict(r.headers)
+
+
+def fetch_github_person(login: str, *, token: str) -> tuple[list[dict], list[dict], int, int]:
+    """(kept repo artifacts, org artifacts, public repo count, rate-limit remaining) — 2 core calls,
+    single attempt (the on-demand path must stay fast; the batch script adds retry/reserve logic)."""
+    repos, _ = _gh_json(f"/users/{login}/repos", token=token,
+                        params={"per_page": 100, "type": "owner", "sort": "pushed"})
+    orgs, hdr = _gh_json(f"/users/{login}/orgs", token=token, params={"per_page": 50})
+    kept = select_repos(repos if isinstance(repos, list) else [], login)
+    org_rows = [a for a in (github_org_artifact(o) for o in (orgs if isinstance(orgs, list) else [])) if a]
+    remaining = int(hdr.get("X-RateLimit-Remaining", "9999") or 9999)
+    return kept, org_rows, (len(repos) if isinstance(repos, list) else 0), remaining
+
+
+def _as_date(s):
+    from datetime import date
+    try:
+        return date.fromisoformat(str(s)[:10]) if s else None
+    except ValueError:
+        return None
+
+
+async def write_person_artifacts(conn, eid: str, source: str, arts: list[dict], n_total: int,
+                                 status: str = "done") -> None:
+    """Upsert one person's artifact rows + their scan marker (one transaction)."""
+    async with conn.transaction():
+        for a in arts:
+            await conn.execute(
+                """INSERT INTO rs_person_artifact (entity_id, kind, artifact_key, title, url, date, venue,
+                                                   role, detail, link_method, confidence, source_family, fetched_at)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12, now())
+                   ON CONFLICT (entity_id, kind, artifact_key) DO UPDATE SET
+                     title=EXCLUDED.title, url=EXCLUDED.url, date=EXCLUDED.date, venue=EXCLUDED.venue,
+                     role=EXCLUDED.role, detail=EXCLUDED.detail, fetched_at=now()""",
+                eid, a["kind"], a["artifact_key"], a["title"], a["url"], _as_date(a.get("date")), a["venue"],
+                a["role"], json.dumps(a["detail"]), a["link_method"], float(a["confidence"]), a["source_family"])
+        await conn.execute(
+            """INSERT INTO rs_artifact_scan (entity_id, source, status, n_found, n_total, scanned_at)
+               VALUES ($1,$2,$3,$4,$5, now())
+               ON CONFLICT (entity_id, source) DO UPDATE SET status=EXCLUDED.status, n_found=EXCLUDED.n_found,
+                 n_total=EXCLUDED.n_total, scanned_at=now()""", eid, source, status, len(arts), int(n_total))
+
+
+async def scan_person_now(pool, entity_id: str, *, timeout: float = 12.0) -> bool:
+    """ON-DEMAND artifact scan for ONE person (a person lookup): fetch + write if this person's source
+    has not been scanned yet. Bounded by `timeout`; never raises. Returns True when a scan ran."""
+    import asyncio
+    import os
+    src = (entity_id or "").split(":", 1)[0]
+    if src not in ("openalex", "github"):
+        return False
+    key = entity_id.split(":", 1)[1]
+    try:
+        await ensure_schema(pool)
+        async with pool.acquire() as conn:
+            done = await conn.fetchval(
+                "SELECT 1 FROM rs_artifact_scan WHERE entity_id = $1 AND source = $2", entity_id, src)
+        if done:
+            return False
+        if src == "openalex":
+            works, total = await asyncio.wait_for(
+                asyncio.to_thread(fetch_openalex_works, key, retries=1, timeout=10), timeout)
+            arts = [a for a in (openalex_work_artifact(w, key) for w in works) if a]
+        else:
+            token = os.environ.get("ROSTER_GITHUB_TOKEN", "")
+            if not token:
+                return False
+            repos, orgs, total, _rem = await asyncio.wait_for(
+                asyncio.to_thread(fetch_github_person, key, token=token), timeout)
+            arts = repos + orgs
+        async with pool.acquire() as conn:
+            await write_person_artifacts(conn, entity_id, src, arts, total)
+        return True
+    except Exception as e:  # noqa: BLE001 — on-demand enrichment is best-effort
+        _log.info("scan_person_now(%s) skipped: %s", entity_id, e)
+        return False
+
+
 def artifact_lines(summary: dict | None, *, limit: int = 8) -> list[str]:
     """Plain-text lines for a citable index document (the person dossier route)."""
     s = summary or {}

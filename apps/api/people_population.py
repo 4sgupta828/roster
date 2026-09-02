@@ -1049,6 +1049,118 @@ def build_person_profile_card(name: str, context: str = "") -> dict:
             "links": links, "citation": None}
 
 
+_ENTITY_ID_RE = re.compile(r"^(github|openalex|theorg|npi|yc|sec|ef|aifund|sosv|pear|person):\S+$", re.I)
+_CTX_STOP = {"the", "one", "who", "works", "worked", "work", "from", "with", "and", "for", "that",
+             "this", "guy", "person", "at", "in", "of", "is", "was", "a", "an", "his", "her", "their",
+             "based", "located", "university", "college", "company", "school", "studied", "went"}
+
+
+def _row_text(row: dict) -> str:
+    """Everything grounded we hold on a row, lowercased — the haystack for context matching."""
+    parts = [row.get("name") or "", row.get("entity_id") or "", row.get("blurb") or ""]
+    parts += [str(a.get("display") or "") for a in row.get("attributes") or []]
+    parts += [str(l.get("url") or "") for l in row.get("links") or []]
+    for a in ((row.get("artifacts") or {}).get("affiliations") or []):
+        parts.append(str(a.get("name") or ""))
+    return " ".join(parts).lower()
+
+
+def resolve_candidates(rows: list[dict], ctx: str = "") -> tuple[str, list[dict]]:
+    """CODE-OWNED identity resolution among same-named index rows.
+
+    Returns (resolution, rows): 'none' (no candidates), 'resolved' (exactly one clear match), or
+    'ambiguous' (several remain — the caller asks a clarifying question). Context tokens (company,
+    school, location, role…) score against each row's grounded text; a single top scorer with any
+    hit resolves. Never merges rows: two people who share a name stay two people."""
+    rows = list(rows or [])
+    if not rows:
+        return "none", []
+    if len(rows) == 1:
+        return "resolved", rows
+    toks = [t for t in re.findall(r"[a-z0-9][a-z0-9.+\-]{1,}", (ctx or "").lower())
+            if t not in _CTX_STOP and len(t) >= 2]
+    if not toks:
+        return "ambiguous", rows
+    scored = []
+    for r in rows:
+        hay = _row_text(r)
+        scored.append((sum(1 for t in toks if t in hay), r))
+    scored.sort(key=lambda x: -x[0])
+    top = scored[0][0]
+    if top <= 0:
+        return "ambiguous", rows
+    leaders = [r for s, r in scored if s == top]
+    if len(leaders) == 1:
+        return "resolved", leaders
+    return "ambiguous", leaders
+
+
+def _distinguisher(row: dict) -> str:
+    """A one-line, grounded 'which one' label for a candidate: company · role · place · source."""
+    attrs = row.get("attributes") or []
+    def g(k):
+        return next((a.get("display") for a in attrs if a.get("key") == k and a.get("display")), "")
+    src = (row.get("entity_id") or "").split(":", 1)[0]
+    from api.evidence import FAMILY_LABELS
+    bits = [g("company"), g("role") or g("seniority"), g("metro") or g("country")]
+    bits.append("via " + (FAMILY_LABELS.get(src, src) if src else "index"))
+    return " · ".join(b for b in bits if b)
+
+
+def _clarify_text(name: str, rows: list[dict], resolution: str) -> str:
+    if resolution == "none":
+        return (f"“{name}” is not in Roster's people index yet — not evidence of absence. Add a "
+                f"company, school, or location if you meant someone specific, or open a "
+                f"web-grounded dossier in Q&A.")
+    if resolution == "ambiguous":
+        cos = [c for c in (next((a.get("display") for a in (r.get("attributes") or [])
+                                 if a.get("key") == "company" and a.get("display")), "") for r in rows) if c]
+        hint = f" (e.g. “{name} at {cos[0]}”)" if cos else ""
+        return (f"Which {name}? {len(rows)} people in the index share this name. Pick one below, "
+                f"or add a company, school, or location{hint}.")
+    return ""
+
+
+async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "demo") -> dict:
+    """PERSON LOOKUP in People mode: bring up everything the index holds on a named person, on
+    demand — or ask which one. kind='person' payload with `resolution` ∈ resolved|ambiguous|none,
+    the matching rows (full cards with evidence packets + linked artifacts; the resolved person gets
+    an on-demand artifact scan), a code-built clarifying question when needed, and the explicit
+    profile-search links (secondary navigation aids, never the answer)."""
+    from api.artifacts import attach_artifacts, scan_person_now
+    name = " ".join((name or "").split())
+    ctx = (ctx or "").strip()
+    rows: list[dict] = []
+    try:
+        if _ENTITY_ID_RE.match(name):                       # a picked candidate (entity id) → direct
+            raw = await store.people_by_ids([name], tenant_id=tenant_id)
+        else:
+            raw = await store.people_by_name(name, tenant_id=tenant_id, limit=12)
+        rows = [_person_row_from_facets(r) for r in raw]
+    except Exception as e:  # noqa: BLE001 — index trouble → honest 'none', never a crash
+        _log.warning("lookup_person(%s) index read failed: %s", name, e)
+        rows = []
+    resolution, rows = resolve_candidates(rows, ctx)
+    if resolution == "resolved":
+        try:
+            pool = await store._get_pool()
+            await scan_person_now(pool, rows[0]["entity_id"])   # on demand: papers/repos/orgs now
+        except Exception:  # noqa: BLE001
+            pass
+    await attach_artifacts(store, rows)
+    display_name = rows[0]["name"] if (resolution == "resolved" and rows) else (
+        name if not _ENTITY_ID_RE.match(name) else (rows[0]["name"] if rows else name))
+    for r in rows:
+        r["distinguisher"] = _distinguisher(r)
+    return {"kind": "person", "not_people_query": False,
+            "person_card": build_person_profile_card(display_name, ctx),
+            "people_rows": rows,
+            "person_lookup": {"resolution": resolution, "name": display_name, "context": ctx,
+                              "clarify": _clarify_text(display_name, rows, resolution),
+                              "candidates": [{"entity_id": r["entity_id"], "name": r["name"],
+                                              "label": r["distinguisher"]} for r in rows]}}
+
+
 def _person_blurb(attrs: list[dict]) -> str:
     """A COMPREHENSIVE mini-resume, assembled from every pertinent GROUNDED facet — what the person is,
     what they do, their expertise, their career history, and their context — led by their own bio when
@@ -1268,7 +1380,8 @@ class _Narrative(BaseModel):
 async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                                    scope_country: str = "",
                                    prior_facets: dict | None = None,
-                                   assume_people: bool = False) -> dict:
+                                   assume_people: bool = False,
+                                   prior_person: str = "") -> dict:
     """Answer a people-enumeration question from the grounded people index. Always returns a structured
     result (never raises to the route): a compiled facet filter, grounded rows, and honest coverage.
 
@@ -1289,6 +1402,19 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                   for k, vals in prior_facets.items()
                   if k in _ok and isinstance(vals, (list, tuple))}
         _prior = {k: v[:6] for k, v in _prior.items() if v}
+    _q = (question or "").strip()
+    if _ENTITY_ID_RE.match(_q):
+        # a PICKED candidate from a clarifying question (entity id) — no compile, direct lookup
+        return await lookup_person(store, _q, "", tenant_id=tenant_id)
+    if prior_person and not _prior:
+        # PERSON-LOOKUP CONVERSATION: the previous turn asked "which <name>?" (or found none). This
+        # utterance is disambiguating CONTEXT for that name ("the one at Anthropic", "IIT Delhi")
+        # unless it names a DIFFERENT person — then that person is looked up instead.
+        f2, p2, c2 = await parse_people_facets(question, llm)
+        if p2 and p2.strip().lower() != prior_person.strip().lower():
+            return await lookup_person(store, p2, c2, tenant_id=tenant_id)
+        return await lookup_person(store, prior_person, " ".join(x for x in [_q, c2] if x),
+                                   tenant_id=tenant_id)
     if _prior:
         # REFINEMENT turn: the model applies the utterance to the RUNNING filter — narrow, expand,
         # remove, or replace, following the user's lead (Rule 18) — and returns the full new filter.
@@ -1300,10 +1426,10 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     else:
         facets, person, ctx = await parse_people_facets(question, llm)
     if not facets and person and not _prior:
-        # SINGLE-PERSON identity/profile question — the router runs the web bio and attaches this
-        # profile card (explicit GitHub/X/LinkedIn search links). kind='person'.
-        return {"kind": "person", "not_people_query": False,
-                "person_card": build_person_profile_card(person, ctx)}
+        # SINGLE-PERSON identity/profile lookup — everything the index holds on them, on demand
+        # (full card, evidence, linked artifacts), or a clarifying question when several people
+        # share the name, or an honest 'not indexed' with explicit profile-search links. kind='person'.
+        return await lookup_person(store, person, ctx, tenant_id=tenant_id)
     stats = await store.people_index_stats(tenant_id=tenant_id)
     _forced_vibe = False
     if not facets:

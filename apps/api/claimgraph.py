@@ -1672,6 +1672,30 @@ class ClaimGraphStore:
                 "block_id": r["source_block_id"], "source_claim_id": r["source_claim_id"]})
         return [by_ent[e] for e in entity_ids if e in by_ent]   # preserve semantic rank order
 
+    async def people_by_name(self, name: str, *, tenant_id: str = "demo", limit: int = 12) -> list[dict]:
+        """People whose NAME matches (person lookup): exact case-insensitive matches first, then
+        token-ordered contains ('mukul gupta' → '%mukul%gupta%') to catch middle names/initials.
+        Same row shape as people_by_ids. Never merges — every same-named person is a separate row."""
+        name = " ".join((name or "").split())
+        if not name:
+            return []
+        toks = [t for t in re.split(r"\s+", name.lower()) if t]
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            exact = await conn.fetch(
+                """SELECT entity_id FROM rs_entity WHERE tenant_id = $1 AND kind = 'person'
+                   AND status = 'active' AND lower(name) = lower($2) ORDER BY retrieved_at DESC LIMIT $3""",
+                tenant_id, name, int(limit))
+            ids = [r["entity_id"] for r in exact]
+            if len(ids) < limit and len(toks) >= 2:
+                loose = await conn.fetch(
+                    """SELECT entity_id FROM rs_entity WHERE tenant_id = $1 AND kind = 'person'
+                       AND status = 'active' AND lower(name) LIKE $2 AND lower(name) <> lower($3)
+                       ORDER BY length(name), retrieved_at DESC LIMIT $4""",
+                    tenant_id, "%" + "%".join(toks) + "%", name, int(limit) - len(ids))
+                ids += [r["entity_id"] for r in loose]
+        return await self.people_by_ids(ids, tenant_id=tenant_id) if ids else []
+
     async def semantic_people(self, qvec: str, *, candidate_ids=None, cap: int = 200) -> list[str]:
         """Rank people by cosine similarity to the query embedding. If candidate_ids is given (the
         facet-filtered set), rank WITHIN it (hybrid: exact filter + semantic order); else pure-semantic

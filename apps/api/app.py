@@ -1101,6 +1101,8 @@ class ResearchIn(BaseModel):
     #                                       filter — the new utterance refines/narrows it (None = fresh)
     refine_query: dict | None = None      # Jobs-tab CONVERSATION: the previous turn's parsed job query —
     #                                       merged so follow-ups narrow the same search (None = fresh)
+    prior_person: str = ""                # People-tab PERSON LOOKUP conversation: the name the previous
+    #                                       turn asked to disambiguate — this utterance adds context
 
 
 class FocusIn(BaseModel):
@@ -1405,10 +1407,22 @@ class Citation(BaseModel):
     tier: str = ""                   # classified evidence tier (evidence_kind) — colors the FE quality badge
 
 
+def _person_lookup_out(res: dict) -> "ResearchOut":
+    """People-mode PERSON LOOKUP result: the index rows (a resolved profile, or the same-named
+    candidates to pick from) — or, when the index holds nobody, the explicit profile-search card.
+    `person_lookup` carries the resolution + the code-built clarifying question."""
+    rows = res.get("people_rows") or []
+    lk = res.get("person_lookup") or {}
+    return ResearchOut(grounded=bool(rows), answer="", claims=[], coverage_gaps=[],
+                       rejected=0, people_rows=rows or [res["person_card"]],
+                       coverage_basis=None, session_id=None, person_lookup=lk or None)
+
+
 class ResearchOut(BaseModel):
     grounded: bool
     answer: str = ""                 # synthesized prose answer, grounded in findings
     people_rows: list = []           # people-enumeration rows (empty unless ROSTER_PEOPLE_POPULATION routed here)
+    person_lookup: dict | None = None  # People-tab person lookup: {resolution, name, context, clarify, candidates}
     jobs: list = []                  # indexed-job rows (the Q&A jobs route) — rendered as job cards, not prose
     coverage_basis: dict | None = None  # honest coverage facts for a people-enumeration answer (else None)
     claims: list[Citation]           # the verified findings (evidence for the answer)
@@ -3460,15 +3474,14 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             res = await answer_people_population(
                 question=(question_text or body.question), tenant_id=body.tenant_id,
                 store=store, llm=build_llm(mode=resolve_mode()), scope_country=scope_country,
-                prior_facets=body.refine_facets, assume_people=assume_people)
+                prior_facets=body.refine_facets, assume_people=assume_people,
+                prior_person=(body.prior_person or "").strip())
             if res.get("kind") == "person":
                 if fallthrough:
                     return None, res      # router: grounded dossier, never only the static card
                 if on_event is not None:
                     await on_event({"type": "people", "count": 1})
-                return ResearchOut(grounded=True, answer="", claims=[], coverage_gaps=[],
-                                   rejected=0, people_rows=[res["person_card"]],
-                                   coverage_basis=None, session_id=None), res
+                return _person_lookup_out(res), res
             if fallthrough and res.get("not_people_query"):
                 return None, res          # router: fall through to native research (design rule 1)
             answer = res.get("answer") or ("No people matched — name a role, expertise, company, "
@@ -3519,10 +3532,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     return out
                 if pres and pres.get("kind") == "person":
                     if on_event is not None:
-                        await on_event({"type": "people", "count": 1})
-                    return ResearchOut(grounded=True, answer="", claims=[], coverage_gaps=[],
-                                       rejected=0, people_rows=[pres["person_card"]],
-                                       coverage_basis=None, session_id=None)
+                        await on_event({"type": "people", "count": len(pres.get("people_rows") or [1])})
+                    return _person_lookup_out(pres)
                 return ResearchOut(
                     grounded=False, claims=[], coverage_gaps=[], rejected=0, people_rows=[],
                     answer="That reads like a question rather than a people search. People mode "
