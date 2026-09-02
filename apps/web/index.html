@@ -7120,8 +7120,18 @@ function collectMatchPrefs(){
     remote: ($("#mRemote")||{}).checked,
     company_types: [($("#mF500")||{}).checked&&"f500", ($("#mPublic")||{}).checked&&"public", ($("#mStartup")||{}).checked&&"startup"].filter(Boolean),
     country: (window.ROSTER_COUNTRY||"us"), limit: 40,
+    seen_ids: seenJobIds(),   // ids shown in prior runs — the server rotates fresh options in
   };
 }
+// VARIETY memory for Find-jobs: the browser remembers which job ids were already shown (capped,
+// per-device); the match engine demotes those so every run exposes different available options.
+function seenJobIds(){ try{ return JSON.parse(localStorage.getItem("roster_seen_job_ids")||"[]").slice(-300); }catch(e){ return []; } }
+function rememberSeenJobs(jobs){ try{
+  const add = (jobs||[]).map(j=>String(j.id||"")).filter(Boolean);
+  const merged = [...new Set([...seenJobIds(), ...add])].slice(-300);
+  localStorage.setItem("roster_seen_job_ids", JSON.stringify(merged));
+}catch(e){} }
+function resetJobRotation(){ try{ localStorage.removeItem("roster_seen_job_ids"); }catch(e){} runMatch(); }
 async function runMatch(){
   const prefs = collectMatchPrefs();
   $("#matchnote").textContent = "Matching your résumé to open roles…"; $("#matchresults").innerHTML = "";
@@ -7135,7 +7145,10 @@ async function runMatch(){
 }
 function renderMatchResults(d){
   const jobs = d.jobs||[];
-  $("#matchnote").textContent = jobs.length ? (d.note||`Top ${jobs.length} matches for your résumé.`) : (d.note || "No matches yet — add or parse a résumé, or loosen preferences.");
+  const base = jobs.length ? (d.note||`Top ${jobs.length} matches for your résumé.`) : (d.note || "No matches yet — add or parse a résumé, or loosen preferences.");
+  $("#matchnote").innerHTML = esc(base) + (d.rotated
+    ? ` · <a href="#" onclick="resetJobRotation();return false;" style="color:var(--gold);">start over</a>` : "");
+  rememberSeenJobs(jobs);   // what's on screen now rotates DOWN next run (never removed)
   $("#matchresults").innerHTML = jobs.map(j=>{
     const co = esc((j.company||"").replace(/_/g," "));
     const tags = (j.company_types||[]).map(t=>`<span class="ppl-tag">${esc(t)}</span>`).join("");

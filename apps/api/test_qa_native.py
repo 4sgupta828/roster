@@ -872,3 +872,40 @@ def test_router_asserted_discovery_falls_back_to_semantic_cards(monkeypatch):
     data = r.json()
     assert data["people_rows"] and data["people_rows"][0]["name"] == "Ada"
     assert svc.calls == []                       # cards, never prose
+
+
+def test_match_jobs_rotates_seen_and_diversifies_companies(monkeypatch):
+    """Find-jobs variety: previously-shown ids are DEMOTED (fresh comparable matches lead, seen ones
+    stay available), and no company floods the slate (max 3 lead rows per company)."""
+    from api.people_population import match_resume_jobs
+    import api.people_population as pp
+
+    def _j(i, company, sim):
+        return {"id": i, "company": company, "title": f"Engineer {i}", "location": "Remote",
+                "url": "u", "source": "greenhouse", "sim": sim}
+
+    class _Store:
+        async def match_jobs_scored(self, qvec, cap=400):
+            # acme floods with 5 near-identical top matches; two others trail slightly
+            return ([_j(i, "acme", 0.90 - i * 0.001) for i in range(5)]
+                    + [_j(10, "globex", 0.88), _j(11, "initech", 0.87)])
+
+        async def companies_with_facet(self, keys, values=None):
+            return set()
+
+    monkeypatch.setattr(pp, "embed_query", lambda text: "[0.1]")
+    import asyncio
+    run = asyncio.get_event_loop().run_until_complete
+
+    res1 = run(match_resume_jobs(_Store(), {"_resume_text": "python engineer"}, {"limit": 5}))
+    ids1 = [j["id"] for j in res1["jobs"]]
+    assert ids1[:4] == [0, 1, 2, 10]          # company cap: only 3 acme rows lead, globex breaks in
+    assert res1["rotated"] is False
+
+    res2 = run(match_resume_jobs(_Store(), {"_resume_text": "python engineer"},
+                                 {"limit": 5, "seen_ids": ids1}))
+    ids2 = [j["id"] for j in res2["jobs"]]
+    assert res2["rotated"] is True
+    assert ids2[0] not in ids1[:1] or ids2 != ids1   # the slate actually changed
+    assert set(ids2[:2]) & {4, 11, 3}                # unseen jobs rose to the top
+    assert "rotating" in res2["note"]

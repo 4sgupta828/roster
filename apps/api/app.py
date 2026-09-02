@@ -1244,6 +1244,8 @@ class MatchIn(BaseModel):
     country: str = "us"              # honor the country scope (default US)
     min_salary: int = 0
     limit: int = 40
+    seen_ids: list = []              # job ids shown in PRIOR runs (client-remembered) — the match
+    #                                  engine DEMOTES them so each run rotates fresh options in
 
 
 class SettingIn(BaseModel):

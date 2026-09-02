@@ -226,6 +226,10 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
         want_sens.add(str(prefs["seniority"]).lower())
     role_kw = [str(k).lower() for k in (prefs.get("role_keywords") or []) if str(k).strip()]
     want_country = (prefs.get("country") or "").lower()
+    # VARIETY / EXPOSURE: ids the user has ALREADY been shown (client-remembered, capped). Seen jobs
+    # are DEMOTED — never removed — so each run rotates fresh comparable options into the slate while
+    # a still-clearly-best match can survive at the top. Deterministic quality, rotating exposure.
+    seen = {str(x) for x in (prefs.get("seen_ids") or [])[:400] if str(x).strip()}
     dropped_country = 0
     # 3) score = semantic similarity + preference bonuses (with human-readable reasons)
     out = []
@@ -254,16 +258,39 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
         if "startup" in want and is_startup:
             score += 0.12; reasons.append("startup")
         types = [t for t, ok in (("F500", is_f500), ("Startup", is_startup), ("Public", is_public)) if ok]
+        fresh = str(j.get("id") or "") not in seen
+        if not fresh:
+            score -= 0.30       # already shown → fresh comparable matches lead this run
         out.append({**{k: j.get(k) for k in ("id", "company", "title", "location", "url", "source")},
                     "score": round(score, 4), "match_pct": min(99, round(sim * 100)),
-                    "seniority": jsen, "company_types": types, "reasons": reasons})
+                    "seniority": jsen, "company_types": types, "reasons": reasons,
+                    "fresh": fresh})
     out.sort(key=lambda x: -x["score"])
+    # COMPANY DIVERSITY (exposure): at most 3 rows per company lead the slate; the overflow is
+    # appended after the diverse block — still available, never hidden — so one employer's hundred
+    # postings can't crowd out the rest of the market.
+    _per_co: dict[str, int] = {}
+    _diverse, _overflow = [], []
+    for r_ in out:
+        _co = _norm_co(r_.get("company") or "")
+        if _per_co.get(_co, 0) < 3:
+            _per_co[_co] = _per_co.get(_co, 0) + 1
+            _diverse.append(r_)
+        else:
+            _overflow.append(r_)
+    out = _diverse + _overflow
+    limit = int(prefs.get("limit", 40))
+    slate = out[:limit]
     notes = []
     if want_country:
         notes.append(f"{want_country.upper()} only")
+    if seen:
+        _n_fresh = sum(1 for r_ in slate if r_.get("fresh"))
+        notes.append(f"↻ rotating — {_n_fresh} of {len(slate)} are options you haven't seen; "
+                     "previously shown matches rank lower, not gone")
     if prefs.get("min_salary"):
         notes.append("salary is best-effort — most listings don't publish pay")
-    return {"jobs": out[: int(prefs.get("limit", 40))],
+    return {"jobs": slate, "rotated": bool(seen),
             "matched_on": qtext[:180], "dropped_out_of_country": dropped_country,
             "note": " · ".join(notes)}
 
