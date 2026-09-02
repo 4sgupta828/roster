@@ -5317,6 +5317,16 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         ip = client_ip(request.headers, fallback=(request.client.host if request.client else ""))
         return resolve_scope(lat=lat, lon=lon, ip=ip)
 
+    @app.get("/geo/options")
+    async def geo_options() -> dict:
+        """Every scope a user can pick: the named US metros and the US states (vertical vocabulary),
+        so anyone — wherever they are — can search or recruit in the Bay Area, Texas, etc."""
+        from roster_vertical.people_facets import US_METROS, US_STATES
+        metros = sorted(({"key": k, "label": m["label"], "state": m["state"]} for k, m in US_METROS.items()),
+                        key=lambda x: x["label"])
+        states = [{"code": c, "name": n} for c, n in sorted(US_STATES.items(), key=lambda kv: kv[1])]
+        return {"metros": metros, "states": states}
+
     @app.post("/people/enrich")
     async def people_enrich(body: EnrichIn, x_roster_token: str = Header(default="")) -> dict:
         """Read LinkedIn SNIPPETS for the people SHOWN on a Talent Map page (≤20 per call): each

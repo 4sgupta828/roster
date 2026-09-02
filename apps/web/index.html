@@ -8204,13 +8204,30 @@ async function initLocalScope(sel, applySel){
     try{ const r = await fetch("/geo/me"); if(r.ok){ geo = await r.json(); geo.ts = Date.now(); localStorage.setItem("roster_geo", JSON.stringify(geo)); } }catch(e){}
   }
   window.ROSTER_GEO = geo;
-  // options: near me (metro) · my state · all US · other countries (kept from the markup)
-  const firstCountry = sel.querySelector('option[value="us"]');
-  if(firstCountry) firstCountry.textContent = "🇺🇸 All US";
-  if(geo && geo.country === "us"){
-    if(geo.state && geo.state_label){ const o = document.createElement("option"); o.value = "state:" + geo.state; o.textContent = "🗺 " + geo.state_label; sel.insertBefore(o, sel.firstChild); }
-    if(geo.metro && geo.metro_label){ const o = document.createElement("option"); o.value = "metro:" + geo.metro; o.textContent = "📍 Near me · " + geo.metro_label; sel.insertBefore(o, sel.firstChild); }
+  // options: near me (detected) · every named US metro · every US state · all US · other countries —
+  // so someone in Arkansas can search or recruit in the Bay Area by choosing it here.
+  let opts = null;
+  try{ const r = await fetch("/geo/options"); if(r.ok) opts = await r.json(); }catch(e){}
+  const countryOpts = [...sel.options].map(o => [o.value, o.textContent]);
+  sel.innerHTML = "";
+  const addGroup = (label) => { const g = document.createElement("optgroup"); g.label = label; sel.appendChild(g); return g; };
+  const addOpt = (parent, value, text) => { const o = document.createElement("option"); o.value = value; o.textContent = text; parent.appendChild(o); return o; };
+  if(geo && geo.country === "us" && (geo.metro || geo.state)){
+    const g = addGroup("Near me");
+    if(geo.metro && geo.metro_label) addOpt(g, "metro:" + geo.metro, "📍 Near me · " + geo.metro_label);
+    if(geo.state && geo.state_label) addOpt(g, "state:" + geo.state, "🗺 My state · " + geo.state_label);
   }
+  addOpt(sel, "us", "🇺🇸 All US");
+  if(opts && (opts.metros||[]).length){
+    const gm = addGroup("US metro / region");
+    opts.metros.forEach(m => { if(!(geo && geo.metro === m.key)) addOpt(gm, "metro:" + m.key, m.label + " (" + String(m.state).toUpperCase() + ")"); });
+  }
+  if(opts && (opts.states||[]).length){
+    const gs = addGroup("US state");
+    opts.states.forEach(st => { if(!(geo && geo.state === st.code)) addOpt(gs, "state:" + st.code, st.name); });
+  }
+  const gc = addGroup("Other countries");
+  countryOpts.forEach(([v, t]) => { if(v !== "us") addOpt(gc, v, t); });
   // default: a choice the user made explicitly; else the user's metro (or state) when detected; else all US
   let explicit = false; try{ explicit = localStorage.getItem("roster_scope_explicit") === "1"; }catch(e){}
   const stored = explicit ? window.ROSTER_SCOPE : "";
@@ -8223,7 +8240,8 @@ async function initLocalScope(sel, applySel){
     navigator.geolocation.getCurrentPosition(async pos => {
       try{ const r = await fetch(`/geo/me?lat=${pos.coords.latitude.toFixed(3)}&lon=${pos.coords.longitude.toFixed(3)}`);
         if(r.ok){ const g = await r.json(); g.ts = Date.now(); localStorage.setItem("roster_geo", JSON.stringify(g)); window.ROSTER_GEO = g;
-          if(g.metro && !sel.querySelector(`option[value="metro:${CSS.escape(g.metro)}"]`)){ const o = document.createElement("option"); o.value = "metro:" + g.metro; o.textContent = "📍 Near me · " + g.metro_label; sel.insertBefore(o, sel.firstChild); if(!stored){ sel.value = o.value; applySel(); } } }
+          if(g.metro && !sel.querySelector(`option[value="metro:${CSS.escape(g.metro)}"]`)){ const o = document.createElement("option"); o.value = "metro:" + g.metro; o.textContent = "📍 Near me · " + g.metro_label; sel.insertBefore(o, sel.firstChild); }
+          if(!stored && g.metro){ sel.value = "metro:" + g.metro; applySel(); } }
       }catch(e){}
     }, () => {}, {maximumAge: 3600000, timeout: 8000});
   }
@@ -8246,7 +8264,9 @@ function scopeChip(gs){
   const btns = [];
   if(gs.metro && gs.state_label) btns.push(`<button type="button" class="ppl-scope" data-scope="state:${esc(gs.state)}">Expand to ${esc(gs.state_label)}</button>`);
   if(gs.metro || gs.state) btns.push(`<button type="button" class="ppl-scope" data-scope="us">All US</button>`);
-  return `<div class="ppl-cov ppl-scopebar">📍 <b>${esc(gs.label)}</b>${gs.source==="query"?"":" (your location)"}: ${esc(gs.statement||"")} ${btns.join(" ")}</div>`;
+  const geo = window.ROSTER_GEO || {};
+  const detected = (gs.metro && geo.metro === gs.metro) || (!gs.metro && gs.state && geo.state === gs.state && !geo.metro);
+  return `<div class="ppl-cov ppl-scopebar">📍 <b>${esc(gs.label)}</b>${gs.source==="query"?"":(detected?" (your location)":" (your choice — change it in the top-right selector)")}: ${esc(gs.statement||"")} ${btns.join(" ")}</div>`;
 }
 document.addEventListener("click", e => {
   const b = e.target.closest && e.target.closest(".ppl-scope");
