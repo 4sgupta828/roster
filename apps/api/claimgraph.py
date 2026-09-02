@@ -1672,6 +1672,21 @@ class ClaimGraphStore:
                 "block_id": r["source_block_id"], "source_claim_id": r["source_claim_id"]})
         return [by_ent[e] for e in entity_ids if e in by_ent]   # preserve semantic rank order
 
+    async def people_by_text(self, terms: list[str], *, tenant_id: str = "demo", limit: int = 300) -> list[str]:
+        """Entity ids whose facet DISPLAY text (bio/title, skills, function, industry, role, company)
+        mentions any of `terms` (ILIKE). The topic-anchor recall path for sparse subjects."""
+        pats = ["%" + " ".join(str(t).split()) + "%" for t in (terms or []) if str(t).strip()][:8]
+        if not pats:
+            return []
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT entity_id, count(*) AS n FROM roster_entity_facet
+                   WHERE tenant_id = $1 AND facet_key IN ('title','skill','function','industry','role','company','worked_at')
+                     AND display_value ILIKE ANY($2::text[])
+                   GROUP BY entity_id ORDER BY n DESC LIMIT $3""", tenant_id, pats, int(limit))
+        return [r["entity_id"] for r in rows]
+
     async def people_by_name(self, name: str, *, tenant_id: str = "demo", limit: int = 12) -> list[dict]:
         """People whose NAME matches (person lookup): exact case-insensitive matches first, then
         token-ordered contains ('mukul gupta' → '%mukul%gupta%') to catch middle names/initials.

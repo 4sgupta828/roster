@@ -126,3 +126,17 @@ def test_people_surface_person_lookup_end_to_end(monkeypatch):
                                         "prior_person": "Tom Brown"}).json()          # a picked card
     assert r3["person_lookup"]["resolution"] == "resolved" and r3["people_rows"][0]["entity_id"] == "yc:1"
     assert svc.calls == []
+
+
+def test_topic_partition_leads_with_people_who_mention_the_subject():
+    from api.people_population import topic_hit, topic_partition
+    a = {"name": "A", "blurb": "Engineering manager, backend", "attributes": [{"key": "function", "display": "Backend"}]}
+    b = {"name": "B", "blurb": "Led the ad serving platform at X", "attributes": []}
+    c = {"name": "C", "blurb": "", "attributes": [{"key": "function", "display": "Advertising"}],
+         "artifacts": {"items": [{"title": "rtb-bidder"}]}}
+    terms = ["ad serving", "adtech", "advertising", "real-time bidding"]
+    assert topic_hit(b, terms) == "ad serving" and topic_hit(c, terms) == "advertising" and topic_hit(a, terms) == ""
+    rows, n = topic_partition([a, b, c], terms)
+    assert [r["name"] for r in rows] == ["B", "C", "A"] and n == 2                # stable, anchored first
+    assert rows[0]["topic_hit"] == "ad serving" and "topic_hit" not in a
+    assert topic_partition([a], [])[1] == 0                                     # no terms: untouched

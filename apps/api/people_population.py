@@ -50,6 +50,10 @@ class _FacetParse(BaseModel):
     skill: list[str] = []
     person: str = ""
     person_context: str = ""
+    # TOPIC TERMS: 3–6 short phrases naming the specific domain the brief requires (with synonyms and
+    # adjacent terms) — used to ANCHOR results on people whose profile text actually mentions the
+    # topic, so a sparse topic (e.g. 'ad serving') is not drowned by generic role look-alikes.
+    topic_terms: list[str] = []
 
 
 def semantic_enabled() -> bool:
@@ -829,6 +833,11 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
 
 
 async def parse_people_facets(question: str, llm) -> tuple[dict[str, list[str]], str, str]:
+    facets, person, ctx, _terms = await parse_people_facets_full(question, llm)
+    return facets, person, ctx
+
+
+async def parse_people_facets_full(question: str, llm) -> tuple[dict[str, list[str]], str, str, list[str]]:
     """LLM query-compiler: free-text people question → (facet filter, person, person_context).
     `facets` is a normalized enumeration filter (empty when the question is not enumeration); `person`
     is a single named individual (identity/profile question) with `person_context` disambiguating
@@ -837,20 +846,57 @@ async def parse_people_facets(question: str, llm) -> tuple[dict[str, list[str]],
     try:
         comp = await llm.complete(
             system="You compile a people-search question into normalized facets, OR identify a single "
-                   "named person. Return only the structured object; empty if it is not about people.",
+                   "named person. Return only the structured object; empty if it is not about people. "
+                   "Also fill topic_terms: 3-6 short lowercase phrases naming the SPECIFIC domain or "
+                   "subject the brief requires, including synonyms and adjacent terms a profile might "
+                   "use (e.g. 'ad serving' -> ['ad serving','adtech','advertising','programmatic',"
+                   "'real-time bidding']); leave it empty when the brief only names a role, level or "
+                   "place with no specific subject.",
             messages=[{"role": "user", "content": facet_parse_prompt(question)}],
-            response_format=_FacetParse, max_tokens=400)
+            response_format=_FacetParse, max_tokens=500)
         p = comp.parsed
     except Exception as e:  # noqa: BLE001 — a parse/provider failure must not crash the route
         _log.warning("parse_people_facets failed: %s", e)
-        return {}, "", ""
+        return {}, "", "", []
     out: dict[str, list[str]] = {}
     for k in PEOPLE_FACET_KEYS:
         vals = [str(v).strip().lower().replace(" ", "_")
                 for v in (getattr(p, k, None) or []) if str(v).strip()]
         if vals:
             out[k] = vals
-    return out, (getattr(p, "person", "") or "").strip(), (getattr(p, "person_context", "") or "").strip()
+    terms = [str(t).strip().lower() for t in (getattr(p, "topic_terms", None) or []) if str(t).strip()][:6]
+    return (out, (getattr(p, "person", "") or "").strip(), (getattr(p, "person_context", "") or "").strip(),
+            terms)
+
+
+def topic_hit(row: dict, terms: list[str]) -> str:
+    """The first topic term that appears in the row's grounded text (attributes + blurb + artifact
+    titles), else ''. Code-owned; whole-word-ish substring match on normalized text."""
+    if not terms:
+        return ""
+    parts = [row.get("blurb") or ""] + [str(a.get("display") or "") for a in row.get("attributes") or []]
+    parts += [str(it.get("title") or "") for it in ((row.get("artifacts") or {}).get("items") or [])]
+    hay = " " + re.sub(r"[^a-z0-9]+", " ", " ".join(parts).lower()) + " "
+    for t in terms:
+        tt = " " + re.sub(r"[^a-z0-9]+", " ", t.lower()).strip() + " "
+        if tt.strip() and tt in hay:
+            return t
+    return ""
+
+
+def topic_partition(rows: list[dict], terms: list[str]) -> tuple[list[dict], int]:
+    """STABLE partition: rows whose grounded text mentions the brief's topic lead (each order kept);
+    marks `topic_hit` on rows. Returns (rows, n_anchored)."""
+    if not terms or not rows:
+        return rows, 0
+    lead, rest = [], []
+    for r in rows:
+        h = topic_hit(r, terms)
+        if h:
+            r["topic_hit"] = h; lead.append(r)
+        else:
+            rest.append(r)
+    return lead + rest, len(lead)
 
 
 async def parse_people_refinement(question: str, prior_facets: dict, llm) -> dict[str, list[str]]:
@@ -1430,6 +1476,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                   for k, vals in prior_facets.items()
                   if k in _ok and isinstance(vals, (list, tuple))}
         _prior = {k: v[:6] for k, v in _prior.items() if v}
+    topic_terms: list[str] = []
     _q = (question or "").strip()
     _picked = picked_entity_id(_q)
     if _picked:
@@ -1453,7 +1500,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             f2, _p2, _c2 = await parse_people_facets(question, llm)
             facets = {**_prior, **f2} if f2 else {}
     else:
-        facets, person, ctx = await parse_people_facets(question, llm)
+        facets, person, ctx, topic_terms = await parse_people_facets_full(question, llm)
     if not facets and person and not _prior:
         # SINGLE-PERSON identity/profile lookup — everything the index holds on them, on demand
         # (full card, evidence, linked artifacts), or a clarifying question when several people
@@ -1535,7 +1582,20 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         # SOFT boost, not a gate — the fix for a query compressing into a sparse hard facet.
         scored = await store.match_people_scored(qvec, cap=500)
         sf_sim = {c["entity_id"]: c["sim"] for c in scored}
-        cand = await store.people_by_ids([c["entity_id"] for c in scored], tenant_id=tenant_id)
+        cand_ids = [c["entity_id"] for c in scored]
+        if topic_terms:
+            # TOPIC ANCHOR: people whose profile TEXT mentions the topic are candidates even when the
+            # embedding top-500 misses them (a sparse subject is drowned by role look-alikes otherwise)
+            try:
+                anchored_ids = await store.people_by_text(topic_terms, tenant_id=tenant_id, limit=300)
+                extra = [i for i in anchored_ids if i not in sf_sim]
+                if extra:
+                    order = await store.semantic_people(qvec, candidate_ids=extra, cap=300)
+                    seen_e = set(order)
+                    cand_ids += order + [i for i in extra if i not in seen_e]
+            except Exception as ex:  # noqa: BLE001 — anchoring is additive
+                _log.info("topic anchor skipped: %s", ex)
+        cand = await store.people_by_ids(cand_ids, tenant_id=tenant_id)
         want_country = set(facets.get("country") or [])
         boost = {k: set(v) for k, v in facets.items() if k != "country"}     # soft-boost facets
         ranked = []
@@ -1549,7 +1609,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             r["_sf"] = sf_sim.get(r["entity_id"], 0.0) + 0.03 * min(nb, 4)   # similarity + soft boost
             ranked.append(r)
         ranked.sort(key=lambda r: -r["_sf"])
-        rows = ranked[:200]
+        rows = ranked[:200] if not topic_terms else ranked[:400]   # anchored rows are partitioned later
         semantic_used = semantic_first = bool(rows)
     elif qvec and real_facets:                   # HYBRID: attribute-filter → semantic-rank within it
         cand = await _enum_recall(facets, cap=1000)
@@ -1679,6 +1739,28 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             p["rank_read"] = rank_read(p, facets)
         people_rows.sort(key=rank_sort_key)
         _ranked_by_evidence = True
+
+    # TOPIC ANCHOR partition: people whose grounded text mentions the brief's subject lead; the
+    # coverage statement says how many the index holds and that the rest are wording look-alikes.
+    n_topic = 0
+    if topic_terms and people_rows:
+        people_rows, n_topic = topic_partition(people_rows, topic_terms)
+        people_rows = people_rows[:200]
+        for p in people_rows:
+            if p.get("topic_hit") and isinstance(p.get("rank_read"), dict):
+                p["rank_read"]["reasons"].insert(0, f"profile mentions the brief's subject ({p['topic_hit']})")
+        coverage["topic_anchor"] = {"terms": topic_terms, "mentioning": n_topic}
+        _t0 = topic_terms[0]
+        if n_topic:
+            coverage["population_statement"] = (
+                f"{n_topic} of these people mention {_t0} (or a related term) in their grounded profile "
+                f"text and are listed first. The rest are the closest matches by wording and may not "
+                f"be {_t0}-related. " + coverage.get("population_statement", ""))
+        else:
+            coverage["population_statement"] = (
+                f"Nobody in the index mentions {_t0} (or a related term: {', '.join(topic_terms[1:4])}) "
+                f"— the rows below are the closest matches by wording, NOT {_t0} specialists. This is "
+                f"an index coverage gap. " + coverage.get("population_statement", ""))
 
     # CONFIRMED-COUNTRY priority under a geo scope: people we can PLACE in the scoped country lead;
     # unknown-location profiles follow (recall keeps them; rank stops them crowding out confirmed).

@@ -525,6 +525,11 @@
   .ppl-li::before{content:"in";display:inline-block;font-weight:700;font-size:.62rem;color:#fff;background:#0A66C2;border-radius:3px;padding:0 .3rem;margin-right:.35rem;line-height:1.4;}
   .ppl-li-none{color:var(--muted);font-size:.72rem;}
   .ppl-lifit{font-family:var(--mono);font-size:.64rem;color:var(--muted);margin-left:.3rem;}
+  .ppl-tag-topic{background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);font-weight:600;}
+  .ppl-pager{display:flex;align-items:center;justify-content:center;gap:.6rem;flex-wrap:wrap;margin:.7rem 0 .3rem;}
+  .ppl-page{min-height:40px;padding:.45rem 1rem;border:1px solid var(--gold);border-radius:999px;background:none;color:var(--gold);font-size:.82rem;font-weight:600;cursor:pointer;}
+  .ppl-page:disabled{opacity:.4;cursor:default;}
+  .ppl-pageinfo{font-size:.8rem;color:var(--muted);}
   .ppl-more-wrap{display:flex;justify-content:center;margin:.8rem 0 .2rem;}
   .ppl-more,.ppl-rerank{min-height:40px;padding:.45rem 1rem;border:1px solid var(--gold);border-radius:999px;background:none;color:var(--gold);font-size:.82rem;font-weight:600;cursor:pointer;}
   .ppl-rerank{display:inline-block;margin-left:.4rem;font-size:.76rem;padding:.3rem .7rem;}
@@ -2581,7 +2586,8 @@ function peopleRowsMarkup(data){
     const attr = k => (p.attributes||[]).find(a=>a.key===k) || {};
     const senD = attr("seniority").display||"";                       // skip bare 'Mid'/'Junior' — reads as a fake title
     const title = (attr("title").display || attr("role").display || (/^(mid|junior|entry)/i.test(senD)?"":senD) || "");
-    const tags = (p.attributes||[]).filter(a=>a.key==="function"||a.key==="metro")
+    const tags = (p.topic_hit ? `<span class="ppl-tag ppl-tag-topic" title="This person's grounded profile text mentions the brief's subject">mentions ${esc(p.topic_hit)}</span>` : "")
+      + (p.attributes||[]).filter(a=>a.key==="function"||a.key==="metro")
       .map(a=>`<span class="ppl-tag">${esc(a.display)}</span>`).join("");
     const avatar = av
       ? `<img class="ppl-av" src="${esc(av)}" alt="" loading="lazy" onerror="this.style.display='none'">`
@@ -2643,12 +2649,15 @@ function peopleRowsMarkup(data){
   window.PEOPLE_RENDERS = window.PEOPLE_RENDERS || {};
   if(!data._pid){ data._pid = String(Date.now()) + Math.random().toString(36).slice(2,6); }
   window.PEOPLE_RENDERS[data._pid] = data;
-  const PAGE0 = 20, STEP = 10;
-  const shown = Math.min(rows.length, data._shown || PAGE0);
-  const paged = (isEnum && !(cb.clusters && cb.clusters.length)) ? rows.slice(0, shown) : rows;
+  const PAGE = 20;
+  const pagesN = Math.max(1, Math.ceil(rows.length / PAGE));
+  const page = Math.min(pagesN - 1, Math.max(0, data._page || 0));
+  const pagedMode = isEnum && !(cb.clusters && cb.clusters.length);
+  const paged = pagedMode ? rows.slice(page * PAGE, page * PAGE + PAGE) : rows;
   const cards = paged.map(cardHtml).join("");
-  const moreBtn = (paged.length < rows.length)
-    ? `<div class="ppl-more-wrap"><button type="button" class="ppl-more" data-pid="${esc(data._pid)}" data-step="${STEP}">Show ${Math.min(STEP, rows.length-paged.length)} more <span class="ppl-fc" style="text-transform:none;">· ${rows.length-paged.length} left</span></button></div>` : "";
+  const from = page * PAGE + 1, to = page * PAGE + paged.length;
+  const moreBtn = (pagedMode && pagesN > 1)
+    ? `<div class="ppl-pager"><button type="button" class="ppl-page" data-pid="${esc(data._pid)}" data-page="${page-1}" ${page===0?"disabled":""}>‹ Previous 20</button><span class="ppl-pageinfo">Page <b>${page+1}</b> of ${pagesN} · people ${from}–${to} of ${rows.length}</span><button type="button" class="ppl-page" data-pid="${esc(data._pid)}" data-page="${page+1}" ${page>=pagesN-1?"disabled":""}>Next 20 ›</button></div>` : "";
   // PUBLIC FOOTPRINT coverage (map-level): how many rows have linked artifacts, by kind — and how
   // many were never scanned (unknown is never presented as absent).
   const fpc = cb.footprint||null;
@@ -2681,7 +2690,7 @@ function peopleRowsMarkup(data){
       + `<div class="ppl-cov" style="border-left-color:var(--gap);">◔ ${esc(lk.clarify||"")} ${qaBtn}</div>`;
   }
   const head = isEnum
-    ? `<div class="ppl-head">${paged.length<rows.length?`Top <b>${paged.length}</b> most relevant <span class="ppl-fc" style="text-transform:none;">· of ${rows.length} matched in the index (the full cohort stays behind the coverage counts, saved maps and CSV)</span>`:`<b>${rows.length}</b> ${rows.length===1?"person":"people"} found`}${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evDist}${fpLine}${rankLine}<div class="ppl-enrich" data-pid="${esc(data._pid)}"></div>`
+    ? `<div class="ppl-head">${pagedMode && pagesN>1?`${page===0?`Top <b>${paged.length}</b> most relevant`:`People <b>${from}–${to}</b> by relevance`} <span class="ppl-fc" style="text-transform:none;">· of ${rows.length} matched in the index · page ${page+1} of ${pagesN}</span>`:`<b>${rows.length}</b> ${rows.length===1?"person":"people"} found`}${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evDist}${fpLine}${rankLine}<div class="ppl-enrich" data-pid="${esc(data._pid)}"></div>`
     : (lkHead || `<div class="ppl-head">Profile</div>`);   // single-person profile card (no enumeration coverage)
   // ambiguous lookup: each candidate card gets a PICK control (sends its entity id back as the choice)
   const pickCards = (lk && lk.resolution === "ambiguous")
@@ -2710,7 +2719,7 @@ function peopleRowsMarkup(data){
     const rest = rows.filter(p=>!inCluster.has(p.entity_id));
     if(rest.length) body += `<div class="ppl-head" style="margin-top:1rem;">Also matching</div><div class="ppl-grid">${rest.map(cardHtml).join("")}</div>`;
   } else {
-    body = `<div class="ppl-grid">${pickCards || cards}</div>${moreBtn}`;
+    body = `${pagedMode && pagesN>1 && page>0 ? moreBtn : ""}<div class="ppl-grid">${pickCards || cards}</div>${moreBtn}`;
   }
   return `<div class="ppl-wrap" data-pid="${esc(data._pid)}">${head}${body}</div>`;
 }
@@ -8110,6 +8119,7 @@ async function openMapsList(){
         const r = await fetch("/people/linkedin-resolve", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
           body: JSON.stringify({entity_id: liB.dataset.ref, tenant_id: "demo"})});
         const d = await r.json();
+        if(r.status === 401){ handleAuthExpired(); throw new Error("your sign-in has expired — sign in again"); }
         if(!r.ok) throw new Error(d.detail || r.status);
         if(d.status === "resolved" && d.match){
           rec.row = d.row || rec.row; rec.links = (rec.row && rec.row.links) || rec.links;
@@ -8155,8 +8165,8 @@ document.addEventListener("click", e => {
   if(pk){ e.preventDefault(); submitAs("people", pk.dataset.pick || ""); return; }
   const qa = e.target.closest && e.target.closest(".ppl-qa");
   if(qa){ e.preventDefault(); submitAs("qa", qa.dataset.q || ""); return; }
-  const more = e.target.closest && e.target.closest(".ppl-more");
-  if(more){ e.preventDefault(); showMorePeople(more.dataset.pid, parseInt(more.dataset.step||"10",10)); return; }
+  const pg = e.target.closest && e.target.closest(".ppl-page");
+  if(pg){ e.preventDefault(); if(!pg.disabled) gotoPeoplePage(pg.dataset.pid, parseInt(pg.dataset.page||"0",10)); return; }
   const rr = e.target.closest && e.target.closest(".ppl-rerank");
   if(rr){ e.preventDefault(); rerankShown(rr.dataset.pid); }
 });
@@ -8167,11 +8177,25 @@ function rerenderPeople(pid){
   wrap.outerHTML = peopleRowsMarkup(data);
   return document.querySelector(`.ppl-wrap[data-pid="${CSS.escape(pid)}"]`);
 }
-function showMorePeople(pid, step){
+function pageRows(data){
+  const rows = data.people_rows || [], PAGE = 20;
+  const page = Math.max(0, data._page || 0);
+  return rows.slice(page * PAGE, page * PAGE + PAGE);
+}
+function gotoPeoplePage(pid, page){
   const data = (window.PEOPLE_RENDERS||{})[pid]; if(!data) return;
-  data._shown = Math.min((data.people_rows||[]).length, (data._shown || 20) + (step || 10));
-  rerenderPeople(pid);
+  const n = Math.max(1, Math.ceil((data.people_rows||[]).length / 20));
+  data._page = Math.min(n - 1, Math.max(0, page || 0));
+  const wrap = rerenderPeople(pid);
+  if(wrap){ const y = wrap.getBoundingClientRect().top + window.scrollY - 80; window.scrollTo({top: Math.max(0, y), behavior: "smooth"}); }
   setTimeout(() => enrichVisible(pid), 60);
+}
+// A 401 from any signed-in call means THIS device's token is no longer valid (rotated or removed):
+// clear it and ask for a fresh sign-in instead of failing quietly.
+function handleAuthExpired(){
+  try{ if(USER){ delete USER.token; localStorage.setItem("roster_user", JSON.stringify(USER)); } }catch(e){}
+  AUTH_MODE = "login"; if(typeof updateAuthUI === "function") updateAuthUI();
+  const m = $("#idmodal"); if(m){ m.hidden = false; const err = $("#iderr"); if(err) err.textContent = "Your sign-in has expired on this device — please sign in again."; }
 }
 const ENRICH_BUSY = new Set();
 async function enrichVisible(pid){
@@ -8182,7 +8206,7 @@ async function enrichVisible(pid){
     return;
   }
   if(ENRICH_BUSY.has(pid)) return;
-  const rows = (data.people_rows||[]).slice(0, data._shown || 20);
+  const rows = pageRows(data);
   const todo = rows.filter(p => p.entity_id && !p.linkedin && !/^search:/.test(p.entity_id));
   const note = document.querySelector(`.ppl-enrich[data-pid="${CSS.escape(pid)}"]`);
   if(!todo.length){
@@ -8199,6 +8223,7 @@ async function enrichVisible(pid){
       const r = await fetch("/people/enrich", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
         body: JSON.stringify({entity_ids: batch.map(p=>p.entity_id), brief, tenant_id:"demo",
           facets: ((data.coverage_basis||{}).query_facets || window.LAST_PEOPLE_FACETS || null)})});
+      if(r.status === 401){ handleAuthExpired(); throw new Error("your sign-in has expired — sign in again"); }
       if(!r.ok) throw new Error("enrich " + r.status);
       const d = await r.json(); quota = d.quota || quota;
       (d.rows||[]).forEach(nr => {
@@ -8219,7 +8244,7 @@ async function enrichVisible(pid){
   }
   ENRICH_BUSY.delete(pid);
   const n2 = document.querySelector(`.ppl-enrich[data-pid="${CSS.escape(pid)}"]`);
-  if(n2) n2.innerHTML = enrichSummary((data.people_rows||[]).slice(0, data._shown || 20), pid, quota);
+  if(n2) n2.innerHTML = enrichSummary(pageRows(data), pid, quota);
 }
 function enrichSummary(rows, pid, quota){
   const st = {resolved:0, already:0, ambiguous:0, none:0, other:0};
@@ -8231,12 +8256,12 @@ function enrichSummary(rows, pid, quota){
 }
 function rerankShown(pid){
   const data = (window.PEOPLE_RENDERS||{})[pid]; if(!data) return;
-  const n = data._shown || 20, rows = data.people_rows || [];
-  const head = rows.slice(0, n), tail = rows.slice(n);
+  const rows = data.people_rows || [], PAGE = 20, pg = Math.max(0, data._page || 0);
+  const before = rows.slice(0, pg * PAGE), head = rows.slice(pg * PAGE, pg * PAGE + PAGE), tail = rows.slice(pg * PAGE + PAGE);
   // the server's banded rank read (relevance band first, evidence within) — headline fit included once read
   const key = p => { const r = p.rank_read||{}; return [-(r.band||0), -(r.within||0), -(r.relevance||(p.match_pct||0)/100)]; };
   head.sort((a,b) => { const ka=key(a), kb=key(b); for(let i=0;i<3;i++){ if(ka[i]!==kb[i]) return ka[i]-kb[i]; } return 0; });
-  data.people_rows = head.concat(tail); data._reranked = true;
+  data.people_rows = before.concat(head, tail); data._reranked = true;
   rerenderPeople(pid);
 }
 // ---- selection → "Learn more" — grounded explain (Roster) or a free AI deep-dive (Google / Perplexity)
