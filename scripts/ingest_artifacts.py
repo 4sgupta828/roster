@@ -110,17 +110,27 @@ async def candidates(conn, source: str, *, limit: int, refresh: bool) -> list[st
     return [r["entity_id"] for r in rows]
 
 
+def _as_date(s):
+    """ISO 'YYYY-MM-DD' (or None/garbage) → datetime.date | None — asyncpg binds a date column
+    from a date object, never from a string."""
+    from datetime import date
+    try:
+        return date.fromisoformat(str(s)[:10]) if s else None
+    except ValueError:
+        return None
+
+
 async def write_person(conn, eid: str, source: str, arts: list[dict], n_total: int, status: str = "done") -> None:
     async with conn.transaction():
         for a in arts:
             await conn.execute(
                 """INSERT INTO rs_person_artifact (entity_id, kind, artifact_key, title, url, date, venue,
                                                    role, detail, link_method, confidence, source_family, fetched_at)
-                   VALUES ($1,$2,$3,$4,$5,$6::date,$7,$8,$9::jsonb,$10,$11,$12, now())
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12, now())
                    ON CONFLICT (entity_id, kind, artifact_key) DO UPDATE SET
                      title=EXCLUDED.title, url=EXCLUDED.url, date=EXCLUDED.date, venue=EXCLUDED.venue,
                      role=EXCLUDED.role, detail=EXCLUDED.detail, fetched_at=now()""",
-                eid, a["kind"], a["artifact_key"], a["title"], a["url"], a.get("date"), a["venue"],
+                eid, a["kind"], a["artifact_key"], a["title"], a["url"], _as_date(a.get("date")), a["venue"],
                 a["role"], json.dumps(a["detail"]), a["link_method"], float(a["confidence"]), a["source_family"])
         await conn.execute(
             """INSERT INTO rs_artifact_scan (entity_id, source, status, n_found, n_total, scanned_at)
@@ -161,7 +171,11 @@ async def run_source(conn, source: str, ids: list[str], *, dry: bool, token: str
             for a in arts[:5]:
                 print(f"   - {a['kind']} {a['date'] or '----'} {a['title'][:70]}  {a['url']}")
             continue
-        await write_person(conn, eid, source, arts, total)
+        try:
+            await write_person(conn, eid, source, arts, total)
+        except Exception as e:  # noqa: BLE001 — a write error on one person must not abort the run
+            print(f"  ! {eid}: write failed: {e}", file=sys.stderr)
+            continue
         if n_people % 50 == 0:
             print(f"  {source}: {n_people}/{len(ids)} people, {n_art} artifacts, {time.time()-t0:.0f}s", flush=True)
     return n_people, n_art
