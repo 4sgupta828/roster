@@ -1609,7 +1609,13 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             r["_sf"] = sf_sim.get(r["entity_id"], 0.0) + 0.03 * min(nb, 4)   # similarity + soft boost
             ranked.append(r)
         ranked.sort(key=lambda r: -r["_sf"])
-        rows = ranked[:200] if not topic_terms else ranked[:400]   # anchored rows are partitioned later
+        rows = ranked[:200]
+        if topic_terms:
+            # keep EVERY topic-anchored candidate (they sit below the global top-N by construction —
+            # their similarity is lower — but they are the people who actually mention the subject);
+            # the topic partition later leads with them in their own relevance order
+            _anch = {i for i in cand_ids if i not in {c["entity_id"] for c in scored}}
+            rows += [r for r in ranked[200:] if r["entity_id"] in _anch][:300]
         semantic_used = semantic_first = bool(rows)
     elif qvec and real_facets:                   # HYBRID: attribute-filter → semantic-rank within it
         cand = await _enum_recall(facets, cap=1000)
