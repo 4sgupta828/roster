@@ -285,7 +285,8 @@ async def connection_path_answer(store, entities: list[str], *, tenant_id: str =
 # ---------------------------------------------------------------------------
 # Indexed job search — closed-world, honest (design §Jobs Search): indexed rows with an as-of
 # disclosure; never invents postings and never answers from stale rows without saying so.
-async def indexed_jobs_answer(store, question: str, llm, *, country: str = "") -> dict | None:
+async def indexed_jobs_answer(store, question: str, llm, *, country: str = "", metro: str = "",
+                              state: str = "") -> dict | None:
     """Answer a job-search question from rs_job. Returns {answer, jobs, query, stats} (answer is a
     code-built markdown list — titles, employer, location, apply links) or None on any failure so
     the caller can fall through to native research. `country` (geo scope) drops jobs whose location
@@ -303,8 +304,9 @@ async def indexed_jobs_answer(store, question: str, llm, *, country: str = "") -
             rows = await store.search_jobs(terms=q.get("title_keywords") or [],
                                            company=q.get("company") or None,
                                            location=(q.get("location") or None), cap=120)
-        if country and not (q.get("location") or "").strip():   # an explicit location wins
-            rows = [r for r in rows if _country_ok(r.get("location") or "", country)]
+        from api.people_population import apply_job_scope
+        rows, _gs = apply_job_scope(rows, country=country, metro=metro, state=state,
+                                    query_location=(q.get("location") or ""))   # an explicit location wins
         rows = rows[:40]
         stats = await store.jobs_stats()
         if not rows:
@@ -322,7 +324,7 @@ async def indexed_jobs_answer(store, question: str, llm, *, country: str = "") -
         answer = (f"{len(rows)} matching open role{'s' if len(rows) != 1 else ''} in Roster's job "
                   f"index ({stats.get('jobs', 0):,} roles across {stats.get('companies', 0):,} "
                   f"companies — not an exhaustive market view).{upd}")
-        return {"answer": answer, "jobs": rows[:25], "query": q, "stats": stats, "grounded": True}
+        return {"answer": answer, "geo_scope": _gs, "jobs": rows[:25], "query": q, "stats": stats, "grounded": True}
     except Exception as e:  # noqa: BLE001
         _log.warning("indexed_jobs_answer failed: %s", e)
         return None

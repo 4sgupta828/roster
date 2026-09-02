@@ -526,6 +526,8 @@
   .ppl-li-none{color:var(--muted);font-size:.72rem;}
   .ppl-lifit{font-family:var(--mono);font-size:.64rem;color:var(--muted);margin-left:.3rem;}
   .ppl-tag-topic{background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);font-weight:600;}
+  .ppl-scopebar{border-left-color:var(--person)!important;}
+  .ppl-scope{display:inline-block;margin-left:.3rem;min-height:40px;padding:.3rem .7rem;border:1px solid var(--person);border-radius:999px;background:none;color:var(--person);font-size:.76rem;font-weight:600;cursor:pointer;}
   .ppl-pager{display:flex;align-items:center;justify-content:center;gap:.6rem;flex-wrap:wrap;margin:.7rem 0 .3rem;}
   .ppl-page{min-height:40px;padding:.45rem 1rem;border:1px solid var(--gold);border-radius:999px;background:none;color:var(--gold);font-size:.82rem;font-weight:600;cursor:pointer;}
   .ppl-page:disabled{opacity:.4;cursor:default;}
@@ -2272,12 +2274,18 @@ async function loadConfig(){
     // People geo-scope (flag-gated): reveal the top-right country selector, persist the choice, and
     // ship it on every people query as `country`. Default 'us'. Backend ignores it when the flag is off.
     try{ window.ROSTER_COUNTRY = localStorage.getItem("roster_country") || "us"; }catch(e){ window.ROSTER_COUNTRY = "us"; }
+    // LOCAL SCOPE: results default to the user's own metro ("📍 Near me · Bay Area"), expandable to
+    // their state or all US, then other countries. Where they are comes from the browser's location
+    // when granted, else the request IP (server-side, best-effort); the choice is stored locally.
+    try{ window.ROSTER_SCOPE = localStorage.getItem("roster_scope") || ""; }catch(e){ window.ROSTER_SCOPE = ""; }
     if(c.people_geo_scope_enabled){
       const cs = document.getElementById("countryscope"), sel = document.getElementById("countrysel");
       if(cs && sel){
-        cs.style.display = "inline-flex"; sel.value = window.ROSTER_COUNTRY;
-        sel.addEventListener("change", ()=>{ window.ROSTER_COUNTRY = sel.value;
-          try{ localStorage.setItem("roster_country", sel.value); }catch(e){} });
+        cs.style.display = "inline-flex";
+        const applySel = () => { const v = sel.value || "us"; window.ROSTER_SCOPE = v; window.ROSTER_COUNTRY = v.startsWith("metro:")||v.startsWith("state:") ? "us" : v;
+          try{ localStorage.setItem("roster_scope", v); localStorage.setItem("roster_country", window.ROSTER_COUNTRY); }catch(e){} };
+        sel.addEventListener("change", applySel);
+        initLocalScope(sel, applySel);
       }
     }
     maybeShowPulseBell();
@@ -2377,7 +2385,7 @@ async function runJobs(question){
   let r;
   try{ r = await fetch("/jobs", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
       body: JSON.stringify({question, tenant_id:"demo", refine_query: (JOBS_CTX||undefined),
-        country: (window.ROSTER_COUNTRY||"us"),   // the top-right scope applies to jobs too
+        ...geoPayload(),   // the top-right scope applies to jobs too
         user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""})}); }
   catch(e){ return false; }
   if(!r || r.status === 404) return false;
@@ -2562,6 +2570,7 @@ function jobsMarkup(d){
   const intentHtml = (d.agentic && (d.intent||angleChips)) ? `<div class="ppl-cov" style="border-left-color:var(--gold);background:rgba(var(--gold-rgb),.06);"><b>⚡ Smart search</b>${d.intent?` — ${esc(d.intent)}`:""}${angleChips}</div>` : "";
   const head = `<div class="ppl-head"><b>${jobs.length}</b> open role${jobs.length===1?"":"s"}${at}${d.agentic?` <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">⚡ smart search</span>`:""}</div>`
     + intentHtml
+    + scopeChip(d.geo_scope)
     + (st.jobs ? `<div class="ppl-cov">◔ Aggregated from public ATS boards — ${st.jobs} jobs across ${st.companies||0} companies indexed. Each links to the company's apply page.</div>`
                : `<div class="ppl-cov">◔ Aggregated from public ATS boards — each card links to the company's apply page.</div>`);
   return `<div class="ppl-wrap">${head}<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.</div>'}</div></div>`;
@@ -2665,6 +2674,7 @@ function peopleRowsMarkup(data){
     ? `<div class="ppl-cov ev-dist">◆ Public footprint: <b>${fpc.with_artifacts}</b> of ${fpc.people} people have linked artifacts${Object.keys(fpc.kinds||{}).length?` (${Object.entries(fpc.kinds).map(([k,n])=>`${FP_LABEL[k]||esc(k)} ${n}`).join(" · ")})`:""}${fpc.unscanned?` <span class="ppl-fc" style="text-transform:none;">— ${fpc.unscanned} not yet scanned: unknown, not absent</span>`:""}</div>`
     : "";
   const rankLine = cb.ranking ? `<div class="ppl-cov ev-dist">⇅ Ranked by ${esc(cb.ranking)}.</div>` : "";
+  const scopeLine = scopeChip(cb.geo_scope);
   // EVIDENCE distribution (spec coverage panel): how many rows by headline evidence state.
   const evGroups = cb.evidence_groups||[];
   const evDist = evGroups.length
@@ -2690,7 +2700,7 @@ function peopleRowsMarkup(data){
       + `<div class="ppl-cov" style="border-left-color:var(--gap);">◔ ${esc(lk.clarify||"")} ${qaBtn}</div>`;
   }
   const head = isEnum
-    ? `<div class="ppl-head">${pagedMode && pagesN>1?`${page===0?`Top <b>${paged.length}</b> most relevant`:`People <b>${from}–${to}</b> by relevance`} <span class="ppl-fc" style="text-transform:none;">· of ${rows.length} matched in the index · page ${page+1} of ${pagesN}</span>`:`<b>${rows.length}</b> ${rows.length===1?"person":"people"} found`}${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evDist}${fpLine}${rankLine}<div class="ppl-enrich" data-pid="${esc(data._pid)}"></div>`
+    ? `<div class="ppl-head">${pagedMode && pagesN>1?`${page===0?`Top <b>${paged.length}</b> most relevant`:`People <b>${from}–${to}</b> by relevance`} <span class="ppl-fc" style="text-transform:none;">· of ${rows.length} matched in the index · page ${page+1} of ${pagesN}</span>`:`<b>${rows.length}</b> ${rows.length===1?"person":"people"} found`}${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${scopeLine}${evDist}${fpLine}${rankLine}<div class="ppl-enrich" data-pid="${esc(data._pid)}"></div>`
     : (lkHead || `<div class="ppl-head">Profile</div>`);   // single-person profile card (no enumeration coverage)
   // ambiguous lookup: each candidate card gets a PICK control (sends its entity id back as the choice)
   const pickCards = (lk && lk.resolution === "ambiguous")
@@ -5572,7 +5582,7 @@ async function runPanelTurn(question){
 async function runDuel(question){
   const flip = Math.random() < 0.5;                                     // blinded, randomized arm order
   const arms = flip ? ["reasoned", "standard"] : ["standard", "reasoned"];   // arms[0] = "Answer A"
-  const base = {question, tenant_id: "demo", sources: chosen(), country: (window.ROSTER_COUNTRY||"us"),
+  const base = {question, tenant_id: "demo", sources: chosen(), ...geoPayload(),
     user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""};   // attribute sessions to the user
   if(EFFORT_ENABLED && EFFORT > 1) base.effort = EFFORT;
   if(ATTACHMENTS.length) base.attachments = ATTACHMENTS.slice();
@@ -5687,7 +5697,7 @@ async function askQuestion(question, opts){
   // Follow-ups, retries, panel/triage and internal re-entries all skip the duel.
   if(DUEL_ENABLED && !opts.skipDuel && APP_MODE === "qa" && !THREAD.turns.length){ return runDuel(question); }
   const conv = CONV_ENABLED;
-  const payload = {question, tenant_id:"demo", sources: chosen(), country: (window.ROSTER_COUNTRY||"us"),
+  const payload = {question, tenant_id:"demo", sources: chosen(), ...geoPayload(),
     surface: SEARCH_MODE,   // which tab asked — People/Jobs are SEARCH surfaces; Q&A owns questions
     user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""};   // attribute sessions to the user
   // People-tab CONVERSATION: carry the accumulated filter so this utterance REFINES the results so far.
@@ -7327,7 +7337,7 @@ function collectMatchPrefs(){
     min_salary: parseInt(($("#mSal")||{}).value||"0",10)||0,
     remote: ($("#mRemote")||{}).checked,
     company_types: [($("#mF500")||{}).checked&&"f500", ($("#mPublic")||{}).checked&&"public", ($("#mStartup")||{}).checked&&"startup"].filter(Boolean),
-    country: (window.ROSTER_COUNTRY||"us"), limit: 40,
+    ...geoPayload(), limit: 40,
     seen_ids: seenJobIds(),   // ids shown in prior runs — the server rotates fresh options in
     exclude_keywords: (($("#mExclude")||{}).value||"").split(",").map(s=>s.trim().toLowerCase()).filter(Boolean).slice(0,12),
   };
@@ -7531,7 +7541,7 @@ async function runJDMatch(){
   $("#jdnote").textContent = (url && jd.length<20) ? "Fetching the JD from the link…" : "Finding matching candidates…";
   $("#jdresults").innerHTML = "";
   const prefs = { job_description: jd, job_url: url, seniorities: Array.from(JD_SENS), locations: JD_LOCS.slice(),
-                  country: (window.ROSTER_COUNTRY||"us"), limit: 40,
+                  ...geoPayload(), limit: 40,
                   allow_source_company: !!($("#jdAllowSrcCo")||{}).checked };
   try{
     const r = await fetch("/match-people", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(prefs)});
@@ -8169,6 +8179,62 @@ document.addEventListener("click", e => {
   if(pg){ e.preventDefault(); if(!pg.disabled) gotoPeoplePage(pg.dataset.pid, parseInt(pg.dataset.page||"0",10)); return; }
   const rr = e.target.closest && e.target.closest(".ppl-rerank");
   if(rr){ e.preventDefault(); rerankShown(rr.dataset.pid); }
+});
+// ---- LOCAL SCOPE (where the user is → default metro; expandable) -------------------------------
+window.ROSTER_GEO = null;
+async function initLocalScope(sel, applySel){
+  let geo = null;
+  try{ const g = JSON.parse(localStorage.getItem("roster_geo")||"null"); if(g && g.ts && Date.now()-g.ts < 86400000) geo = g; }catch(e){}
+  if(!geo){
+    try{ const r = await fetch("/geo/me"); if(r.ok){ geo = await r.json(); geo.ts = Date.now(); localStorage.setItem("roster_geo", JSON.stringify(geo)); } }catch(e){}
+  }
+  window.ROSTER_GEO = geo;
+  // options: near me (metro) · my state · all US · other countries (kept from the markup)
+  const firstCountry = sel.querySelector('option[value="us"]');
+  if(firstCountry) firstCountry.textContent = "🇺🇸 All US";
+  if(geo && geo.country === "us"){
+    if(geo.state && geo.state_label){ const o = document.createElement("option"); o.value = "state:" + geo.state; o.textContent = "🗺 " + geo.state_label; sel.insertBefore(o, sel.firstChild); }
+    if(geo.metro && geo.metro_label){ const o = document.createElement("option"); o.value = "metro:" + geo.metro; o.textContent = "📍 Near me · " + geo.metro_label; sel.insertBefore(o, sel.firstChild); }
+  }
+  // default: the stored choice; else the user's metro (or state) when detected; else all US
+  const stored = window.ROSTER_SCOPE;
+  const want = stored && sel.querySelector(`option[value="${CSS.escape(stored)}"]`) ? stored
+             : (geo && geo.country === "us" && geo.metro ? "metro:" + geo.metro : (geo && geo.country === "us" && geo.state ? "state:" + geo.state : (window.ROSTER_COUNTRY || "us")));
+  sel.value = want; applySel();
+  // the browser's own location (when the user grants it) refines an IP guess — silently, once
+  if(navigator.geolocation && (!geo || geo.source !== "browser") && !localStorage.getItem("roster_geo_asked")){
+    try{ localStorage.setItem("roster_geo_asked", "1"); }catch(e){}
+    navigator.geolocation.getCurrentPosition(async pos => {
+      try{ const r = await fetch(`/geo/me?lat=${pos.coords.latitude.toFixed(3)}&lon=${pos.coords.longitude.toFixed(3)}`);
+        if(r.ok){ const g = await r.json(); g.ts = Date.now(); localStorage.setItem("roster_geo", JSON.stringify(g)); window.ROSTER_GEO = g;
+          if(g.metro && !sel.querySelector(`option[value="metro:${CSS.escape(g.metro)}"]`)){ const o = document.createElement("option"); o.value = "metro:" + g.metro; o.textContent = "📍 Near me · " + g.metro_label; sel.insertBefore(o, sel.firstChild); if(!stored){ sel.value = o.value; applySel(); } } }
+      }catch(e){}
+    }, () => {}, {maximumAge: 3600000, timeout: 8000});
+  }
+}
+function geoPayload(){
+  const v = window.ROSTER_SCOPE || window.ROSTER_COUNTRY || "us";
+  if(v.startsWith("metro:")) return {country: "us", metro: v.slice(6)};
+  if(v.startsWith("state:")) return {country: "us", state: v.slice(6)};
+  return {country: v};
+}
+function setScopeAndRerun(value){
+  const sel = document.getElementById("countrysel"); if(!sel) return;
+  if(!sel.querySelector(`option[value="${CSS.escape(value)}"]`)){ const o = document.createElement("option"); o.value = value; o.textContent = value; sel.appendChild(o); }
+  sel.value = value; sel.dispatchEvent(new Event("change"));
+  const last = (THREAD && THREAD.turns && THREAD.turns.length) ? THREAD.turns[THREAD.turns.length-1].question : "";
+  if(last) submitAs(SEARCH_MODE, last);
+}
+function scopeChip(gs){
+  if(!gs || !gs.label) return "";
+  const btns = [];
+  if(gs.metro && gs.state_label) btns.push(`<button type="button" class="ppl-scope" data-scope="state:${esc(gs.state)}">Expand to ${esc(gs.state_label)}</button>`);
+  if(gs.metro || gs.state) btns.push(`<button type="button" class="ppl-scope" data-scope="us">All US</button>`);
+  return `<div class="ppl-cov ppl-scopebar">📍 Scoped to <b>${esc(gs.label)}</b>${gs.source==="query"?"":" (your location)"} — ${esc(gs.statement||"")} ${btns.join(" ")}</div>`;
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest && e.target.closest(".ppl-scope");
+  if(b){ e.preventDefault(); setScopeAndRerun(b.dataset.scope || "us"); }
 });
 // ---- Talent Map paging + cohort enrichment (LinkedIn snippets for the people SHOWN) ------------
 function rerenderPeople(pid){

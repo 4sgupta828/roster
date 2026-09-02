@@ -237,3 +237,55 @@ METRO_ALIAS = {
     "bengaluru": "bangalore", "washington_dc": "dc", "washington": "dc",
     "la": "los_angeles", "silicon_valley": "bay_area", "south_bay": "bay_area",
 }
+
+
+# US METROS (vertical vocabulary for the LOCAL scope): canonical metro key → display label, state,
+# centroid (for nearest-metro from a lat/lon), and the city names a job location or a profile may
+# use. Keys match METRO_COUNTRY / METRO_ALIAS canonical forms.
+US_METROS: dict[str, dict] = {
+    "bay_area": {"label": "Bay Area", "state": "ca", "lat": 37.55, "lon": -122.15,
+                 "cities": ["san francisco", "palo alto", "mountain view", "san jose", "oakland", "sunnyvale",
+                            "menlo park", "redwood city", "cupertino", "santa clara", "berkeley", "fremont",
+                            "san mateo", "bay area", "silicon valley", "south bay", "sf"]},
+    "los_angeles": {"label": "Los Angeles", "state": "ca", "lat": 34.05, "lon": -118.24,
+                    "cities": ["los angeles", "santa monica", "pasadena", "irvine", "culver city", "burbank",
+                               "long beach", "el segundo", "venice", "la"]},
+    "san_diego": {"label": "San Diego", "state": "ca", "lat": 32.72, "lon": -117.16, "cities": ["san diego", "la jolla", "carlsbad"]},
+    "sacramento": {"label": "Sacramento", "state": "ca", "lat": 38.58, "lon": -121.49, "cities": ["sacramento", "davis"]},
+    "seattle": {"label": "Seattle", "state": "wa", "lat": 47.61, "lon": -122.33, "cities": ["seattle", "bellevue", "redmond", "kirkland", "tacoma"]},
+    "portland": {"label": "Portland", "state": "or", "lat": 45.52, "lon": -122.68, "cities": ["portland", "beaverton", "hillsboro"]},
+    "nyc": {"label": "New York", "state": "ny", "lat": 40.71, "lon": -74.01,
+            "cities": ["new york", "nyc", "brooklyn", "manhattan", "queens", "jersey city", "hoboken"]},
+    "boston": {"label": "Boston", "state": "ma", "lat": 42.36, "lon": -71.06, "cities": ["boston", "cambridge, ma", "somerville", "waltham", "burlington, ma"]},
+    "austin": {"label": "Austin", "state": "tx", "lat": 30.27, "lon": -97.74, "cities": ["austin", "round rock"]},
+    "dallas": {"label": "Dallas–Fort Worth", "state": "tx", "lat": 32.78, "lon": -96.80, "cities": ["dallas", "plano", "irving", "fort worth", "frisco", "richardson"]},
+    "houston": {"label": "Houston", "state": "tx", "lat": 29.76, "lon": -95.37, "cities": ["houston", "the woodlands"]},
+    "chicago": {"label": "Chicago", "state": "il", "lat": 41.88, "lon": -87.63, "cities": ["chicago", "evanston", "naperville"]},
+    "denver": {"label": "Denver–Boulder", "state": "co", "lat": 39.74, "lon": -104.99, "cities": ["denver", "boulder", "aurora, co"]},
+    "atlanta": {"label": "Atlanta", "state": "ga", "lat": 33.75, "lon": -84.39, "cities": ["atlanta", "alpharetta"]},
+    "miami": {"label": "Miami", "state": "fl", "lat": 25.76, "lon": -80.19, "cities": ["miami", "fort lauderdale", "boca raton"]},
+    "philadelphia": {"label": "Philadelphia", "state": "pa", "lat": 39.95, "lon": -75.17, "cities": ["philadelphia"]},
+    "phoenix": {"label": "Phoenix", "state": "az", "lat": 33.45, "lon": -112.07, "cities": ["phoenix", "scottsdale", "tempe", "chandler"]},
+    "dc": {"label": "Washington DC", "state": "dc", "lat": 38.91, "lon": -77.04,
+           "cities": ["washington, dc", "washington dc", "arlington", "reston", "mclean", "bethesda", "alexandria"]},
+    "salt_lake_city": {"label": "Salt Lake City", "state": "ut", "lat": 40.76, "lon": -111.89, "cities": ["salt lake city", "lehi", "provo"]},
+    "minneapolis": {"label": "Minneapolis", "state": "mn", "lat": 44.98, "lon": -93.27, "cities": ["minneapolis", "st. paul", "saint paul"]},
+    "pittsburgh": {"label": "Pittsburgh", "state": "pa", "lat": 40.44, "lon": -80.00, "cities": ["pittsburgh"]},
+    "raleigh": {"label": "Raleigh–Durham", "state": "nc", "lat": 35.78, "lon": -78.64, "cities": ["raleigh", "durham", "chapel hill", "research triangle"]},
+    "charlotte": {"label": "Charlotte", "state": "nc", "lat": 35.23, "lon": -80.84, "cities": ["charlotte"]},
+    "detroit": {"label": "Detroit", "state": "mi", "lat": 42.33, "lon": -83.05, "cities": ["detroit", "ann arbor"]},
+    "nashville": {"label": "Nashville", "state": "tn", "lat": 36.16, "lon": -86.78, "cities": ["nashville"]},
+}
+
+US_STATES: dict[str, str] = {
+    "al": "Alabama", "ak": "Alaska", "az": "Arizona", "ar": "Arkansas", "ca": "California", "co": "Colorado",
+    "ct": "Connecticut", "de": "Delaware", "dc": "District of Columbia", "fl": "Florida", "ga": "Georgia",
+    "hi": "Hawaii", "id": "Idaho", "il": "Illinois", "in": "Indiana", "ia": "Iowa", "ks": "Kansas",
+    "ky": "Kentucky", "la": "Louisiana", "me": "Maine", "md": "Maryland", "ma": "Massachusetts",
+    "mi": "Michigan", "mn": "Minnesota", "ms": "Mississippi", "mo": "Missouri", "mt": "Montana",
+    "ne": "Nebraska", "nv": "Nevada", "nh": "New Hampshire", "nj": "New Jersey", "nm": "New Mexico",
+    "ny": "New York", "nc": "North Carolina", "nd": "North Dakota", "oh": "Ohio", "ok": "Oklahoma",
+    "or": "Oregon", "pa": "Pennsylvania", "ri": "Rhode Island", "sc": "South Carolina", "sd": "South Dakota",
+    "tn": "Tennessee", "tx": "Texas", "ut": "Utah", "vt": "Vermont", "va": "Virginia", "wa": "Washington",
+    "wv": "West Virginia", "wi": "Wisconsin", "wy": "Wyoming",
+}

@@ -15,7 +15,7 @@ import time
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -1095,6 +1095,8 @@ class ResearchIn(BaseModel):
     mode: str = ""                        # analytical lens, e.g. "acquirer" (M&A); "" = default investor lens
     company: str = ""                     # single-company DILIGENCE subject (name / entity_id); used only by /research/diligence
     country: str = ""                     # people geo-scope from the top-right selector (default 'us' when the flag is on)
+    metro: str = ""                       # LOCAL scope: the user's metro (e.g. 'bay_area') — clearly-elsewhere dropped,
+    state: str = ""                       #   unknown kept, confirmed-local lead; or a US state code; query-named places win
     surface: str = ""                     # which UI tab asked: "people" | "jobs" | "qa" | "" — People/Jobs are
     #                                       SEARCH surfaces (never prose answers); Q&A owns questions
     refine_facets: dict | None = None     # People-tab CONVERSATION: the previous turn's accumulated facet
@@ -1245,6 +1247,8 @@ class MatchIn(BaseModel):
     role_keywords: list[str] = []
     company_types: list[str] = []    # subset of {f500, public, startup}
     country: str = "us"              # honor the country scope (default US)
+    metro: str = ""                  # LOCAL scope (user's metro / state): local roles lead, remote+unplaced follow
+    state: str = ""
     min_salary: int = 0
     limit: int = 40
     seen_ids: list = []              # job ids shown in PRIOR runs (client-remembered) — the match
@@ -1438,6 +1442,7 @@ class ResearchOut(BaseModel):
     people_rows: list = []           # people-enumeration rows (empty unless ROSTER_PEOPLE_POPULATION routed here)
     person_lookup: dict | None = None  # People-tab person lookup: {resolution, name, context, clarify, candidates}
     jobs: list = []                  # indexed-job rows (the Q&A jobs route) — rendered as job cards, not prose
+    geo_scope: dict | None = None    # LOCAL scope applied to job rows {label, counts, statement, …}
     coverage_basis: dict | None = None  # honest coverage facts for a people-enumeration answer (else None)
     claims: list[Citation]           # the verified findings (evidence for the answer)
     coverage_gaps: list[str]
@@ -2639,6 +2644,11 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             try:
                 res = await agentic_job_search(store, body.question, build_llm(mode=resolve_mode()),
                                                country=(body.country or "us"))
+                if people_geo_scope_enabled():
+                    from api.people_population import apply_job_scope
+                    res["jobs"], res["geo_scope"] = apply_job_scope(
+                        res.get("jobs") or [], metro=(body.metro or ""), state=(body.state or ""),
+                        country=(body.country or "us"))
                 res["count"] = len(res.get("jobs", []))
                 res["agentic"] = True
                 res["query"] = {}
@@ -2682,15 +2692,17 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         # COUNTRY SCOPE (top-right selector, geo-scope flag): drop jobs whose location is CLEARLY in
         # a different country; unplaceable/remote stays (recall). The F2000 sweep made the index
         # global, so an unscoped search now surfaces Stuttgart/Tokyo rows to a US user.
+        _gs = None
         if people_geo_scope_enabled():
-            _want = (body.country or "us").strip().lower()
-            if _want and not (q.get("location") or "").strip():   # an explicit location wins
-                from api.people_population import _country_ok
-                rows = [r for r in rows if _country_ok(r.get("location") or "", _want)]
+            from api.people_population import apply_job_scope
+            rows, _gs = apply_job_scope(rows, country=(body.country or "us").strip().lower(),
+                                        metro=(body.metro or ""), state=(body.state or ""),
+                                        query_location=(q.get("location") or ""))   # an explicit location wins
         rows = rows[:80]
         stats = await store.jobs_stats()
         await _save_job_session(rows, q)   # JOB searches appear in the user's private History
-        return {"jobs": rows, "count": len(rows), "query": q, "semantic": bool(qvec), "stats": stats}
+        return {"jobs": rows, "count": len(rows), "query": q, "semantic": bool(qvec), "stats": stats,
+                "geo_scope": _gs}
 
     @app.post("/insights")
     async def insights(body: ResearchIn) -> dict:
@@ -3489,7 +3501,9 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 question=(question_text or body.question), tenant_id=body.tenant_id,
                 store=store, llm=build_llm(mode=resolve_mode()), scope_country=scope_country,
                 prior_facets=body.refine_facets, assume_people=assume_people,
-                prior_person=(body.prior_person or "").strip())
+                prior_person=(body.prior_person or "").strip(),
+                scope_metro=((body.metro or "").strip().lower() if people_geo_scope_enabled() else ""),
+                scope_state=((body.state or "").strip().lower() if people_geo_scope_enabled() else ""))
             if res.get("kind") == "person":
                 if fallthrough:
                     return None, res      # router: grounded dossier, never only the static card
@@ -3684,7 +3698,9 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 jres = await _qr.indexed_jobs_answer(
                     _cstore, _ctx_question(), build_llm(mode=resolve_mode()),
                     country=((body.country or "us").strip().lower()
-                             if people_geo_scope_enabled() else ""))
+                             if people_geo_scope_enabled() else ""),
+                    metro=((body.metro or "") if people_geo_scope_enabled() else ""),
+                    state=((body.state or "") if people_geo_scope_enabled() else ""))
                 if jres is not None:
                     if on_event is not None:
                         await on_event({"type": "jobs", "count": len(jres.get("jobs") or [])})
@@ -3694,7 +3710,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                          "jobs": list(jres.get("jobs") or []),
                          "query": jres.get("query") or {}, "qa_route": _route.model_dump()})
                     return ResearchOut(grounded=bool(jres.get("grounded")), answer=jres["answer"],
-                                       jobs=list(jres.get("jobs") or []),
+                                       jobs=list(jres.get("jobs") or []), geo_scope=jres.get("geo_scope"),
                                        claims=[], coverage_gaps=[], rejected=0, session_id=sid,
                                        qa_route=_route.model_dump())
                 # jobs engine unavailable → fall through to native research
@@ -5281,6 +5297,15 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             await attach_artifacts(store, [row])
         dec["row"] = row
         return dec
+
+    @app.get("/geo/me")
+    async def geo_me(request: Request, lat: float | None = Query(default=None),
+                     lon: float | None = Query(default=None)) -> dict:
+        """Where is this user? The browser's lat/lon when given (nearest US metro), else the request
+        IP via a best-effort lookup. Drives the default LOCAL scope; the choice stays in the browser."""
+        from api.geo import client_ip, resolve_scope
+        ip = client_ip(request.headers, fallback=(request.client.host if request.client else ""))
+        return resolve_scope(lat=lat, lon=lon, ip=ip)
 
     @app.post("/people/enrich")
     async def people_enrich(body: EnrichIn, x_roster_token: str = Header(default="")) -> dict:

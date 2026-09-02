@@ -24,6 +24,8 @@ import urllib.request
 
 from pydantic import BaseModel
 
+from roster_vertical.people_facets import US_METROS, US_STATES
+
 _log = logging.getLogger(__name__)
 
 # Sources the index does NOT yet cover — stated in every answer so "find all" never implies the whole
@@ -189,6 +191,29 @@ def _country_ok(loc: str, want: str) -> bool:
     return True if jc == "" else jc == want   # drop ONLY jobs clearly in a DIFFERENT country
 
 
+def apply_job_scope(rows: list[dict], *, country: str = "", metro: str = "", state: str = "",
+                    query_location: str = "") -> tuple[list[dict], dict | None]:
+    """Country + LOCAL scope for job rows: drop the clearly-elsewhere, lead with the local, keep
+    remote/unplaced after. A location the query names wins (no scope applied). Returns
+    (rows, geo_scope|None) where geo_scope carries the label/counts/statement for the UI."""
+    if (query_location or "").strip():
+        return rows, None
+    want_c = (country or "").lower()
+    if want_c:
+        rows = [r for r in rows if _country_ok(r.get("location") or "", want_c)]
+    metro, state = (metro or "").lower(), (state or "").lower()
+    if not (metro or state) or want_c not in ("", "us"):
+        return rows, None
+    from api.geo import job_geo_status, partition_local, scope_label, scope_statement
+    rows, c = partition_local(rows, lambda j: job_geo_status(j.get("location") or "", metro=metro, state=state))
+    for j in rows[:c["in"]]:
+        j["local"] = True
+    st = state or US_METROS.get(metro, {}).get("state", "")
+    return rows, {"metro": metro, "state": st, "label": scope_label(metro, state),
+                  "state_label": US_STATES.get(st, ""), "counts": c, "source": "selector",
+                  "statement": scope_statement("jobs", metro, state, c)}
+
+
 async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
     """On-demand: embed the user's résumé profile → most-similar jobs → re-rank by explicit preferences
     (location/remote, seniority, role keywords, company type F500/public/startup, best-effort salary).
@@ -349,7 +374,9 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
         notes.append(f"{dropped_excluded} excluded by your title filters")
     if prefs.get("min_salary"):
         notes.append("salary is best-effort — most listings don't publish pay")
-    return {"jobs": slate, "rotated": bool(seen),
+    slate, _gs = apply_job_scope(slate, country=want_country, metro=str(prefs.get("metro") or ""),
+                                 state=str(prefs.get("state") or ""))
+    return {"jobs": slate, "geo_scope": _gs, "rotated": bool(seen),
             "matched_on": qtext[:180], "dropped_out_of_country": dropped_country,
             "note": " · ".join(notes)}
 
@@ -1480,7 +1507,8 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                                    scope_country: str = "",
                                    prior_facets: dict | None = None,
                                    assume_people: bool = False,
-                                   prior_person: str = "") -> dict:
+                                   prior_person: str = "",
+                                   scope_metro: str = "", scope_state: str = "") -> dict:
     """Answer a people-enumeration question from the grounded people index. Always returns a structured
     result (never raises to the route): a compiled facet filter, grounded rows, and honest coverage.
 
@@ -1547,6 +1575,16 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     # GEO SCOPE (flag-gated): inject the selector country UNLESS the query already named one (query wins).
     if scope_country and not facets.get("country"):
         facets["country"] = [scope_country]
+    # LOCAL SCOPE (the user's metro / state from the selector): applies only when the query itself
+    # names no place — a query-named metro/state/country always wins. Clearly-elsewhere people are
+    # dropped; unknown-location people are kept (they may be local); confirmed-local lead (below).
+    from api.geo import person_geo_status, partition_local, scope_label, scope_statement
+    _query_named_place = bool(facets.get("metro") or facets.get("state") or
+                              (facets.get("country") and facets.get("country") != [scope_country]))
+    _local_metro = (scope_metro or "").strip().lower() if not _query_named_place else ""
+    _local_state = (scope_state or "").strip().lower() if not _query_named_place else ""
+    _local = bool(_local_metro or _local_state)
+    _local_dropped = 0
 
     _worked_at_union_used = False
 
@@ -1630,6 +1668,9 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                 cvals = _person_countries(r["facets"])   # explicit country, else metro→country
                 if cvals and not (cvals & want_country):
                     continue                     # KNOWN-foreign → drop; unknown country → keep (recall)
+            if _local and person_geo_status(r["facets"], metro=_local_metro, state=_local_state) == "out":
+                _local_dropped += 1
+                continue                         # LOCAL scope: clearly elsewhere → drop; unknown → keep
             rf = {(f["facet_key"], f["value_norm"]) for f in r["facets"]}
             nb = sum(1 for k, vals in boost.items() for v in vals if (k, v) in rf)
             r["_sf"] = sf_sim.get(r["entity_id"], 0.0) + 0.03 * min(nb, 4)   # similarity + soft boost
@@ -1645,6 +1686,10 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         semantic_used = semantic_first = bool(rows)
     elif qvec and real_facets:                   # HYBRID: attribute-filter → semantic-rank within it
         cand = await _enum_recall(facets, cap=1000)
+        if _local:
+            _n0 = len(cand)
+            cand = [r for r in cand if person_geo_status(r["facets"], metro=_local_metro, state=_local_state) != "out"]
+            _local_dropped += _n0 - len(cand)
         ids = await store.semantic_people(qvec, candidate_ids=[r["entity_id"] for r in cand], cap=200)
         rows = await store.people_by_ids(ids, tenant_id=tenant_id) if ids else cand[:200]
         semantic_used = bool(ids)
@@ -1655,10 +1700,16 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         def _geo_ok(r):
             return all(any(f["facet_key"] == k and f["value_norm"] in vals for f in r["facets"])
                        for k, vals in geo.items())
-        rows = [r for r in cand if _geo_ok(r)][:200]
+        rows = [r for r in cand if _geo_ok(r)
+                and not (_local and person_geo_status(r["facets"], metro=_local_metro, state=_local_state) == "out")][:200]
         semantic_used = bool(rows)
     else:
-        rows = await _enum_recall(facets, cap=200)
+        rows = await _enum_recall(facets, cap=400 if _local else 200)
+        if _local:
+            _n0 = len(rows)
+            rows = [r for r in rows if person_geo_status(r["facets"], metro=_local_metro, state=_local_state) != "out"]
+            _local_dropped += _n0 - len(rows)
+            rows = rows[:200]
 
     # GRACEFUL PROGRESSIVE RELAXATION: an over-specific query ANDs to zero (e.g. "sales GTM leaders in
     # California" → state=ca matches no business person; "engineers content platform at netflix" →
@@ -1791,6 +1842,20 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             return (v or "").strip().lower().replace(" ", "_")
         people_rows = ([p for p in people_rows if _primary_role(p) in _want_roles]
                        + [p for p in people_rows if _primary_role(p) not in _want_roles])
+
+    # LOCAL-SCOPE partition: people we can PLACE in the user's metro/state lead; unknown-location
+    # rows follow (kept for recall). Then the topic partition, so subject-mentioning locals lead.
+    if _local and people_rows:
+        _fac = {r["entity_id"]: r["facets"] for r in rows}
+        people_rows, _gc = partition_local(
+            people_rows, lambda p: person_geo_status(_fac.get(p["entity_id"], []), metro=_local_metro, state=_local_state))
+        _gc["out"] = _local_dropped
+        coverage["geo_scope"] = {"metro": _local_metro, "state": _local_state or US_METROS.get(_local_metro, {}).get("state", ""),
+                                 "label": scope_label(_local_metro, _local_state),
+                                 "state_label": US_STATES.get(_local_state or US_METROS.get(_local_metro, {}).get("state", ""), ""),
+                                 "counts": _gc, "source": "selector",
+                                 "statement": scope_statement("people", _local_metro, _local_state, _gc)}
+        coverage["population_statement"] = coverage["geo_scope"]["statement"] + " " + coverage.get("population_statement", "")
 
     # TOPIC ANCHOR partition (LAST, so it wins over the country / primary-role partitions): people
     # whose grounded text mentions the brief's subject lead; the coverage statement says how many the
