@@ -44,7 +44,8 @@ def parse_title(title: str) -> tuple[str, str]:
     parts = [p.strip() for p in re.split(r"\s+[-–|]\s+", t) if p.strip()]
     if not parts:
         return "", ""
-    return parts[0], " - ".join(parts[1:])
+    name = re.sub(r"^[^\w]+", "", parts[0]).strip()      # Brave prefixes some titles with '.'
+    return name, " - ".join(parts[1:])
 
 
 def name_matches(person: str, result_name: str) -> bool:

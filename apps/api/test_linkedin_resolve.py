@@ -19,6 +19,7 @@ R_OTHER = {"url": "https://www.linkedin.com/company/anthropic", "title": "Anthro
 def test_title_parsing_and_name_matching():
     assert parse_title(R_ANTHROPIC["title"]) == ("Tom Brown", "Co-Founder at Anthropic")
     assert parse_title(R_SF["title"]) == ("Tom Brown", "San Francisco, California, United States")
+    assert parse_title(".Chris Albon - Wikimedia Foundation | LinkedIn") == ("Chris Albon", "Wikimedia Foundation")
     assert name_matches("Tom Brown", "Tom B. Brown") and name_matches("tom brown", "Tom Brown")
     assert not name_matches("Tom Brown", "Tomer Brown") and not name_matches("Tom Brown", "Tom")
 
