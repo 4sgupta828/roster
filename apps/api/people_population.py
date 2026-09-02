@@ -1160,6 +1160,20 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
             await scan_person_now(pool, rows[0]["entity_id"])   # on demand: papers/repos/orgs now
         except Exception:  # noqa: BLE001
             pass
+        # on demand: resolve their LinkedIn from search snippets (never reads linkedin.com) when the
+        # index holds no LinkedIn link yet; a confident match is stored as self-stated facets
+        if not any((l.get("kind") or "") == "linkedin" for l in rows[0].get("links") or []):
+            try:
+                import asyncio
+                from api.linkedin_resolve import persist_resolution, resolve_linkedin
+                dec = await asyncio.wait_for(resolve_linkedin(rows[0]), 12.0)
+                if dec.get("status") == "resolved" and dec.get("match"):
+                    await persist_resolution(store, rows[0]["entity_id"], dec["match"], tenant_id=tenant_id)
+                    raw = await store.people_by_ids([rows[0]["entity_id"]], tenant_id=tenant_id)
+                    if raw:
+                        rows = [_person_row_from_facets(raw[0])]
+            except Exception as e:  # noqa: BLE001 — best-effort enrichment
+                _log.info("linkedin resolve skipped for %s: %s", rows[0].get("entity_id"), e)
     await attach_artifacts(store, rows)
     display_name = rows[0]["name"] if (resolution == "resolved" and rows) else (
         name if not _ENTITY_ID_RE.match(name) else (rows[0]["name"] if rows else name))

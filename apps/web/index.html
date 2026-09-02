@@ -522,6 +522,8 @@
   .ppl-qa:hover{background:rgba(var(--gold-rgb),.08);}
   /* public FOOTPRINT strip: artifacts linked by identity key (papers · repos · orgs · newest year) */
   .ppl-fp{display:block;font-family:var(--mono);font-size:.66rem;color:var(--muted);margin-top:.25rem;letter-spacing:.02em;line-height:1.5;}
+  #evrail .er-li{display:inline-block;min-height:40px;margin:.15rem 0;padding:.3rem .7rem;border:1px dashed var(--gold);border-radius:999px;background:none;color:var(--gold);font-size:.78rem;font-weight:600;cursor:pointer;}
+  #evrail .er-li:disabled{opacity:.6;cursor:wait;}
   #evrail .er-art{font-size:.8rem;line-height:1.4;padding:.32rem 0;border-top:1px solid var(--hair);}
   #evrail .er-art a{color:var(--gold);text-decoration:none;}
   #evrail .er-art-k{font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-right:.3rem;}
@@ -7957,6 +7959,17 @@ async function openMapsList(){
     }).join("");
     const gaps = (ev.gaps||[]).length ? `<div class="er-gap">No evidence in the corpus for: ${ev.gaps.map(g=>esc(g.replace(/_/g," "))).join(", ")} — a coverage gap, not a finding.</div>` : `<div class="er-src">No missing core dimensions.</div>`;
     const corro = (ev.corroborated_keys||[]).length ? `<div class="er-src">Corroborated across independent sources: ${ev.corroborated_keys.map(esc).join(", ")}.</div>` : `<div class="er-src">No claim is corroborated by two independent source families yet — treat every row above as its stated type.</div>`;
+    // SELF-STATED CALIBRATION (evidence-model-v2 §3): a band + code-derived reasons, never a score.
+    const cal = ev.calibration || null;
+    const calHtml = !cal || cal.band === "n/a" ? ""
+      : cal.band === "consistent"
+        ? `<div class="er-src">Self-stated · <b>consistent</b> — ${cal.reasons.map(esc).join("; ")}.</div>`
+        : `<div class="er-src">Self-stated · <b>no independent evidence yet</b> — nothing we hold agrees or disagrees with the profile's own claims; useful for inclusion, not for verification.</div>`;
+    const consist = (ev.consistent_keys||[]).length ? `<div class="er-src">Stated consistently across self-authored sources (not corroboration): ${ev.consistent_keys.map(esc).join(", ")}.</div>` : "";
+    // LinkedIn: resolve on demand from search-engine SNIPPETS (Roster never reads linkedin.com); a
+    // confident name+hint match becomes a self-stated link + quoted headline on this row.
+    const hasLi = (p.links||[]).some(l=>(l.kind||"")==="linkedin");
+    const liBtn = (!hasLi && p.entity_id && !/^search:/.test(p.entity_id)) ? `<button type="button" class="er-li" data-ref="${esc(p.entity_id)}" title="Find this person's LinkedIn from search-engine snippets — a confident name + company match only; never a guess">Resolve LinkedIn ⌕</button>` : "";
     const links = (p.links||[]).filter(l=>/^https?:\/\//i.test(l.url||"")).map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.kind==="x"?"𝕏":l.kind)} ↗</a>`).join("")
       + (rec.github ? `<a href="${esc(rec.github)}" target="_blank" rel="noopener noreferrer">github ↗</a>` : "");
     // PUBLIC ARTIFACTS (evidence-model-v2 step 1): dated, linkable work tied to this person by an
@@ -7992,12 +8005,38 @@ async function openMapsList(){
       ${p.blurb?`<div class="er-src" style="margin-top:.4rem;">Profile text (self-stated): “${esc(p.blurb)}”</div>`:""}
       <div class="er-sec">Evidence ladder</div>${ladder || '<div class="er-src">No grounded attributes on this row.</div>'}
       ${artSec}
-      <div class="er-sec">Corroboration</div>${corro}
+      <div class="er-sec">Corroboration</div>${corro}${consist}
+      ${calHtml?`<div class="er-sec">Calibration</div>${calHtml}`:""}
       <div class="er-sec">Gaps</div>${gaps}
       <div class="er-sec">Freshness</div><div class="er-src">${fresh}</div>
-      ${links?`<div class="er-sec">Public links</div><div class="er-links">${links}</div>`:""}
+      ${(links||liBtn)?`<div class="er-sec">Public links</div><div class="er-links">${links}${liBtn}</div><div class="er-li-out"></div>`:""}
       <div class="er-sec">Review state</div>${review}
       <div class="er-note">Evidence types are derived from where each fact came from — never from a model's opinion. Self-stated claims are useful for inclusion but are never shown as verified.</div>`;
+    const liB = el.querySelector(".er-li");
+    if(liB) liB.addEventListener("click", async () => {
+      const out = el.querySelector(".er-li-out");
+      if(!(window.USER && USER.token)){ out.innerHTML = `<div class="er-src">Sign in to resolve profiles (it writes to the shared index).</div>`; return; }
+      liB.disabled = true; liB.textContent = "Searching snippets…";
+      try{
+        const r = await fetch("/people/linkedin-resolve", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
+          body: JSON.stringify({entity_id: liB.dataset.ref, tenant_id: "demo"})});
+        const d = await r.json();
+        if(!r.ok) throw new Error(d.detail || r.status);
+        if(d.status === "resolved" && d.match){
+          rec.row = d.row || rec.row; rec.links = (rec.row && rec.row.links) || rec.links;
+          open(ref);                                   // re-render with the new self-stated link + headline
+          const o = ensure().querySelector(".er-li-out");
+          if(o) o.innerHTML = `<div class="er-src">Resolved from a search-engine snippet: “${esc(d.match.headline||"")}” — matched on ${esc(Object.entries(d.match.hits||{}).map(([k,v])=>k.replace(/_/g," ")+": "+v.join(", ")).join("; "))}. Self-stated; never read from linkedin.com.</div>`;
+        } else if(d.status === "already"){
+          out.innerHTML = `<div class="er-src">A LinkedIn link is already on file.</div>`;
+        } else if(d.status === "ambiguous" && (d.candidates||[]).length){
+          out.innerHTML = `<div class="er-gap">No confident match — ${d.candidates.length} same-named profile${d.candidates.length===1?"":"s"} found, none carrying the company on file. Unverified possibilities:</div>`
+            + d.candidates.slice(0,4).map(c=>`<div class="er-art"><a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.name)} ↗</a><span class="er-art-m">${esc(c.headline||"")}</span></div>`).join("");
+        } else {
+          out.innerHTML = `<div class="er-gap">No same-named LinkedIn profile surfaced in search snippets — not evidence of absence.</div>`;
+        }
+      }catch(err){ out.innerHTML = `<div class="er-gap">Could not resolve right now (${esc(String(err.message||err))}).</div>`; liB.disabled = false; liB.textContent = "Resolve LinkedIn ⌕"; }
+    });
     el.querySelector(".er-review").addEventListener("change", e => {
       setReview(ref, e.target.value);
       if(typeof syncMapReview === "function") syncMapReview(ref, e.target.value);   // persists on the saved map (owner)

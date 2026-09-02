@@ -281,21 +281,24 @@ async def attach_artifacts(store, rows: list[dict]) -> None:
     packet. In place; never raises — a row without artifacts simply has none (unscanned)."""
     if not rows:
         return
+    from api.evidence import calibrate
+    found: dict[str, dict] = {}
     get_pool = getattr(store, "_get_pool", None)
-    if get_pool is None:
-        return
-    try:
-        pool = await get_pool()
-        found = await fetch_person_artifacts(pool, [r.get("entity_id") for r in rows])
-    except Exception as e:  # noqa: BLE001 — artifacts are additive; the map must still render
-        _log.warning("attach_artifacts failed: %s", e)
-        return
+    if get_pool is not None:
+        try:
+            pool = await get_pool()
+            found = await fetch_person_artifacts(pool, [r.get("entity_id") for r in rows])
+        except Exception as e:  # noqa: BLE001 — artifacts are additive; the map must still render
+            _log.warning("attach_artifacts failed: %s", e)
     for r in rows:
         s = found.get(r.get("entity_id") or "")
-        r["artifacts"] = s or {"scanned": [], "counts": {}, "total": 0, "newest": None,
-                               "items": [], "affiliations": [], "reported": {}}
+        if get_pool is not None:
+            r["artifacts"] = s or {"scanned": [], "counts": {}, "total": 0, "newest": None,
+                                   "items": [], "affiliations": [], "reported": {}}
         if isinstance(r.get("evidence"), dict):
-            apply_artifacts_to_packet(r["evidence"], s)
+            if get_pool is not None:
+                apply_artifacts_to_packet(r["evidence"], s)
+            calibrate(r["evidence"], r)          # self-stated calibration band + reasons (code-owned)
 
 
 # --------------------------------------------------------------------------- #

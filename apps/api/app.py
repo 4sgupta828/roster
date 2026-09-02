@@ -5237,6 +5237,41 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=503, detail="map store unavailable (no corpus DSN)")
         return ms
 
+    class LinkedInResolveIn(BaseModel):
+        entity_id: str
+        tenant_id: str = "demo"
+
+    @app.post("/people/linkedin-resolve")
+    async def people_linkedin_resolve(body: LinkedInResolveIn,
+                                      x_roster_token: str = Header(default="")) -> dict:
+        """ON-DEMAND LinkedIn resolution from search-engine SNIPPETS (never reads linkedin.com):
+        name-matched, hint-gated (company / past employers / role / metro). A confident match is
+        stored as self-stated facets (link + quoted headline); anything less returns candidates
+        marked unverified. Signed-in only (it writes to the shared index)."""
+        user = await _optional_user(x_roster_token)
+        if user is None:
+            raise HTTPException(status_code=401, detail="sign in to resolve profiles")
+        store = _claim_store_cached()
+        if store is None:
+            raise HTTPException(status_code=503, detail="people index unavailable")
+        from api.linkedin_resolve import persist_resolution, resolve_linkedin
+        from api.people_population import _person_row_from_facets
+        rows = await store.people_by_ids([body.entity_id], tenant_id=body.tenant_id)
+        if not rows:
+            raise HTTPException(status_code=404, detail="person not found")
+        row = _person_row_from_facets(rows[0])
+        if any((l.get("kind") or "") == "linkedin" for l in row.get("links") or []):
+            return {"status": "already", "match": None, "candidates": [], "row": row}
+        dec = await resolve_linkedin(row)
+        if dec.get("status") == "resolved" and dec.get("match"):
+            await persist_resolution(store, body.entity_id, dec["match"], tenant_id=body.tenant_id)
+            rows = await store.people_by_ids([body.entity_id], tenant_id=body.tenant_id)
+            row = _person_row_from_facets(rows[0]) if rows else row
+            from api.artifacts import attach_artifacts
+            await attach_artifacts(store, [row])
+        dec["row"] = row
+        return dec
+
     @app.post("/maps")
     async def map_create(body: MapIn, x_roster_token: str = Header(default="")) -> dict:
         ms = _require_maps()

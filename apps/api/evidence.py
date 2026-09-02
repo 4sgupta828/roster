@@ -23,6 +23,7 @@ _DOC_FAMILY_PATTERNS = (
     ("openalex.org", "openalex"), ("github", "github"), ("ycombinator.com", "yc"),
     ("npiregistry", "npi"), ("theorg.com", "theorg"), ("edgar", "sec"), ("sec.gov", "sec"),
     ("aifund.ai", "aifund"), ("joinef.com", "ef"), ("pear.vc", "pear"), ("sosv", "sosv"),
+    ("linkedin.com", "linkedin"),
 )
 
 FAMILY_EVIDENCE_TYPE = {
@@ -36,6 +37,7 @@ FAMILY_EVIDENCE_TYPE = {
     "ef": "employer_stated",
     "pear": "employer_stated",
     "sosv": "employer_stated",
+    "linkedin": "self_stated",      # headline quoted from a search-engine snippet of the profile
 }
 
 # ladder position (higher = stronger support for what the source constrains)
@@ -62,6 +64,7 @@ FAMILY_LABELS = {
     "ef": "Entrepreneur First company page",
     "pear": "Pear VC portfolio page",
     "sosv": "SOSV portfolio page",
+    "linkedin": "the person's LinkedIn headline, quoted from a search-engine snippet (self-stated)",
 }
 
 
@@ -100,8 +103,19 @@ def evidence_packet(facet_rows: list[dict], entity_id: str = "") -> dict:
         cur = per_key.get(key)
         if cur is None or _STRENGTH_RANK.get(etype, 0) > _STRENGTH_RANK.get(cur["type"], 0):
             per_key[key] = {"type": etype, "family": fam}
-    corroborated_keys = sorted({k for (k, v), fams in fams_by_keyval.items()
-                                if len({f for f in fams if f}) >= 2})
+    # CORROBORATED = the same value from ≥2 independent families of which at least one is NOT
+    # self-authored (a registry, an employer page, an artifact). Two self-stated sources agreeing
+    # (GitHub bio + LinkedIn headline) is CONSISTENCY — real signal for calibration, not verification.
+    corroborated_keys, consistent_keys = [], []
+    for (k, v), fams in fams_by_keyval.items():
+        fams = {f for f in fams if f}
+        if len(fams) < 2 or not v:
+            continue
+        if all(FAMILY_EVIDENCE_TYPE.get(f, "self_stated") == "self_stated" for f in fams):
+            consistent_keys.append(k)
+        else:
+            corroborated_keys.append(k)
+    corroborated_keys, consistent_keys = sorted(set(corroborated_keys)), sorted(set(consistent_keys))
     for k in corroborated_keys:
         per_key[k] = {**per_key.get(k, {}), "type": "corroborated"}
     types_present = sorted({d["type"] for d in per_key.values()},
@@ -116,7 +130,47 @@ def evidence_packet(facet_rows: list[dict], entity_id: str = "") -> dict:
     gaps = [k for k in _USEFUL if k not in per_key]
     return {"types": types_present, "strength": strength,
             "families": sorted(f for f in families if f), "per_key": per_key,
-            "corroborated_keys": corroborated_keys, "gaps": gaps}
+            "corroborated_keys": corroborated_keys, "consistent_keys": consistent_keys, "gaps": gaps}
+
+
+def _co_norm(s: str) -> str:
+    import re
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
+def calibrate(packet: dict, row: dict) -> dict:
+    """SELF-STATED CALIBRATION (evidence-model-v2 §3, first band): a self-stated claim becomes a
+    claim with a prior. CODE-OWNED reasons from independent, grounded signals we hold on the row:
+      - consistency: the same value stated in ≥2 self-authored sources (GitHub bio + LinkedIn headline);
+      - artifact agreement: a paper affiliation or a public GitHub org that names the stated company.
+    Band ∈ consistent | uncorroborated | n/a (no self-stated claim). Reasons are shown, never a score;
+    'contradicted' waits for dated evidence (temporal consistency) — not asserted from undated facets."""
+    if not isinstance(packet, dict):
+        return packet
+    reasons: list[str] = []
+    for k in packet.get("consistent_keys") or []:
+        reasons.append(f"{k.replace('_', ' ')} stated consistently across independent self-authored profiles")
+    attrs = row.get("attributes") or []
+    companies = [_co_norm(a.get("display")) for a in attrs if a.get("key") == "company" and a.get("display")]
+    art = row.get("artifacts") or {}
+    for co in companies:
+        if len(co) < 3:
+            continue
+        n_aff = sum(int(a.get("n") or 0) for a in art.get("affiliations") or []
+                    if co in _co_norm(a.get("name")) or _co_norm(a.get("name")) in co)
+        if n_aff:
+            reasons.append(f"{n_aff} published work{'s' if n_aff != 1 else ''} carry an affiliation matching the stated company")
+        orgs = [it for it in art.get("items") or [] if it.get("kind") == "org"
+                and (co.replace(" ", "") in _co_norm(it.get("title")).replace(" ", ""))]
+        if orgs:
+            reasons.append("public GitHub org membership matches the stated company")
+    if "linkedin" in (packet.get("families") or []) and any(k == "company" for k in packet.get("consistent_keys") or []):
+        reasons.append("note: the LinkedIn profile was matched on name + company, so its agreement is consistency, not independent proof")
+    has_self = "self_stated" in (packet.get("types") or []) or any(
+        d.get("type") == "self_stated" for d in (packet.get("per_key") or {}).values())
+    band = "n/a" if not has_self else ("consistent" if reasons else "uncorroborated")
+    packet["calibration"] = {"band": band, "reasons": reasons}
+    return packet
 
 
 def evidence_groups(rows: list[dict]) -> list[dict]:
