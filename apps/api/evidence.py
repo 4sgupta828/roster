@@ -190,3 +190,49 @@ def evidence_groups(rows: list[dict]) -> list[dict]:
         counts[s] = counts.get(s, 0) + 1
     return [{"state": s, "label": EVIDENCE_TYPE_LABELS.get(s, s), "count": counts[s]}
             for s in order if counts.get(s)]
+
+
+def rank_read(row: dict) -> dict:
+    """CODE-OWNED rank read for one row (evidence-model-v2 §4): relevance first, then evidence
+    depth within it. Returns {score, relevance, evidence_depth, headline_fit, reasons}. Every
+    contribution is small and capped so evidence REORDERS near-equals and never outranks a
+    clearly better match; unscanned footprint is neutral (unknown is not absent)."""
+    import math
+    ev = row.get("evidence") or {}
+    art = row.get("artifacts") or {}
+    li = row.get("linkedin") or {}
+    reasons: list[str] = []
+    rel = (row.get("match_pct") or 0) / 100.0
+    if rel:
+        reasons.append(f"relevance {int(rel * 100)}%")
+    fit = li.get("headline_fit")
+    fit_term = 0.0
+    if fit is not None:
+        fit_term = 0.10 * fit
+        reasons.append(f"LinkedIn headline fits the brief {int(fit * 100)}%")
+    depth = 0.0
+    if ev.get("corroborated_keys"):
+        depth += 0.07; reasons.append("corroborated " + ", ".join(ev["corroborated_keys"][:2]))
+    elif ev.get("consistent_keys") or (ev.get("calibration") or {}).get("band") == "consistent":
+        depth += 0.04; reasons.append("self-stated claims consistent with independent signals")
+    if "artifact_backed" in (ev.get("types") or []):
+        depth += 0.04; reasons.append("artifact-backed capability")
+    total = int(art.get("total") or 0)
+    if total:
+        fp = min(0.05, 0.015 * math.log1p(total))
+        depth += fp
+        parts = ", ".join(f"{n} {k}{'s' if n != 1 else ''}" for k, n in sorted((art.get("counts") or {}).items()))
+        reasons.append(f"public footprint: {parts}")
+    newest = str(art.get("newest") or "")[:4]
+    if newest.isdigit():
+        import datetime
+        age = datetime.date.today().year - int(newest)
+        if age <= 2:
+            depth += 0.02; reasons.append(f"active recently (newest artifact {newest})")
+    if art.get("scanned") and not total:
+        depth -= 0.02; reasons.append("scanned: no public artifacts found")
+    # evidence + headline fit together bridge at most 0.25 of relevance: near-equals reorder,
+    # a clearly better match never loses to a thicker footprint
+    score = rel + min(0.25, fit_term + depth)
+    return {"score": round(score, 4), "relevance": round(rel, 3), "evidence_depth": round(depth, 3),
+            "headline_fit": fit, "reasons": reasons}

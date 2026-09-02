@@ -520,6 +520,15 @@
   .ppl-pickbtn:hover{background:rgba(var(--gold-rgb),.08);}
   .ppl-qa{display:inline-block;margin-left:.4rem;min-height:40px;padding:.35rem .8rem;border:1px solid var(--gold);border-radius:999px;background:none;color:var(--gold);font-size:.78rem;font-weight:600;cursor:pointer;vertical-align:middle;}
   .ppl-qa:hover{background:rgba(var(--gold-rgb),.08);}
+  /* LinkedIn headline line on cards (self-stated, from a search-engine snippet) + paging + re-rank */
+  .ppl-li{display:block;font-size:.78rem;color:var(--ink);margin-top:.2rem;line-height:1.4;}
+  .ppl-li::before{content:"in";display:inline-block;font-weight:700;font-size:.62rem;color:#fff;background:#0A66C2;border-radius:3px;padding:0 .3rem;margin-right:.35rem;line-height:1.4;}
+  .ppl-li-none{color:var(--muted);font-size:.72rem;}
+  .ppl-lifit{font-family:var(--mono);font-size:.64rem;color:var(--muted);margin-left:.3rem;}
+  .ppl-more-wrap{display:flex;justify-content:center;margin:.8rem 0 .2rem;}
+  .ppl-more,.ppl-rerank{min-height:40px;padding:.45rem 1rem;border:1px solid var(--gold);border-radius:999px;background:none;color:var(--gold);font-size:.82rem;font-weight:600;cursor:pointer;}
+  .ppl-rerank{display:inline-block;margin-left:.4rem;font-size:.76rem;padding:.3rem .7rem;}
+  .ppl-more:hover,.ppl-rerank:hover{background:rgba(var(--gold-rgb),.08);}
   /* public FOOTPRINT strip: artifacts linked by identity key (papers · repos · orgs · newest year) */
   .ppl-fp{display:block;font-family:var(--mono);font-size:.66rem;color:var(--muted);margin-top:.25rem;letter-spacing:.02em;line-height:1.5;}
   #evrail .er-li{display:inline-block;min-height:40px;margin:.15rem 0;padding:.3rem .7rem;border:1px dashed var(--gold);border-radius:999px;background:none;color:var(--gold);font-size:.78rem;font-weight:600;cursor:pointer;}
@@ -2603,17 +2612,34 @@ function peopleRowsMarkup(data){
     const nameHtml = (profileUrl
       ? `<a class="ppl-name" href="${esc(profileUrl)}" target="_blank" rel="noopener noreferrer">${esc(p.name)}<span class="ppl-ext">↗</span></a>`
       : `<span class="ppl-name">${esc(p.name)}</span>`);
-    return `<div class="ppl-card">${acts}${avatar}
+    // LinkedIn HEADLINE (self-stated, quoted from a search-engine snippet — never read from
+    // linkedin.com) + how well it fits the brief; shown once the cohort enrichment has run.
+    const liH = (p.linkedin && p.linkedin.headline) || (attr("linkedin_headline").display || "");
+    const liFit = p.linkedin && typeof p.linkedin.headline_fit === "number" ? Math.round(p.linkedin.headline_fit*100) : null;
+    const liLine = liH ? `<span class="ppl-li" title="The person's own LinkedIn headline, quoted from a search-engine snippet (self-stated)">in “${esc(liH)}”${liFit!==null?` <span class="ppl-lifit">fits brief ${liFit}%</span>`:""}</span>`
+      : (p.linkedin && p.linkedin.status && p.linkedin.status!=="resolved" && p.linkedin.status!=="already" ? `<span class="ppl-li ppl-li-none">in ${p.linkedin.status==="ambiguous"?"several same-named profiles — none confirmed":p.linkedin.status==="quota"?"snippet quota reached today":p.linkedin.status==="unavailable"?"search leg unavailable":"no same-named profile in snippets"}</span>` : "");
+    return `<div class="ppl-card" data-ref="${esc(ref)}">${acts}${avatar}
       <span class="ppl-body">
         ${nameHtml}
         ${p.blurb?`<span class="ppl-blurb">${esc(p.blurb)}</span>`:(title?`<span class="ppl-title">${esc(title)}</span>`:"")}
+        ${liLine}
         ${tags?`<span class="ppl-tags">${tags}</span>`:""}
         ${evPill?`<span class="ppl-ev">${evPill}</span>`:""}
         ${fpStrip}
         ${linkBadges?`<span class="ppl-links">${linkBadges}</span>`:""}
       </span></div>`;
   };
-  const cards = rows.map(cardHtml).join("");
+  // PAGING: the 20 most relevant first, then 10 more per click (the whole ranked cohort stays in
+  // `data` for coverage counts, saved maps and CSV; only the cards are paged).
+  window.PEOPLE_RENDERS = window.PEOPLE_RENDERS || {};
+  if(!data._pid){ data._pid = String(Date.now()) + Math.random().toString(36).slice(2,6); }
+  window.PEOPLE_RENDERS[data._pid] = data;
+  const PAGE0 = 20, STEP = 10;
+  const shown = Math.min(rows.length, data._shown || PAGE0);
+  const paged = (isEnum && !(cb.clusters && cb.clusters.length)) ? rows.slice(0, shown) : rows;
+  const cards = paged.map(cardHtml).join("");
+  const moreBtn = (paged.length < rows.length)
+    ? `<div class="ppl-more-wrap"><button type="button" class="ppl-more" data-pid="${esc(data._pid)}" data-step="${STEP}">Show ${Math.min(STEP, rows.length-paged.length)} more <span class="ppl-fc" style="text-transform:none;">· ${rows.length-paged.length} left</span></button></div>` : "";
   // PUBLIC FOOTPRINT coverage (map-level): how many rows have linked artifacts, by kind — and how
   // many were never scanned (unknown is never presented as absent).
   const fpc = cb.footprint||null;
@@ -2645,7 +2671,7 @@ function peopleRowsMarkup(data){
       + `<div class="ppl-cov" style="border-left-color:var(--gap);">◔ ${esc(lk.clarify||"")} ${qaBtn}</div>`;
   }
   const head = isEnum
-    ? `<div class="ppl-head"><b>${rows.length}</b> ${rows.length===1?"person":"people"} found${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evDist}${fpLine}`
+    ? `<div class="ppl-head"><b>${rows.length}</b> ${rows.length===1?"person":"people"} found${paged.length<rows.length?` <span class="ppl-fc" style="text-transform:none;">· showing the ${paged.length} most relevant</span>`:""}${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evDist}${fpLine}<div class="ppl-enrich" data-pid="${esc(data._pid)}"></div>`
     : (lkHead || `<div class="ppl-head">Profile</div>`);   // single-person profile card (no enumeration coverage)
   // ambiguous lookup: each candidate card gets a PICK control (sends its entity id back as the choice)
   const pickCards = (lk && lk.resolution === "ambiguous")
@@ -2674,9 +2700,9 @@ function peopleRowsMarkup(data){
     const rest = rows.filter(p=>!inCluster.has(p.entity_id));
     if(rest.length) body += `<div class="ppl-head" style="margin-top:1rem;">Also matching</div><div class="ppl-grid">${rest.map(cardHtml).join("")}</div>`;
   } else {
-    body = `<div class="ppl-grid">${pickCards || cards}</div>`;
+    body = `<div class="ppl-grid">${pickCards || cards}</div>${moreBtn}`;
   }
-  return `<div class="ppl-wrap">${head}${body}</div>`;
+  return `<div class="ppl-wrap" data-pid="${esc(data._pid)}">${head}${body}</div>`;
 }
 
 // [n] AND grouped [n, m, k] citation refs → clickable sups, in ONE pass (a chained second replace
@@ -3289,6 +3315,9 @@ function render(data, target, opts){
       if(lk) PEOPLE_CTX = null;   // a person lookup is not a facet conversation
     }
     parts.push(peopleRowsMarkup(data));
+    // COHORT ENRICHMENT: once the cards are in the DOM, read LinkedIn snippets for the people SHOWN
+    // (signed-in; Brave quota is spent only on the visible 20 / next 10, never the whole cohort).
+    if(SEARCH_MODE === "people" && data.coverage_basis && data._pid){ setTimeout(() => enrichVisible(data._pid), 60); }
     // single-person profile card also carries a grounded bio prose (enumeration does not) — show it below
     if(data.answer && !data.coverage_basis){
       const bio = STRUCTURED ? mdToHtml(data.answer) : linkCitationRefs(esc(data.answer));
@@ -8065,8 +8094,84 @@ document.addEventListener("click", e => {
   const pk = e.target.closest && e.target.closest(".ppl-pickbtn");
   if(pk){ e.preventDefault(); submitAs("people", pk.dataset.pick || ""); return; }
   const qa = e.target.closest && e.target.closest(".ppl-qa");
-  if(qa){ e.preventDefault(); submitAs("qa", qa.dataset.q || ""); }
+  if(qa){ e.preventDefault(); submitAs("qa", qa.dataset.q || ""); return; }
+  const more = e.target.closest && e.target.closest(".ppl-more");
+  if(more){ e.preventDefault(); showMorePeople(more.dataset.pid, parseInt(more.dataset.step||"10",10)); return; }
+  const rr = e.target.closest && e.target.closest(".ppl-rerank");
+  if(rr){ e.preventDefault(); rerankShown(rr.dataset.pid); }
 });
+// ---- Talent Map paging + cohort enrichment (LinkedIn snippets for the people SHOWN) ------------
+function rerenderPeople(pid){
+  const data = (window.PEOPLE_RENDERS||{})[pid]; if(!data) return null;
+  const wrap = document.querySelector(`.ppl-wrap[data-pid="${CSS.escape(pid)}"]`); if(!wrap) return null;
+  wrap.outerHTML = peopleRowsMarkup(data);
+  return document.querySelector(`.ppl-wrap[data-pid="${CSS.escape(pid)}"]`);
+}
+function showMorePeople(pid, step){
+  const data = (window.PEOPLE_RENDERS||{})[pid]; if(!data) return;
+  data._shown = Math.min((data.people_rows||[]).length, (data._shown || 20) + (step || 10));
+  rerenderPeople(pid);
+  setTimeout(() => enrichVisible(pid), 60);
+}
+const ENRICH_BUSY = new Set();
+async function enrichVisible(pid){
+  const data = (window.PEOPLE_RENDERS||{})[pid]; if(!data || !(window.USER && USER.token)) return;
+  if(ENRICH_BUSY.has(pid)) return;
+  const rows = (data.people_rows||[]).slice(0, data._shown || 20);
+  const todo = rows.filter(p => p.entity_id && !p.linkedin && !/^search:/.test(p.entity_id));
+  const note = document.querySelector(`.ppl-enrich[data-pid="${CSS.escape(pid)}"]`);
+  if(!todo.length){
+    if(note && rows.some(p=>p.linkedin)) note.innerHTML = enrichSummary(rows, pid);
+    return;
+  }
+  ENRICH_BUSY.add(pid);
+  const brief = ((data.coverage_basis||{}).question || data.resolved_question || (THREAD.turns[THREAD.turns.length-1]||{}).question || "");
+  let done = 0, quota = null;
+  try{
+    for(let i = 0; i < todo.length; i += 5){
+      const batch = todo.slice(i, i+5);
+      if(note) note.innerHTML = `<div class="ppl-cov" style="border-left-color:var(--gold);">⌕ Reading public LinkedIn snippets for the people shown… ${done}/${todo.length} <span class="ppl-fc" style="text-transform:none;">(one search per person; nothing is read from linkedin.com)</span></div>`;
+      const r = await fetch("/people/enrich", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
+        body: JSON.stringify({entity_ids: batch.map(p=>p.entity_id), brief, tenant_id:"demo"})});
+      if(!r.ok) throw new Error("enrich " + r.status);
+      const d = await r.json(); quota = d.quota || quota;
+      (d.rows||[]).forEach(nr => {
+        const idx = (data.people_rows||[]).findIndex(p => p.entity_id === nr.entity_id);
+        if(idx >= 0){
+          const keep = data.people_rows[idx];
+          nr.match_pct = keep.match_pct; nr.reasons = keep.reasons; nr.distinguisher = keep.distinguisher;
+          data.people_rows[idx] = nr;
+          if(window.PEOPLE_INDEX && PEOPLE_INDEX[nr.entity_id]) PEOPLE_INDEX[nr.entity_id].row = nr;
+        }
+      });
+      done += batch.length;
+      rerenderPeople(pid);   // cards pick up headline / links / evidence in place
+    }
+  }catch(err){
+    if(note) note.innerHTML = `<div class="ppl-cov">Snippet enrichment stopped (${esc(String(err.message||err))}) — cards above show what was read so far.</div>`;
+    ENRICH_BUSY.delete(pid); return;
+  }
+  ENRICH_BUSY.delete(pid);
+  const n2 = document.querySelector(`.ppl-enrich[data-pid="${CSS.escape(pid)}"]`);
+  if(n2) n2.innerHTML = enrichSummary((data.people_rows||[]).slice(0, data._shown || 20), pid, quota);
+}
+function enrichSummary(rows, pid, quota){
+  const st = {resolved:0, already:0, ambiguous:0, none:0, other:0};
+  rows.forEach(p => { const s = (p.linkedin||{}).status; if(!s) return; st[s in st ? s : "other"]++; });
+  const withHead = rows.filter(p => p.linkedin && p.linkedin.headline).length;
+  const fits = rows.filter(p => p.linkedin && typeof p.linkedin.headline_fit === "number").map(p=>p.linkedin.headline_fit);
+  const strong = fits.filter(f => f >= 0.5).length;
+  return `<div class="ppl-cov" style="border-left-color:var(--gold);">⌕ LinkedIn snippets read for the ${rows.length} shown: <b>${withHead}</b> with a headline (${st.resolved} newly resolved, ${st.already} on file), ${st.ambiguous} ambiguous (several same-named — none guessed), ${st.none} not found${st.other?`, ${st.other} unavailable`:""}.${fits.length?` Headline fits the brief strongly for <b>${strong}</b> of ${fits.length}.`:""} <button type="button" class="ppl-rerank" data-pid="${esc(pid)}" title="Reorder the people shown by relevance, headline fit and evidence depth — code-computed, reasons in Inspect evidence">⇅ Re-rank shown by evidence</button>${quota&&quota.cap?` <span class="ppl-fc" style="text-transform:none;">· snippet quota ${quota.used_today}/${quota.cap} today</span>`:""}</div>`;
+}
+function rerankShown(pid){
+  const data = (window.PEOPLE_RENDERS||{})[pid]; if(!data) return;
+  const n = data._shown || 20, rows = data.people_rows || [];
+  const head = rows.slice(0, n), tail = rows.slice(n);
+  const score = p => (p.rank_read && typeof p.rank_read.score === "number") ? p.rank_read.score : ((p.match_pct||0)/100);
+  head.sort((a,b) => score(b) - score(a));
+  data.people_rows = head.concat(tail); data._reranked = true;
+  rerenderPeople(pid);
+}
 // ---- selection → "Learn more" — grounded explain (Roster) or a free AI deep-dive (Google / Perplexity)
 // A floating popover on any highlighted text in the readable content. No backend, no cost: the external
 // options open a free web AI search in a new tab; ✦ Explain reuses our own grounded glossary lookup.

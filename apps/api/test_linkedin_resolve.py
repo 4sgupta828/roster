@@ -138,3 +138,82 @@ def test_persist_writes_link_headline_and_company_facets_from_the_linkedin_famil
         {"facet_key": "linkedin_company", "value_norm": "anthropic", "document_id": match["url"]},
     ], "github:nottombrown")
     assert pk["consistent_keys"] == ["company"] and pk["corroborated_keys"] == []   # claim-axis mapping
+
+
+def test_enrich_cohort_reads_snippets_once_and_scores_rank(monkeypatch):
+    """Cohort enrichment: each unscanned person gets ONE search; outcomes are remembered (a second
+    call makes no search); resolved people gain self-stated facets; rows carry a rank read."""
+    from api.linkedin_resolve import enrich_cohort
+    from api.evidence import rank_read
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)          # no embeddings → no headline fit
+
+    def _fp(eid, name, **facets):
+        rows = [{"facet_key": k, "display_value": v, "value_norm": v.lower().replace(" ", "_"),
+                 "document_id": "https://github.com/" + eid.split(":", 1)[1], "block_id": ""}
+                for k, v in facets.items()]
+        return {"entity_id": eid, "name": name, "facets": rows}
+
+    class _St:
+        def __init__(self):
+            self.people = {"github:tb": _fp("github:tb", "Tom Brown", company="Anthropic"),
+                           "github:ab": _fp("github:ab", "Ada Byte", company="Acme")}
+            self.scans, self.facets, self.searches = {}, [], []
+
+        async def people_by_ids(self, ids, *, tenant_id="demo"):
+            return [self.people[i] for i in ids if i in self.people]
+
+        async def linkedin_scans(self, ids):
+            return {i: self.scans[i] for i in ids if i in self.scans}
+
+        async def linkedin_scans_today(self):
+            return len(self.scans)
+
+        async def record_linkedin_scan(self, eid, status, *, url="", headline=""):
+            self.scans[eid] = {"entity_id": eid, "status": status, "url": url, "headline": headline}
+
+        async def add_person_facet(self, **kw):
+            self.facets.append(kw)
+            self.people[kw["entity_id"]]["facets"].append(
+                {"facet_key": kw["facet_key"], "display_value": kw["display_value"],
+                 "value_norm": kw["facet_value_norm"], "document_id": kw["source_document_id"], "block_id": ""})
+
+    st = _St()
+
+    async def search(q):
+        st.searches.append(q)
+        return [R_ANTHROPIC, R_SF] if "Tom Brown" in q else []
+
+    loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
+    res = loop.run_until_complete(enrich_cohort(st, ["github:tb", "github:ab", "missing:x"], "LLM training",
+                                                qps=1000, search=search))
+    assert res["skipped"] == ["missing:x"] and len(st.searches) == 2
+    tb, ab = res["rows"]
+    assert tb["linkedin"]["status"] == "resolved" and tb["linkedin"]["headline"] == "Co-Founder at Anthropic"
+    assert any(l["kind"] == "linkedin" for l in tb["links"])                    # facet persisted + row rebuilt
+    assert tb["evidence"]["consistent_keys"] == ["company"]                     # GitHub + LinkedIn agree
+    assert ab["linkedin"]["status"] == "unavailable"                            # empty leg ≠ absence; not recorded
+    assert st.scans["github:tb"]["status"] == "resolved" and "github:ab" not in st.scans
+    assert tb["rank_read"]["score"] >= ab["rank_read"]["score"]
+    assert any("consistent" in r for r in tb["rank_read"]["reasons"])
+    # second call: Tom is remembered (no new search); Ada is retried (unavailable was never recorded)
+    res2 = loop.run_until_complete(enrich_cohort(st, ["github:tb", "github:ab"], "LLM training", qps=1000, search=search))
+    assert len(st.searches) == 3 and res2["rows"][0]["linkedin"]["status"] == "resolved"
+    # quota: cap reached → 'quota', no search
+    res3 = loop.run_until_complete(enrich_cohort(st, ["github:ab"], "x", qps=1000, daily_cap=1, search=search))
+    assert res3["rows"][0]["linkedin"]["status"] == "quota" and len(st.searches) == 3
+
+
+def test_rank_read_is_relevance_first_and_capped():
+    from api.evidence import rank_read
+    base = {"match_pct": 70, "evidence": {"types": ["self_stated"], "corroborated_keys": [], "consistent_keys": []},
+            "artifacts": {"scanned": ["github"], "total": 0, "counts": {}, "newest": None}}
+    rich = {"match_pct": 60, "evidence": {"types": ["artifact_backed", "self_stated"], "corroborated_keys": ["company"]},
+            "artifacts": {"scanned": ["github"], "total": 40, "counts": {"repo": 40}, "newest": "2026-01-01"},
+            "linkedin": {"headline_fit": 0.8}}
+    b, r = rank_read(base), rank_read(rich)
+    assert b["evidence_depth"] == -0.02 and "scanned: no public artifacts found" in b["reasons"]
+    assert r["evidence_depth"] <= 0.07 + 0.04 + 0.05 + 0.02 + 1e-9 and r["headline_fit"] == 0.8
+    assert r["score"] - r["relevance"] <= 0.25 + 1e-9                          # the bridge is capped
+    assert r["score"] > b["score"]                                              # near-equal relevance: evidence decides
+    weak = rank_read({**rich, "match_pct": 20})
+    assert weak["score"] < b["score"]                                           # but never over a clearly better match

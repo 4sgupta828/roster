@@ -214,3 +214,162 @@ async def persist_resolution(store, entity_id: str, match: dict, *, tenant_id: s
             await store.add_person_facet(entity_id=entity_id, facet_key="linkedin_company",
                                          facet_value_norm=norm[:200], display_value=str(co)[:300],
                                          source_document_id=url, confidence=0.7, tenant_id=tenant_id)
+
+
+# --------------------------------------------------------------------------- #
+# COHORT ENRICHMENT: read the snippets for the people SHOWN (top-20 / next-10)  #
+# --------------------------------------------------------------------------- #
+_SCAN_DDL = """
+CREATE TABLE IF NOT EXISTS rs_linkedin_scan (
+    entity_id  text PRIMARY KEY,
+    status     text NOT NULL,                 -- resolved | ambiguous | none | already
+    url        text NOT NULL DEFAULT '',
+    headline   text NOT NULL DEFAULT '',
+    scanned_at timestamptz NOT NULL DEFAULT now()
+);
+"""
+
+
+def _embed_many(texts: list[str]) -> list[list[float] | None]:
+    """One embeddings call for a small batch (headline ↔ brief fit). None per item on failure."""
+    import json
+    import os
+    import urllib.request
+    key = os.environ.get("OPENAI_API_KEY")
+    clean = [(t or "").strip()[:1000] for t in texts]
+    if not key or not any(clean):
+        return [None] * len(texts)
+    try:
+        body = json.dumps({"model": "text-embedding-3-small",
+                           "input": [c or "." for c in clean]}).encode()
+        req = urllib.request.Request("https://api.openai.com/v1/embeddings", data=body,
+                                     headers={"Authorization": "Bearer " + key,
+                                              "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            data = json.load(r)["data"]
+        out = [d["embedding"] for d in sorted(data, key=lambda d: d["index"])]
+        return [v if c else None for v, c in zip(out, clean)]
+    except Exception as e:  # noqa: BLE001
+        _log.info("embed_many failed: %s", e)
+        return [None] * len(texts)
+
+
+def _cos(a: list[float] | None, b: list[float] | None) -> float | None:
+    if not a or not b:
+        return None
+    import math
+    dot = sum(x * y for x, y in zip(a, b))
+    na, nb = math.sqrt(sum(x * x for x in a)), math.sqrt(sum(y * y for y in b))
+    return (dot / (na * nb)) if na and nb else None
+
+
+async def reembed_person(pool, entity_id: str) -> bool:
+    """Rebuild the person's search vector from ALL current facets (now including the LinkedIn
+    headline) so future semantic searches see what the person says about themselves."""
+    from api.people_population import embed_query
+    try:
+        async with pool.acquire() as conn:
+            name = await conn.fetchval("SELECT name FROM rs_entity WHERE entity_id = $1", entity_id)
+            frows = await conn.fetch(
+                "SELECT facet_key, display_value FROM roster_entity_facet WHERE entity_id = $1", entity_id)
+        parts = [name or ""] + [f["display_value"] for f in frows
+                                if not str(f["facet_key"]).startswith("link_")]
+        vec = embed_query(" ".join(p for p in parts if p))
+        if not vec:
+            return False
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO rs_person_vec (entity_id, embedding) VALUES ($1, $2::vector)
+                   ON CONFLICT (entity_id) DO UPDATE SET embedding = EXCLUDED.embedding""", entity_id, vec)
+        return True
+    except Exception as e:  # noqa: BLE001
+        _log.info("reembed_person(%s) skipped: %s", entity_id, e)
+        return False
+
+
+async def enrich_cohort(store, entity_ids: list[str], brief: str, *, tenant_id: str = "demo",
+                        max_people: int = 20, qps: float = 1.0, daily_cap: int | None = None,
+                        search=search_snippets) -> dict:
+    """Read LinkedIn snippets for the people SHOWN (never the whole 200): resolve each unscanned
+    person (Brave: ~1 query/s), store confident matches as self-stated facets + re-embed them,
+    remember every outcome so a person is queried once, then score HEADLINE ↔ BRIEF fit and a
+    code-owned rank read per row. Returns {rows:[{entity_id, linkedin:{...}, rank_read, row}],
+    quota:{used_today, cap}, skipped}."""
+    import asyncio
+    import os
+    import time
+    from api.artifacts import attach_artifacts
+    from api.evidence import rank_read
+    from api.people_population import _person_row_from_facets
+    ids = [e for e in dict.fromkeys(entity_ids or []) if e][:max_people]
+    if not ids:
+        return {"rows": [], "quota": {}, "skipped": []}
+    cap = int(daily_cap if daily_cap is not None else os.environ.get("ROSTER_LINKEDIN_DAILY_CAP", "600") or 600)
+    scans = await store.linkedin_scans(ids)
+    used_today = await store.linkedin_scans_today()
+    raw = {r["entity_id"]: r for r in await store.people_by_ids(ids, tenant_id=tenant_id)}
+    out_rows, skipped = [], []
+    last_call = 0.0
+    for eid in ids:
+        r = raw.get(eid)
+        if not r:
+            skipped.append(eid); continue
+        row = _person_row_from_facets(r)
+        li = {"status": "", "url": "", "headline": "", "hits": {}}
+        has_link = next((l["url"] for l in row.get("links") or [] if (l.get("kind") or "") == "linkedin"), "")
+        headline_facet = next((a["display"] for a in row.get("attributes") or []
+                               if a.get("key") == "linkedin_headline"), "")
+        prior = scans.get(eid)
+        if prior:
+            li.update({"status": prior["status"], "url": prior["url"] or has_link,
+                       "headline": prior["headline"] or headline_facet})
+        elif has_link:
+            li.update({"status": "already", "url": has_link, "headline": headline_facet})
+            await store.record_linkedin_scan(eid, "already", url=has_link, headline=headline_facet)
+        elif used_today >= cap:
+            li["status"] = "quota"
+        else:
+            wait = (1.0 / qps) - (time.time() - last_call)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            last_call = time.time()
+            dec = await resolve_linkedin(row, search=search)
+            used_today += 1
+            st = dec.get("status") or "none"
+            if st == "resolved" and dec.get("match"):
+                m = dec["match"]
+                await persist_resolution(store, eid, m, tenant_id=tenant_id)
+                await store.record_linkedin_scan(eid, "resolved", url=m["url"], headline=m.get("headline") or "")
+                li.update({"status": "resolved", "url": m["url"], "headline": m.get("headline") or "",
+                           "hits": m.get("hits") or {}})
+                fresh = await store.people_by_ids([eid], tenant_id=tenant_id)
+                if fresh:
+                    row = _person_row_from_facets(fresh[0])
+                get_pool = getattr(store, "_get_pool", None)
+                if get_pool is not None:
+                    try:
+                        await reembed_person(await get_pool(), eid)
+                    except Exception:  # noqa: BLE001
+                        pass
+            elif st in ("ambiguous", "none"):
+                await store.record_linkedin_scan(eid, st)
+                li["status"] = st
+                li["candidates"] = [{"name": c["name"], "headline": c["headline"], "url": c["url"]}
+                                    for c in (dec.get("candidates") or [])[:3]]
+            else:
+                li["status"] = st          # unavailable: not recorded → retried next time
+        row["linkedin"] = li
+        out_rows.append(row)
+    await attach_artifacts(store, out_rows)
+    # HEADLINE ↔ BRIEF fit: what the person says they do vs what the brief asks for (one batch call)
+    heads = [(r["linkedin"].get("headline") or "") for r in out_rows]
+    if (brief or "").strip() and any(heads):
+        vecs = _embed_many([brief] + heads)
+        bvec = vecs[0]
+        for r, hv in zip(out_rows, vecs[1:]):
+            fit = _cos(bvec, hv)
+            if fit is not None:
+                r["linkedin"]["headline_fit"] = round(max(0.0, min(1.0, fit)), 3)
+    for r in out_rows:
+        r["rank_read"] = rank_read(r)
+    return {"rows": out_rows, "quota": {"used_today": used_today, "cap": cap}, "skipped": skipped}

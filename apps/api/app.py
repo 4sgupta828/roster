@@ -5272,6 +5272,28 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         dec["row"] = row
         return dec
 
+    class EnrichIn(BaseModel):
+        entity_ids: list[str]
+        brief: str = ""
+        tenant_id: str = "demo"
+
+    @app.post("/people/enrich")
+    async def people_enrich(body: EnrichIn, x_roster_token: str = Header(default="")) -> dict:
+        """Read LinkedIn SNIPPETS for the people SHOWN on a Talent Map page (≤20 per call): each
+        unscanned person gets one search (Brave, ~1/s), confident matches become self-stated facets
+        (link + quoted headline + stated company) and the person is re-embedded; every outcome is
+        remembered so nobody is queried twice. Returns per-row headline ↔ brief fit and a code-owned
+        rank read. Signed-in only (writes to the shared index; spends search quota)."""
+        user = await _optional_user(x_roster_token)
+        if user is None:
+            raise HTTPException(status_code=401, detail="sign in to enrich results")
+        store = _claim_store_cached()
+        if store is None:
+            raise HTTPException(status_code=503, detail="people index unavailable")
+        from api.linkedin_resolve import enrich_cohort
+        res = await enrich_cohort(store, body.entity_ids[:20], body.brief, tenant_id=body.tenant_id)
+        return res
+
     @app.post("/maps")
     async def map_create(body: MapIn, x_roster_token: str = Header(default="")) -> dict:
         ms = _require_maps()

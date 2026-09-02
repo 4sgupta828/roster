@@ -1699,6 +1699,46 @@ class ClaimGraphStore:
                 ids += [r["entity_id"] for r in loose]
         return await self.people_by_ids(ids, tenant_id=tenant_id) if ids else []
 
+    # ---- LinkedIn snippet-scan memory (a person is queried once; outcomes remembered) ----
+    _LI_DDL = """CREATE TABLE IF NOT EXISTS rs_linkedin_scan (
+        entity_id text PRIMARY KEY, status text NOT NULL, url text NOT NULL DEFAULT '',
+        headline text NOT NULL DEFAULT '', scanned_at timestamptz NOT NULL DEFAULT now())"""
+    _li_ready = False
+
+    async def _li_ensure(self, conn) -> None:
+        if not self._li_ready:
+            await conn.execute(self._LI_DDL)
+            self._li_ready = True
+
+    async def linkedin_scans(self, entity_ids) -> dict[str, dict]:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await self._li_ensure(conn)
+            rows = await conn.fetch(
+                "SELECT entity_id, status, url, headline FROM rs_linkedin_scan WHERE entity_id = ANY($1)",
+                list(entity_ids))
+        return {r["entity_id"]: dict(r) for r in rows}
+
+    async def linkedin_scans_today(self) -> int:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await self._li_ensure(conn)
+            return int(await conn.fetchval(
+                "SELECT count(*) FROM rs_linkedin_scan WHERE scanned_at > now() - interval '24 hours' "
+                "AND status <> 'already'") or 0)
+
+    async def record_linkedin_scan(self, entity_id: str, status: str, *, url: str = "",
+                                   headline: str = "") -> None:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await self._li_ensure(conn)
+            await conn.execute(
+                """INSERT INTO rs_linkedin_scan (entity_id, status, url, headline, scanned_at)
+                   VALUES ($1,$2,$3,$4, now())
+                   ON CONFLICT (entity_id) DO UPDATE SET status=EXCLUDED.status, url=EXCLUDED.url,
+                     headline=EXCLUDED.headline, scanned_at=now()""",
+                entity_id, status, (url or "")[:500], (headline or "")[:300])
+
     async def semantic_people(self, qvec: str, *, candidate_ids=None, cap: int = 200) -> list[str]:
         """Rank people by cosine similarity to the query embedding. If candidate_ids is given (the
         facet-filtered set), rank WITHIN it (hybrid: exact filter + semantic order); else pure-semantic
