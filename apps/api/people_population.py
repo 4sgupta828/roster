@@ -1661,8 +1661,24 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         base = _RANK.get(sen.lower().replace(" ", "_"), 3)
         return base + min(len(p["links"]), 3) * 0.1   # small boost for a richer/contactable profile
 
-    if not semantic_used:            # semantic search already ranked by query relevance — keep that order
+    if not semantic_used:            # facet path: the seniority ladder is the relevance signal
         people_rows.sort(key=lambda p: (-_score(p), p["name"]))
+        for p in people_rows:
+            p["relevance"] = round(min(1.0, _score(p) / 10.0), 3)
+
+    # EVIDENCE-AWARE RANKING (evidence-model-v2 §4, default order): relevance BANDS (0.05) are the
+    # primary key; within a band, code-computed evidence depth (corroborated/consistent affiliation,
+    # artifact-backed capability, brief-matching artifacts, seniority-from-evidence when asked,
+    # footprint, freshness, headline fit) orders the rows. Artifacts attach here so the read sees them.
+    _ranked_by_evidence = False
+    if people_rows:
+        from api.artifacts import attach_artifacts
+        from api.evidence import rank_read, rank_sort_key
+        await attach_artifacts(store, people_rows)
+        for p in people_rows:
+            p["rank_read"] = rank_read(p, facets)
+        people_rows.sort(key=rank_sort_key)
+        _ranked_by_evidence = True
 
     # CONFIRMED-COUNTRY priority under a geo scope: people we can PLACE in the scoped country lead;
     # unknown-location profiles follow (recall keeps them; rank stops them crowding out confirmed).
@@ -1753,12 +1769,16 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     # EVIDENCE DISTRIBUTION (spec: coverage is a first-class surface) — how many rows per headline
     # evidence state, counted by code from the per-row packets (rows are fully built here).
     if people_rows:
-        # PUBLIC ARTIFACTS (evidence-model-v2 step 1): papers/repos/orgs linked by identity key —
-        # attached before the distribution is counted so 'artifact-backed' shows in the groups.
+        # PUBLIC ARTIFACTS (evidence-model-v2 step 1) were attached before ranking; count the
+        # distribution here (rows are final) and say how the order was produced.
         from api.artifacts import attach_artifacts, footprint_coverage
         from api.evidence import evidence_groups
-        await attach_artifacts(store, people_rows)
+        if not any("artifacts" in p for p in people_rows):
+            await attach_artifacts(store, people_rows)
         coverage["footprint"] = footprint_coverage(people_rows)
         coverage["evidence_groups"] = evidence_groups(people_rows)
+        coverage["ranking"] = ("relevance bands of 0.05 first; within a band, evidence depth "
+                               "(corroborated/consistent affiliation, brief-matching artifacts, "
+                               "footprint, freshness, headline fit) — reasons per row in Inspect evidence")
     return {"grounded": grounded, "not_people_query": False, "answer": answer,
             "people_rows": people_rows, "coverage_basis": coverage}

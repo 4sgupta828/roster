@@ -203,17 +203,31 @@ def test_enrich_cohort_reads_snippets_once_and_scores_rank(monkeypatch):
     assert res3["rows"][0]["linkedin"]["status"] == "quota" and len(st.searches) == 3
 
 
-def test_rank_read_is_relevance_first_and_capped():
-    from api.evidence import rank_read
+def test_rank_read_bands_then_evidence():
+    from api.evidence import rank_read, rank_sort_key
     base = {"match_pct": 70, "evidence": {"types": ["self_stated"], "corroborated_keys": [], "consistent_keys": []},
             "artifacts": {"scanned": ["github"], "total": 0, "counts": {}, "newest": None}}
-    rich = {"match_pct": 60, "evidence": {"types": ["artifact_backed", "self_stated"], "corroborated_keys": ["company"]},
-            "artifacts": {"scanned": ["github"], "total": 40, "counts": {"repo": 40}, "newest": "2026-01-01"},
+    rich = {"match_pct": 68, "evidence": {"types": ["artifact_backed", "self_stated"], "corroborated_keys": ["company"]},
+            "artifacts": {"scanned": ["github"], "total": 40, "counts": {"repo": 40}, "newest": "2026-01-01",
+                          "items": [{"kind": "repo", "title": "vecdb-rs", "venue": "Rust", "stat": "120★"}]},
             "linkedin": {"headline_fit": 0.8}}
     b, r = rank_read(base), rank_read(rich)
-    assert b["evidence_depth"] == -0.02 and "scanned: no public artifacts found" in b["reasons"]
-    assert r["evidence_depth"] <= 0.07 + 0.04 + 0.05 + 0.02 + 1e-9 and r["headline_fit"] == 0.8
-    assert r["score"] - r["relevance"] <= 0.25 + 1e-9                          # the bridge is capped
-    assert r["score"] > b["score"]                                              # near-equal relevance: evidence decides
-    weak = rank_read({**rich, "match_pct": 20})
-    assert weak["score"] < b["score"]                                           # but never over a clearly better match
+    base["rank_read"], rich["rank_read"] = b, r
+    assert b["band"] == 14 and r["band"] == 13                        # 0.70 vs 0.68 → different bands
+    assert b["score"] > r["score"] and rank_sort_key(base) < rank_sort_key(rich)   # band wins over evidence
+    assert "scanned: no public artifacts found" in b["reasons"] and b["within"] == 0.0
+    same = rank_read({**rich, "match_pct": 70})                       # same band → evidence decides
+    assert same["score"] > b["score"] and same["score"] < 15 * 0.05   # and never crosses into the next band
+    # brief-aware artifact boost + seniority from evidence when the brief asks for senior people
+    br = rank_read({**rich, "match_pct": 70,
+                    "artifacts": {**rich["artifacts"], "items": [
+                        {"kind": "repo", "title": "vector-db-rs", "venue": "Rust", "stat": "120★"},
+                        {"kind": "paper", "title": "Vector database infrastructure at scale", "venue": "VLDB",
+                         "role": "first_author", "stat": "340 citations"}]}},
+                   {"skill": ["vector_db"], "function": ["infrastructure"], "seniority": ["senior"]})
+    assert any(x.startswith("2 artifacts match the brief") for x in br["reasons"])
+    assert any(x.startswith("seniority evidence: 1 first-author paper, 340 citations, 1 starred repo") for x in br["reasons"])
+    assert br["within"] > same["within"]
+    # unscanned is neutral: no penalty, no footprint claim
+    un = rank_read({"match_pct": 70, "evidence": {"types": ["self_stated"]}, "artifacts": {"scanned": [], "total": 0}})
+    assert un["within"] == 0.0 and not any("scanned" in x for x in un["reasons"])

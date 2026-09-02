@@ -289,7 +289,7 @@ async def reembed_person(pool, entity_id: str) -> bool:
 
 async def enrich_cohort(store, entity_ids: list[str], brief: str, *, tenant_id: str = "demo",
                         max_people: int = 20, qps: float = 1.0, daily_cap: int | None = None,
-                        search=search_snippets) -> dict:
+                        search=search_snippets, facets: dict | None = None) -> dict:
     """Read LinkedIn snippets for the people SHOWN (never the whole 200): resolve each unscanned
     person (Brave: ~1 query/s), store confident matches as self-stated facets + re-embed them,
     remember every outcome so a person is queried once, then score HEADLINE ↔ BRIEF fit and a
@@ -371,5 +371,5 @@ async def enrich_cohort(store, entity_ids: list[str], brief: str, *, tenant_id: 
             if fit is not None:
                 r["linkedin"]["headline_fit"] = round(max(0.0, min(1.0, fit)), 3)
     for r in out_rows:
-        r["rank_read"] = rank_read(r)
+        r["rank_read"] = rank_read(r, facets)
     return {"rows": out_rows, "quota": {"used_today": used_today, "cap": cap}, "skipped": skipped}

@@ -531,6 +531,7 @@
   .ppl-more:hover,.ppl-rerank:hover{background:rgba(var(--gold-rgb),.08);}
   /* public FOOTPRINT strip: artifacts linked by identity key (papers · repos · orgs · newest year) */
   .ppl-fp{display:block;font-family:var(--mono);font-size:.66rem;color:var(--muted);margin-top:.25rem;letter-spacing:.02em;line-height:1.5;}
+  #evrail .er-rank{display:block;margin-top:.35rem;font-size:.82rem;color:var(--ink);}
   #evrail .er-li{display:inline-block;min-height:40px;margin:.15rem 0;padding:.3rem .7rem;border:1px dashed var(--gold);border-radius:999px;background:none;color:var(--gold);font-size:.78rem;font-weight:600;cursor:pointer;}
   #evrail .er-li:disabled{opacity:.6;cursor:wait;}
   #evrail .er-art{font-size:.8rem;line-height:1.4;padding:.32rem 0;border-top:1px solid var(--hair);}
@@ -2646,6 +2647,7 @@ function peopleRowsMarkup(data){
   const fpLine = (fpc && fpc.people)
     ? `<div class="ppl-cov ev-dist">◆ Public footprint: <b>${fpc.with_artifacts}</b> of ${fpc.people} people have linked artifacts${Object.keys(fpc.kinds||{}).length?` (${Object.entries(fpc.kinds).map(([k,n])=>`${FP_LABEL[k]||esc(k)} ${n}`).join(" · ")})`:""}${fpc.unscanned?` <span class="ppl-fc" style="text-transform:none;">— ${fpc.unscanned} not yet scanned: unknown, not absent</span>`:""}</div>`
     : "";
+  const rankLine = cb.ranking ? `<div class="ppl-cov ev-dist">⇅ Ranked by ${esc(cb.ranking)}.</div>` : "";
   // EVIDENCE distribution (spec coverage panel): how many rows by headline evidence state.
   const evGroups = cb.evidence_groups||[];
   const evDist = evGroups.length
@@ -2671,7 +2673,7 @@ function peopleRowsMarkup(data){
       + `<div class="ppl-cov" style="border-left-color:var(--gap);">◔ ${esc(lk.clarify||"")} ${qaBtn}</div>`;
   }
   const head = isEnum
-    ? `<div class="ppl-head"><b>${rows.length}</b> ${rows.length===1?"person":"people"} found${paged.length<rows.length?` <span class="ppl-fc" style="text-transform:none;">· showing the ${paged.length} most relevant</span>`:""}${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evDist}${fpLine}<div class="ppl-enrich" data-pid="${esc(data._pid)}"></div>`
+    ? `<div class="ppl-head"><b>${rows.length}</b> ${rows.length===1?"person":"people"} found${paged.length<rows.length?` <span class="ppl-fc" style="text-transform:none;">· showing the ${paged.length} most relevant</span>`:""}${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evDist}${fpLine}${rankLine}<div class="ppl-enrich" data-pid="${esc(data._pid)}"></div>`
     : (lkHead || `<div class="ppl-head">Profile</div>`);   // single-person profile card (no enumeration coverage)
   // ambiguous lookup: each candidate card gets a PICK control (sends its entity id back as the choice)
   const pickCards = (lk && lk.resolution === "ambiguous")
@@ -7977,6 +7979,12 @@ async function openMapsList(){
     if(p.match_pct) why.push(`Relevance ${p.match_pct}% — embedding similarity between the brief and this profile (a retrieval signal, not a fit score).`);
     if(Array.isArray(p.reasons) && p.reasons.length) why.push(`Also: ${p.reasons.map(esc).join(", ")}.`);
     if(!why.length) why.push("Surfaced by the compiled facet filter for this brief.");
+    // RANK READ (evidence-model-v2 §4): the code-computed contributions that placed this row —
+    // relevance band first, evidence depth within it. Transparent, never a model opinion.
+    const rr = p.rank_read || null;
+    if(rr && Array.isArray(rr.reasons) && rr.reasons.length){
+      why.push(`<span class="er-rank">Ranking: ${rr.reasons.map(esc).join(" · ")}${typeof rr.band==="number"?` <span class="ppl-fc" style="text-transform:none;">(relevance band ${rr.band}, evidence within band ${Math.round((rr.within||0)*100)}%)</span>`:""}.</span>`);
+    }
     // EVIDENCE LADDER — one row per grounded attribute, typed by its source provenance.
     const ladder = (p.attributes||[]).filter(a=>a.display && !/^link_/.test(a.key||"")
         && !(a.key==="title" && String(a.display).toLowerCase()===String(p.name||"").toLowerCase())).map(a => {
@@ -8132,7 +8140,8 @@ async function enrichVisible(pid){
       const batch = todo.slice(i, i+5);
       if(note) note.innerHTML = `<div class="ppl-cov" style="border-left-color:var(--gold);">⌕ Reading public LinkedIn snippets for the people shown… ${done}/${todo.length} <span class="ppl-fc" style="text-transform:none;">(one search per person; nothing is read from linkedin.com)</span></div>`;
       const r = await fetch("/people/enrich", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
-        body: JSON.stringify({entity_ids: batch.map(p=>p.entity_id), brief, tenant_id:"demo"})});
+        body: JSON.stringify({entity_ids: batch.map(p=>p.entity_id), brief, tenant_id:"demo",
+          facets: ((data.coverage_basis||{}).query_facets || window.LAST_PEOPLE_FACETS || null)})});
       if(!r.ok) throw new Error("enrich " + r.status);
       const d = await r.json(); quota = d.quota || quota;
       (d.rows||[]).forEach(nr => {
@@ -8167,8 +8176,9 @@ function rerankShown(pid){
   const data = (window.PEOPLE_RENDERS||{})[pid]; if(!data) return;
   const n = data._shown || 20, rows = data.people_rows || [];
   const head = rows.slice(0, n), tail = rows.slice(n);
-  const score = p => (p.rank_read && typeof p.rank_read.score === "number") ? p.rank_read.score : ((p.match_pct||0)/100);
-  head.sort((a,b) => score(b) - score(a));
+  // the server's banded rank read (relevance band first, evidence within) — headline fit included once read
+  const key = p => { const r = p.rank_read||{}; return [-(r.band||0), -(r.within||0), -(r.relevance||(p.match_pct||0)/100)]; };
+  head.sort((a,b) => { const ka=key(a), kb=key(b); for(let i=0;i<3;i++){ if(ka[i]!==kb[i]) return ka[i]-kb[i]; } return 0; });
   data.people_rows = head.concat(tail); data._reranked = true;
   rerenderPeople(pid);
 }

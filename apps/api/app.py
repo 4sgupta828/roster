@@ -5275,6 +5275,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     class EnrichIn(BaseModel):
         entity_ids: list[str]
         brief: str = ""
+        facets: dict | None = None        # the brief's compiled facets (brief-aware rank read)
         tenant_id: str = "demo"
 
     @app.post("/people/enrich")
@@ -5291,7 +5292,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         if store is None:
             raise HTTPException(status_code=503, detail="people index unavailable")
         from api.linkedin_resolve import enrich_cohort
-        res = await enrich_cohort(store, body.entity_ids[:20], body.brief, tenant_id=body.tenant_id)
+        res = await enrich_cohort(store, body.entity_ids[:20], body.brief, tenant_id=body.tenant_id,
+                                  facets=body.facets if isinstance(body.facets, dict) else None)
         return res
 
     @app.post("/maps")

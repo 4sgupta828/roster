@@ -192,47 +192,108 @@ def evidence_groups(rows: list[dict]) -> list[dict]:
             for s in order if counts.get(s)]
 
 
-def rank_read(row: dict) -> dict:
-    """CODE-OWNED rank read for one row (evidence-model-v2 §4): relevance first, then evidence
-    depth within it. Returns {score, relevance, evidence_depth, headline_fit, reasons}. Every
-    contribution is small and capped so evidence REORDERS near-equals and never outranks a
-    clearly better match; unscanned footprint is neutral (unknown is not absent)."""
+BAND = 0.05          # relevance band width: evidence reorders ONLY inside a band
+_SENIOR_WORDS = {"senior", "staff", "principal", "lead", "head", "director", "vp", "c_level", "cto",
+                 "distinguished_scientist", "founder", "senior_manager", "engineering_manager"}
+
+
+def _facet_terms(brief_facets: dict | None) -> list[str]:
+    """Tokens from the brief's compiled skill/function/role facets ('vector_db' → 'vector db')."""
+    out: list[str] = []
+    for k in ("skill", "function", "role"):
+        for v in (brief_facets or {}).get(k) or []:
+            t = str(v).strip().lower().replace("_", " ")
+            if len(t) >= 3:
+                out.append(t)
+    return out
+
+
+def _stat_number(stat: str) -> int:
+    import re
+    m = re.match(r"\s*([\d,]+)", stat or "")
+    return int(m.group(1).replace(",", "")) if m else 0
+
+
+def rank_read(row: dict, brief_facets: dict | None = None) -> dict:
+    """CODE-OWNED rank read for one row (evidence-model-v2 §4).
+
+    RELEVANCE BAND is the primary key: similarity (or the facet-path score) bucketed into 0.05 bands,
+    so evidence reorders near-equals and a weak match can never outrank a strong one because it has
+    many repos. WITHIN a band the evidence score orders rows:
+      - corroborated / consistent affiliation; artifact-backed capability;
+      - footprint (log-scaled, capped — prolific accounts do not dominate); freshness (≤2 years);
+      - BRIEF-AWARE capability: artifacts whose title/venue/language match the brief's skill,
+        function or role terms count more than generic footprint;
+      - SENIORITY FROM EVIDENCE when the brief asks for senior people: first-author papers,
+        citations, starred repos, org membership — not the self-stated seniority word alone;
+      - LinkedIn headline ↔ brief fit when the snippet was read;
+      - a small penalty for 'scanned and nothing found'; unscanned is neutral (unknown ≠ absent).
+    Returns {score, band, relevance, within, headline_fit, reasons}; `score` = band*BAND + within
+    scaled to stay inside the band, so a plain sort on score honours the banding."""
     import math
     ev = row.get("evidence") or {}
     art = row.get("artifacts") or {}
     li = row.get("linkedin") or {}
     reasons: list[str] = []
-    rel = (row.get("match_pct") or 0) / 100.0
-    if rel:
-        reasons.append(f"relevance {int(rel * 100)}%")
-    fit = li.get("headline_fit")
-    fit_term = 0.0
-    if fit is not None:
-        fit_term = 0.10 * fit
-        reasons.append(f"LinkedIn headline fits the brief {int(fit * 100)}%")
-    depth = 0.0
+    rel = float(row.get("relevance") if row.get("relevance") is not None else (row.get("match_pct") or 0) / 100.0)
+    rel = max(0.0, min(1.0, rel))
+    band = int(math.floor(rel / BAND + 1e-9))     # epsilon: 0.70/0.05 is 13.999… in floats
+    if row.get("match_pct"):
+        reasons.append(f"relevance {int(row['match_pct'])}%")
+    within = 0.0
     if ev.get("corroborated_keys"):
-        depth += 0.07; reasons.append("corroborated " + ", ".join(ev["corroborated_keys"][:2]))
+        within += 0.30; reasons.append("corroborated " + ", ".join(ev["corroborated_keys"][:2]))
     elif ev.get("consistent_keys") or (ev.get("calibration") or {}).get("band") == "consistent":
-        depth += 0.04; reasons.append("self-stated claims consistent with independent signals")
+        within += 0.15; reasons.append("consistent affiliation (self-stated claims agree with independent signals)")
     if "artifact_backed" in (ev.get("types") or []):
-        depth += 0.04; reasons.append("artifact-backed capability")
+        within += 0.12; reasons.append("artifact-backed capability")
     total = int(art.get("total") or 0)
+    counts = art.get("counts") or {}
     if total:
-        fp = min(0.05, 0.015 * math.log1p(total))
-        depth += fp
-        parts = ", ".join(f"{n} {k}{'s' if n != 1 else ''}" for k, n in sorted((art.get("counts") or {}).items()))
-        reasons.append(f"public footprint: {parts}")
+        within += min(0.15, 0.05 * math.log1p(total))
+        reasons.append("footprint: " + ", ".join(f"{n} {k}{'s' if n != 1 else ''}" for k, n in sorted(counts.items())))
+    items = art.get("items") or []
+    terms = _facet_terms(brief_facets)
+    if terms and items:
+        hits = []
+        for it in items:
+            hay = " ".join([it.get("title") or "", it.get("venue") or ""]).lower().replace("_", " ").replace("-", " ")
+            if any(t in hay for t in terms):
+                hits.append(it.get("title") or "")
+        if hits:
+            within += min(0.20, 0.07 * len(hits))
+            reasons.append(f"{len(hits)} artifact{'s' if len(hits) != 1 else ''} match the brief ({', '.join(h[:28] for h in hits[:3])})")
+    wants_senior = any(str(v).lower() in _SENIOR_WORDS for v in (brief_facets or {}).get("seniority") or [])
+    if wants_senior and items:
+        first = sum(1 for it in items if it.get("role") == "first_author")
+        cites = sum(_stat_number(it.get("stat") or "") for it in items if "citation" in (it.get("stat") or ""))
+        stars = sum(1 for it in items if (it.get("stat") or "").endswith("★") and _stat_number(it.get("stat")) >= 10)
+        orgs = int(counts.get("org") or 0)
+        sen = min(0.20, 0.04 * first + 0.06 * (cites >= 100) + 0.06 * (cites >= 1000) + 0.03 * stars + 0.03 * (orgs > 0))
+        if sen:
+            within += sen
+            bits = []
+            if first: bits.append(f"{first} first-author paper{'s' if first != 1 else ''}")
+            if cites: bits.append(f"{cites:,} citations")
+            if stars: bits.append(f"{stars} starred repo{'s' if stars != 1 else ''}")
+            if orgs: bits.append("org membership")
+            reasons.append("seniority evidence: " + ", ".join(bits))
     newest = str(art.get("newest") or "")[:4]
     if newest.isdigit():
         import datetime
-        age = datetime.date.today().year - int(newest)
-        if age <= 2:
-            depth += 0.02; reasons.append(f"active recently (newest artifact {newest})")
+        if datetime.date.today().year - int(newest) <= 2:
+            within += 0.06; reasons.append(f"active recently (newest artifact {newest})")
+    fit = li.get("headline_fit")
+    if fit is not None:
+        within += 0.20 * float(fit); reasons.append(f"LinkedIn headline fits the brief {int(float(fit) * 100)}%")
     if art.get("scanned") and not total:
-        depth -= 0.02; reasons.append("scanned: no public artifacts found")
-    # evidence + headline fit together bridge at most 0.25 of relevance: near-equals reorder,
-    # a clearly better match never loses to a thicker footprint
-    score = rel + min(0.25, fit_term + depth)
-    return {"score": round(score, 4), "relevance": round(rel, 3), "evidence_depth": round(depth, 3),
+        within -= 0.05; reasons.append("scanned: no public artifacts found")
+    within = max(0.0, min(1.0, within))
+    score = band * BAND + within * (BAND * 0.98)     # never crosses into the next band
+    return {"score": round(score, 4), "band": band, "relevance": round(rel, 3), "within": round(within, 3),
             "headline_fit": fit, "reasons": reasons}
+
+
+def rank_sort_key(row: dict) -> tuple:
+    rr = row.get("rank_read") or {}
+    return (-int(rr.get("band") or 0), -float(rr.get("within") or 0.0), -float(rr.get("relevance") or 0.0))
