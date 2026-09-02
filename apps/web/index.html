@@ -528,7 +528,7 @@
   .ppl-tag-topic{background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);font-weight:600;}
   .ppl-scopebar{border-left-color:var(--person)!important;}
   .ppl-scope{display:inline-block;margin-left:.3rem;min-height:40px;padding:.3rem .7rem;border:1px solid var(--person);border-radius:999px;background:none;color:var(--person);font-size:.76rem;font-weight:600;cursor:pointer;}
-  .ppl-pager{display:flex;align-items:center;justify-content:center;gap:.6rem;flex-wrap:wrap;margin:.7rem 0 .3rem;}
+  .ppl-pager{display:flex;align-items:center;justify-content:center;gap:.6rem;flex-wrap:wrap;margin:.7rem 0 .3rem;scroll-margin-top:72px;}
   .ppl-page{min-height:40px;padding:.45rem 1rem;border:1px solid var(--gold);border-radius:999px;background:none;color:var(--gold);font-size:.82rem;font-weight:600;cursor:pointer;}
   .ppl-page:disabled{opacity:.4;cursor:default;}
   .ppl-pageinfo{font-size:.8rem;color:var(--muted);}
@@ -8269,7 +8269,9 @@ function gotoPeoplePage(pid, page){
   const wrap = rerenderPeople(pid);
   // land on the first card of the new page (the top pager sits just above it), not on the head/map bar
   const anchor = wrap && (wrap.querySelector(".ppl-pager") || wrap.querySelector(".ppl-grid") || wrap);
-  if(anchor){ const y = anchor.getBoundingClientRect().top + window.scrollY - 72; window.scrollTo({top: Math.max(0, y), behavior: "smooth"}); }
+  // scrollIntoView works whichever element actually scrolls (window or an inner panel); the pager's
+  // scroll-margin keeps it clear of the sticky header
+  if(anchor){ try{ anchor.scrollIntoView({block: "start", behavior: "smooth"}); }catch(e){ anchor.scrollIntoView(true); } }
   setTimeout(() => enrichVisible(pid), 60);
 }
 // A 401 from any signed-in call means THIS device's token is no longer valid (rotated or removed):
