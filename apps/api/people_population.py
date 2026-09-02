@@ -869,6 +869,31 @@ async def parse_people_facets_full(question: str, llm) -> tuple[dict[str, list[s
             terms)
 
 
+_GENERIC_FUNCTIONS = {"engineering", "software_engineering", "backend", "frontend", "infrastructure",
+                      "machine_learning", "data", "product", "design", "devops", "security", "research",
+                      "management", "business", "sales", "marketing", "operations", "finance"}
+
+
+def topic_terms_for(facets: dict, llm_terms: list[str] | None) -> list[str]:
+    """The brief's SUBJECT terms: the compiler's topic_terms when it gave any, else code-derived from
+    the compiled facets — every skill value and any non-generic function value, de-underscored — so
+    anchoring never depends on the model remembering to fill the field."""
+    terms = [t for t in (llm_terms or []) if t]
+    if terms:
+        return terms[:6]
+    out: list[str] = []
+    for v in (facets or {}).get("skill") or []:
+        t = str(v).replace("_", " ").strip().lower()
+        if len(t) >= 3 and t not in out:
+            out.append(t)
+    for v in (facets or {}).get("function") or []:
+        if str(v) not in _GENERIC_FUNCTIONS:
+            t = str(v).replace("_", " ").strip().lower()
+            if len(t) >= 3 and t not in out:
+                out.append(t)
+    return out[:6]
+
+
 def topic_hit(row: dict, terms: list[str]) -> str:
     """The first topic term that appears in the row's grounded text (attributes + blurb + artifact
     titles), else ''. Code-owned; whole-word-ish substring match on normalized text."""
@@ -1501,6 +1526,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             facets = {**_prior, **f2} if f2 else {}
     else:
         facets, person, ctx, topic_terms = await parse_people_facets_full(question, llm)
+        topic_terms = topic_terms_for(facets, topic_terms)
     if not facets and person and not _prior:
         # SINGLE-PERSON identity/profile lookup — everything the index holds on them, on demand
         # (full card, evidence, linked artifacts), or a clarifying question when several people

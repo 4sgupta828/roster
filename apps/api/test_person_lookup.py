@@ -140,3 +140,10 @@ def test_topic_partition_leads_with_people_who_mention_the_subject():
     assert [r["name"] for r in rows] == ["B", "C", "A"] and n == 2                # stable, anchored first
     assert rows[0]["topic_hit"] == "ad serving" and "topic_hit" not in a
     assert topic_partition([a], [])[1] == 0                                     # no terms: untouched
+
+
+def test_topic_terms_fall_back_to_compiled_facets():
+    from api.people_population import topic_terms_for
+    assert topic_terms_for({"skill": ["ad_serving"], "function": ["engineering"]}, ["ad serving", "adtech"]) == ["ad serving", "adtech"]
+    assert topic_terms_for({"skill": ["ad_serving", "kafka"], "function": ["infrastructure", "advertising"]}, []) == ["ad serving", "kafka", "advertising"]
+    assert topic_terms_for({"role": ["engineering_manager"], "function": ["backend"]}, None) == []   # no subject → no anchor
