@@ -2,7 +2,7 @@
 
 Status: DRAFT for review.
 Date: 2026-09-02.
-Scope: product positioning, information architecture, interaction model, and UI design direction for the recruiting/talent-intelligence wedge.
+Scope: product positioning, broad product architecture, information architecture, interaction model, and UI design direction for the first recruiting/talent-intelligence wedge.
 
 ## Goal
 
@@ -17,6 +17,65 @@ The product should make its differentiation obvious within one session:
 - Roster is honest about corpus coverage and missing evidence.
 
 This is not a generic recruiting platform, ATS, applicant tracker, or consumer job board. The first commercial artifact is a Talent Map: a curated, evidence-cited map of people relevant to a hard hiring search, with each claim labeled by evidence type. Connection paths are a later expansion surface, not a v1 dependency.
+
+## Architecture Posture
+
+Sell narrow, architect broad.
+
+The first wedge is talent search because the buyer pain is urgent, the ROI is legible, and Roster's evidence discipline creates visible differentiation. The underlying product should not be a one-off recruiting app. It should be a reusable evidence-intelligence system that can later package the same primitives for company diligence, market mapping, expert discovery, sales research, vendor research, and investor/portfolio intelligence.
+
+### Reusable product primitive
+
+The broad primitive is an Evidence Map:
+
+> A scoped map of entities relevant to a user question, where every row explains why the entity appears, what evidence supports each claim, how strong each evidence type is, and what the system could not verify.
+
+Talent Map is the first Evidence Map package:
+
+- entity type: people, companies, jobs, roles.
+- question type: who is relevant for this hiring/search brief?
+- evidence lens: work, role, affiliation, capability, source freshness.
+- buyer artifact: candidate map, shortlist, dossier, export.
+
+The same pattern can later become:
+
+- Company Map: companies in a category, with evidence for market, product, traction, team, and risk claims.
+- Expert Map: people with evidence of expertise on a topic.
+- Vendor Map: vendors with evidence of capability, integrations, customers, security posture, and gaps.
+- Sales Account Map: buyers, teams, initiatives, and public signals that explain account relevance.
+- Investor/Portfolio Map: founders, companies, backers, milestones, and competitive adjacency.
+
+### Product boundaries
+
+Reusable across verticals:
+
+- entity rows.
+- typed claims.
+- evidence packets.
+- evidence ladder.
+- source freshness.
+- coverage statement.
+- review state.
+- notes.
+- export/share artifact.
+- optional relationship path.
+
+Vertical-specific:
+
+- nouns and labels.
+- query examples.
+- facet vocabulary.
+- evidence hierarchy details.
+- answer formats.
+- source mix.
+- ranking policy.
+- compliance constraints.
+
+Architecture invariant:
+
+- Build the internal contracts around `map`, `entity`, `claim`, `evidence`, `coverage`, and `review`.
+- Use `Talent Map`, `candidate`, `role`, and recruiting-specific labels at the app/vertical layer.
+- Do not push recruiting vocabulary into `packages/kernel/roster_kernel/`.
 
 ## Strategic Positioning
 
@@ -514,6 +573,8 @@ If a later implementation adds outreach drafting, drafts must cite the public ev
 
 ## Required Product Surfaces
 
+The surfaces below are the first talent package of the broader Evidence Map architecture. They should be implemented with reusable map, dossier, evidence, coverage, and export components wherever practical.
+
 ### Talent Map home
 
 Default landing view for the recruiting wedge.
@@ -582,7 +643,7 @@ Must include:
 
 ## Backend And Data Implications
 
-This design can reuse current primitives but requires cleaner contracts.
+This design can reuse current primitives but requires cleaner contracts. The internal contract should be broad enough for multiple evidence-map packages, while the first user-facing product remains Talent Map.
 
 Existing raw material:
 
@@ -596,12 +657,19 @@ Existing raw material:
 
 Likely API needs:
 
-- `POST /talent-maps` to create a map from a search brief.
-- `GET /talent-maps/{id}` to load a saved map.
+- `POST /maps` to create an evidence map from a vertical, map type, and search brief.
+- `GET /maps/{id}` to load a saved map.
+- `GET /maps/{id}/entities` to load map rows.
+- `GET /entities/{entity_id}/dossier?map_id=...` to load the selected row's evidence-focused dossier.
+- `GET /coverage?vertical=roster&map_type=talent&brief=...`.
+- `POST /maps/{id}/exports`.
+
+Talent-facing route aliases can exist for product clarity:
+
+- `POST /talent-maps`.
+- `GET /talent-maps/{id}`.
 - `GET /talent-maps/{id}/candidates`.
 - `GET /person-dossiers/{entity_id}`.
-- `GET /coverage/talent?brief=...`.
-- `POST /talent-maps/{id}/exports`.
 
 Later API needs:
 
@@ -609,9 +677,9 @@ Later API needs:
 
 Likely data needs:
 
-- map entity.
-- candidate snapshot tied to a map.
-- evidence packet per candidate reason.
+- map artifact with `vertical`, `map_type`, `brief`, filters, owner, created time, and coverage snapshot.
+- map row snapshot tied to a map.
+- evidence packet per row reason.
 - review state and notes.
 - source coverage snapshot.
 - optional relationship path snapshot.
@@ -619,8 +687,26 @@ Likely data needs:
 Design invariant:
 
 - The kernel stays domain-free. Recruiting vocabulary belongs in `packages/vertical_roster` and app-level product surfaces.
+- The database and API can expose talent-specific aliases, but the durable schema should prefer map/entity/evidence/coverage terms over candidate-only terms.
 
 ## Phased Redesign Plan
+
+### Phase 0: Establish broad map contracts
+
+Goal: keep the first Talent Map wedge from hardcoding a one-vertical architecture.
+
+Changes:
+
+- Define shared response shapes for map artifact, map row, evidence packet, evidence type, coverage snapshot, review state, and export request.
+- Keep recruiting labels as presentation metadata, not core schema concepts.
+- Map existing `people_rows`, citations, saved searches, and coverage data into the broader contract.
+- Add fixture examples for at least two future map types, such as Talent Map and Company Map, even if only Talent Map is productized first.
+
+Acceptance:
+
+- Talent Map can render from the generic map contract.
+- A future Company Map or Expert Map would not require redesigning the evidence rail, coverage panel, review state, or export model.
+- Kernel conformance remains clean.
 
 ### Phase 1: Reframe the existing app
 
@@ -727,6 +813,7 @@ Product:
 - selected candidate to evidence inspection in one click.
 - map export/share completed without manual cleanup.
 - mobile review flow works without horizontal breakage.
+- generic map contract can support a second mocked map type without new core UI primitives.
 
 Commercial:
 
