@@ -2659,7 +2659,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 if _cos:
                     _lead = []
                     for _co in _cos[:3]:
-                        _lead += await store.search_jobs(company=_co, cap=120)
+                        _lead += await store.search_jobs(company=[_co], cap=120)   # list: ANY($1)
                     _seen = {(j.get("company"), j.get("title"), j.get("location")) for j in _lead}
                     res["jobs"] = _lead + [j for j in (res.get("jobs") or [])
                                            if (j.get("company"), j.get("title"), j.get("location")) not in _seen]
