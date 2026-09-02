@@ -8050,7 +8050,7 @@ async function openMapsList(){
     } else if(lis && lis.status){
       liSec = `<div class="er-src">Snippet read not completed (${esc(lis.status)}).</div>`;
     } else {
-      liSec = `<div class="er-src">Not read yet — ${(window.USER&&USER.token)?"snippets are read for the people shown as they load; use “Resolve LinkedIn ⌕” below to read this one now":"sign in to read LinkedIn snippets for the people shown"}.</div>`;
+      liSec = `<div class="er-src">Not read yet — ${loggedIn()?"snippets are read for the people shown as they load; use “Resolve LinkedIn ⌕” below to read this one now":"sign in to read LinkedIn snippets for the people shown"}.</div>`;
     }
     const mapRev = (window.ACTIVE_MAP && ACTIVE_MAP.reviews && ACTIVE_MAP.reviews[ref]) || null;
     const cur = (mapRev && mapRev.state) || getReview(ref);   // a saved map's review state wins over device memory
@@ -8074,7 +8074,7 @@ async function openMapsList(){
     const liB = el.querySelector(".er-li");
     if(liB) liB.addEventListener("click", async () => {
       const out = el.querySelector(".er-li-out");
-      if(!(window.USER && USER.token)){ out.innerHTML = `<div class="er-src">Sign in to resolve profiles (it writes to the shared index).</div>`; return; }
+      if(!loggedIn()){ out.innerHTML = `<div class="er-src">Sign in to resolve profiles (it writes to the shared index).</div>`; return; }
       liB.disabled = true; liB.textContent = "Searching snippets…";
       try{
         const r = await fetch("/people/linkedin-resolve", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
@@ -8146,7 +8146,7 @@ function showMorePeople(pid, step){
 const ENRICH_BUSY = new Set();
 async function enrichVisible(pid){
   const data = (window.PEOPLE_RENDERS||{})[pid]; if(!data) return;
-  if(!(window.USER && USER.token)){
+  if(!loggedIn()){
     const n0 = document.querySelector(`.ppl-enrich[data-pid="${CSS.escape(pid)}"]`);
     if(n0 && !n0.innerHTML) n0.innerHTML = `<div class="ppl-cov">⌕ Sign in (◈ Account) to read public LinkedIn snippets for the people shown — one search per person; the headline becomes labeled self-stated evidence and feeds the ranking.</div>`;
     return;
