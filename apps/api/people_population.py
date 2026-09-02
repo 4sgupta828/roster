@@ -169,6 +169,10 @@ _COUNTRY_RX = {
     "my": re.compile(r"\b(malaysia|kuala lumpur)\b", re.I),
     "ph": re.compile(r"\b(philippines|manila)\b", re.I),
 }
+def _norm_title(t: str) -> str:
+    return re.sub(r"\s+", " ", (t or "").strip().lower())
+
+
 def _job_country(loc: str) -> str:
     for c, rx in _COUNTRY_RX.items():
         if rx.search(loc or ""):
@@ -211,7 +215,11 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
     qvec = embed_query(qtext)
     if not qvec:
         return {"jobs": [], "note": "Matching is unavailable right now."}
-    cands = await store.match_jobs_scored(qvec, cap=int(prefs.get("candidate_cap", 400)))
+    # EXPOSURE: the deeper the user has rotated (seen more), the deeper the candidate pool reaches —
+    # otherwise rotation would just cycle inside the same top-400 forever.
+    _seen_n = len(prefs.get("seen_ids") or [])
+    cands = await store.match_jobs_scored(
+        qvec, cap=int(prefs.get("candidate_cap", 400)) + min(3 * _seen_n, 800))
     if not cands:
         return {"jobs": []}
     # 2) company-type sets (startup from accelerator/stage facets; f500/public from the curated set)
@@ -233,10 +241,16 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
     dropped_country = 0
     # 3) score = semantic similarity + preference bonuses (with human-readable reasons)
     out = []
+    # USER-LED exclusions: titles containing any excluded word are DROPPED outright ("roles I don't
+    # even want") — the one hard filter, because the user explicitly asked to never see them.
+    excl_kw = [str(k).strip().lower() for k in (prefs.get("exclude_keywords") or []) if str(k).strip()]
+    dropped_excluded = 0
     for j in cands:
         title, loc, co = j.get("title") or "", (j.get("location") or "").lower(), (j.get("company") or "")
         if not _country_ok(loc, want_country):     # honor the country scope — drop clearly-foreign jobs
             dropped_country += 1; continue
+        if excl_kw and any(k in title.lower() for k in excl_kw):
+            dropped_excluded += 1; continue
         sim = float(j.get("sim") or 0.0)
         score, reasons = sim, []
         is_f500 = co in _F500
@@ -266,6 +280,20 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
                     "seniority": jsen, "company_types": types, "reasons": reasons,
                     "fresh": fresh})
     out.sort(key=lambda x: -x["score"])
+    # NEAR-DUPLICATE collapse: the same job often arrives via TWO sources (greenhouse + adzuna, with
+    # company-case variants like 'Cloudflare'/'cloudflare') — burn ONE slot per (company, title),
+    # keeping the best-scored row, so the slate spends its 40 slots on DISTINCT roles.
+    _dedup: dict[tuple, dict] = {}
+    for r_ in out:
+        _k = (_norm_co(r_.get("company") or ""), _norm_title(r_.get("title") or ""))
+        if _k not in _dedup:
+            _dedup[_k] = r_
+    out = list(_dedup.values())
+    # USER-LED role priority: when the user NAMED role keywords, titles matching them LEAD the slate
+    # (stable partition) — semantic look-alikes the user didn't ask for follow, they don't crowd out.
+    if role_kw:
+        out = ([r_ for r_ in out if any(k in (r_.get("title") or "").lower() for k in role_kw)]
+               + [r_ for r_ in out if not any(k in (r_.get("title") or "").lower() for k in role_kw)])
     # COMPANY DIVERSITY (exposure): at most 3 rows per company lead the slate; the overflow is
     # appended after the diverse block — still available, never hidden — so one employer's hundred
     # postings can't crowd out the rest of the market.
@@ -288,6 +316,8 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
         _n_fresh = sum(1 for r_ in slate if r_.get("fresh"))
         notes.append(f"↻ rotating — {_n_fresh} of {len(slate)} are options you haven't seen; "
                      "previously shown matches rank lower, not gone")
+    if dropped_excluded:
+        notes.append(f"{dropped_excluded} excluded by your title filters")
     if prefs.get("min_salary"):
         notes.append("salary is best-effort — most listings don't publish pay")
     return {"jobs": slate, "rotated": bool(seen),

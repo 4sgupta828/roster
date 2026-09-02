@@ -708,7 +708,8 @@ def jd_exclude_source_co_enabled() -> bool:
 def _match_config_of(prefs: dict) -> dict:
     """The rememberable Find-jobs config fields (what the form prefills next time)."""
     return {k: prefs.get(k) for k in ("locations", "role_keywords", "seniorities", "remote",
-                                      "company_types", "min_salary", "country")}
+                                      "company_types", "min_salary", "country",
+                                      "exclude_keywords")}
 
 
 def _resume_fingerprint(profile: dict) -> str:
@@ -1246,6 +1247,8 @@ class MatchIn(BaseModel):
     limit: int = 40
     seen_ids: list = []              # job ids shown in PRIOR runs (client-remembered) — the match
     #                                  engine DEMOTES them so each run rotates fresh options in
+    exclude_keywords: list[str] = [] # title words the user NEVER wants ("roles I don't even want")
+    #                                  — the one HARD filter in matching
 
 
 class SettingIn(BaseModel):

@@ -1854,6 +1854,8 @@
     <span class="mlabel">Roles</span>
     <select id="mRoleSel" style="width:100%;font-size:.86rem;margin-bottom:.35rem;"><option value="">Pick a role…</option></select>
     <div class="chipbox" id="mRoleBox"><input id="mRole" type="text" placeholder="…or type a custom role, press Enter"/></div>
+    <span class="mlabel">Never show me</span>
+    <input id="mExclude" type="text" placeholder="Title words to exclude, comma-separated (e.g. sales, manager, intern)" style="width:100%;font-size:.86rem;margin-bottom:.35rem;"/>
     <span class="mlabel">Seniority (pick any)</span>
     <div class="sentogs" id="mSenBox"></div>
     <span class="mlabel">Company &amp; more</span>
@@ -7080,6 +7082,7 @@ function applySavedConfig(cfg){
   set("#mF500", ct.has("f500")); set("#mPublic", ct.has("public")); set("#mStartup", ct.has("startup"));
   set("#mRemote", cfg.remote);
   if(cfg.min_salary){ const s=$("#mSal"); if(s) s.value = cfg.min_salary; }
+  if(Array.isArray(cfg.exclude_keywords)){ const x=$("#mExclude"); if(x) x.value = cfg.exclude_keywords.join(", "); }
 }
 // ✨ Fine tune config: a recruiter AI reads the résumé (recency-weighted, multi-dimensional) and
 // proposes an optimized config; we populate the form and show the candidate brief it built.
@@ -7121,6 +7124,7 @@ function collectMatchPrefs(){
     company_types: [($("#mF500")||{}).checked&&"f500", ($("#mPublic")||{}).checked&&"public", ($("#mStartup")||{}).checked&&"startup"].filter(Boolean),
     country: (window.ROSTER_COUNTRY||"us"), limit: 40,
     seen_ids: seenJobIds(),   // ids shown in prior runs — the server rotates fresh options in
+    exclude_keywords: (($("#mExclude")||{}).value||"").split(",").map(s=>s.trim().toLowerCase()).filter(Boolean).slice(0,12),
   };
 }
 // VARIETY memory for Find-jobs: the browser remembers which job ids were already shown (capped,

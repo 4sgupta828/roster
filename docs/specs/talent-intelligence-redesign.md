@@ -6,17 +6,17 @@ Scope: product positioning, information architecture, interaction model, and UI 
 
 ## Goal
 
-Reposition the Roster web experience from a broad people/jobs/search tool into an evidence-backed talent intelligence workbench for high-stakes technical hiring.
+Reposition the Roster web experience from a broad people/jobs/search tool into an evidence-typed talent intelligence workbench for high-stakes technical hiring.
 
 The product should make its differentiation obvious within one session:
 
-- Roster finds people with public proof of doing the work.
+- Roster finds people with public evidence of relevant work, roles, and affiliations.
 - Roster explains why each person surfaced.
 - Roster shows the source evidence behind every material claim.
-- Roster maps how people, companies, teams, and introducers connect.
+- Roster distinguishes self-stated, employer-stated, artifact-backed, structured, and corroborated evidence.
 - Roster is honest about corpus coverage and missing evidence.
 
-This is not a generic recruiting platform, ATS, applicant tracker, or consumer job board. The first commercial artifact is a Talent Map: a curated, evidence-cited map of people relevant to a hard hiring search.
+This is not a generic recruiting platform, ATS, applicant tracker, or consumer job board. The first commercial artifact is a Talent Map: a curated, evidence-cited map of people relevant to a hard hiring search, with each claim labeled by evidence type. Connection paths are a later expansion surface, not a v1 dependency.
 
 ## Strategic Positioning
 
@@ -48,11 +48,11 @@ Current broad promise:
 
 Target promise:
 
-> Build evidence-cited talent maps for hard technical searches.
+> Build evidence-typed talent maps for hard technical searches.
 
 Supporting copy:
 
-> Roster maps who has done the work, where the proof is, and how you are connected.
+> Roster maps who appears relevant, what public evidence supports that, and what remains unverified.
 
 ## Competitive Differentiation
 
@@ -60,32 +60,38 @@ The recruiting market is crowded around large databases, AI sourcing, outreach a
 
 Roster should compete on:
 
-- proof of work, not keyword presence.
+- public evidence of relevance, not keyword presence.
 - cited professional evidence, not opaque profile enrichment.
-- connection paths, not only contact records.
+- typed evidence that separates self-stated claims from employer-stated, artifact-backed, structured, and corroborated claims.
 - source quality and freshness, not only match percentages.
 - coverage honesty, not implied completeness.
 
-The interface must therefore foreground evidence, graph paths, and coverage status. If the user mostly sees a chat box and generic profile cards, the product looks like a weaker incumbent.
+The interface must therefore foreground evidence type, source strength, freshness, and coverage status. If the user mostly sees a chat box and generic profile cards, the product looks like a weaker incumbent.
 
 ## Design Principles
 
 1. Evidence before persuasion.
    Every material UI element should answer: why is this person here, and what proves it?
 
-2. Analyst workbench, not social network.
+2. Evidence is typed, not flattened.
+   A self-stated LinkedIn headline, a company team page, a GitHub contribution, and a registry record are all useful, but they must render as different kinds of support.
+
+3. Analyst workbench, not social network.
    The experience should feel like a serious sourcing brief, with dense comparison, source marks, and inspection tools.
 
-3. Maps over feeds.
+4. Maps over feeds.
    The default artifact is a ranked, filterable Talent Map, not an infinite list of candidates.
 
-4. Confidence is visible.
+5. Confidence is visible.
    Grounded, inferred, stale, weak, and missing evidence must be visibly different states.
 
-5. Human decision support only.
+6. No publication bias.
+   Roster must not imply that excellent candidates need public artifacts. Role, affiliation, employer, and self-stated profile evidence remain valid when clearly labeled.
+
+7. Human decision support only.
    Avoid automated hiring-decision language. Use evidence, reasons, and review state instead of opaque candidate scores.
 
-6. Mobile remains supported.
+8. Mobile remains supported.
    Every user-facing surface must work at <=400px. Dense tables need stacked cards or horizontal scrolling with clear preserved labels.
 
 ## Information Architecture
@@ -96,8 +102,8 @@ Replace the current top-level emphasis on People / Jobs / Q&A with buyer tasks.
 
 - Talent Map
 - Company Map
-- Connection Path
 - Person Dossier
+- Evidence Types
 - Saved
 - Coverage
 
@@ -105,12 +111,13 @@ Replace the current top-level emphasis on People / Jobs / Q&A with buyer tasks.
 
 - Job Search
 - Apply Assistant
+- Connection Path
 - Expert Panel
 - Pulse
 - Admin Settings
 - Corpus Search
 
-Jobs and Apply Assistant can remain available, but they should not compete with Talent Map for first-screen attention during the GTM wedge.
+Jobs, Apply Assistant, and Connection Path can remain available, but they should not compete with Talent Map for first-screen attention during the GTM wedge.
 
 ## First-Screen Experience
 
@@ -120,19 +127,19 @@ The first viewport should communicate the product through a live-feeling artifac
 
 ```
 +--------------------------------------------------------------------------------+
-| ROSTER                         Talent Map | Company Map | Path | Saved          |
+| ROSTER                      Talent Map | Company Map | Evidence | Saved          |
 +--------------------------------------------------------------------------------+
 | Search brief                                                                    |
 | [ Senior infra engineers with public evidence of vector DB or distributed ML ]  |
 | [Sources: GitHub] [Papers] [Company pages] [Talks] [Filings]  [Build map]       |
 +------------------------------+-------------------------------------------------+
 | Coverage                     | Talent Map                                      |
-| 184 people searched          | Person        Evidence       Path       Review  |
-| 42 strong matches            | A. Nguyen     GitHub, talk   2 hops     Open    |
-| 6 sources active             | M. Patel      paper, repo    none       Open    |
-| 3 known gaps                 | J. Lee        company page   1 hop      Open    |
+| 184 people searched          | Person        Evidence type  Strength   Review  |
+| 42 strong matches            | A. Nguyen     artifact      strong     Open    |
+| 6 sources active             | M. Patel      self+paper    mixed      Open    |
+| 3 known gaps                 | J. Lee        employer page stated    Open    |
 +------------------------------+-------------------------------------------------+
-| Selected person: why surfaced, citations, source quotes, connection path        |
+| Selected person: why surfaced, citations, source quotes, evidence ladder        |
 +--------------------------------------------------------------------------------+
 ```
 
@@ -149,7 +156,7 @@ The first viewport should communicate the product through a live-feeling artifac
 | A. Nguyen                           |
 | Why: built vector indexing infra    |
 | Evidence: GitHub, talk              |
-| Path: 2 hops                        |
+| Strength: artifact-backed           |
 | [Inspect] [Save]                    |
 +------------------------------------+
 | M. Patel ...                        |
@@ -171,7 +178,7 @@ Inputs:
 - company include/exclude.
 - source types.
 - evidence requirements.
-- connection target, such as "connected to our team", "connected to Sequoia network", or "connected to ex-Stripe".
+- optional connection target for later graph-enhanced searches, such as "connected to our team" or "connected to ex-Stripe".
 
 Primary action:
 
@@ -198,8 +205,9 @@ Required response structure:
 
 Candidate groups:
 
-- strongest public proof.
-- strongest warm paths.
+- strongest artifact-backed evidence.
+- employer-stated or structured role evidence.
+- self-stated but relevant.
 - likely relevant, weaker evidence.
 - requires more evidence.
 
@@ -210,9 +218,9 @@ Clicking a person opens a dossier pane.
 Dossier sections:
 
 - Why surfaced.
-- Public proof.
+- Evidence ladder.
 - Career and affiliation evidence.
-- Connection paths.
+- Public artifacts, when available.
 - Contact/profile links.
 - Gaps and ambiguity.
 - Notes and review state.
@@ -224,28 +232,38 @@ Every cited claim should show:
 - quote or extracted span.
 - date or freshness.
 - evidence tier.
+- evidence type.
 - link to source.
 
-### 4. Inspect connections
+### 4. Inspect relationship evidence later
 
-Connection Path should be available from every person and as a standalone mode.
+Connection Path is valuable, but it is not required for the first wedge. The first version should only show relationship claims when Roster has explicit base edges from public evidence. It should never imply a personal warm-intro graph unless the user has supplied seed nodes or integrations.
 
-Path format:
+Base edges to collect before making paths prominent:
 
-```
-You / target org
-  -> shared investor, advisor, employer, repo, paper, or company
-  -> candidate
-```
+- person works at company.
+- person founded company.
+- person advises or sits on the board of company.
+- person authored paper, post, patent, or talk.
+- person contributed to repo or organization.
+- person spoke at event.
+- company funded by investor or fund.
 
-Each hop carries:
+Derived relationship examples:
 
-- relation label.
-- supporting source.
-- confidence.
-- time period if known.
+- cofounder path from two people tied to the same company.
+- coauthor path from two people tied to the same work.
+- possible colleague path from overlapping employer evidence.
+- collaborator path from shared repo or organization evidence.
 
-Path design should be compact and inspectable. Avoid decorative graph clouds as the default view. Use graph visualization only when it clarifies clusters.
+Relationship states:
+
+- No path data yet.
+- Public path found.
+- Possible shared affiliation.
+- Warm path from your network, only after the user supplies network seeds.
+
+Path design should be compact and inspectable when present. Avoid decorative graph clouds as the default view. Use graph visualization only when it clarifies clusters.
 
 ### 5. Shortlist and export
 
@@ -281,7 +299,8 @@ Required fields:
 - Why surfaced.
 - Evidence chips.
 - strongest quote or proof snippet.
-- Connection path summary.
+- Evidence type and strength.
+- Optional public relationship summary when available.
 - Freshness.
 - Review actions.
 
@@ -292,16 +311,20 @@ Example:
 | Anika Nguyen                                      [Save] [Inspect] |
 | Staff infra engineer, ExampleDB       Bay Area    last seen 2026   |
 | Why surfaced: built vector indexing and distributed query systems  |
-| Evidence: GitHub repo | conference talk | company engineering page |
+| Evidence: GitHub repo | conference talk | self-stated profile      |
 | Proof: "..."                                                    [1] |
-| Path: 2 hops via ex-Stripe infra lead                             |
+| Support: artifact-backed + self-stated                             |
 | State: unreviewed                                                 |
 +-------------------------------------------------------------------+
 ```
 
 States:
 
-- Grounded: strong public evidence supports the claim.
+- Self-stated: the person represents the claim on a profile, personal site, resume, or bio.
+- Employer-stated: a company, event, or third-party page states the role or affiliation.
+- Artifact-backed: a repo, paper, patent, talk, post, or similar work product supports the capability.
+- Structured: a constrained public system, such as GitHub, OpenAlex, ORCID, EDGAR, or Companies House, supports the claim.
+- Corroborated: two or more independent evidence families support the same material claim.
 - Inferred: model-normalized meaning from grounded text.
 - Weak: source exists but does not strongly support the claim.
 - Gap: useful field is missing.
@@ -320,7 +343,8 @@ Default columns:
 - Role.
 - Evidence-backed capability.
 - Proof sources.
-- Connection path.
+- Evidence type.
+- Evidence strength.
 - Freshness.
 - Review state.
 
@@ -333,12 +357,14 @@ Optional columns:
 - talks.
 - patents.
 - likely contact route.
+- public relationship path.
 - notes.
 
 Filters:
 
 - source type.
 - evidence strength.
+- evidence type.
 - connection distance.
 - current company.
 - prior company.
@@ -359,7 +385,8 @@ Every Talent Map should show:
 - population searched.
 - sources included.
 - source recency.
-- number of candidates with strong evidence.
+- number of candidates by evidence type.
+- number of candidates with strong or corroborated evidence.
 - number with weak or missing evidence.
 - active filters.
 - known corpus gaps.
@@ -372,7 +399,7 @@ Coverage should appear before and after map generation:
 
 ## Visual Direction
 
-Subject: evidence-backed technical talent research for founders, VC talent partners, and search researchers.
+Subject: evidence-typed technical talent research for founders, VC talent partners, and search researchers.
 
 Single job of the UI: turn a hard hiring question into an inspectable, shareable Talent Map.
 
@@ -402,7 +429,7 @@ Layout:
 
 Signature element:
 
-- The Evidence Rail: a persistent right-side inspector that follows the selected row and shows the exact proof stack, quotes, and connection path. This is the visual distinction from generic recruiting search.
+- The Evidence Rail: a persistent right-side inspector that follows the selected row and shows the exact evidence ladder, quotes, source types, freshness, and gaps. This is the visual distinction from generic recruiting search.
 
 Self-critique:
 
@@ -416,8 +443,8 @@ Use buyer-facing names:
 
 - Talent Map, not People Search.
 - Person Dossier, not Profile Card.
-- Public proof, not enrichment.
-- Connection Path, not graph query.
+- Evidence ladder, not enrichment.
+- Public relationship path, not social graph.
 - Coverage, not diagnostics.
 - Evidence strength, not confidence score when the claim is about a person.
 - Review state, not hiring verdict.
@@ -435,7 +462,11 @@ Allowed:
 
 - strongest evidence match.
 - surfaced because.
-- public proof.
+- public evidence.
+- self-stated.
+- employer-stated.
+- artifact-backed.
+- corroborated.
 - needs review.
 - no evidence found.
 - coverage gap.
@@ -490,16 +521,18 @@ Inspector or full-page view for a selected person.
 Must include:
 
 - why surfaced.
+- evidence ladder.
 - evidence-backed capabilities.
 - career and affiliation evidence.
-- connection paths.
+- public artifacts when available.
+- public relationship paths when available.
 - public links.
 - gaps.
 - notes/review state.
 
 ### Connection Path
 
-Standalone and contextual relationship inspection.
+Later standalone and contextual relationship inspection. This surface is not required for the first Talent Map wedge.
 
 Must include:
 
@@ -508,6 +541,7 @@ Must include:
 - evidence per hop.
 - source links.
 - confidence or support state per hop.
+- clear empty states when the graph lacks base edges.
 
 ### Coverage
 
@@ -541,9 +575,12 @@ Likely API needs:
 - `GET /talent-maps/{id}` to load a saved map.
 - `GET /talent-maps/{id}/candidates`.
 - `GET /person-dossiers/{entity_id}`.
-- `GET /connection-paths?from=&to=`.
 - `GET /coverage/talent?brief=...`.
 - `POST /talent-maps/{id}/exports`.
+
+Later API needs:
+
+- `GET /connection-paths?from=&to=`.
 
 Likely data needs:
 
@@ -552,7 +589,7 @@ Likely data needs:
 - evidence packet per candidate reason.
 - review state and notes.
 - source coverage snapshot.
-- connection path snapshot.
+- optional relationship path snapshot.
 
 Design invariant:
 
@@ -569,7 +606,7 @@ Changes:
 - Rename People default to Talent Map.
 - Move Jobs and Apply Assistant out of primary mode prominence.
 - Replace the generic placeholder with talent-map examples.
-- Update candidate cards to show why surfaced, evidence chips, connection summary, and coverage state when available.
+- Update candidate cards to show why surfaced, evidence chips, evidence type, evidence strength, and coverage state when available.
 - Move coverage language into the result area.
 - Replace broad footer copy with talent-intelligence copy.
 
@@ -588,13 +625,15 @@ Changes:
 
 - Add a selected-candidate inspector.
 - Render citations, source tiers, quotes, freshness, and gaps in one persistent rail.
-- Add a compact connection path strip when graph evidence exists.
+- Render self-stated, employer-stated, artifact-backed, structured, corroborated, inferred, weak, stale, and gap states.
+- Add a compact public relationship strip only when graph evidence exists.
 - Keep citation hover behavior for prose answers.
 
 Acceptance:
 
 - Selecting any candidate with evidence shows why they surfaced and what supports the claim.
 - Weak or missing evidence is visibly distinct.
+- Self-stated claims are useful but never visually upgraded to corroborated claims.
 - Mobile renders the rail as a bottom sheet or inline expandable panel.
 
 ### Phase 3: Talent Map artifacts
@@ -614,9 +653,9 @@ Acceptance:
 - A recruiter or founder can send a Talent Map to a stakeholder without explaining the product.
 - Exports preserve source links and evidence strength.
 
-### Phase 4: Connection-first workflows
+### Phase 4: Relationship-path workflows
 
-Goal: make warm paths and network mapping a separate reason to buy.
+Goal: make public relationship paths and later warm paths a separate reason to buy after the evidence-first wedge works.
 
 Changes:
 
@@ -624,11 +663,13 @@ Changes:
 - Add connection-distance filters to Talent Map.
 - Add target network input during search setup.
 - Add path alternatives and evidence per hop.
+- Add seed-node ingestion for user/team/investor networks before claiming warm paths.
 
 Acceptance:
 
 - A user can ask how two people/companies connect and inspect every hop.
 - A Talent Map can be filtered by reachable warm paths.
+- Empty and weak-path states are explicit and do not imply missing people are unconnected.
 
 ## Open Questions
 
@@ -636,7 +677,8 @@ Acceptance:
 2. Should a Talent Map be synchronous at first, or created as a background job with progress and notification?
 3. Which export is most important for early pilots: CSV, share link, PDF brief, or ATS handoff?
 4. What is the minimum evidence packet required for a candidate to appear in the strongest group?
-5. Should map rank be deterministic from source/evidence rules, LLM-assisted with explanations, or both?
+5. Should self-stated evidence be enough for inclusion in the map, or only for lower-confidence groups?
+6. Should map rank be deterministic from source/evidence rules, LLM-assisted with explanations, or both?
 
 ## Implementation Constraints
 
@@ -652,7 +694,7 @@ Qualitative:
 
 - Users describe Roster as an evidence-backed talent map, not as a chatbot.
 - Users trust the surfaced candidates because they can inspect proof.
-- Users discover candidates or warm paths they did not already have.
+- Users discover candidates or relevant evidence they did not already have.
 
 Product:
 

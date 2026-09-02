@@ -909,3 +909,37 @@ def test_match_jobs_rotates_seen_and_diversifies_companies(monkeypatch):
     assert ids2[0] not in ids1[:1] or ids2 != ids1   # the slate actually changed
     assert set(ids2[:2]) & {4, 11, 3}                # unseen jobs rose to the top
     assert "rotating" in res2["note"]
+
+
+def test_match_jobs_dedupes_excludes_and_leads_with_named_roles(monkeypatch):
+    """Variety round 2: cross-source duplicate listings collapse to one slot; excluded title words
+    never appear; user-named role keywords LEAD the slate over semantic look-alikes."""
+    from api.people_population import match_resume_jobs
+    import api.people_population as pp
+
+    def _j(i, company, title, sim):
+        return {"id": i, "company": company, "title": title, "location": "Remote",
+                "url": "u", "source": "s", "sim": sim}
+
+    class _Store:
+        async def match_jobs_scored(self, qvec, cap=400):
+            return [_j(1, "Cloudflare", "Senior Software Engineer - Fintech", 0.90),
+                    _j(2, "cloudflare", "Senior Software Engineer - Fintech", 0.899),  # same job, 2nd source
+                    _j(3, "acme", "Sales Engineer", 0.89),                              # excluded
+                    _j(4, "globex", "Staff Payments Engineer", 0.88),
+                    _j(5, "initech", "Data Analyst", 0.87)]
+
+        async def companies_with_facet(self, keys, values=None):
+            return set()
+
+    monkeypatch.setattr(pp, "embed_query", lambda text: "[0.1]")
+    import asyncio
+    res = asyncio.get_event_loop().run_until_complete(match_resume_jobs(
+        _Store(), {"_resume_text": "payments engineer"},
+        {"limit": 10, "exclude_keywords": ["sales"], "role_keywords": ["payments"]}))
+    titles = [j["title"] for j in res["jobs"]]
+    ids = [j["id"] for j in res["jobs"]]
+    assert ids.count(1) + ids.count(2) == 1          # cross-source duplicate collapsed to one slot
+    assert 3 not in ids                              # excluded word never shows
+    assert titles[0] == "Staff Payments Engineer"    # user-named role LEADS over higher-sim look-alikes
+    assert "excluded by your title filters" in res["note"]
