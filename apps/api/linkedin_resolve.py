@@ -202,3 +202,12 @@ async def persist_resolution(store, entity_id: str, match: dict, *, tenant_id: s
                                      facet_value_norm=_norm(match["headline"])[:200],
                                      display_value=match["headline"][:300],
                                      source_document_id=url, confidence=0.7, tenant_id=tenant_id)
+    # The headline STATES the company we matched on → a second self-authored `company` facet (same
+    # normalized value as the ingester's) so the evidence packet can see two families agreeing —
+    # recorded as CONSISTENCY (both self-stated), never corroboration.
+    for co in (match.get("hits") or {}).get("company") or []:
+        norm = str(co).strip().lower().replace(" ", "_")
+        if norm:
+            await store.add_person_facet(entity_id=entity_id, facet_key="company",
+                                         facet_value_norm=norm[:200], display_value=str(co)[:300],
+                                         source_document_id=url, confidence=0.7, tenant_id=tenant_id)

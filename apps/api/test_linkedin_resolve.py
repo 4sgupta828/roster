@@ -110,3 +110,30 @@ def test_calibration_bands_and_consistency_vs_corroboration():
     pk5 = evidence_packet([{"facet_key": "company", "value_norm": "acme", "document_id": "https://openalex.org/A1"}], "openalex:A1")
     calibrate(pk5, {"attributes": []})
     assert pk5["calibration"]["band"] == "n/a"
+
+
+def test_persist_writes_link_headline_and_company_facets_from_the_linkedin_family():
+    from api.linkedin_resolve import persist_resolution
+
+    class _Rec:
+        def __init__(self):
+            self.calls = []
+
+        async def add_person_facet(self, **kw):
+            self.calls.append(kw)
+
+    st = _Rec()
+    match = {"url": "https://www.linkedin.com/in/nottombrown", "headline": "Co-Founder at Anthropic",
+             "hits": {"company": ["anthropic"]}}
+    loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
+    loop.run_until_complete(persist_resolution(st, "github:nottombrown", match))
+    keys = [c["facet_key"] for c in st.calls]
+    assert keys == ["link_linkedin", "linkedin_headline", "company"]
+    assert all(c["source_document_id"] == match["url"] for c in st.calls)         # family 'linkedin'
+    assert st.calls[2]["facet_value_norm"] == "anthropic"                          # ingester's norm
+    # the packet then sees github + linkedin agreeing on company → consistent, not corroborated
+    pk = evidence_packet([
+        {"facet_key": "company", "value_norm": "anthropic", "document_id": "https://github.com/nottombrown"},
+        {"facet_key": "company", "value_norm": "anthropic", "document_id": match["url"]},
+    ], "github:nottombrown")
+    assert pk["consistent_keys"] == ["company"] and pk["corroborated_keys"] == []
