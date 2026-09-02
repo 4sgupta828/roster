@@ -227,3 +227,13 @@ METRO_COUNTRY = {
     "manila": "ph", "bangkok": "th", "ho_chi_minh_city": "vn", "kuala_lumpur": "my",
     "dubai": "ae", "istanbul": "tr",
 }
+
+
+# metro ALIASES (display-time collapse): ingest runs normalized the same place differently across
+# time ("san_francisco" vs canonical "bay_area") — cards must not show both as separate chips.
+METRO_ALIAS = {
+    "san_francisco": "bay_area", "sf": "bay_area", "sanfrancisco": "bay_area",
+    "new_york": "nyc", "new_york_city": "nyc", "manhattan": "nyc", "brooklyn": "nyc",
+    "bengaluru": "bangalore", "washington_dc": "dc", "washington": "dc",
+    "la": "los_angeles", "silicon_valley": "bay_area", "south_bay": "bay_area",
+}

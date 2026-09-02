@@ -633,6 +633,48 @@ async def build_tailored_resume(jd_text: str, profile: dict, resume_text: str, l
         return None
 
 
+_IDENTITY_LINK_KINDS = {"github", "x", "twitter", "linkedin", "in", "email"}
+
+
+def _dedupe_links(links: list[dict]) -> list[dict]:
+    """One chip per IDENTITY profile kind (github/x/linkedin/email — a person has one of each; twin
+    facet rows from separate ingest runs showed 'github github', '𝕏 𝕏'); other kinds (site/medium)
+    dedupe by normalized URL so slash/case/www variants collapse but genuinely different sites stay."""
+    seen_kind, seen_url, out = set(), set(), []
+    for l in links:
+        kind = (l.get("kind") or "").lower()
+        u = (l.get("url") or "").strip().lower().rstrip("/")
+        for pre in ("https://", "http://", "www."):
+            u = u.removeprefix(pre) if u.startswith(pre) else u
+        if kind in _IDENTITY_LINK_KINDS:
+            if kind in seen_kind:
+                continue
+            seen_kind.add(kind)
+        elif u in seen_url:
+            continue
+        seen_url.add(u)
+        out.append(l)
+    return out
+
+
+def _dedupe_attrs(attrs: list[dict]) -> list[dict]:
+    """Collapse duplicate attribute chips: same (key, normalized display), and metro ALIASES from
+    divergent ingest normalizations ('san_francisco' + 'Bay Area' = one place, one chip)."""
+    from roster_vertical.people_facets import METRO_ALIAS
+    seen, out = set(), []
+    for a in attrs:
+        k = a.get("key") or ""
+        norm = (a.get("display") or "").strip().lower().replace(" ", "_")
+        if k == "metro":
+            norm = METRO_ALIAS.get(norm, norm)
+        sig = (k, norm)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        out.append(a)
+    return out
+
+
 def _person_countries(facet_rows: list[dict]) -> set[str]:
     """Best-effort countries for a person under a geo scope: explicit country facets first; when
     none, a known METRO implies its country (vertical map) — so metro=berlin with no country facet
@@ -663,6 +705,7 @@ def _person_row_from_facets(r: dict) -> dict:
         else:
             attrs.append({"key": f["facet_key"], "display": f["display_value"],
                           "document_id": f["document_id"], "block_id": f["block_id"]})
+    links, attrs = _dedupe_links(links), _dedupe_attrs(attrs)
     return {"entity_id": r["entity_id"], "name": r["name"], "blurb": _person_blurb(attrs),
             "attributes": attrs, "links": links, "citation": cite}
 
@@ -1401,6 +1444,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             else:
                 attrs.append({"key": f["facet_key"], "display": f["display_value"],
                               "document_id": f["document_id"], "block_id": f["block_id"]})
+        links, attrs = _dedupe_links(links), _dedupe_attrs(attrs)
         # LinkedIn PROXY: when we have no direct LinkedIn link, synthesize a Google search over the
         # person's name + role + company that reliably lands on their LinkedIn — a navigation aid
         # (clearly a SEARCH, not grounded evidence). Skipped when a real LinkedIn link exists.

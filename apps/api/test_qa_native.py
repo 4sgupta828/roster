@@ -973,3 +973,26 @@ def test_rotation_counts_twin_rows_as_seen(monkeypatch):
     r2 = run(match_resume_jobs(_Store(), {"_resume_text": "payments"},
                                {"limit": 2, "seen_ids": seen}))
     assert r2["jobs"][0]["title"] == "Staff Payments Engineer"   # twin row did NOT lead again
+
+
+def test_people_card_chips_deduped():
+    """Twin facet rows (re-ingest URL variants, divergent metro normalizations) must not show
+    duplicate chips: one github/𝕏 chip each, san_francisco+Bay Area collapse to one place."""
+    from api.people_population import _person_row_from_facets
+
+    row = {"entity_id": "gh:tom", "name": "Tom B Brown", "facets": [
+        {"facet_key": "link_github", "display_value": "https://github.com/tom", "document_id": "d", "block_id": "b"},
+        {"facet_key": "link_github", "display_value": "https://github.com/Tom/", "document_id": "d", "block_id": "b"},
+        {"facet_key": "link_x", "display_value": "https://x.com/tom", "document_id": "d", "block_id": "b"},
+        {"facet_key": "link_x", "display_value": "https://twitter.com/tom", "document_id": "d", "block_id": "b"},
+        {"facet_key": "link_site", "display_value": "https://tom.dev", "document_id": "d", "block_id": "b"},
+        {"facet_key": "link_site", "display_value": "http://www.tom.dev/", "document_id": "d", "block_id": "b"},
+        {"facet_key": "metro", "display_value": "san_francisco", "document_id": "d", "block_id": "b"},
+        {"facet_key": "metro", "display_value": "Bay Area", "document_id": "d", "block_id": "b"},
+        {"facet_key": "role", "display_value": "Research Scientist", "document_id": "d", "block_id": "b"},
+    ]}
+    card = _person_row_from_facets(row)
+    kinds = [l["kind"] for l in card["links"]]
+    assert kinds.count("github") == 1 and kinds.count("x") == 1 and kinds.count("site") == 1
+    metros = [a for a in card["attributes"] if a["key"] == "metro"]
+    assert len(metros) == 1                          # one place, one chip
