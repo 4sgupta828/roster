@@ -105,7 +105,7 @@ def evidence_packet(facet_rows: list[dict], entity_id: str = "") -> dict:
     for k in corroborated_keys:
         per_key[k] = {**per_key.get(k, {}), "type": "corroborated"}
     types_present = sorted({d["type"] for d in per_key.values()},
-                           key=lambda t: -_STRENGTH_RANK.get(t, 0))
+                           key=lambda t: (-_STRENGTH_RANK.get(t, 0), t))   # rank, then a STABLE tie-break
     if not types_present:
         strength = "gap"
     elif len({_STRENGTH_RANK.get(t, 0) for t in types_present}) > 1:

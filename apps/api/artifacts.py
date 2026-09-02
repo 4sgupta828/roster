@@ -203,7 +203,9 @@ def apply_artifacts_to_packet(packet: dict, summary: dict | None) -> dict:
         fams.add(fam)
         packet["families"] = sorted(fams)
         types = {d.get("type") for d in per_key.values() if d.get("type")}
-        packet["types"] = sorted(types, key=lambda t: -_STRENGTH_RANK.get(t, 0))
+        # rank first, then alphabetical so same-rung ties (structured + artifact_backed) are stable
+        # across processes: 'artifact-backed' leads for a scholar whose papers are linked
+        packet["types"] = sorted(types, key=lambda t: (-_STRENGTH_RANK.get(t, 0), t))
         packet["strength"] = ("mixed" if len({_STRENGTH_RANK.get(t, 0) for t in types}) > 1
                               else packet["types"][0])
     packet["freshness"] = {"newest_artifact": s.get("newest"), "profile_text": "undated"}
