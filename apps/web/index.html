@@ -2552,7 +2552,17 @@ function jobsMarkup(d){
       <button type="button" class="histbtn" style="margin-top:.6rem;" onclick="hopToQA()">💬 Ask in Q&amp;A</button></div>`;
   }
   const jobs = d.jobs||[], st = d.stats||{}, q = d.query||{};
-  const cards = jobs.map(j=>{
+  // PAGING (like people): 20 roles per page with ‹ Previous / Next ›; the whole list stays in `d`
+  window.JOBS_RENDERS = window.JOBS_RENDERS || {};
+  if(!d._jpid){ d._jpid = "j" + String(Date.now()) + Math.random().toString(36).slice(2,6); }
+  window.JOBS_RENDERS[d._jpid] = d;
+  const JPAGE = 20, jpagesN = Math.max(1, Math.ceil(jobs.length / JPAGE));
+  const jpage = Math.min(jpagesN - 1, Math.max(0, d._jpage || 0));
+  const pagedJobs = jobs.slice(jpage * JPAGE, jpage * JPAGE + JPAGE);
+  const jfrom = jpage * JPAGE + 1, jto = jpage * JPAGE + pagedJobs.length;
+  const jpager = jpagesN > 1
+    ? `<div class="ppl-pager"><button type="button" class="jobs-page" data-jpid="${esc(d._jpid)}" data-page="${jpage-1}" ${jpage===0?"disabled":""}>‹ Previous 20</button><span class="ppl-pageinfo">Page <b>${jpage+1}</b> of ${jpagesN} · roles ${jfrom}–${jto} of ${jobs.length}</span><button type="button" class="jobs-page" data-jpid="${esc(d._jpid)}" data-page="${jpage+1}" ${jpage>=jpagesN-1?"disabled":""}>Next 20 ›</button></div>` : "";
+  const cards = pagedJobs.map(j=>{
     const co = esc((j.company||"").replace(/_/g," "));
     const loc = j.location?`<span class="ppl-tag">${esc(j.location)}</span>`:"";
     const dept = j.department?`<span class="ppl-tag">${esc(j.department)}</span>`:"";
@@ -2570,12 +2580,12 @@ function jobsMarkup(d){
   const at = (q.company&&q.company.length)?` at ${esc(q.company.join(", ").replace(/_/g," "))}`:"";
   const angleChips = (d.query_angles&&d.query_angles.length>1) ? `<div style="margin-top:.4rem;display:flex;flex-wrap:wrap;gap:.3rem;">${d.query_angles.map(a=>`<span class="ppl-tag">${esc(a)}</span>`).join("")}</div>` : "";
   const intentHtml = (d.agentic && (d.intent||angleChips)) ? `<div class="ppl-cov" style="border-left-color:var(--gold);background:rgba(var(--gold-rgb),.06);"><b>⚡ Smart search</b>${d.intent?` — ${esc(d.intent)}`:""}${angleChips}</div>` : "";
-  const head = `<div class="ppl-head"><b>${jobs.length}</b> open role${jobs.length===1?"":"s"}${at}${d.agentic?` <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">⚡ smart search</span>`:""}</div>`
+  const head = `<div class="ppl-head"><b>${jobs.length}</b> open role${jobs.length===1?"":"s"}${at}${jpagesN>1?` <span class="ppl-fc" style="text-transform:none;">· showing ${jfrom}–${jto} · page ${jpage+1} of ${jpagesN}</span>`:""}${d.agentic?` <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">⚡ smart search</span>`:""}</div>`
     + intentHtml
     + scopeChip(d.geo_scope)
     + (st.jobs ? `<div class="ppl-cov">◔ Aggregated from public ATS boards — ${st.jobs} jobs across ${st.companies||0} companies indexed. Each links to the company's apply page.</div>`
                : `<div class="ppl-cov">◔ Aggregated from public ATS boards — each card links to the company's apply page.</div>`);
-  return `<div class="ppl-wrap">${head}<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.</div>'}</div></div>`;
+  return `<div class="ppl-wrap" data-jpid="${esc(d._jpid)}">${head}${jpage>0?jpager:""}<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.</div>'}</div>${jpager}</div>`;
 }
 function peopleRowsMarkup(data){
   const rows = data.people_rows||[];
@@ -8180,6 +8190,8 @@ document.addEventListener("click", e => {
   if(qa){ e.preventDefault(); submitAs("qa", qa.dataset.q || ""); return; }
   const pg = e.target.closest && e.target.closest(".ppl-page");
   if(pg){ e.preventDefault(); if(!pg.disabled) gotoPeoplePage(pg.dataset.pid, parseInt(pg.dataset.page||"0",10)); return; }
+  const jpg = e.target.closest && e.target.closest(".jobs-page");
+  if(jpg){ e.preventDefault(); if(!jpg.disabled) gotoJobsPage(jpg.dataset.jpid, parseInt(jpg.dataset.page||"0",10)); return; }
   const rr = e.target.closest && e.target.closest(".ppl-rerank");
   if(rr){ e.preventDefault(); rerankShown(rr.dataset.pid); }
 });
@@ -8257,6 +8269,16 @@ function rerenderPeople(pid){
   wrap.outerHTML = peopleRowsMarkup(data);
   return document.querySelector(`.ppl-wrap[data-pid="${CSS.escape(pid)}"]`);
 }
+function gotoJobsPage(jpid, page){
+  const d = (window.JOBS_RENDERS||{})[jpid]; if(!d) return;
+  const n = Math.max(1, Math.ceil((d.jobs||[]).length / 20));
+  d._jpage = Math.min(n - 1, Math.max(0, page || 0));
+  const wrap = document.querySelector(`.ppl-wrap[data-jpid="${CSS.escape(jpid)}"]`); if(!wrap) return;
+  wrap.outerHTML = jobsMarkup(d);
+  const nw = document.querySelector(`.ppl-wrap[data-jpid="${CSS.escape(jpid)}"]`);
+  const anchor = nw && (nw.querySelector(".ppl-pager") || nw.querySelector(".ppl-grid") || nw);
+  if(anchor){ try{ anchor.scrollIntoView({block: "start", behavior: "auto"}); }catch(e){ anchor.scrollIntoView(true); } }
+}
 function pageRows(data){
   const rows = data.people_rows || [], PAGE = 20;
   const page = Math.max(0, data._page || 0);
@@ -8271,7 +8293,7 @@ function gotoPeoplePage(pid, page){
   const anchor = wrap && (wrap.querySelector(".ppl-pager") || wrap.querySelector(".ppl-grid") || wrap);
   // scrollIntoView works whichever element actually scrolls (window or an inner panel); the pager's
   // scroll-margin keeps it clear of the sticky header
-  if(anchor){ try{ anchor.scrollIntoView({block: "start", behavior: "smooth"}); }catch(e){ anchor.scrollIntoView(true); } }
+  if(anchor){ try{ anchor.scrollIntoView({block: "start", behavior: "auto"}); }catch(e){ anchor.scrollIntoView(true); } }
   setTimeout(() => enrichVisible(pid), 60);
 }
 // A 401 from any signed-in call means THIS device's token is no longer valid (rotated or removed):
