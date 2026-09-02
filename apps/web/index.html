@@ -1810,7 +1810,7 @@
     <p>Tell us who you are, so your questions are saved to your name.</p>
     <input id="idname" type="text" placeholder="Full name (optional)" autocomplete="name" />
     <input id="idemail" type="email" placeholder="Email" autocomplete="email" />
-    <input id="idpassword" type="password" placeholder="Password (min 12 characters)" autocomplete="current-password" hidden />
+    <input id="idpassword" type="password" placeholder="Password" autocomplete="current-password" hidden />
     <div class="idtoggle" id="idtoggle" hidden style="font-size:.8rem;margin:.2rem 0 .1rem;">
       <a href="#" id="idswitch" style="color:var(--accent,#6a5acd);text-decoration:none;">Already have an account? Sign in</a>
     </div>
@@ -6831,7 +6831,8 @@ $("#idgo").addEventListener("click", async ()=>{
   // ---- accounts ON: password register / login (the primary path for Roster) ----
   if(ACCOUNTS_ENABLED){
     const password = ($("#idpassword").value || "");
-    if(password.length < 12){ $("#iderr").textContent = "Password must be at least 12 characters."; return; }
+    if(!password){ $("#iderr").textContent = "Please enter a password."; return; }
+    if(AUTH_MODE !== "login" && name.length < 2){ $("#iderr").textContent = "Please enter your name."; return; }
     const btn = $("#idgo"), was = btn.textContent; btn.textContent = "…"; btn.disabled = true;
     $("#iderr").textContent = "";
     try{

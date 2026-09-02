@@ -5201,17 +5201,20 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=503, detail="no account store configured (ROSTER_CORPUS_DSN)")
         if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", body.email or ""):
             raise HTTPException(status_code=400, detail="invalid email")
-        # SECURITY: register ALWAYS requires a >=12-char password, and REJECTS an email that already
-        # has an account. (The store's upsert-on-email would otherwise let anyone re-claim an existing
-        # account by email without proving the password — account takeover. Returning users sign in.)
-        if len(body.password or "") < 12:
-            raise HTTPException(status_code=400, detail="password must be at least 12 characters")
+        # Register requires a NAME and any non-empty password (no length rule — owner's call), and
+        # REJECTS an email that already has an account. (The store's upsert-on-email would otherwise
+        # let anyone re-claim an existing account by email without proving the password — account
+        # takeover. Returning users sign in.)
+        if not (body.password or ""):
+            raise HTTPException(status_code=400, detail="password required")
+        name = (body.name or "").strip()
+        if len(name) < 2:
+            raise HTTPException(status_code=400, detail="please enter your name")
         if await store.email_exists(body.email):
             raise HTTPException(status_code=409,
                                 detail="an account with that email already exists — please sign in")
         from api.accounts import hash_password
         pw_hash, pw_salt = hash_password(body.password)
-        name = (body.name or "").strip() or (body.email.split("@")[0] if body.email else "")
         npi_ok = False
         if body.npi.strip():
             from api.accounts import verify_npi
