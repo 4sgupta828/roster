@@ -3409,7 +3409,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             persist_kind = "qa"       # Q&A-tab conversations file under the qa kind in History
 
         async def _people_population_route(*, fallthrough: bool, route_extra: dict | None = None,
-                                           question_text: str | None = None):
+                                           question_text: str | None = None,
+                                           assume_people: bool = False):
             """The closed-world people-index engine (flag ROSTER_PEOPLE_POPULATION) shared by the
             legacy intercept and the Q&A router. Returns (ResearchOut|None, raw_engine_result|None).
             fallthrough=False reproduces the legacy behavior EXACTLY (always a ResearchOut: person
@@ -3431,7 +3432,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             res = await answer_people_population(
                 question=(question_text or body.question), tenant_id=body.tenant_id,
                 store=store, llm=build_llm(mode=resolve_mode()), scope_country=scope_country,
-                prior_facets=body.refine_facets)
+                prior_facets=body.refine_facets, assume_people=assume_people)
             if res.get("kind") == "person":
                 if fallthrough:
                     return None, res      # router: grounded dossier, never only the static card
@@ -3654,9 +3655,14 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                "deployment, so I can't enumerate matching people.",
                         coverage_gaps=["people-index discovery engine disabled"],
                         qa_route=_route.model_dump())
+                # The router's own extraction (entities/axes, resolved WITH history) rides into the
+                # engine question — "example people for these roles" arrives as concrete role/skill
+                # words even when the utterance itself names none (the busted-follow-up fix).
+                _hint = ", ".join([*(_route.entities or []), *(_route.axes or [])][:6]).strip(", ")
                 out, pres = await _people_population_route(
                     fallthrough=True, route_extra={"qa_route": _route.model_dump()},
-                    question_text=_ctx_question())
+                    question_text=_ctx_question() + (f"\n(The people sought: {_hint})" if _hint else ""),
+                    assume_people=True)
                 if out is not None:
                     out.qa_route = _route.model_dump()
                     return out

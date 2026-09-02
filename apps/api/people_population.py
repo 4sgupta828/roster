@@ -1125,7 +1125,8 @@ class _Narrative(BaseModel):
 
 async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                                    scope_country: str = "",
-                                   prior_facets: dict | None = None) -> dict:
+                                   prior_facets: dict | None = None,
+                                   assume_people: bool = False) -> dict:
     """Answer a people-enumeration question from the grounded people index. Always returns a structured
     result (never raises to the route): a compiled facet filter, grounded rows, and honest coverage.
 
@@ -1162,10 +1163,16 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         return {"kind": "person", "not_people_query": False,
                 "person_card": build_person_profile_card(person, ctx)}
     stats = await store.people_index_stats(tenant_id=tenant_id)
+    _forced_vibe = False
     if not facets:
-        # Not a people query at all — signal the router to fall through to normal research.
-        return {"kind": "none", "grounded": False, "not_people_query": True, "people_rows": [],
-                "coverage_basis": None, "answer": ""}
+        # BIAS TO CARDS: when the ROUTER asserted this seeks people (`assume_people`) but nothing
+        # compiled into facets ("example people profiles that suit above roles"), serve it as a
+        # pure SEMANTIC search over the (context-enriched) question text instead of dead-ending to
+        # research prose. Without that assertion: not a people query — fall through as before.
+        _forced_vibe = assume_people and (semantic_enabled() or people_semantic_first_enabled())
+        if not _forced_vibe:
+            return {"kind": "none", "grounded": False, "not_people_query": True, "people_rows": [],
+                    "coverage_basis": None, "answer": ""}
 
     # GEO SCOPE (flag-gated): inject the selector country UNLESS the query already named one (query wins).
     if scope_country and not facets.get("country"):

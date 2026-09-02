@@ -823,3 +823,52 @@ def test_followup_discovery_gets_conversation_context(monkeypatch):
     data = r.json()
     assert data["people_rows"] and data["people_rows"][0]["name"] == "Ada"
     assert svc.calls == []                       # cards, not prose
+
+
+def test_router_asserted_discovery_falls_back_to_semantic_cards(monkeypatch):
+    """A discovery-routed follow-up that compiles to NO facets ('example people for these roles')
+    must serve semantic people CARDS, never research prose (busted-follow-up session 7e1123b6)."""
+    from roster_kernel.providers.llm import LLMResult
+    from api.people_population import _FacetParse
+
+    class _TwoStageLLM:
+        async def complete(self, *, system, messages, response_format, max_tokens=2048,
+                           temperature=None):
+            if response_format is _FacetParse:
+                return LLMResult(parsed=_FacetParse(), output_tokens=5)   # compiler yields {}
+            return LLMResult(parsed=response_format(route="indexed_people_discovery",
+                                                    subject_kind="person",
+                                                    axes=["AI Engineers", "LLM based coding"],
+                                                    confidence="high"), output_tokens=5)
+
+    class _Store:
+        async def people_index_stats(self, *, tenant_id):
+            return {"persons_indexed": 5, "source_documents": 2, "facet_coverage": {}}
+
+        async def match_people_scored(self, qvec, cap=500):
+            return [{"entity_id": "gh:a", "sim": 0.9}]
+
+        async def people_by_ids(self, ids, *, tenant_id):
+            return [{"entity_id": "gh:a", "name": "Ada", "facets": [
+                {"facet_key": "role", "facet_value_norm": "ml_engineer", "value_norm": "ml_engineer",
+                 "display_value": "ML Engineer", "document_id": "d", "block_id": "b"}]}]
+
+    import api.people_population as pp
+    svc = _AskSpy(answer="PROSE MUST NOT WIN")
+    monkeypatch.setenv("ROSTER_QA_ROUTER", "1")
+    monkeypatch.setenv("ROSTER_PEOPLE_POPULATION", "1")
+    monkeypatch.setenv("ROSTER_PEOPLE_SEMANTIC_FIRST", "1")
+    monkeypatch.delenv("ROSTER_REASONED_DEFAULT", raising=False)
+    monkeypatch.setattr(appmod, "build_llm", lambda *a, **k: _TwoStageLLM())
+    monkeypatch.setattr(pp, "embed_query", lambda text: "[0.1,0.2]")
+    app = create_app(svc)
+    app.state.claim_store = _Store()
+    client = TestClient(app)
+    r = client.post("/qa", json={
+        "question": "Give me some example people profiles that suit above roles",
+        "tenant_id": "demo",
+        "history": [{"question": "Which companies are hiring AI Engineers?", "answer": "35 roles",
+                     "route": "indexed_job_search"}]})
+    data = r.json()
+    assert data["people_rows"] and data["people_rows"][0]["name"] == "Ada"
+    assert svc.calls == []                       # cards, never prose
