@@ -532,6 +532,14 @@
   /* public FOOTPRINT strip: artifacts linked by identity key (papers · repos · orgs · newest year) */
   .ppl-fp{display:block;font-family:var(--mono);font-size:.66rem;color:var(--muted);margin-top:.25rem;letter-spacing:.02em;line-height:1.5;}
   #evrail .er-rank{display:block;margin-top:.35rem;font-size:.82rem;color:var(--ink);}
+  #evrail .er-head{margin:.2rem 0 .4rem;}
+  #evrail .er-list{margin:.2rem 0 0 1.05rem;padding:0;font-size:.88rem;line-height:1.5;}
+  #evrail .er-list li{margin:.15rem 0;}
+  #evrail .er-unknown li{color:var(--gap);}
+  #evrail .er-claim{padding:.4rem 0;border-top:1px solid var(--hair);}
+  #evrail .er-claim .er-v{font-size:.9rem;}
+  #evrail details.er-bio,#evrail details.er-facts{margin-top:.6rem;}
+  #evrail details summary{cursor:pointer;font-size:.8rem;color:var(--gold);min-height:40px;line-height:40px;}
   #evrail .er-li{display:inline-block;min-height:40px;margin:.15rem 0;padding:.3rem .7rem;border:1px dashed var(--gold);border-radius:999px;background:none;color:var(--gold);font-size:.78rem;font-weight:600;cursor:pointer;}
   #evrail .er-li:disabled{opacity:.6;cursor:wait;}
   #evrail .er-art{font-size:.8rem;line-height:1.4;padding:.32rem 0;border-top:1px solid var(--hair);}
@@ -2617,7 +2625,7 @@ function peopleRowsMarkup(data){
     // linkedin.com) + how well it fits the brief; shown once the cohort enrichment has run.
     const liH = (p.linkedin && p.linkedin.headline) || (attr("linkedin_headline").display || "");
     const liFit = p.linkedin && typeof p.linkedin.headline_fit === "number" ? Math.round(p.linkedin.headline_fit*100) : null;
-    const liLine = liH ? `<span class="ppl-li" title="The person's own LinkedIn headline, quoted from a search-engine snippet (self-stated)">in “${esc(liH)}”${liFit!==null?` <span class="ppl-lifit">fits brief ${liFit}%</span>`:""}</span>`
+    const liLine = liH ? `<span class="ppl-li" title="The person's own LinkedIn headline, quoted from a search-engine snippet (self-stated)">in “${esc(liH)}”${liFit!==null?` <span class="ppl-lifit">${liFit>=50?"fits the brief well":liFit>=30?"partly fits the brief":"does not obviously fit the brief"}</span>`:""}</span>`
       : (p.linkedin && p.linkedin.status && p.linkedin.status!=="resolved" && p.linkedin.status!=="already" ? `<span class="ppl-li ppl-li-none">in ${p.linkedin.status==="ambiguous"?"several same-named profiles — none confirmed":p.linkedin.status==="quota"?"snippet quota reached today":p.linkedin.status==="unavailable"?"search leg unavailable":"no same-named profile in snippets"}</span>` : "");
     return `<div class="ppl-card" data-ref="${esc(ref)}">${acts}${avatar}
       <span class="ppl-body">
@@ -7957,120 +7965,140 @@ async function openMapsList(){
   function getReview(ref){ try{ return localStorage.getItem(reviewKey(ref)) || "unreviewed"; }catch(e){ return "unreviewed"; } }
   function setReview(ref, v){ try{ localStorage.setItem(reviewKey(ref), v); }catch(e){} }
   function pill(t){ return `<span class="ev-pill ${EV_CLASS[t]||"ev-self"}">${esc(EV_LABEL[t]||t||"")}</span>`; }
+  // Plain-language source phrasing (who says so) — the reader never sees a provenance tag.
+  const SAYS = {github:"self-described on GitHub", linkedin:"self-described on LinkedIn (from a search snippet)",
+    openalex:"derived from published work (OpenAlex)", yc:"listed by Y Combinator", npi:"NPI clinician registry",
+    sec:"SEC filings", theorg:"company org chart (TheOrg)", aifund:"AI Fund portfolio page",
+    ef:"Entrepreneur First page", pear:"Pear VC portfolio page", sosv:"SOSV portfolio page"};
+  const HEADLINE = {corroborated:["Confirmed by independent sources","ev-strong"], structured:["Registry-listed","ev-strong"],
+    artifact_backed:["Backed by public work","ev-strong"], employer_stated:["Listed by the employer","ev-stated"],
+    self_stated:["Self-described only","ev-self"], mixed:["Self-described, with public work","ev-mixed"], gap:["Little evidence","ev-gap"]};
   function open(ref){
     const rec = (window.PEOPLE_INDEX||{})[ref]; if(!rec || !rec.row) return;
     const p = rec.row, ev = p.evidence||{}, perKey = ev.per_key||{};
-    const attr = k => (p.attributes||[]).find(a=>a.key===k) || {};
-    // the stored 'title' facet is often just the person's name — never echo the name as a role
+    const attrs = p.attributes||[];
+    const attr = k => attrs.find(a=>a.key===k) || {};
+    const all = k => attrs.filter(a=>a.key===k && a.display).map(a=>a.display);
+    const famOf = k => (perKey[k]||{}).family || (ev.families||[])[0] || "";
+    const says = k => SAYS[famOf(k)] || "a source in Roster's index";
+    const srcLink = k => { const a = attr(k); return a.document_id && /^https?:\/\//i.test(a.document_id) ? ` <a href="${esc(a.document_id)}" target="_blank" rel="noopener noreferrer">source ↗</a>` : ""; };
+    const typeOf = k => (perKey[k]||{}).type || ev.strength || "self_stated";
     const rawTitle = attr("title").display || "";
-    const role = attr("role").display || (rawTitle && rawTitle.toLowerCase() !== String(p.name||"").toLowerCase() ? rawTitle : "") || "";
+    const bio = rawTitle && rawTitle.toLowerCase() !== String(p.name||"").toLowerCase() ? rawTitle : "";
+    const role = attr("role").display || attr("seniority").display || "";
     const co = attr("company").display || "";
-    const loc = attr("metro").display || attr("country").display || "";
+    const past = all("worked_at").filter(x => x.toLowerCase() !== co.toLowerCase());
+    const loc = [attr("metro").display, attr("state").display, attr("country").display].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).join(", ");
+    const level = attr("seniority").display || "";
     const brief = window.LAST_PEOPLE_FACETS || {};
-    // WHY SURFACED — the brief's compiled facets this person actually carries (grounded matches),
-    // plus relevance similarity / match reasons when the engine ranked semantically.
+    const fp = p.artifacts||null, lis = p.linkedin||null, cal = ev.calibration||null, rr = p.rank_read||null;
+    const liHead = (lis && lis.headline) || attr("linkedin_headline").display || "";
+    const liUrl = (lis && lis.url) || ((p.links||[]).find(l=>(l.kind||"")==="linkedin")||{}).url || "";
+    const hl = HEADLINE[ev.strength] || HEADLINE.gap;
+
+    // ---- 1. MATCH TO YOUR BRIEF (plain words; the number is a search signal, said so) ----
     const hits = [];
     Object.entries(brief).forEach(([k, vals]) => {
-      const mine = (p.attributes||[]).filter(a=>a.key===k).map(a=>String(a.display||"").toLowerCase().replace(/\s+/g,"_"));
-      (vals||[]).forEach(v => { if(mine.includes(String(v).toLowerCase())) hits.push(`${k}: ${String(v).replace(/_/g," ")}`); });
+      if(k === "country" && !vals) return;
+      const mine = attrs.filter(a=>a.key===k).map(a=>String(a.display||"").toLowerCase().replace(/\s+/g,"_"));
+      (vals||[]).forEach(v => { if(mine.includes(String(v).toLowerCase())) hits.push(String(v).replace(/_/g," ")); });
     });
-    const why = [];
-    if(hits.length) why.push(`Matches the brief on <b>${hits.map(esc).join("</b>, <b>")}</b>.`);
-    if(p.match_pct) why.push(`Relevance ${p.match_pct}% — embedding similarity between the brief and this profile (a retrieval signal, not a fit score).`);
-    if(Array.isArray(p.reasons) && p.reasons.length) why.push(`Also: ${p.reasons.map(esc).join(", ")}.`);
-    if(!why.length) why.push("Surfaced by the compiled facet filter for this brief.");
-    // RANK READ (evidence-model-v2 §4): the code-computed contributions that placed this row —
-    // relevance band first, evidence depth within it. Transparent, never a model opinion.
-    const rr = p.rank_read || null;
-    if(rr && Array.isArray(rr.reasons) && rr.reasons.length){
-      why.push(`<span class="er-rank">Ranking: ${rr.reasons.map(esc).join(" · ")}${typeof rr.band==="number"?` <span class="ppl-fc" style="text-transform:none;">(relevance band ${rr.band}, evidence within band ${Math.round((rr.within||0)*100)}%)</span>`:""}.</span>`);
+    const m = [];
+    if(hits.length) m.push(`<li>Matches your brief on <b>${hits.map(esc).join("</b>, <b>")}</b>.</li>`);
+    if(p.match_pct){
+      const w = p.match_pct >= 60 ? "strong" : p.match_pct >= 45 ? "moderate" : "weak";
+      m.push(`<li>Wording match to your brief: <b>${w}</b> <span class="ppl-fc" style="text-transform:none;">(${p.match_pct}% — how closely this profile's own words resemble the brief; a search signal, not a fit verdict)</span>.</li>`);
     }
-    // EVIDENCE LADDER — one row per grounded attribute, typed by its source provenance.
-    const ladder = (p.attributes||[]).filter(a=>a.display && !/^link_/.test(a.key||"")
-        && !(a.key==="title" && String(a.display).toLowerCase()===String(p.name||"").toLowerCase())
-        && !/^linkedin_/.test(a.key||"")).map(a => {
-      const t = (perKey[a.key]||{}).type || ev.strength || "self_stated";
-      const fam = (perKey[a.key]||{}).family || (ev.families||[])[0] || "";
-      const src = FAMILY[fam] || (fam ? fam : "source in Roster's index");
-      const link = a.document_id && /^https?:\/\//i.test(a.document_id) ? ` · <a href="${esc(a.document_id)}" target="_blank" rel="noopener noreferrer">source ↗</a>` : "";
-      return `<div class="er-row"><div><div class="er-k">${esc(String(a.key||"").replace(/_/g," "))}</div><div class="er-v">${esc(a.display)}</div></div><div>${pill(t)}</div><div class="er-src">from ${esc(src)}${link}</div></div>`;
-    }).join("");
-    const gaps = (ev.gaps||[]).length ? `<div class="er-gap">No evidence in the corpus for: ${ev.gaps.map(g=>esc(g.replace(/_/g," "))).join(", ")} — a coverage gap, not a finding.</div>` : `<div class="er-src">No missing core dimensions.</div>`;
-    const corro = (ev.corroborated_keys||[]).length ? `<div class="er-src">Corroborated across independent sources: ${ev.corroborated_keys.map(esc).join(", ")}.</div>` : `<div class="er-src">No claim is corroborated by two independent source families yet — treat every row above as its stated type.</div>`;
-    // SELF-STATED CALIBRATION (evidence-model-v2 §3): a band + code-derived reasons, never a score.
-    const cal = ev.calibration || null;
-    const calHtml = !cal || cal.band === "n/a" ? ""
-      : cal.band === "consistent"
-        ? `<div class="er-src">Self-stated · <b>consistent</b> — ${cal.reasons.map(esc).join("; ")}.</div>`
-        : `<div class="er-src">Self-stated · <b>no independent evidence yet</b> — nothing we hold agrees or disagrees with the profile's own claims; useful for inclusion, not for verification.</div>`;
-    const consist = (ev.consistent_keys||[]).length ? `<div class="er-src">Stated consistently across self-authored sources (not corroboration): ${ev.consistent_keys.map(esc).join(", ")}.</div>` : "";
-    // LinkedIn: resolve on demand from search-engine SNIPPETS (Roster never reads linkedin.com); a
-    // confident name+hint match becomes a self-stated link + quoted headline on this row.
-    const hasLi = (p.links||[]).some(l=>(l.kind||"")==="linkedin");
-    const liBtn = (!hasLi && p.entity_id && !/^search:/.test(p.entity_id)) ? `<button type="button" class="er-li" data-ref="${esc(p.entity_id)}" title="Find this person's LinkedIn from search-engine snippets — a confident name + company match only; never a guess">Resolve LinkedIn ⌕</button>` : "";
-    const links = (p.links||[]).filter(l=>/^https?:\/\//i.test(l.url||"")).map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.kind==="x"?"𝕏":l.kind)} ↗</a>`).join("")
-      + (rec.github ? `<a href="${esc(rec.github)}" target="_blank" rel="noopener noreferrer">github ↗</a>` : "");
-    // PUBLIC ARTIFACTS (evidence-model-v2 step 1): dated, linkable work tied to this person by an
-    // identity key — the capability rung. Three honest states: found / scanned-and-none / not scanned.
-    const fp = p.artifacts||null;
-    let artSec;
+    if(liHead){
+      const fit = lis && typeof lis.headline_fit === "number" ? lis.headline_fit : null;
+      const fw = fit === null ? "" : fit >= 0.5 ? " — <b>fits the brief well</b>" : fit >= 0.3 ? " — partly fits the brief" : " — does not obviously fit the brief";
+      m.push(`<li>Their LinkedIn headline: “${esc(liHead)}”${fw}.</li>`);
+    }
+    if(Array.isArray(p.reasons) && p.reasons.length) m.push(`<li>${p.reasons.map(esc).join(", ")}.</li>`);
+    const rrs = (rr && rr.reasons || []).filter(x => !/^relevance \d+%/.test(x) && !/^LinkedIn headline fits/.test(x));
+    if(rrs.length) m.push(`<li>Ranked here because: ${rrs.map(esc).join(" · ")}.</li>`);
+    if(!m.length) m.push("<li>Surfaced by the filter compiled from your brief.</li>");
+
+    // ---- 2. HOW SURE CAN YOU BE (one code-built paragraph, no jargon) ----
+    const sure = [];
+    if(co || role){
+      const what = [role && `the role (${role})`, co && `the employer (${co})`].filter(Boolean).join(" and ");
+      const fam = famOf("company") || famOf("role");
+      const src = SAYS[fam] || "a source in the index";
+      const t = typeOf("company") === "corroborated" || typeOf("role") === "corroborated";
+      sure.push(t ? `${what[0].toUpperCase()+what.slice(1)} are confirmed by two independent sources.`
+        : /^self-described/.test(src) ? `${what[0].toUpperCase()+what.slice(1)} come only from what the person wrote about themselves (${src}).`
+        : `${what[0].toUpperCase()+what.slice(1)} are ${src} — reliable for that listing, but no second source confirms them.`);
+    }
+    if(cal && cal.band === "consistent") sure.push("Independent signals agree with their self-description: " + cal.reasons.filter(r=>!/^note:/.test(r)).map(esc).join("; ") + ".");
+    if(fp && fp.total) sure.push(`Public work is linked to them by identity (${Object.entries(fp.counts||{}).map(([k,n])=>`${n} ${FP_LABEL[k]||k}`).join(", ")}), newest ${esc(String(fp.newest||"undated").slice(0,4))} — the strongest evidence of what they can do.`);
+    else if(fp && (fp.scanned||[]).length) sure.push("We looked for public work (papers, repos) and found none linked to them — a gap, not a verdict.");
+    else sure.push("Public work (papers, repos) has not been checked for this person yet.");
+    if(!(fp && fp.newest)) sure.push("Nothing here carries a date, so treat “current role” and “current employer” as unconfirmed before outreach.");
+    else if(new Date().getFullYear() - parseInt(String(fp.newest).slice(0,4),10) > 2) sure.push(`The newest dated evidence is from ${esc(String(fp.newest).slice(0,4))}; the current role may have changed.`);
+
+    // ---- 3. ROLE & EMPLOYER / LOCATION & LEVEL (the claims that matter, each with who says so) ----
+    const claimRow = (label, value, k, extra) => value ? `<div class="er-claim"><div class="er-k">${label}</div><div class="er-v">${esc(value)}</div><div class="er-src">${esc(says(k))}${srcLink(k)}${extra||""}</div></div>` : "";
+    const roleEmp = claimRow("Role & employer", [role, co].filter(Boolean).join(" at ") || co || role, co ? "company" : "role")
+      + (liHead ? `<div class="er-claim"><div class="er-k">LinkedIn says</div><div class="er-v">“${esc(liHead)}”</div><div class="er-src">self-described on LinkedIn, quoted from a search snippet${liUrl?` <a href="${esc(liUrl)}" target="_blank" rel="noopener noreferrer">profile ↗</a>`:""}${lis && lis.hits && lis.hits.company ? " · matched to this person on name + employer, so agreement on the employer is consistency, not proof" : ""}</div></div>` : "")
+      + (past.length ? claimRow("Previously", past.slice(0,4).join(", "), "worked_at") : "");
+    const where = claimRow("Location", loc, attr("metro").display ? "metro" : "country")
+      + (level && level.toLowerCase() !== role.toLowerCase() ? claimRow("Level", level, "seniority") : "");
+
+    // ---- 4. WHAT THEY'VE DONE (public work + their own words) ----
+    let done = "";
     if(fp && fp.total){
-      const counts = Object.entries(fp.counts||{}).map(([k,n])=>`${FP_LABEL[k]||esc(k)} ${n}`).join(" · ");
-      const items = (fp.items||[]).map(it=>{
+      done += (fp.items||[]).slice(0,6).map(it=>{
         const meta = [it.venue, (it.date||"").slice(0,4), it.stat, it.role==="first_author"?"first author":(it.role==="member"?"member":"")].filter(Boolean).join(" · ");
         return `<div class="er-art"><span class="er-art-k">${FP_LABEL[it.kind]||esc(it.kind)}</span>${it.url?`<a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">${esc(it.title)} ↗</a>`:esc(it.title)}${meta?`<span class="er-art-m">${esc(meta)}</span>`:""}</div>`;
       }).join("");
-      const affs = (fp.affiliations||[]).map(a=>{ const y=a.years||[]; const span=y.length>1?`${y[0]}–${y[y.length-1]}`:(y.length?String(y[0]):"undated");
-        return `<div class="er-src">${esc(a.name)} — ${esc(span)}, ${a.n} work${a.n===1?"":"s"}</div>`; }).join("");
-      artSec = `<div class="er-sec">Public artifacts</div><div class="er-src" style="margin-bottom:.3rem;">${counts} — linked by identity key (${esc((fp.scanned||[]).join(", "))}), never by name.</div>${items}`
-        + (affs?`<div class="er-sec">Affiliations on published work (dated)</div>${affs}`:"");
+      if(fp.total > 6) done += `<div class="er-src">+${fp.total-6} more linked by identity key.</div>`;
+      const affs = (fp.affiliations||[]);
+      if(affs.length) done += `<div class="er-src" style="margin-top:.3rem;">Affiliations on published work: ${affs.slice(0,3).map(a=>{const y=a.years||[]; return esc(a.name)+(y.length?` (${y.length>1?y[0]+"–"+y[y.length-1]:y[0]})`:"");}).join("; ")}.</div>`;
     } else if(fp && (fp.scanned||[]).length){
-      artSec = `<div class="er-sec">Public artifacts</div><div class="er-gap">Scanned ${esc(fp.scanned.join(", "))}: no public artifacts found — a coverage gap, not a finding.</div>`;
+      done += `<div class="er-gap">No papers, repositories or org memberships found linked to this person.</div>`;
     } else {
-      artSec = `<div class="er-sec">Public artifacts</div><div class="er-src">Not yet scanned for public artifacts — unknown, not absent.</div>`;
+      done += `<div class="er-src">Public work not checked yet.</div>`;
     }
-    const fresh = (fp && fp.newest)
-      ? `Newest linked artifact: <b>${esc(fp.newest)}</b>. Profile text itself is undated — treat current-role and current-employer claims as needing confirmation before outreach.`
-      : `Undated — no dated artifact linked yet; treat current-role and current-employer claims as needing confirmation before outreach.`;
-    // LINKEDIN SNIPPET (evidence-model-v2): what the search engine's snippet of the profile says —
-    // self-stated headline, its fit to the brief, and how it was matched. Never read from linkedin.com.
-    const lis = p.linkedin || null;
-    const liHead = lis && lis.headline ? lis.headline : (attr("linkedin_headline").display || "");
-    const liUrl = (lis && lis.url) || ((p.links||[]).find(l=>(l.kind||"")==="linkedin")||{}).url || "";
-    let liSec;
-    if(liHead){
-      const fitTxt = lis && typeof lis.headline_fit === "number" ? ` · fits the brief <b>${Math.round(lis.headline_fit*100)}%</b> (embedding similarity of headline vs brief)` : "";
-      const how = lis && lis.hits && Object.keys(lis.hits).length ? ` Matched on ${esc(Object.entries(lis.hits).map(([k,v])=>k.replace(/_/g," ")+": "+v.join(", ")).join("; "))} — so agreement on those is consistency, not independent proof.` : "";
-      liSec = `<div class="er-row"><div><div class="er-k">linkedin headline</div><div class="er-v">“${esc(liHead)}”</div></div><div>${pill("self_stated")}</div><div class="er-src">quoted from a search-engine snippet of the profile${liUrl?` · <a href="${esc(liUrl)}" target="_blank" rel="noopener noreferrer">profile ↗</a>`:""}${fitTxt}.${how}</div></div>`;
-    } else if(lis && lis.status === "ambiguous"){
-      liSec = `<div class="er-gap">Several same-named LinkedIn profiles surfaced and none carried the company on file — nothing was guessed.</div>`
-        + ((lis.candidates||[]).map(c=>`<div class="er-art"><a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.name)} ↗</a><span class="er-art-m">${esc(c.headline||"")} · unverified</span></div>`).join(""));
-    } else if(lis && lis.status === "none"){
-      liSec = `<div class="er-gap">No same-named LinkedIn profile in search snippets — a coverage gap, not evidence of absence.</div>`;
-    } else if(lis && lis.status){
-      liSec = `<div class="er-src">Snippet read not completed (${esc(lis.status)}).</div>`;
-    } else {
-      liSec = `<div class="er-src">Not read yet — ${loggedIn()?"snippets are read for the people shown as they load; use “Resolve LinkedIn ⌕” below to read this one now":"sign in to read LinkedIn snippets for the people shown"}.</div>`;
-    }
+    if(bio) done += `<details class="er-bio"><summary>In their own words (${esc(says("title").replace(/^self-described on /,""))})</summary><div class="er-src">“${esc(bio)}”</div></details>`;
+
+    // ---- 5. WHAT WE DON'T KNOW ----
+    const unknown = [];
+    if(!co) unknown.push("no current employer on record");
+    if(!role && !level) unknown.push("no role or level on record");
+    if(!loc) unknown.push("no location on record");
+    if(!(ev.corroborated_keys||[]).length) unknown.push("no claim is confirmed by two independent sources yet");
+    if(lis && lis.status === "ambiguous") unknown.push(`LinkedIn: several same-named profiles, none confirmed${(lis.candidates||[]).length?` (${lis.candidates.slice(0,3).map(c=>`<a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.headline||c.name)} ↗</a>`).join(", ")} — unverified)`:""}`);
+    else if(lis && lis.status === "none") unknown.push("LinkedIn: no same-named profile surfaced in search snippets");
+    else if(!liHead) unknown.push(loggedIn() ? "LinkedIn not read yet (it is read for the people shown as they load)" : "LinkedIn not read — sign in to read snippets for the people shown");
+    (ev.gaps||[]).filter(g => !["company","role","metro","country","seniority"].includes(g) && g !== "public_artifacts").forEach(g => unknown.push(`no ${g.replace(/_/g," ")} on record`));
+
+    // ---- 6. LINKS / REVIEW / ALL FACTS ----
+    const hasLi = (p.links||[]).some(l=>(l.kind||"")==="linkedin");
+    const liBtn = (!hasLi && p.entity_id && !/^search:/.test(p.entity_id)) ? `<button type="button" class="er-li" data-ref="${esc(p.entity_id)}" title="Find this person's LinkedIn from search-engine snippets — a confident name + employer match only; never a guess">Find LinkedIn ⌕</button>` : "";
+    const links = (p.links||[]).filter(l=>/^https?:\/\//i.test(l.url||"")).map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.kind==="x"?"𝕏":l.kind)} ↗</a>`).join("")
+      + (rec.github ? `<a href="${esc(rec.github)}" target="_blank" rel="noopener noreferrer">github ↗</a>` : "");
+    const facts = attrs.filter(a=>a.display && !/^link_/.test(a.key||"") && a.key !== "title").map(a => {
+      const link = a.document_id && /^https?:\/\//i.test(a.document_id) ? ` · <a href="${esc(a.document_id)}" target="_blank" rel="noopener noreferrer">source ↗</a>` : "";
+      return `<div class="er-row"><div><div class="er-k">${esc(String(a.key||"").replace(/_/g," "))}</div><div class="er-v">${esc(a.display)}</div></div><div>${pill(typeOf(a.key))}</div><div class="er-src">${esc(says(a.key))}${link}</div></div>`;
+    }).join("");
     const mapRev = (window.ACTIVE_MAP && ACTIVE_MAP.reviews && ACTIVE_MAP.reviews[ref]) || null;
     const cur = (mapRev && mapRev.state) || getReview(ref);   // a saved map's review state wins over device memory
     const review = `<select class="er-review" style="min-height:40px;font-size:.85rem;">${REVIEW.map(r=>`<option value="${esc(r)}"${r===cur?" selected":""}>${esc(r)}</option>`).join("")}</select>`;
     const el = ensure();
     el.innerHTML = `<button type="button" class="er-x" aria-label="Close">✕</button>
       <h3>${esc(p.name||"")}</h3>
-      <div class="er-sub">${esc([role, co].filter(Boolean).join(" · ") || "—")}${loc?` · ${esc(loc)}`:""} &nbsp;${pill(ev.strength||"gap")}</div>
-      <div class="er-sec">Why surfaced</div><div class="er-why">${why.join(" ")}</div>
-      ${p.blurb?`<div class="er-src" style="margin-top:.4rem;">Profile text (self-stated): “${esc(p.blurb)}”</div>`:""}
-      <div class="er-sec">Evidence ladder</div>${ladder || '<div class="er-src">No grounded attributes on this row.</div>'}
-      <div class="er-sec">LinkedIn snippet</div>${liSec}
-      ${artSec}
-      <div class="er-sec">Corroboration</div>${corro}${consist}
-      ${calHtml?`<div class="er-sec">Calibration</div>${calHtml}`:""}
-      <div class="er-sec">Gaps</div>${gaps}
-      <div class="er-sec">Freshness</div><div class="er-src">${fresh}</div>
-      ${(links||liBtn)?`<div class="er-sec">Public links</div><div class="er-links">${links}${liBtn}</div><div class="er-li-out"></div>`:""}
-      <div class="er-sec">Review state</div>${review}
-      <div class="er-note">Evidence types are derived from where each fact came from — never from a model's opinion. Self-stated claims are useful for inclusion but are never shown as verified.</div>`;
+      <div class="er-sub">${esc([role, co].filter(Boolean).join(" · ") || "—")}${loc?` · ${esc(loc)}`:""}</div>
+      <div class="er-head"><span class="ev-pill ${hl[1]}">${esc(hl[0])}</span></div>
+      <div class="er-sec">Match to your brief</div><ul class="er-list">${m.join("")}</ul>
+      <div class="er-sec">How sure can you be</div><div class="er-why">${sure.join(" ")}</div>
+      ${(roleEmp||where)?`<div class="er-sec">The claims that matter</div>${roleEmp}${where}`:""}
+      <div class="er-sec">What they've done</div>${done}
+      ${unknown.length?`<div class="er-sec">What we don't know</div><ul class="er-list er-unknown">${unknown.map(u=>`<li>${u}</li>`).join("")}</ul>`:""}
+      ${(links||liBtn)?`<div class="er-sec">Links</div><div class="er-links">${links}${liBtn}</div><div class="er-li-out"></div>`:""}
+      <div class="er-sec">Your review</div>${review}
+      ${facts?`<details class="er-facts"><summary>All recorded facts (${attrs.filter(a=>a.display && !/^link_/.test(a.key||"") && a.key!=="title").length}) — each with who says so</summary>${facts}</details>`:""}
+      <div class="er-note">Every label comes from where a fact was found — never from a model's opinion. Self-described claims count for inclusion, never as verification.</div>`;
     const liB = el.querySelector(".er-li");
     if(liB) liB.addEventListener("click", async () => {
       const out = el.querySelector(".er-li-out");
@@ -8197,7 +8225,7 @@ function enrichSummary(rows, pid, quota){
   const withHead = rows.filter(p => p.linkedin && p.linkedin.headline).length;
   const fits = rows.filter(p => p.linkedin && typeof p.linkedin.headline_fit === "number").map(p=>p.linkedin.headline_fit);
   const strong = fits.filter(f => f >= 0.5).length;
-  return `<div class="ppl-cov" style="border-left-color:var(--gold);">⌕ LinkedIn snippets read for the ${rows.length} shown: <b>${withHead}</b> with a headline (${st.resolved} newly resolved, ${st.already} on file), ${st.ambiguous} ambiguous (several same-named — none guessed), ${st.none} not found${st.other?`, ${st.other} unavailable`:""}.${fits.length?` Headline fits the brief strongly for <b>${strong}</b> of ${fits.length}.`:""} <button type="button" class="ppl-rerank" data-pid="${esc(pid)}" title="Reorder the people shown by relevance, headline fit and evidence depth — code-computed, reasons in Inspect evidence">⇅ Re-rank shown by evidence</button>${quota&&quota.cap?` <span class="ppl-fc" style="text-transform:none;">· snippet quota ${quota.used_today}/${quota.cap} today</span>`:""}</div>`;
+  return `<div class="ppl-cov" style="border-left-color:var(--gold);">⌕ LinkedIn snippets read for the ${rows.length} shown: <b>${withHead}</b> with a headline (${st.resolved} newly resolved, ${st.already} on file), ${st.ambiguous} ambiguous (several same-named — none guessed), ${st.none} not found${st.other?`, ${st.other} unavailable`:""}.${fits.length?` The headline fits the brief well for <b>${strong}</b> of ${fits.length}.`:""} <button type="button" class="ppl-rerank" data-pid="${esc(pid)}" title="Reorder the people shown by relevance, headline fit and evidence depth — code-computed, reasons in Inspect evidence">⇅ Re-rank shown by evidence</button>${quota&&quota.cap?` <span class="ppl-fc" style="text-transform:none;">· snippet quota ${quota.used_today}/${quota.cap} today</span>`:""}</div>`;
 }
 function rerankShown(pid){
   const data = (window.PEOPLE_RENDERS||{})[pid]; if(!data) return;

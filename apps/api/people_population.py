@@ -1777,8 +1777,9 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             await attach_artifacts(store, people_rows)
         coverage["footprint"] = footprint_coverage(people_rows)
         coverage["evidence_groups"] = evidence_groups(people_rows)
-        coverage["ranking"] = ("relevance bands of 0.05 first; within a band, evidence depth "
-                               "(corroborated/consistent affiliation, brief-matching artifacts, "
-                               "footprint, freshness, headline fit) — reasons per row in Inspect evidence")
+        coverage["ranking"] = ("how closely each profile's wording matches your brief first; among "
+                               "near-equal matches, the strength of public evidence (confirmed employer, "
+                               "linked papers and repos, recent activity, LinkedIn headline fit) — the "
+                               "reasons for each person are under Inspect evidence")
     return {"grounded": grounded, "not_people_query": False, "answer": answer,
             "people_rows": people_rows, "coverage_basis": coverage}
