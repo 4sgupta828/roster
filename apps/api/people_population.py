@@ -1659,6 +1659,20 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                     cand_ids += extra
             except Exception as ex:  # noqa: BLE001 — anchoring is additive
                 _log.info("topic anchor skipped: %s", ex)
+        if _local:
+            # LOCAL RECALL: the global top-N is drawn before the scope applies, so confirmed-local people
+            # are rare in it (7 of 200 in a Bay Area test). Add the best-matching people we can PLACE
+            # in the metro/state, scored on the same similarity scale; the local partition leads with them.
+            try:
+                local_ids = await store.people_by_geo(metro=_local_metro, state=_local_state, tenant_id=tenant_id)
+                local_extra = [i for i in local_ids if i not in sf_sim]
+                if local_extra:
+                    top_local = await store.semantic_people(qvec, candidate_ids=local_extra, cap=250)
+                    if top_local:
+                        sf_sim.update(await store.similarity_for(qvec, top_local))
+                        cand_ids += top_local
+            except Exception as ex:  # noqa: BLE001 — local recall is additive
+                _log.info("local recall skipped: %s", ex)
         cand = await store.people_by_ids(cand_ids, tenant_id=tenant_id)
         want_country = set(facets.get("country") or [])
         boost = {k: set(v) for k, v in facets.items() if k != "country"}     # soft-boost facets
@@ -1677,6 +1691,11 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             ranked.append(r)
         ranked.sort(key=lambda r: -r["_sf"])
         rows = ranked[:200]
+        if _local:
+            # keep every confirmed-local candidate through the cut (they may sit below the global top-N)
+            _loc_set = {r["entity_id"] for r in ranked[200:]
+                        if person_geo_status(r["facets"], metro=_local_metro, state=_local_state) == "in"}
+            rows += [r for r in ranked[200:] if r["entity_id"] in _loc_set][:250]
         if topic_terms:
             # keep EVERY topic-anchored candidate (they sit below the global top-N by construction —
             # their similarity is lower — but they are the people who actually mention the subject);

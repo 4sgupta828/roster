@@ -1688,6 +1688,33 @@ class ClaimGraphStore:
             return {}
         return {r["entity_id"]: float(r["sim"]) for r in rows}
 
+    async def people_by_geo(self, *, metro: str = "", state: str = "", tenant_id: str = "demo",
+                            limit: int = 4000) -> list[str]:
+        """Entity ids CONFIRMED in a metro (canonical + aliases) or a US state — the local-scope
+        recall path, so the default view leads with people we can actually place there."""
+        from roster_vertical.people_facets import METRO_ALIAS, US_METROS
+        vals: list[str] = []
+        if metro:
+            vals = [metro] + [a for a, canon in METRO_ALIAS.items() if canon == metro]
+        conds, args = [], [tenant_id]
+        if vals:
+            args.append(vals); conds.append(f"(facet_key = 'metro' AND facet_value_norm = ANY(${len(args)}))")
+        if state:
+            args.append(state.lower()); conds.append(f"(facet_key = 'state' AND facet_value_norm = ${len(args)})")
+            in_state = [k for k, m in US_METROS.items() if m["state"] == state.lower()]
+            in_state += [a for a, canon in METRO_ALIAS.items() if canon in in_state]
+            if in_state:
+                args.append(in_state); conds.append(f"(facet_key = 'metro' AND facet_value_norm = ANY(${len(args)}))")
+        if not conds:
+            return []
+        args.append(int(limit))
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT DISTINCT entity_id FROM roster_entity_facet WHERE tenant_id = $1 AND ({' OR '.join(conds)}) "
+                f"LIMIT ${len(args)}", *args)
+        return [r["entity_id"] for r in rows]
+
     async def people_by_text(self, terms: list[str], *, tenant_id: str = "demo", limit: int = 300) -> list[str]:
         """Entity ids whose facet DISPLAY text (bio/title, skills, function, industry, role, company)
         mentions any of `terms` (ILIKE). The topic-anchor recall path for sparse subjects."""
