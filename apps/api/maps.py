@@ -173,7 +173,8 @@ def build_csv(m: dict) -> str:
     w = csv.writer(out)
     w.writerow(["name", "current_company", "role", "location", "evidence_strength",
                 "evidence_types", "source_families", "corroborated_claims", "gaps",
-                "why_surfaced", "profile_links", "review_state", "review_note", "entity_id"])
+                "why_surfaced", "profile_links", "public_artifacts", "newest_artifact",
+                "artifact_links", "review_state", "review_note", "entity_id"])
     reviews = m.get("reviews") or {}
     for p in m.get("rows") or []:
         attrs = p.get("attributes") or []
@@ -187,11 +188,17 @@ def build_csv(m: dict) -> str:
         cite = (p.get("citation") or {}).get("document_id") or ""
         if str(cite).startswith("http") and cite not in links:
             links = (cite + " " + links).strip()
+        art = p.get("artifacts") or {}
+        art_counts = "|".join(f"{k}:{n}" for k, n in sorted((art.get("counts") or {}).items()))
+        if not art_counts and art.get("scanned"):
+            art_counts = "none found"
+        art_links = " ".join((it.get("url") or "") for it in (art.get("items") or [])
+                             if str(it.get("url") or "").startswith("http"))
         w.writerow([
             p.get("name") or "", _a("company"), _a("role") or _a("title"),
             _a("metro") or _a("country"), ev.get("strength") or "",
             "|".join(ev.get("types") or []), "|".join(ev.get("families") or []),
             "|".join(ev.get("corroborated_keys") or []), "|".join(ev.get("gaps") or []),
-            p.get("blurb") or "", links, rv.get("state") or "unreviewed", rv.get("note") or "",
-            p.get("entity_id") or ""])
+            p.get("blurb") or "", links, art_counts, art.get("newest") or "", art_links,
+            rv.get("state") or "unreviewed", rv.get("note") or "", p.get("entity_id") or ""])
     return out.getvalue()

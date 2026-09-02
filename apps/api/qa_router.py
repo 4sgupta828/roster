@@ -357,6 +357,14 @@ async def person_index_document(store, name: str, *, tenant_id: str = "demo") ->
             v = (f.get("display_value") or f.get("facet_value_norm") or "").strip()
             if v:
                 lines.append(f"- {f['facet_key'].replace('_', ' ')}: {v}")
+        # PUBLIC ARTIFACTS linked by identity key (papers/repos/orgs, dated) — the dossier's strongest
+        # capability evidence; a dossier may quote titles/venues/dates from these lines.
+        try:
+            from api.artifacts import artifact_lines, fetch_person_artifacts
+            found = await fetch_person_artifacts(await store._get_pool(), [r["entity_id"]])
+            lines += artifact_lines(found.get(r["entity_id"]))
+        except Exception as e:  # noqa: BLE001 — additive; the profile still cites the facets
+            _log.debug("artifact lines skipped: %s", e)
         if len(lines) < 2:
             return None
         return {"name": f"roster-index profile: {r['name']}", "text": "\n".join(lines)}

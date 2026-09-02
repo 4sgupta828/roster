@@ -820,7 +820,10 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
     out.sort(key=lambda x: -x["_score"])
     for c in out:
         c.pop("_score", None)
-    return {"people_rows": out[: int(prefs.get("limit", 40))],
+    out = out[: int(prefs.get("limit", 40))]
+    from api.artifacts import attach_artifacts
+    await attach_artifacts(store, out)          # public artifacts + freshness on the returned cards
+    return {"people_rows": out,
             "note": (want_country.upper() + " only" if want_country else ""),
             "excluded_source_company": ({"companies": excl_raw, "count": excluded_n} if excl else None)}
 
@@ -1595,7 +1598,12 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     # EVIDENCE DISTRIBUTION (spec: coverage is a first-class surface) — how many rows per headline
     # evidence state, counted by code from the per-row packets (rows are fully built here).
     if people_rows:
+        # PUBLIC ARTIFACTS (evidence-model-v2 step 1): papers/repos/orgs linked by identity key —
+        # attached before the distribution is counted so 'artifact-backed' shows in the groups.
+        from api.artifacts import attach_artifacts, footprint_coverage
         from api.evidence import evidence_groups
+        await attach_artifacts(store, people_rows)
+        coverage["footprint"] = footprint_coverage(people_rows)
         coverage["evidence_groups"] = evidence_groups(people_rows)
     return {"grounded": grounded, "not_people_query": False, "answer": answer,
             "people_rows": people_rows, "coverage_basis": coverage}

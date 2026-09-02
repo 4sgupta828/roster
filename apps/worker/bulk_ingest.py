@@ -10,6 +10,9 @@ Enabled with ROSTER_BULK_INGEST=1 on a worker service (ROSTER_ROLE=worker). Knob
   ROSTER_BULK_JOBS_CHUNK      max job boards/aggregators per cycle (0 = all remaining)
   ROSTER_BULK_PEOPLE_CHUNK    max people per cycle (default 500 — bounds GitHub + LLM/embed spend/cycle)
   ROSTER_BULK_PEOPLE_PERWINDOW  per search-window depth (default 1000)
+  ROSTER_BULK_ARTIFACTS_CHUNK  people per source per cycle for the public-artifact linker
+                              (scripts/ingest_artifacts.py: papers/repos/orgs by identity key; HTTP
+                              only, no LLM spend). 0 = off (default).
   ROSTER_BULK_INTERVAL_SEC    seconds between cycles (default 900) — paces GitHub's 5k/hr + 30/min
   ROSTER_BULK_MAX_CYCLES_DAY  coarse daily cap on cycles (default 96 = one per ~15min) — cost ceiling
 
@@ -60,6 +63,8 @@ def run_bulk_ingest_loop() -> None:
     people_on = os.environ.get("ROSTER_BULK_INGEST_PEOPLE", "").lower() in ("1", "true", "yes")
     jobs_chunk = int(os.environ.get("ROSTER_BULK_JOBS_CHUNK", "0") or 0)
     people_chunk = int(os.environ.get("ROSTER_BULK_PEOPLE_CHUNK", "500") or 500)
+    # public-artifact linking (papers/repos/orgs by identity key): people per source per cycle; 0 = off
+    artifacts_chunk = int(os.environ.get("ROSTER_BULK_ARTIFACTS_CHUNK", "0") or 0)
     per_window = int(os.environ.get("ROSTER_BULK_PEOPLE_PERWINDOW", "1000") or 1000)
     interval = int(os.environ.get("ROSTER_BULK_INTERVAL_SEC", "900") or 900)
     max_cycles_day = int(os.environ.get("ROSTER_BULK_MAX_CYCLES_DAY", "96") or 96)
@@ -86,4 +91,6 @@ def run_bulk_ingest_loop() -> None:
                         "--per-window", str(per_window)])
             # self-heal: embed any people written without a vector (embed hiccups) so they're searchable
             _run_chunk(["scripts/ingest_people.py", "--backfill", str(people_chunk)])
+        if artifacts_chunk:
+            _run_chunk(["scripts/ingest_artifacts.py", "--source", "all", "--limit", str(artifacts_chunk)])
         time.sleep(interval)

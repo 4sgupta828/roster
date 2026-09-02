@@ -514,6 +514,12 @@
   .ev-dist .ev-pill{margin-right:.3rem;}
   .ev-inspect{margin-left:.45rem;font-size:.7rem;font-weight:600;color:var(--gold);background:none;border:0;cursor:pointer;padding:.35rem .2rem;min-height:40px;}
   .ev-inspect:hover{text-decoration:underline;}
+  /* public FOOTPRINT strip: artifacts linked by identity key (papers · repos · orgs · newest year) */
+  .ppl-fp{display:block;font-family:var(--mono);font-size:.66rem;color:var(--muted);margin-top:.25rem;letter-spacing:.02em;line-height:1.5;}
+  #evrail .er-art{font-size:.8rem;line-height:1.4;padding:.32rem 0;border-top:1px solid var(--hair);}
+  #evrail .er-art a{color:var(--gold);text-decoration:none;}
+  #evrail .er-art-k{font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-right:.3rem;}
+  #evrail .er-art-m{display:block;font-size:.72rem;color:var(--muted);}
   /* SAVED MAPS (Phase 3): the map bar above a Talent Map result + the header entry point. */
   #mapsbtn{display:none;} body.logged-in #mapsbtn{display:inline-block;}
   .mapbar{display:flex;flex-wrap:wrap;gap:.45rem;align-items:center;margin:.55rem 0 .8rem;padding:.55rem .7rem;border:1px solid var(--hair);border-radius:10px;background:var(--panel2);}
@@ -2086,6 +2092,8 @@ let VISUAL_AUTO = false;          // auto-generate visuals on every fresh ground
 let _autoVisualsArm = false;      // armed only around a FRESH panel render so reopens don't re-spend
 let VOICE_TTS_NEURAL = false;     // server neural voiceover (/voice/tts); browser voice is the fallback
 let GAP_ENABLED = false;    // self-healing: suggest + queue sources to fill evidence gaps
+// public-artifact kind → label (cards' footprint strip, coverage line, Evidence Rail)
+const FP_LABEL = window.FP_LABEL = {paper:"papers",repo:"repos",org:"orgs",patent:"patents",post:"posts",talk:"talks",podcast:"podcasts",press:"press"};
 let CONV_ENABLED = false;   // multi-turn conversation (follow-ups carry context)
 let FOCUS_ENABLED = false;  // select a span of an answer → Go deeper / Rethink (POST /research/focus)
 let RELATED_ENABLED = false;// "Top related public research" section attached to answers
@@ -2566,6 +2574,12 @@ function peopleRowsMarkup(data){
     const evClass = {corroborated:"ev-strong",structured:"ev-strong",artifact_backed:"ev-strong",employer_stated:"ev-stated",self_stated:"ev-self",mixed:"ev-mixed",gap:"ev-gap"};
     const evPill = (ev.strength?`<span class="ev-pill ${evClass[ev.strength]||"ev-self"}" title="Evidence type — code-derived from the source; self-stated is never shown as verified">${evLabel[ev.strength]||ev.strength}</span>`:"")
       + `<button type="button" class="ev-inspect" data-ref="${esc(p.entity_id||p.name||"")}" title="Why surfaced, evidence ladder, sources, gaps">Inspect evidence ›</button>`;
+    // PUBLIC FOOTPRINT strip (evidence-model-v2): artifacts linked to this person by an identity key
+    // (OpenAlex author id / GitHub login) — dated, linkable work. Absent when none or not yet scanned.
+    const fp = p.artifacts||null;
+    const fpStrip = (fp && fp.total)
+      ? `<span class="ppl-fp" title="Public artifacts linked by identity key — dated, linkable evidence (see Inspect evidence)">◆ ${Object.entries(fp.counts||{}).map(([k,n])=>`${FP_LABEL[k]||esc(k)} ${n}`).join(" · ")}${fp.newest?` · newest ${esc(String(fp.newest).slice(0,4))}`:""}</span>`
+      : "";
     // Name links to a real profile: the citation URL if it is one, else the person's best public
     // link (LinkedIn/X/GitHub, server-ordered). Never a bare provenance tag. Plain text if neither.
     const profileUrl = citeUrl || ((p.links&&p.links[0]&&p.links[0].url)||"");
@@ -2586,10 +2600,17 @@ function peopleRowsMarkup(data){
         ${p.blurb?`<span class="ppl-blurb">${esc(p.blurb)}</span>`:(title?`<span class="ppl-title">${esc(title)}</span>`:"")}
         ${tags?`<span class="ppl-tags">${tags}</span>`:""}
         ${evPill?`<span class="ppl-ev">${evPill}</span>`:""}
+        ${fpStrip}
         ${linkBadges?`<span class="ppl-links">${linkBadges}</span>`:""}
       </span></div>`;
   };
   const cards = rows.map(cardHtml).join("");
+  // PUBLIC FOOTPRINT coverage (map-level): how many rows have linked artifacts, by kind — and how
+  // many were never scanned (unknown is never presented as absent).
+  const fpc = cb.footprint||null;
+  const fpLine = (fpc && fpc.people)
+    ? `<div class="ppl-cov ev-dist">◆ Public footprint: <b>${fpc.with_artifacts}</b> of ${fpc.people} people have linked artifacts${Object.keys(fpc.kinds||{}).length?` (${Object.entries(fpc.kinds).map(([k,n])=>`${FP_LABEL[k]||esc(k)} ${n}`).join(" · ")})`:""}${fpc.unscanned?` <span class="ppl-fc" style="text-transform:none;">— ${fpc.unscanned} not yet scanned: unknown, not absent</span>`:""}</div>`
+    : "";
   // EVIDENCE distribution (spec coverage panel): how many rows by headline evidence state.
   const evGroups = cb.evidence_groups||[];
   const evDist = evGroups.length
@@ -2599,7 +2620,7 @@ function peopleRowsMarkup(data){
   // its title, notes, share link and CSV export.
   const mapBar = (isEnum && rows.length && SEARCH_MODE === "people" && typeof talentMapBar === "function") ? talentMapBar() : "";
   const head = isEnum
-    ? `<div class="ppl-head"><b>${rows.length}</b> ${rows.length===1?"person":"people"} found${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evDist}`
+    ? `<div class="ppl-head"><b>${rows.length}</b> ${rows.length===1?"person":"people"} found${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evDist}${fpLine}`
     : `<div class="ppl-head">Profile</div>`;   // single-person profile card (no enumeration coverage)
   // TALENT CLUSTERS: a multi-company staffing comparison renders per-company sections — index
   // headcount + code-computed seniority/function mix, then that company's people cards.
@@ -7849,6 +7870,7 @@ async function openMapsList(){
 (function(){
   const EV_LABEL = {corroborated:"corroborated",structured:"structured record",artifact_backed:"artifact-backed",employer_stated:"employer-stated",self_stated:"self-stated",mixed:"mixed evidence",gap:"needs evidence"};
   const EV_CLASS = {corroborated:"ev-strong",structured:"ev-strong",artifact_backed:"ev-strong",employer_stated:"ev-stated",self_stated:"ev-self",mixed:"ev-mixed",gap:"ev-gap"};
+  const FP_LABEL = window.FP_LABEL;   // artifact-kind labels shared with the cards
   const FAMILY = {github:"the person's own GitHub profile (self-stated)",openalex:"OpenAlex scholarly registry — derived from published works",
     yc:"Y Combinator company directory",npi:"NPI clinician registry",sec:"SEC EDGAR filings",theorg:"TheOrg org-chart page (employer-stated)",
     aifund:"AI Fund portfolio page",ef:"Entrepreneur First company page",pear:"Pear VC portfolio page",sosv:"SOSV portfolio page"};
@@ -7902,6 +7924,28 @@ async function openMapsList(){
     const corro = (ev.corroborated_keys||[]).length ? `<div class="er-src">Corroborated across independent sources: ${ev.corroborated_keys.map(esc).join(", ")}.</div>` : `<div class="er-src">No claim is corroborated by two independent source families yet — treat every row above as its stated type.</div>`;
     const links = (p.links||[]).filter(l=>/^https?:\/\//i.test(l.url||"")).map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.kind==="x"?"𝕏":l.kind)} ↗</a>`).join("")
       + (rec.github ? `<a href="${esc(rec.github)}" target="_blank" rel="noopener noreferrer">github ↗</a>` : "");
+    // PUBLIC ARTIFACTS (evidence-model-v2 step 1): dated, linkable work tied to this person by an
+    // identity key — the capability rung. Three honest states: found / scanned-and-none / not scanned.
+    const fp = p.artifacts||null;
+    let artSec;
+    if(fp && fp.total){
+      const counts = Object.entries(fp.counts||{}).map(([k,n])=>`${FP_LABEL[k]||esc(k)} ${n}`).join(" · ");
+      const items = (fp.items||[]).map(it=>{
+        const meta = [it.venue, (it.date||"").slice(0,4), it.stat, it.role==="first_author"?"first author":(it.role==="member"?"member":"")].filter(Boolean).join(" · ");
+        return `<div class="er-art"><span class="er-art-k">${FP_LABEL[it.kind]||esc(it.kind)}</span>${it.url?`<a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">${esc(it.title)} ↗</a>`:esc(it.title)}${meta?`<span class="er-art-m">${esc(meta)}</span>`:""}</div>`;
+      }).join("");
+      const affs = (fp.affiliations||[]).map(a=>{ const y=a.years||[]; const span=y.length>1?`${y[0]}–${y[y.length-1]}`:(y.length?String(y[0]):"undated");
+        return `<div class="er-src">${esc(a.name)} — ${esc(span)}, ${a.n} work${a.n===1?"":"s"}</div>`; }).join("");
+      artSec = `<div class="er-sec">Public artifacts</div><div class="er-src" style="margin-bottom:.3rem;">${counts} — linked by identity key (${esc((fp.scanned||[]).join(", "))}), never by name.</div>${items}`
+        + (affs?`<div class="er-sec">Affiliations on published work (dated)</div>${affs}`:"");
+    } else if(fp && (fp.scanned||[]).length){
+      artSec = `<div class="er-sec">Public artifacts</div><div class="er-gap">Scanned ${esc(fp.scanned.join(", "))}: no public artifacts found — a coverage gap, not a finding.</div>`;
+    } else {
+      artSec = `<div class="er-sec">Public artifacts</div><div class="er-src">Not yet scanned for public artifacts — unknown, not absent.</div>`;
+    }
+    const fresh = (fp && fp.newest)
+      ? `Newest linked artifact: <b>${esc(fp.newest)}</b>. Profile text itself is undated — treat current-role and current-employer claims as needing confirmation before outreach.`
+      : `Undated — no dated artifact linked yet; treat current-role and current-employer claims as needing confirmation before outreach.`;
     const mapRev = (window.ACTIVE_MAP && ACTIVE_MAP.reviews && ACTIVE_MAP.reviews[ref]) || null;
     const cur = (mapRev && mapRev.state) || getReview(ref);   // a saved map's review state wins over device memory
     const review = `<select class="er-review" style="min-height:40px;font-size:.85rem;">${REVIEW.map(r=>`<option value="${esc(r)}"${r===cur?" selected":""}>${esc(r)}</option>`).join("")}</select>`;
@@ -7912,9 +7956,10 @@ async function openMapsList(){
       <div class="er-sec">Why surfaced</div><div class="er-why">${why.join(" ")}</div>
       ${p.blurb?`<div class="er-src" style="margin-top:.4rem;">Profile text (self-stated): “${esc(p.blurb)}”</div>`:""}
       <div class="er-sec">Evidence ladder</div>${ladder || '<div class="er-src">No grounded attributes on this row.</div>'}
+      ${artSec}
       <div class="er-sec">Corroboration</div>${corro}
       <div class="er-sec">Gaps</div>${gaps}
-      <div class="er-sec">Freshness</div><div class="er-src">Undated — Roster does not yet track source dates for profile facets; treat current-role and current-employer claims as needing confirmation before outreach.</div>
+      <div class="er-sec">Freshness</div><div class="er-src">${fresh}</div>
       ${links?`<div class="er-sec">Public links</div><div class="er-links">${links}</div>`:""}
       <div class="er-sec">Review state</div>${review}
       <div class="er-note">Evidence types are derived from where each fact came from — never from a model's opinion. Self-stated claims are useful for inclusion but are never shown as verified.</div>`;
