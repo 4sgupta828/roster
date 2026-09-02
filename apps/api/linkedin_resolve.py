@@ -170,16 +170,17 @@ def build_query(name: str, hints: dict[str, list[str]]) -> str:
 async def resolve_linkedin(row: dict, *, search=search_snippets) -> dict:
     """Resolve a people row's LinkedIn profile from snippets. Returns the `choose` decision plus
     the query used and the evidence framing. Never fetches linkedin.com."""
+    import os
     name = (row.get("name") or "").strip()
     if not name or len(name.split()) < 2:
         return {"status": "none", "match": None, "candidates": [], "query": ""}
     hints = hints_from_row(row)
     q = build_query(name, hints)
     results = await search(q)
-    if not results:
-        # An empty leg is far more often a BLOCKED search (the keyless DuckDuckGo leg serves an
-        # anti-bot page from datacenter IPs after a few calls) than a true zero — say so; never
-        # let 'search unavailable' read as 'no such profile'.
+    if not results and not os.environ.get("BRAVE_API_KEY"):
+        # On the KEYLESS leg an empty result is far more often a BLOCKED search (DuckDuckGo serves
+        # an anti-bot page from datacenter IPs after a few calls) than a true zero — say so; never
+        # let 'search unavailable' read as 'no such profile'. With Brave keyed, empty means none.
         return {"status": "unavailable", "match": None, "candidates": [], "query": q,
                 "note": "the search leg returned nothing (keyless DuckDuckGo is rate-limited from "
                         "the server; set BRAVE_API_KEY for a reliable leg)"}

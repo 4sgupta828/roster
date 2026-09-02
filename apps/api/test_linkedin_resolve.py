@@ -72,8 +72,16 @@ def test_resolve_linkedin_uses_search_and_frames_evidence():
 
     async def blocked(q):
         return []                                                               # anti-bot page / rate limit
+    import os
+    os.environ.pop("BRAVE_API_KEY", None)
     ua = loop.run_until_complete(resolve_linkedin(row, search=blocked))
-    assert ua["status"] == "unavailable" and ua["match"] is None                # never reads as 'no profile'
+    assert ua["status"] == "unavailable" and ua["match"] is None                # keyless: never 'no profile'
+    os.environ["BRAVE_API_KEY"] = "x"
+    try:
+        none = loop.run_until_complete(resolve_linkedin(row, search=blocked))
+        assert none["status"] == "none"                                         # keyed: empty really is none
+    finally:
+        os.environ.pop("BRAVE_API_KEY", None)
 
 
 def test_calibration_bands_and_consistency_vs_corroboration():
