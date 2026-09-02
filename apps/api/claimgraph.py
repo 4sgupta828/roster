@@ -1688,11 +1688,14 @@ class ClaimGraphStore:
                 tenant_id, name, int(limit))
             ids = [r["entity_id"] for r in exact]
             if len(ids) < limit and len(toks) >= 2:
+                # whole-word tokens in order: 'tom brown' matches 'Tom B. Brown', not 'Tomer Brown'
+                pat = ".*".join(r"\m" + re.escape(t) + r"\M" for t in toks)
                 loose = await conn.fetch(
                     """SELECT entity_id FROM rs_entity WHERE tenant_id = $1 AND kind = 'person'
-                       AND status = 'active' AND lower(name) LIKE $2 AND lower(name) <> lower($3)
-                       ORDER BY length(name), retrieved_at DESC LIMIT $4""",
-                    tenant_id, "%" + "%".join(toks) + "%", name, int(limit) - len(ids))
+                       AND status = 'active' AND lower(name) LIKE $2 AND lower(name) ~ $3
+                       AND lower(name) <> lower($4)
+                       ORDER BY length(name), retrieved_at DESC LIMIT $5""",
+                    tenant_id, "%" + "%".join(toks) + "%", pat, name, int(limit) - len(ids))
                 ids += [r["entity_id"] for r in loose]
         return await self.people_by_ids(ids, tenant_id=tenant_id) if ids else []
 
