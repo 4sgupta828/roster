@@ -1253,6 +1253,20 @@ class MatchIn(BaseModel):
     #                                  — the one HARD filter in matching
 
 
+class LinkedInResolveIn(BaseModel):
+    """POST /people/linkedin-resolve — module-level so FastAPI can resolve the (string) annotation."""
+    entity_id: str
+    tenant_id: str = "demo"
+
+
+class EnrichIn(BaseModel):
+    """POST /people/enrich — the people SHOWN (≤20) + the brief and its compiled facets."""
+    entity_ids: list[str]
+    brief: str = ""
+    facets: dict | None = None        # the brief's compiled facets (brief-aware rank read)
+    tenant_id: str = "demo"
+
+
 class MapIn(BaseModel):
     """Save an EVIDENCE MAP artifact (talent-intelligence redesign Phase 3): the brief, compiled
     filters, a snapshot of the rows (with their evidence packets), and the coverage statement."""
@@ -5237,10 +5251,6 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=503, detail="map store unavailable (no corpus DSN)")
         return ms
 
-    class LinkedInResolveIn(BaseModel):
-        entity_id: str
-        tenant_id: str = "demo"
-
     @app.post("/people/linkedin-resolve")
     async def people_linkedin_resolve(body: LinkedInResolveIn,
                                       x_roster_token: str = Header(default="")) -> dict:
@@ -5271,12 +5281,6 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             await attach_artifacts(store, [row])
         dec["row"] = row
         return dec
-
-    class EnrichIn(BaseModel):
-        entity_ids: list[str]
-        brief: str = ""
-        facets: dict | None = None        # the brief's compiled facets (brief-aware rank read)
-        tenant_id: str = "demo"
 
     @app.post("/people/enrich")
     async def people_enrich(body: EnrichIn, x_roster_token: str = Header(default="")) -> dict:
