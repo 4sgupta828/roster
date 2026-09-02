@@ -1672,6 +1672,22 @@ class ClaimGraphStore:
                 "block_id": r["source_block_id"], "source_claim_id": r["source_claim_id"]})
         return [by_ent[e] for e in entity_ids if e in by_ent]   # preserve semantic rank order
 
+    async def similarity_for(self, qvec: str, entity_ids) -> dict[str, float]:
+        """Cosine similarity of the query embedding to SPECIFIC people (topic-anchored candidates
+        outside the global top-N) — so they can be ranked on the same scale as everyone else."""
+        ids = [e for e in (entity_ids or []) if e]
+        if not ids:
+            return {}
+        pool = await self._get_pool()
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT entity_id, 1 - (embedding <=> $1::vector) AS sim FROM rs_person_vec "
+                    "WHERE entity_id = ANY($2)", qvec, ids)
+        except Exception:
+            return {}
+        return {r["entity_id"]: float(r["sim"]) for r in rows}
+
     async def people_by_text(self, terms: list[str], *, tenant_id: str = "demo", limit: int = 300) -> list[str]:
         """Entity ids whose facet DISPLAY text (bio/title, skills, function, industry, role, company)
         mentions any of `terms` (ILIKE). The topic-anchor recall path for sparse subjects."""

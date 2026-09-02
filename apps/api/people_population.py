@@ -1590,9 +1590,9 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                 anchored_ids = await store.people_by_text(topic_terms, tenant_id=tenant_id, limit=300)
                 extra = [i for i in anchored_ids if i not in sf_sim]
                 if extra:
-                    order = await store.semantic_people(qvec, candidate_ids=extra, cap=300)
-                    seen_e = set(order)
-                    cand_ids += order + [i for i in extra if i not in seen_e]
+                    # same similarity scale as the global top-N (an un-scored extra would sort last)
+                    sf_sim.update(await store.similarity_for(qvec, extra))
+                    cand_ids += extra
             except Exception as ex:  # noqa: BLE001 — anchoring is additive
                 _log.info("topic anchor skipped: %s", ex)
         cand = await store.people_by_ids(cand_ids, tenant_id=tenant_id)
@@ -1740,28 +1740,6 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         people_rows.sort(key=rank_sort_key)
         _ranked_by_evidence = True
 
-    # TOPIC ANCHOR partition: people whose grounded text mentions the brief's subject lead; the
-    # coverage statement says how many the index holds and that the rest are wording look-alikes.
-    n_topic = 0
-    if topic_terms and people_rows:
-        people_rows, n_topic = topic_partition(people_rows, topic_terms)
-        people_rows = people_rows[:200]
-        for p in people_rows:
-            if p.get("topic_hit") and isinstance(p.get("rank_read"), dict):
-                p["rank_read"]["reasons"].insert(0, f"profile mentions the brief's subject ({p['topic_hit']})")
-        coverage["topic_anchor"] = {"terms": topic_terms, "mentioning": n_topic}
-        _t0 = topic_terms[0]
-        if n_topic:
-            coverage["population_statement"] = (
-                f"{n_topic} of these people mention {_t0} (or a related term) in their grounded profile "
-                f"text and are listed first. The rest are the closest matches by wording and may not "
-                f"be {_t0}-related. " + coverage.get("population_statement", ""))
-        else:
-            coverage["population_statement"] = (
-                f"Nobody in the index mentions {_t0} (or a related term: {', '.join(topic_terms[1:4])}) "
-                f"— the rows below are the closest matches by wording, NOT {_t0} specialists. This is "
-                f"an index coverage gap. " + coverage.get("population_statement", ""))
-
     # CONFIRMED-COUNTRY priority under a geo scope: people we can PLACE in the scoped country lead;
     # unknown-location profiles follow (recall keeps them; rank stops them crowding out confirmed).
     _want_c = set(facets.get("country") or [])
@@ -1781,6 +1759,29 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             return (v or "").strip().lower().replace(" ", "_")
         people_rows = ([p for p in people_rows if _primary_role(p) in _want_roles]
                        + [p for p in people_rows if _primary_role(p) not in _want_roles])
+
+    # TOPIC ANCHOR partition (LAST, so it wins over the country / primary-role partitions): people
+    # whose grounded text mentions the brief's subject lead; the coverage statement says how many the
+    # index holds and that the rest are wording look-alikes.
+    n_topic = 0
+    if topic_terms and people_rows:
+        people_rows, n_topic = topic_partition(people_rows, topic_terms)
+        people_rows = people_rows[:200]
+        for p in people_rows:
+            if p.get("topic_hit") and isinstance(p.get("rank_read"), dict):
+                p["rank_read"]["reasons"].insert(0, f"profile mentions the brief's subject ({p['topic_hit']})")
+        coverage["topic_anchor"] = {"terms": topic_terms, "mentioning": n_topic}
+        _t0 = topic_terms[0]
+        if n_topic:
+            coverage["population_statement"] = (
+                f"{n_topic} of these people mention {_t0} (or a related term) in their grounded profile "
+                f"text and are listed first. The rest are the closest matches by wording and may not "
+                f"be {_t0}-related. " + coverage.get("population_statement", ""))
+        else:
+            coverage["population_statement"] = (
+                f"Nobody in the index mentions {_t0} (or a related term: {', '.join(topic_terms[1:4])}) "
+                f"— the rows below are the closest matches by wording, NOT {_t0} specialists. This is "
+                f"an index coverage gap. " + coverage.get("population_statement", ""))
 
     # TALENT CLUSTERS: a query naming SEVERAL companies ("top infra talent at Anthropic and
     # OpenAI") is a STAFFING COMPARISON — group the results per company, each cluster with its
