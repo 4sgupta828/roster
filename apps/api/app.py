@@ -1251,6 +1251,29 @@ class MatchIn(BaseModel):
     #                                  — the one HARD filter in matching
 
 
+class MapIn(BaseModel):
+    """Save an EVIDENCE MAP artifact (talent-intelligence redesign Phase 3): the brief, compiled
+    filters, a snapshot of the rows (with their evidence packets), and the coverage statement."""
+    tenant_id: str = "demo"
+    map_type: str = "talent"          # talent | company | expert … (presentation label lives in the FE)
+    brief: str
+    title: str = ""
+    rows: list = []
+    coverage: dict | None = None
+    filters: dict | None = None
+
+
+class MapPatchIn(BaseModel):
+    title: str | None = None
+    notes: str | None = None
+
+
+class MapReviewIn(BaseModel):
+    entity_id: str
+    state: str = "unreviewed"         # unreviewed | shortlisted | needs more evidence | reviewed
+    note: str | None = None
+
+
 class SettingIn(BaseModel):
     key: str
     value: str = ""     # "on" | "off" | "" (empty = follow the env default)
@@ -5169,6 +5192,111 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     async def me(x_roster_token: str = Header(default="")) -> dict:
         store, user = await _require_user(x_roster_token)
         return {"user": user}
+
+    # ---- EVIDENCE MAP artifacts (talent-intelligence redesign, Phase 3) ----------------------
+    # Generic map/entity/evidence/coverage contract; the Talent Map is the first package. Saving
+    # requires a signed-in owner (durable, owned deliverable); a private share token lets anyone
+    # holding the link read the map; review states/notes are owner-only and never a verdict.
+    def _maps():
+        if getattr(app.state, "map_store", "unset") == "unset":
+            dsn = os.environ.get("ROSTER_CORPUS_DSN")
+            if dsn:
+                from api.maps import MapStore
+                app.state.map_store = MapStore(dsn, vertical=load_active_vertical().name)
+            else:
+                app.state.map_store = None
+        return app.state.map_store
+
+    async def _optional_user(x_roster_token: str):
+        """The signed-in user if the token is valid, else None (never raises) — for surfaces that
+        work anonymously but unlock owner actions when signed in."""
+        if not accounts_enabled() or not x_roster_token:
+            return None
+        store = _accounts()
+        if store is None:
+            return None
+        try:
+            return await store.user_by_token(x_roster_token)
+        except Exception:   # noqa: BLE001
+            return None
+
+    def _require_maps():
+        ms = _maps()
+        if ms is None:
+            raise HTTPException(status_code=503, detail="map store unavailable (no corpus DSN)")
+        return ms
+
+    @app.post("/maps")
+    async def map_create(body: MapIn, x_roster_token: str = Header(default="")) -> dict:
+        ms = _require_maps()
+        user = await _optional_user(x_roster_token)
+        if user is None:
+            raise HTTPException(status_code=401, detail="sign in to save a map")
+        if not (body.brief or "").strip():
+            raise HTTPException(status_code=400, detail="brief required")
+        rows = [r for r in (body.rows or []) if isinstance(r, dict)]
+        res = await ms.create(tenant_id=body.tenant_id, map_type=(body.map_type or "talent")[:32],
+                              brief=body.brief, rows=rows, coverage=body.coverage,
+                              filters=body.filters, title=body.title, owner_id=user["id"])
+        res["share_path"] = f"#m/{res['id']}?t={res['share_token']}"
+        return res
+
+    @app.get("/maps")
+    async def map_list(x_roster_token: str = Header(default="")) -> dict:
+        ms = _require_maps()
+        user = await _optional_user(x_roster_token)
+        if user is None:
+            raise HTTPException(status_code=401, detail="sign in first")
+        maps = await ms.list_mine(user["id"])
+        for m in maps:
+            m["share_path"] = f"#m/{m['id']}?t={m.pop('share_token')}"
+        return {"maps": maps}
+
+    @app.get("/maps/{map_id}")
+    async def map_get(map_id: str, t: str = "", x_roster_token: str = Header(default="")) -> dict:
+        ms = _require_maps()
+        user = await _optional_user(x_roster_token)
+        m = await ms.get(map_id, owner_id=(user or {}).get("id"), share_token=(t or None))
+        if m is None:
+            raise HTTPException(status_code=404, detail="map not found")
+        if m.get("is_owner"):
+            m["share_path"] = f"#m/{m['id']}?t={m['share_token']}"
+        return {"map": m}
+
+    @app.patch("/maps/{map_id}")
+    async def map_patch(map_id: str, body: MapPatchIn,
+                        x_roster_token: str = Header(default="")) -> dict:
+        ms = _require_maps()
+        _, user = await _require_user(x_roster_token)
+        ok = await ms.update(map_id, owner_id=user["id"], title=body.title, notes=body.notes)
+        if not ok:
+            raise HTTPException(status_code=404, detail="map not found")
+        return {"ok": True}
+
+    @app.post("/maps/{map_id}/review")
+    async def map_review(map_id: str, body: MapReviewIn,
+                         x_roster_token: str = Header(default="")) -> dict:
+        ms = _require_maps()
+        _, user = await _require_user(x_roster_token)
+        ok = await ms.review(map_id, owner_id=user["id"], entity_id=body.entity_id,
+                             state=body.state, note=body.note)
+        if not ok:
+            raise HTTPException(status_code=400, detail="invalid review or not your map")
+        return {"ok": True}
+
+    @app.get("/maps/{map_id}/export.csv")
+    async def map_export_csv(map_id: str, t: str = "", x_roster_token: str = Header(default="")):
+        """CSV export preserving source links and evidence strength (spec acceptance)."""
+        from fastapi.responses import Response
+        from api.maps import build_csv
+        ms = _require_maps()
+        user = await _optional_user(x_roster_token)
+        m = await ms.get(map_id, owner_id=(user or {}).get("id"), share_token=(t or None))
+        if m is None:
+            raise HTTPException(status_code=404, detail="map not found")
+        fname = re.sub(r"[^A-Za-z0-9_-]+", "-", (m.get("title") or "talent-map"))[:60] or "talent-map"
+        return Response(content=build_csv(m), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{fname}.csv"'})
 
     # ---- saved searches ----
     @app.get("/me/searches")

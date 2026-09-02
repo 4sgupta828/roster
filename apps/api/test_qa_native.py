@@ -1125,3 +1125,25 @@ def test_evidence_corroboration_needs_independent_families():
     ], "github:x")
     assert "company" in cross["corroborated_keys"]
     assert cross["per_key"]["company"]["type"] == "corroborated"
+
+
+def test_map_csv_preserves_links_and_evidence_strength():
+    """Phase 3 export acceptance: CSV rows carry profile links and evidence strength/types, plus
+    the human review state — built by code from the snapshot."""
+    import csv, io
+    from api.maps import build_csv
+
+    m = {"rows": [{
+            "entity_id": "github:ada", "name": "Ada Byte", "blurb": "Staff infra engineer at Acme",
+            "attributes": [{"key": "company", "display": "Acme"}, {"key": "role", "display": "Staff Engineer"},
+                           {"key": "metro", "display": "Bay Area"}],
+            "links": [{"kind": "github", "url": "https://github.com/ada"}],
+            "citation": {"document_id": "https://github.com/ada"},
+            "evidence": {"strength": "self_stated", "types": ["self_stated"], "families": ["github"],
+                         "corroborated_keys": [], "gaps": ["seniority"]}}],
+         "reviews": {"github:ada": {"state": "shortlisted", "note": "strong infra fit"}}}
+    rows = list(csv.DictReader(io.StringIO(build_csv(m))))
+    assert rows[0]["name"] == "Ada Byte" and rows[0]["current_company"] == "Acme"
+    assert rows[0]["evidence_strength"] == "self_stated"
+    assert "https://github.com/ada" in rows[0]["profile_links"]
+    assert rows[0]["review_state"] == "shortlisted" and rows[0]["gaps"] == "seniority"

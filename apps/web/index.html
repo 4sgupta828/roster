@@ -514,6 +514,16 @@
   .ev-dist .ev-pill{margin-right:.3rem;}
   .ev-inspect{margin-left:.45rem;font-size:.7rem;font-weight:600;color:var(--gold);background:none;border:0;cursor:pointer;padding:.35rem .2rem;min-height:40px;}
   .ev-inspect:hover{text-decoration:underline;}
+  /* SAVED MAPS (Phase 3): the map bar above a Talent Map result + the header entry point. */
+  #mapsbtn{display:none;} body.logged-in #mapsbtn{display:inline-block;}
+  .mapbar{display:flex;flex-wrap:wrap;gap:.45rem;align-items:center;margin:.55rem 0 .8rem;padding:.55rem .7rem;border:1px solid var(--hair);border-radius:10px;background:var(--panel2);}
+  .mapbar .mb-title{flex:1 1 220px;min-width:0;font-weight:640;font-size:.92rem;border:0;background:transparent;color:var(--ink);padding:.4rem .2rem;min-height:40px;}
+  .mapbar .mb-btn{font-size:.78rem;font-weight:600;color:var(--gold);background:var(--panel);border:1px solid var(--hair);border-radius:999px;padding:.45rem .8rem;min-height:40px;cursor:pointer;text-decoration:none;white-space:nowrap;}
+  .mapbar .mb-btn:hover{border-color:var(--gold);}
+  .mapbar .mb-meta{flex-basis:100%;font-size:.74rem;color:var(--muted);}
+  .mapnotes{width:100%;min-height:72px;font:inherit;font-size:.86rem;border:1px solid var(--hair);border-radius:8px;padding:.5rem .6rem;background:var(--panel);color:var(--ink);margin:.2rem 0 .8rem;}
+  .maplist .mrow{display:block;padding:.6rem .2rem;border-top:1px solid var(--hair);text-decoration:none;color:inherit;}
+  .maplist .mrow b{color:var(--gold);} .maplist .mrow small{display:block;color:var(--muted);font-size:.76rem;margin-top:.15rem;}
   /* EVIDENCE RAIL — the signature inspector: right-side panel on desktop, bottom sheet on mobile. */
   #evrail{position:fixed;top:0;right:0;height:100vh;width:min(420px,100vw);background:var(--panel);border-left:1px solid var(--hair);
     box-shadow:-12px 0 32px -18px rgba(0,0,0,.35);z-index:1250;overflow-y:auto;padding:1rem 1.1rem 2rem;transform:translateX(100%);transition:transform .2s ease;}
@@ -1511,9 +1521,9 @@
     try{
       var saved=localStorage.getItem("roster-theme");
       if(saved==="dark"||saved==="editorial") document.documentElement.setAttribute("data-theme",saved);
-      else if(saved!=="light") document.documentElement.setAttribute("data-theme","editorial");
+      // default is LIGHT: only an explicit saved dark/editorial choice overrides it
       /* EDITORIAL is the default for new visitors; an explicit saved "light" is respected. */
-    }catch(e){ document.documentElement.setAttribute("data-theme","editorial"); }
+    }catch(e){ /* storage unavailable → stay on the light default */ }
     document.addEventListener("DOMContentLoaded", function(){
       var btn=document.getElementById("themebtn");
       function label(){ if(btn){ var t=current();
@@ -1561,6 +1571,7 @@
     <button type="button" class="histbtn" id="applyhdr" hidden style="margin-left:0;" title="Paste a job → see how you fit, how to apply, and draft a cover letter">🎯 Apply Assistant</button>
     <button type="button" class="histbtn" id="signinbtn" style="margin-left:0;" title="Sign in or create an account">Sign in</button>
     <button type="button" class="histbtn" id="histbtn2" style="margin-left:0;" hidden title="Your search history — private to your account">⧗ History</button>
+    <button type="button" class="histbtn" id="mapsbtn" style="margin-left:0;" title="Your saved Talent Maps" onclick="location.hash='#maps'">🗺 Maps</button>
     <button type="button" class="histbtn" id="acctbtn" style="margin-left:0;" hidden title="Your account — shortlists, saved searches, apply profile">◈ Account</button>
     <!-- legacy hidden hooks (handlers guard for null; kept out of the header) -->
     <button type="button" id="savedbtn" hidden></button>
@@ -2584,8 +2595,11 @@ function peopleRowsMarkup(data){
   const evDist = evGroups.length
     ? `<div class="ppl-cov ev-dist">◈ Evidence: ${evGroups.map(g=>`<span class="ev-pill ${({corroborated:"ev-strong",structured:"ev-strong","artifact-backed":"ev-strong","employer-stated":"ev-stated","self-stated":"ev-self","mixed evidence":"ev-mixed","needs evidence":"ev-gap"}[g.label]||"ev-self")}">${esc(g.label)} ${g.count}</span>`).join(" ")} <span class="ppl-fc" style="text-transform:none;">— self-stated is labeled, never shown as verified</span></div>`
     : "";
+  // MAP BAR (Phase 3): save this result as a durable Talent Map, or — when viewing a saved map —
+  // its title, notes, share link and CSV export.
+  const mapBar = (isEnum && rows.length && SEARCH_MODE === "people" && typeof talentMapBar === "function") ? talentMapBar() : "";
   const head = isEnum
-    ? `<div class="ppl-head"><b>${rows.length}</b> ${rows.length===1?"person":"people"} found${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evDist}`
+    ? `<div class="ppl-head"><b>${rows.length}</b> ${rows.length===1?"person":"people"} found${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evDist}`
     : `<div class="ppl-head">Profile</div>`;   // single-person profile card (no enumeration coverage)
   // TALENT CLUSTERS: a multi-company staffing comparison renders per-company sections — index
   // headcount + code-computed seniority/function mix, then that company's people cards.
@@ -5544,6 +5558,7 @@ async function askQuestion(question, opts){
     return;
   }
   CURRENT_Q = question;
+  window.ACTIVE_MAP = null;                 // a fresh search is not the saved map anymore
   document.body.classList.add("working");   // the spirit scene dissolves once the user gets to work
   autoSaveSearch(question, SEARCH_MODE);   // signed-in → record to the user's search history (fire-and-forget)
   // EXPLICIT mode: the People/Jobs toggle decides routing — no keyword guessing. Jobs → ATS search;
@@ -6109,6 +6124,7 @@ function wireEngineHops(root, t){
 function newConversation(){
   THREAD = {session_id:null, turns:[]};
   MODE_VIEWS = {}; TAB_THREADS = {};   // "＋ New search" wipes every tab's remembered result/thread
+  window.ACTIVE_MAP = null;            // …and leaves any saved-map view
   PEOPLE_CTX = null; JOBS_CTX = null;  // …and both tabs' refinement conversations start fresh
   GUIDED_REFINED = false;
   document.body.classList.remove("chatting"); out.style.paddingBottom = "";   // back to landing layout
@@ -7668,8 +7684,11 @@ setSearchMode("people");   // initial heading + placeholder (People by default)
 function routeHash(){    // #s/<id> → Q&A answer/thread · #p/<id> → panel session page · #sessions/#panel
   const mp = location.hash.match(/^#p\/(.+)$/);
   const m = location.hash.match(/^#s\/(.+)$/);
-  if(mp){ loadPanelSession(decodeURIComponent(mp[1])); }
+  const mm = location.hash.match(/^#m\/([^?]+)(?:\?t=(.+))?$/);   // saved Talent Map (private share link)
+  if(mm){ loadMapView(decodeURIComponent(mm[1]), mm[2] ? decodeURIComponent(mm[2]) : ""); }
+  else if(mp){ loadPanelSession(decodeURIComponent(mp[1])); }
   else if(m){ loadSharedSession(decodeURIComponent(m[1])); }   // legacy #s/<panelid> still self-routes to the panel
+  else if(location.hash === "#maps"){ openMapsList(); }
   else if(location.hash === "#sessions"){ openSessions(); }
   else if(location.hash === "#panel" && ASK_PANEL_ENABLED){ openPanel(""); }
   else if(location.hash === "#triage" && TRIAGE_ENABLED){ setMode("triage"); }
@@ -7681,6 +7700,9 @@ function routeHash(){    // #s/<id> → Q&A answer/thread · #p/<id> → panel s
 loadConfig().then(routeHash);
 // pasted link / back-forward within the tab (our own writes use replaceState → no event)
 window.addEventListener("hashchange", ()=>{
+  const mm = location.hash.match(/^#m\/([^?]+)(?:\?t=(.+))?$/);
+  if(mm){ loadMapView(decodeURIComponent(mm[1]), mm[2] ? decodeURIComponent(mm[2]) : ""); return; }
+  if(location.hash === "#maps"){ openMapsList(); return; }
   const mp = location.hash.match(/^#p\/(.+)$/);
   if(mp){ loadPanelSession(decodeURIComponent(mp[1])); return; }
   const m = location.hash.match(/^#s\/(.+)$/);
@@ -7737,6 +7759,89 @@ window.addEventListener("hashchange", ()=>{
   card.addEventListener("mouseleave", scheduleHide);
   document.addEventListener("scroll", hide, true);
 })();
+// ---- SAVED TALENT MAPS (talent-intelligence redesign, Phase 3): durable artifacts — save the current
+// result (rows + evidence packets + coverage + brief), title/notes, per-row review states persisted on
+// the map, CSV export preserving links + evidence strength, and a private share link (#m/<id>?t=…).
+window.ACTIVE_MAP = null;
+function talentMapBar(){
+  const m = window.ACTIVE_MAP;
+  if(m){
+    const share = m.share_path ? `<button type="button" class="mb-btn" onclick="copyMapLink()">🔗 Copy private link</button>` : "";
+    const csvHref = `/maps/${encodeURIComponent(m.id)}/export.csv${m.token?`?t=${encodeURIComponent(m.token)}`:""}`;
+    const title = m.is_owner
+      ? `<input class="mb-title" id="mapTitle" value="${esc(m.title||"")}" placeholder="Map title" onchange="saveMapMeta()">`
+      : `<span class="mb-title">${esc(m.title||"Talent Map")}</span>`;
+    return `<div class="mapbar">${title}${share}<a class="mb-btn" href="${csvHref}" target="_blank" rel="noopener">⬇ Export CSV</a>
+      <span class="mb-meta">Saved Talent Map · ${m.n_rows||0} people · ${m.is_owner?"you own this map — review states and notes persist here":"shared read-only view"}${m.created_at?` · saved ${esc(String(m.created_at).slice(0,10))}`:""}</span>
+      ${m.is_owner?`<textarea class="mapnotes" id="mapNotes" placeholder="Map notes — context for whoever you share this with (persisted)" onchange="saveMapMeta()">${esc(m.notes||"")}</textarea>`:(m.notes?`<div class="mb-meta">Notes: ${esc(m.notes)}</div>`:"")}
+    </div>`;
+  }
+  return `<div class="mapbar"><span class="mb-meta" style="flex-basis:auto;flex:1 1 200px;">Turn this result into a durable, shareable artifact.</span>
+    <button type="button" class="mb-btn" onclick="saveTalentMap()">💾 Save as Talent Map</button></div>`;
+}
+function lastPeopleTurn(){
+  for(let i = THREAD.turns.length - 1; i >= 0; i--){ const t = THREAD.turns[i]; if(Array.isArray(t.people_rows) && t.people_rows.length) return t; }
+  return null;
+}
+async function saveTalentMap(){
+  if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
+  const t = lastPeopleTurn(); if(!t) return;
+  const cb = t.coverage_basis || {};
+  const body = {tenant_id:"demo", map_type:"talent", brief:(t.question||CURRENT_Q||""), title:(t.question||"").slice(0,80),
+    rows:(t.people_rows||[]).slice(0,400), coverage:cb, filters:(cb.query_facets||{})};
+  try{
+    const r = await fetch("/maps", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(body)});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); alert(e.detail || "Couldn't save the map."); return; }
+    const d = await r.json();
+    window.ACTIVE_MAP = {id:d.id, title:d.title, share_path:d.share_path, token:(d.share_token||""), is_owner:true, reviews:{}, n_rows:d.rows, notes:"", created_at:new Date().toISOString()};
+    try{ history.replaceState(null, "", d.share_path); }catch(e){}
+    renderThread();
+  }catch(e){ alert("Couldn't save the map — " + (e.message||e)); }
+}
+async function loadMapView(id, token){
+  const out = $("#out"); if(out){ out.hidden = false; out.innerHTML = `<div class="status">Loading Talent Map…</div>`; }
+  try{
+    const r = await fetch(`/maps/${encodeURIComponent(id)}${token?`?t=${encodeURIComponent(token)}`:""}`, {headers: authHeaders()});
+    if(!r.ok){ if(out) out.innerHTML = `<div class="pitem-empty">This map isn't available — the link may be incomplete or private.</div>`; return; }
+    const m = (await r.json()).map;
+    if(typeof setSearchMode === "function") setSearchMode("people");   // a map lives in the Talent Map tab
+    window.ACTIVE_MAP = {id:m.id, title:m.title, notes:m.notes||"", share_path:m.share_path||"", token:(token||""),
+      is_owner:!!m.is_owner, reviews:(m.reviews||{}), n_rows:(m.rows||[]).length, created_at:m.created_at};
+    THREAD = {session_id:null, turns:[{question:m.brief||m.title||"Talent Map", people_rows:(m.rows||[]), coverage_basis:(m.coverage||{}), grounded:true, claims:[], coverage_gaps:[]}]};
+    TAB_THREADS.people = THREAD;
+    renderThread(); window.scrollTo({top:0});
+  }catch(e){ if(out) out.innerHTML = `<div class="pitem-empty">Couldn't load the map — ${esc(e.message||e)}</div>`; }
+}
+async function saveMapMeta(){
+  const m = window.ACTIVE_MAP; if(!m || !m.is_owner) return;
+  const title = ($("#mapTitle")||{}).value, notes = ($("#mapNotes")||{}).value;
+  m.title = title != null ? title : m.title; m.notes = notes != null ? notes : m.notes;
+  try{ await fetch(`/maps/${encodeURIComponent(m.id)}`, {method:"PATCH", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({title:m.title, notes:m.notes})}); }catch(e){}
+}
+async function syncMapReview(ref, state){
+  const m = window.ACTIVE_MAP; if(!m || !m.is_owner) return;
+  m.reviews[ref] = {state};
+  try{ await fetch(`/maps/${encodeURIComponent(m.id)}/review`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({entity_id:ref, state})}); }catch(e){}
+}
+function copyMapLink(){
+  const m = window.ACTIVE_MAP; if(!m || !m.share_path) return;
+  const url = location.origin + location.pathname + m.share_path;
+  const done = ()=>{ const b = document.querySelector(".mapbar .mb-btn"); if(b){ const o=b.textContent; b.textContent="✓ Link copied"; setTimeout(()=>{ b.textContent=o; }, 1600); } };
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(done, ()=>prompt("Copy this private link:", url)); }
+  else prompt("Copy this private link:", url);
+}
+async function openMapsList(){
+  const out = $("#out"); if(!out) return;
+  if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
+  out.hidden = false; out.innerHTML = `<div class="status">Loading your maps…</div>`;
+  try{
+    const r = await fetch("/maps", {headers: authHeaders()});
+    const maps = r.ok ? ((await r.json()).maps||[]) : [];
+    out.innerHTML = `<div class="ppl-wrap"><div class="ppl-head"><b>${maps.length}</b> saved Talent Map${maps.length===1?"":"s"}</div>
+      <div class="maplist">${maps.length ? maps.map(m=>`<a class="mrow" href="${esc(m.share_path)}"><b>${esc(m.title||m.brief||"Talent Map")}</b><small>${m.n_rows||0} people · saved ${esc(String(m.created_at||"").slice(0,10))} · ${esc((m.brief||"").slice(0,120))}</small></a>`).join("")
+        : `<div class="pitem-empty">No saved maps yet — run a Talent Map search and press “Save as Talent Map”.</div>`}</div></div>`;
+  }catch(e){ out.innerHTML = `<div class="pitem-empty">Couldn't load maps — ${esc(e.message||e)}</div>`; }
+}
 // ---- EVIDENCE RAIL (talent-intelligence redesign, Phase 2): the persistent inspector for a selected
 // person — why surfaced, the evidence LADDER (each claim typed by source provenance), sources, gaps,
 // freshness, links, and a human review state. Everything shown comes from the row payload the
@@ -7797,7 +7902,8 @@ window.addEventListener("hashchange", ()=>{
     const corro = (ev.corroborated_keys||[]).length ? `<div class="er-src">Corroborated across independent sources: ${ev.corroborated_keys.map(esc).join(", ")}.</div>` : `<div class="er-src">No claim is corroborated by two independent source families yet — treat every row above as its stated type.</div>`;
     const links = (p.links||[]).filter(l=>/^https?:\/\//i.test(l.url||"")).map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.kind==="x"?"𝕏":l.kind)} ↗</a>`).join("")
       + (rec.github ? `<a href="${esc(rec.github)}" target="_blank" rel="noopener noreferrer">github ↗</a>` : "");
-    const cur = getReview(ref);
+    const mapRev = (window.ACTIVE_MAP && ACTIVE_MAP.reviews && ACTIVE_MAP.reviews[ref]) || null;
+    const cur = (mapRev && mapRev.state) || getReview(ref);   // a saved map's review state wins over device memory
     const review = `<select class="er-review" style="min-height:40px;font-size:.85rem;">${REVIEW.map(r=>`<option value="${esc(r)}"${r===cur?" selected":""}>${esc(r)}</option>`).join("")}</select>`;
     const el = ensure();
     el.innerHTML = `<button type="button" class="er-x" aria-label="Close">✕</button>
@@ -7812,7 +7918,10 @@ window.addEventListener("hashchange", ()=>{
       ${links?`<div class="er-sec">Public links</div><div class="er-links">${links}</div>`:""}
       <div class="er-sec">Review state</div>${review}
       <div class="er-note">Evidence types are derived from where each fact came from — never from a model's opinion. Self-stated claims are useful for inclusion but are never shown as verified.</div>`;
-    el.querySelector(".er-review").addEventListener("change", e => setReview(ref, e.target.value));
+    el.querySelector(".er-review").addEventListener("change", e => {
+      setReview(ref, e.target.value);
+      if(typeof syncMapReview === "function") syncMapReview(ref, e.target.value);   // persists on the saved map (owner)
+    });
     el.classList.add("on"); el.setAttribute("aria-hidden","false"); el.scrollTop = 0;
   }
   document.addEventListener("click", e => {
