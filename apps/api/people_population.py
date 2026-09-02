@@ -633,6 +633,18 @@ async def build_tailored_resume(jd_text: str, profile: dict, resume_text: str, l
         return None
 
 
+def _attr_display(f: dict) -> str:
+    """Human display for a facet: the stored display value, except when the ingester stored a
+    provenance NOTE there ('From metro' for a metro-derived country) — then the normalized value
+    (e.g. 'US') is what a reader should see in a card or the Evidence Rail."""
+    disp = (f.get("display_value") or "").strip()
+    if disp.lower().startswith("from ") or not disp:
+        val = (f.get("value_norm") or f.get("facet_value_norm") or "").strip()
+        if val:
+            return val.upper() if f.get("facet_key") == "country" else val.replace("_", " ")
+    return disp
+
+
 _IDENTITY_LINK_KINDS = {"github", "x", "twitter", "linkedin", "in", "email"}
 
 
@@ -703,7 +715,7 @@ def _person_row_from_facets(r: dict) -> dict:
         if f["facet_key"].startswith("link_"):
             links.append({"kind": f["facet_key"][5:], "url": f["display_value"]})
         else:
-            attrs.append({"key": f["facet_key"], "display": f["display_value"],
+            attrs.append({"key": f["facet_key"], "display": _attr_display(f),
                           "document_id": f["document_id"], "block_id": f["block_id"]})
     links, attrs = _dedupe_links(links), _dedupe_attrs(attrs)
     from api.evidence import evidence_packet
@@ -1455,7 +1467,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             if f["facet_key"].startswith("link_"):
                 links.append({"kind": f["facet_key"][5:], "url": f["display_value"]})
             else:
-                attrs.append({"key": f["facet_key"], "display": f["display_value"],
+                attrs.append({"key": f["facet_key"], "display": _attr_display(f),
                               "document_id": f["document_id"], "block_id": f["block_id"]})
         links, attrs = _dedupe_links(links), _dedupe_attrs(attrs)
         # LinkedIn PROXY: when we have no direct LinkedIn link, synthesize a Google search over the
@@ -1538,11 +1550,17 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             _sen: dict[str, int] = {}
             _fn: dict[str, int] = {}
             for p in members:
+                _seen_sen, _seen_fn = set(), set()
                 for a in p["attributes"]:
-                    if a.get("key") == "seniority" and a.get("display"):
-                        _sen[a["display"]] = _sen.get(a["display"], 0) + 1
-                    elif a.get("key") == "function" and a.get("display"):
-                        _fn[a["display"]] = _fn.get(a["display"], 0) + 1
+                    # normalize display variants ('Senior'/'senior'/'senior ') so a person counts
+                    # ONCE per distinct level/function in the mix
+                    d = (a.get("display") or "").strip().replace("_", " ").title()
+                    if not d:
+                        continue
+                    if a.get("key") == "seniority" and d not in _seen_sen:
+                        _seen_sen.add(d); _sen[d] = _sen.get(d, 0) + 1
+                    elif a.get("key") == "function" and d not in _seen_fn:
+                        _seen_fn.add(d); _fn[d] = _fn.get(d, 0) + 1
             clusters.append({
                 "company": c, "count": len(members),
                 "entity_ids": [p["entity_id"] for p in members],

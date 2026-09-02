@@ -2147,6 +2147,11 @@ const label = k => k === "web" ? "Web" : k === "workspace" ? "Workspace" : "Corp
 
 // A random real example question for the intake prompt (or the plain placeholder if none).
 function pickPlaceholder(){
+  // Vertical example questions rotate ONLY in Q&A; Talent Map / Jobs keep their brief-shaped
+  // placeholders (spec Phase 1: replace the generic prompt with talent-map examples).
+  if(typeof SEARCH_MODE !== "undefined" && SEARCH_MODE !== "qa" && typeof PJ_COPY !== "undefined" && PJ_COPY[SEARCH_MODE]){
+    return PJ_COPY[SEARCH_MODE].ph;
+  }
   return EXAMPLES.length ? EXAMPLES[Math.floor(Math.random()*EXAMPLES.length)] : BASE_PLACEHOLDER;
 }
 
@@ -7761,7 +7766,9 @@ window.addEventListener("hashchange", ()=>{
     const rec = (window.PEOPLE_INDEX||{})[ref]; if(!rec || !rec.row) return;
     const p = rec.row, ev = p.evidence||{}, perKey = ev.per_key||{};
     const attr = k => (p.attributes||[]).find(a=>a.key===k) || {};
-    const role = attr("title").display || attr("role").display || "";
+    // the stored 'title' facet is often just the person's name — never echo the name as a role
+    const rawTitle = attr("title").display || "";
+    const role = attr("role").display || (rawTitle && rawTitle.toLowerCase() !== String(p.name||"").toLowerCase() ? rawTitle : "") || "";
     const co = attr("company").display || "";
     const loc = attr("metro").display || attr("country").display || "";
     const brief = window.LAST_PEOPLE_FACETS || {};
@@ -7778,7 +7785,8 @@ window.addEventListener("hashchange", ()=>{
     if(Array.isArray(p.reasons) && p.reasons.length) why.push(`Also: ${p.reasons.map(esc).join(", ")}.`);
     if(!why.length) why.push("Surfaced by the compiled facet filter for this brief.");
     // EVIDENCE LADDER — one row per grounded attribute, typed by its source provenance.
-    const ladder = (p.attributes||[]).filter(a=>a.display && !/^link_/.test(a.key||"")).map(a => {
+    const ladder = (p.attributes||[]).filter(a=>a.display && !/^link_/.test(a.key||"")
+        && !(a.key==="title" && String(a.display).toLowerCase()===String(p.name||"").toLowerCase())).map(a => {
       const t = (perKey[a.key]||{}).type || ev.strength || "self_stated";
       const fam = (perKey[a.key]||{}).family || (ev.families||[])[0] || "";
       const src = FAMILY[fam] || (fam ? fam : "source in Roster's index");
