@@ -821,6 +821,12 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
     want_sens = {str(s).lower() for s in (prefs.get("seniorities") or []) if str(s).strip()}
     want_country = (prefs.get("country") or "").lower()
     locs = [str(l).lower() for l in (prefs.get("locations") or []) if str(l).strip()]
+    # LOCAL scope (the recruiter's metro / state) applies when no explicit locations were given:
+    # clearly-elsewhere candidates dropped, unknown kept, confirmed-local lead (partition below)
+    _lm = (str(prefs.get("metro") or "").lower() if not locs and want_country in ("", "us") else "")
+    _ls = (str(prefs.get("state") or "").lower() if not locs and want_country in ("", "us") else "")
+    from api.geo import partition_local, person_geo_status, scope_label, scope_statement
+    _geo_dropped = 0
     excl_raw = [str(c).strip() for c in (prefs.get("exclude_companies") or []) if str(c).strip()]
     excl = {_norm_co(c) for c in excl_raw if _norm_co(c)}
     excluded_n = 0
@@ -831,6 +837,9 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
             return next((f["value_norm"] for f in facets if f["facet_key"] == k), "")
         sen, country, metro = fval("seniority"), fval("country"), fval("metro")
         if want_country and country and country != want_country:   # drop only when we KNOW it's elsewhere
+            continue
+        if (_lm or _ls) and person_geo_status(facets, metro=_lm, state=_ls) == "out":
+            _geo_dropped += 1
             continue
         # Hide people at the hiring company — check ALL of the person's company facets (a profile can
         # carry more than one), not just the first, so a current employer listed after a prior one is
@@ -851,10 +860,18 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
     out.sort(key=lambda x: -x["_score"])
     for c in out:
         c.pop("_score", None)
+    _gs = None
+    if _lm or _ls:
+        _fac = {r["entity_id"]: r["facets"] for r in rows}
+        out, _gc = partition_local(out, lambda p: person_geo_status(_fac.get(p["entity_id"], []), metro=_lm, state=_ls))
+        _gc["out"] = _geo_dropped
+        _st = _ls or US_METROS.get(_lm, {}).get("state", "")
+        _gs = {"metro": _lm, "state": _st, "label": scope_label(_lm, _ls), "state_label": US_STATES.get(_st, ""),
+               "counts": _gc, "source": "selector", "statement": scope_statement("people", _lm, _ls, _gc)}
     out = out[: int(prefs.get("limit", 40))]
     from api.artifacts import attach_artifacts
     await attach_artifacts(store, out)          # public artifacts + freshness on the returned cards
-    return {"people_rows": out,
+    return {"people_rows": out, "geo_scope": _gs,
             "note": (want_country.upper() + " only" if want_country else ""),
             "excluded_source_company": ({"companies": excl_raw, "count": excluded_n} if excl else None)}
 

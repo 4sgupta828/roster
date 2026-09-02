@@ -7368,7 +7368,8 @@ function renderMatchResults(d){
   const jobs = d.jobs||[];
   const base = jobs.length ? (d.note||`Top ${jobs.length} matches for your résumé.`) : (d.note || "No matches yet — add or parse a résumé, or loosen preferences.");
   $("#matchnote").innerHTML = esc(base) + (d.rotated
-    ? ` · <a href="#" onclick="resetJobRotation();return false;" style="color:var(--gold);">start over</a>` : "");
+    ? ` · <a href="#" onclick="resetJobRotation();return false;" style="color:var(--gold);">start over</a>` : "")
+    + scopeChip(d.geo_scope);
   rememberSeenJobs(jobs);   // what's on screen now rotates DOWN next run (never removed)
   $("#matchresults").innerHTML = jobs.map(j=>{
     const co = esc((j.company||"").replace(/_/g," "));
@@ -7551,7 +7552,7 @@ async function runJDMatch(){
     const exNote = (ex && ex.count) ? ` · hid ${ex.count} at ${(ex.companies||[]).join(", ")} (tick the box to include)` : "";
     $("#jdnote").textContent = rows.length ? (`Top ${rows.length} candidates`+(d.note?` · ${d.note}`:"")+exNote) : ("No candidates found — loosen the filters."+exNote);
     rows.forEach(p=>{ p.blurb = `[${p.match_pct}% fit${(p.reasons&&p.reasons.length)?" · "+p.reasons.join(" · "):""}] ` + (p.blurb||""); });
-    $("#jdresults").innerHTML = peopleRowsMarkup({people_rows: rows, coverage_basis:{query_facets:{}, population_statement:""}});
+    $("#jdresults").innerHTML = scopeChip(d.geo_scope) + peopleRowsMarkup({people_rows: rows, coverage_basis:{query_facets:{}, population_statement:""}});
   }catch(e){ $("#jdnote").textContent = "Match failed — try again."; }
 }
 $("#candhdr") && $("#candhdr").addEventListener("click", openJD);
@@ -8234,8 +8235,18 @@ function scopeChip(gs){
 }
 document.addEventListener("click", e => {
   const b = e.target.closest && e.target.closest(".ppl-scope");
-  if(b){ e.preventDefault(); setScopeAndRerun(b.dataset.scope || "us"); }
+  if(!b) return;
+  e.preventDefault();
+  const v = b.dataset.scope || "us";
+  if(b.closest("#matchresults,#matchnote")){ setScopeOnly(v); if(typeof runMatch === "function") runMatch(); return; }
+  if(b.closest("#jdresults,#jdnote")){ setScopeOnly(v); if(typeof runJDMatch === "function") runJDMatch(); return; }
+  setScopeAndRerun(v);
 });
+function setScopeOnly(value){
+  const sel = document.getElementById("countrysel"); if(!sel) return;
+  if(!sel.querySelector(`option[value="${CSS.escape(value)}"]`)){ const o = document.createElement("option"); o.value = value; o.textContent = value; sel.appendChild(o); }
+  sel.value = value; sel.dispatchEvent(new Event("change"));
+}
 // ---- Talent Map paging + cohort enrichment (LinkedIn snippets for the people SHOWN) ------------
 function rerenderPeople(pid){
   const data = (window.PEOPLE_RENDERS||{})[pid]; if(!data) return null;

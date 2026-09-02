@@ -1229,6 +1229,8 @@ class MatchPeopleIn(BaseModel):        # recruiter reverse-match: JD → candida
     seniorities: list[str] = []
     locations: list[str] = []
     country: str = "us"
+    metro: str = ""                    # LOCAL scope (recruiter's metro / state): local candidates lead
+    state: str = ""
     limit: int = 40
     allow_source_company: bool = False   # recruiter opt-in: include people at the JD's hiring company
 
