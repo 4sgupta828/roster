@@ -79,3 +79,47 @@ def test_lookup_person_resolves_clarifies_and_handles_absence():
     none = _run(lookup_person(store, "Nobody Here"))
     assert none["person_lookup"]["resolution"] == "none" and none["people_rows"] == []
     assert none["person_card"]["links"][0]["kind"] == "github_search"          # explicit search links remain
+
+
+def test_people_surface_person_lookup_end_to_end(monkeypatch):
+    """People tab + a person name: the index is searched (no research, no router call); several
+    same-named people → clarify + candidates; the next utterance with prior_person resolves it."""
+    from fastapi.testclient import TestClient
+    from roster_kernel.providers.llm import LLMResult
+    import api.app as appmod
+    from api.app import create_app
+    from api.people_population import _FacetParse
+    from api.test_qa_native import _AskSpy
+
+    class _NameLLM:
+        async def complete(self, *, system, messages, response_format, max_tokens=2048, temperature=None):
+            assert response_format is _FacetParse
+            txt = messages[-1]["content"] if messages else ""
+            return LLMResult(parsed=_FacetParse(person="Tom Brown",
+                                                person_context=("Anthropic" if "Anthropic" in txt else "")),
+                             output_tokens=5)
+
+    people = [_facet_person("openalex:A1", "Tom Brown", company="Anthropic", role="Researcher"),
+              _facet_person("yc:1", "Tom Brown", company="SolidStage", role="Founder")]
+
+    class _AppStore(_Store):
+        async def people_index_stats(self, *, tenant_id):
+            return {"persons_indexed": 2, "source_documents": 2, "facet_coverage": {}}
+
+    svc = _AskSpy(answer="MUST NOT RUN")
+    monkeypatch.setenv("ROSTER_QA_ROUTER", "1"); monkeypatch.setenv("ROSTER_PEOPLE_POPULATION", "1")
+    monkeypatch.delenv("ROSTER_REASONED_DEFAULT", raising=False)
+    monkeypatch.setattr(appmod, "build_llm", lambda *a, **k: _NameLLM())
+    app = create_app(svc); app.state.claim_store = _AppStore(people)
+    client = TestClient(app)
+    r = client.post("/research", json={"question": "Tom Brown", "tenant_id": "demo", "surface": "people"}).json()
+    assert svc.calls == [] and r["answer"] == "" and r.get("redirect_to_qa") is not True
+    assert r["person_lookup"]["resolution"] == "ambiguous" and len(r["people_rows"]) == 2
+    assert r["person_lookup"]["clarify"].startswith("Which Tom Brown? 2 people")
+    r2 = client.post("/research", json={"question": "the one at Anthropic", "tenant_id": "demo",
+                                        "surface": "people", "prior_person": "Tom Brown"}).json()
+    assert r2["person_lookup"]["resolution"] == "resolved" and r2["people_rows"][0]["entity_id"] == "openalex:A1"
+    r3 = client.post("/research", json={"question": "yc:1", "tenant_id": "demo", "surface": "people",
+                                        "prior_person": "Tom Brown"}).json()          # a picked card
+    assert r3["person_lookup"]["resolution"] == "resolved" and r3["people_rows"][0]["entity_id"] == "yc:1"
+    assert svc.calls == []
