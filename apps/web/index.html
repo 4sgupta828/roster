@@ -12,7 +12,7 @@
     color-scheme:light;
     --bg:#F7F8FB; --panel:#FFFFFF; --panel2:#F1F3F9; --ink:#0E1726; --muted:#5B6675;
     --gold:#4F46E5; --gold-strong:#4338CA; --gold-rgb:79,70,229; --verified:#08744E; --gap:#C2701C;
-    --person:#0B5CAD; --person-rgb:11,92,173;   /* deep azure blue (distinct from the indigo accent) */
+    --person:#0B5CAD; --person-rgb:11,92,173;   /* deep azure blue (distinct from the indigo accent) */ --graph:#2C5490;
     --on-accent:#FFFFFF; --on-accent-rgb:255,255,255;   /* white text on the indigo accent */
     --hair:#E4E7EE; --hair-soft:rgba(14,23,38,.05);
     --hl-f:14,159,110; --hl-r:194,112,28; --hl-k:79,70,229;   /* darker tints stay legible on white */
@@ -33,7 +33,7 @@
     color-scheme:dark;
     --bg:#0A0F1E; --panel:#131C30; --panel2:#0F1728; --ink:#EAECF2; --muted:#8B96A9;
     --gold:#818CF8; --gold-strong:#A5B0FF; --gold-rgb:129,140,248; --verified:#4ADE9E; --gap:#E0A55E;
-    --person:#8AB8F8; --person-rgb:138,184,248;   /* soft azure on the dark ground */
+    --person:#8AB8F8; --person-rgb:138,184,248;   /* soft azure on the dark ground */ --graph:#7FA8E0;
     --on-accent:#0B1020; --on-accent-rgb:11,16,32;
     --hair:#26314C; --hair-soft:rgba(255,255,255,.06);
     --hl-f:74,222,158; --hl-r:224,165,94; --hl-k:129,140,248;
@@ -49,7 +49,7 @@
     color-scheme:light;
     --bg:#F6F3EA; --panel:#FDFBF5; --panel2:#F0ECE0; --ink:#221D12; --muted:#6E6550;
     --gold:#8A6A1F; --gold-strong:#6E5314; --gold-rgb:138,106,31; --verified:#2E6B4F; --gap:#A05C24;
-    --person:#123F73; --person-rgb:18,63,115;   /* darker azure for the paper theme */
+    --person:#123F73; --person-rgb:18,63,115;   /* darker azure for the paper theme */ --graph:#234B7A;
     --on-accent:#FDF8EA; --on-accent-rgb:253,248,234;
     --hair:#DCD4C0; --hair-soft:rgba(34,29,18,.06);
     --hl-f:46,107,79; --hl-r:138,106,31; --hl-k:63,94,150;
@@ -503,6 +503,40 @@
   .ppl-blurb{display:block;font-size:.82rem;line-height:1.45;color:var(--ink);opacity:.82;margin:.15rem 0;}
   .ppl-tags{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.16rem;}
   .ppl-tag{font-size:.64rem;font-weight:600;color:var(--person,#0B5CAD);background:rgba(var(--person-rgb,11,92,173),.10);padding:.1rem .42rem;border-radius:4px;}
+  /* EVIDENCE pills (talent-intelligence redesign): typed support, colored by rung. */
+  .ppl-ev{display:block;margin:.2rem 0 0;}
+  .ev-pill{display:inline-block;font-size:.62rem;font-weight:700;letter-spacing:.02em;padding:.1rem .44rem;border-radius:999px;border:1px solid transparent;white-space:nowrap;}
+  .ev-strong{color:var(--verified);background:rgba(8,116,78,.10);border-color:rgba(8,116,78,.30);}
+  .ev-stated{color:var(--graph,#315C96);background:rgba(49,92,150,.10);border-color:rgba(49,92,150,.28);}
+  .ev-self{color:var(--muted);background:rgba(106,113,108,.12);border-color:rgba(106,113,108,.26);}
+  .ev-mixed{color:var(--graph,#315C96);background:rgba(49,92,150,.07);border-color:rgba(49,92,150,.22);}
+  .ev-gap{color:var(--gap);background:rgba(184,106,34,.10);border-color:rgba(184,106,34,.30);}
+  .ev-dist .ev-pill{margin-right:.3rem;}
+  .ev-inspect{margin-left:.45rem;font-size:.7rem;font-weight:600;color:var(--gold);background:none;border:0;cursor:pointer;padding:.35rem .2rem;min-height:40px;}
+  .ev-inspect:hover{text-decoration:underline;}
+  /* EVIDENCE RAIL — the signature inspector: right-side panel on desktop, bottom sheet on mobile. */
+  #evrail{position:fixed;top:0;right:0;height:100vh;width:min(420px,100vw);background:var(--panel);border-left:1px solid var(--hair);
+    box-shadow:-12px 0 32px -18px rgba(0,0,0,.35);z-index:1250;overflow-y:auto;padding:1rem 1.1rem 2rem;transform:translateX(100%);transition:transform .2s ease;}
+  #evrail.on{transform:translateX(0);}
+  #evrail .er-x{position:absolute;top:.6rem;right:.7rem;width:40px;height:40px;border:0;background:var(--panel2);border-radius:999px;cursor:pointer;font-size:1.1rem;color:var(--ink);}
+  #evrail h3{font-family:var(--serif);font-size:1.15rem;margin:.2rem 2.6rem .1rem 0;line-height:1.25;}
+  #evrail .er-sub{font-size:.82rem;color:var(--muted);margin-bottom:.8rem;}
+  #evrail .er-sec{font-family:var(--mono);font-size:.62rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:1rem 0 .35rem;}
+  #evrail .er-why{font-size:.9rem;line-height:1.5;}
+  #evrail .er-row{display:grid;grid-template-columns:1fr auto;gap:.35rem .6rem;align-items:start;padding:.42rem 0;border-top:1px solid var(--hair);font-size:.84rem;}
+  #evrail .er-k{font-family:var(--mono);font-size:.64rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}
+  #evrail .er-v{color:var(--ink);font-weight:560;}
+  #evrail .er-src{grid-column:1/-1;font-size:.74rem;color:var(--muted);}
+  #evrail .er-src a{color:var(--gold);text-decoration:none;}
+  #evrail .er-gap{font-size:.82rem;color:var(--gap);}
+  #evrail .er-links a{display:inline-block;margin:.15rem .4rem .15rem 0;font-size:.8rem;color:var(--gold);text-decoration:none;min-height:40px;line-height:40px;}
+  #evrail .er-note{font-size:.76rem;color:var(--muted);margin-top:.9rem;line-height:1.45;}
+  @media (max-width:560px){
+    #evrail{top:auto;bottom:0;height:min(78vh,100vh);width:100vw;border-left:0;border-top:1px solid var(--hair);border-radius:14px 14px 0 0;
+      transform:translateY(100%);box-shadow:0 -12px 32px -18px rgba(0,0,0,.35);}
+    #evrail.on{transform:translateY(0);}
+    .ev-inspect{display:block;margin:.25rem 0 0;padding:.5rem 0;}
+  }
   .ppl-links{display:flex;flex-wrap:wrap;gap:.32rem;margin-top:.32rem;}
   .ppl-lnk{font-size:.66rem;font-weight:600;text-decoration:none;padding:.14rem .46rem;border-radius:5px;border:1px solid var(--hair);color:var(--faint,#8a93ad);background:rgba(138,147,173,.08);transition:all .12s;line-height:1.3;}
   .ppl-lnk:hover{border-color:currentColor;transform:translateY(-1px);}
@@ -1541,7 +1575,7 @@
 
   <h1 id="heading">Who are you looking for?</h1>
   <div class="pjmode" id="pjmode" role="tablist" aria-label="Search mode">
-    <button type="button" class="pjbtn on" data-pj="people" role="tab" aria-selected="true">👤 People</button>
+    <button type="button" class="pjbtn on" data-pj="people" role="tab" aria-selected="true">🗺 Talent Map</button>
     <button type="button" class="pjbtn" data-pj="jobs" role="tab" aria-selected="false">💼 Jobs</button>
     <button type="button" class="pjbtn" data-pj="qa" role="tab" aria-selected="false" id="pjqa" hidden>💬 Q&amp;A</button>
   </div>
@@ -1677,8 +1711,8 @@
         <circle class="sa-cap" cx="170" cy="80" r="2.4"/>
       </g>
     </svg>
-    <div class="mf-h">People, work, and companies — findable on merit.</div>
-    <div class="mf-b">Roster turns public professional signal into a living map of people, companies, and the work between them — so you can find the right role, find the right people, and understand the market they move in, whether you’re job-hunting, hiring, or just making sense of it all.</div>
+    <div class="mf-h">Evidence-typed talent maps for hard technical searches.</div>
+    <div class="mf-b">Roster maps who appears relevant to a hiring brief, what public evidence supports that, and what remains unverified — every claim labeled self-stated, employer-stated, artifact-backed, or corroborated, with honest coverage of what the corpus does and doesn’t hold. “Not found” means not in the corpus yet, not nonexistent.</div>
   </footer>
 </div>
 
@@ -2058,7 +2092,7 @@ let TRIAGE_ENABLED = false;     // guided-intake / triage mode (clarify → rout
 let ACCOUNTS_ENABLED = false;   // accounts + per-answer feedback (W-taxonomy)
 let SEARCH_MODE = "people";     // People/Jobs toggle — explicit routing, no keyword guessing
 const PJ_COPY = {
-  people: {h:"Who are you looking for?",  ph:"Search people — e.g. senior ML engineers at Stripe, or “someone who can scale ML infra at an early-stage startup”"},
+  people: {h:"Describe the search brief",  ph:"Talent Map brief — e.g. “senior infra engineers with public evidence of vector DB or distributed ML”, or “research talent at Anthropic and OpenAI”"},
   jobs:   {h:"What role are you looking for?", ph:"Search jobs — e.g. remote backend roles at big tech, or “design jobs that involve research”"},
   qa:     {h:"Ask about the people & jobs data", ph:"Ask about patterns — e.g. “which companies hire the most ML engineers?”, “where are data scientists concentrated?”, “seniority mix for AI roles?”"},
 };
@@ -2481,6 +2515,7 @@ function peopleRowsMarkup(data){
   const isEnum = !!data.coverage_basis;   // enumeration has coverage; a single-person profile does not
   const cb = data.coverage_basis||{};
   const facets = cb.query_facets||{};
+  window.LAST_PEOPLE_FACETS = facets;   // the brief's compiled filter — the Evidence Rail explains "why surfaced" against it
   const facetChips = Object.entries(facets).map(([k,v])=>
     `<span class="ppl-fc">${esc(k)}: ${esc((v||[]).join(" / "))}</span>`).join("");
   const cov = esc(cb.population_statement||"");
@@ -2507,13 +2542,22 @@ function peopleRowsMarkup(data){
     // citation-derived github badge only when the server links don't ALREADY carry one ('github github')
     const hasGhLink = (p.links||[]).some(l=>(l.kind||"")==="github");
     const linkBadges = (isGh&&!hasGhLink?badge("github",citeUrl):"") + (p.links||[]).map(l=>badge(l.kind,l.url)).join("");
+    // EVIDENCE strength pill (spec: confidence is visible, evidence is typed) — the row's headline
+    // support state, code-computed from source provenance. Colored by rung: strong=green, stated=
+    // graph-blue, self=source-gray, gap/stale=amber. Self-stated NEVER renders as verified.
+    const ev = p.evidence||{};
+    const evLabel = {corroborated:"corroborated",structured:"structured record",artifact_backed:"artifact-backed",employer_stated:"employer-stated",self_stated:"self-stated",mixed:"mixed evidence",gap:"needs evidence"};
+    const evClass = {corroborated:"ev-strong",structured:"ev-strong",artifact_backed:"ev-strong",employer_stated:"ev-stated",self_stated:"ev-self",mixed:"ev-mixed",gap:"ev-gap"};
+    const evPill = (ev.strength?`<span class="ev-pill ${evClass[ev.strength]||"ev-self"}" title="Evidence type — code-derived from the source; self-stated is never shown as verified">${evLabel[ev.strength]||ev.strength}</span>`:"")
+      + `<button type="button" class="ev-inspect" data-ref="${esc(p.entity_id||p.name||"")}" title="Why surfaced, evidence ladder, sources, gaps">Inspect evidence ›</button>`;
     // Name links to a real profile: the citation URL if it is one, else the person's best public
     // link (LinkedIn/X/GitHub, server-ordered). Never a bare provenance tag. Plain text if neither.
     const profileUrl = citeUrl || ((p.links&&p.links[0]&&p.links[0].url)||"");
     const ref = p.entity_id||p.name||"";
     // stash the person's channels so the outreach composer can look them up by ref
     window.PEOPLE_INDEX = window.PEOPLE_INDEX || {};
-    window.PEOPLE_INDEX[ref] = {name:p.name||"", blurb:p.blurb||"", links:(p.links||[]), github:(isGh?citeUrl:"")};
+    window.PEOPLE_INDEX[ref] = {name:p.name||"", blurb:p.blurb||"", links:(p.links||[]), github:(isGh?citeUrl:""),
+      row:p, profileUrl:(citeUrl || ((p.links&&p.links[0]&&p.links[0].url)||""))};   // full row → Evidence Rail
     const saveBtn = `<button type="button" class="rsave" data-kind="person" data-ref="${esc(ref)}" data-label="${esc(p.name||"")}" data-sub="${esc((p.blurb||"").slice(0,140))}" data-url="${esc(profileUrl||"")}" title="Save to a shortlist">☆</button>`;
     const reachBtn = `<button type="button" class="rsave rmsg" data-ref="${esc(ref)}" title="Reach out on their shared channels">✉</button>`;
     const acts = `<div class="ppl-acts">${saveBtn}${reachBtn}</div>`;
@@ -2525,12 +2569,18 @@ function peopleRowsMarkup(data){
         ${nameHtml}
         ${p.blurb?`<span class="ppl-blurb">${esc(p.blurb)}</span>`:(title?`<span class="ppl-title">${esc(title)}</span>`:"")}
         ${tags?`<span class="ppl-tags">${tags}</span>`:""}
+        ${evPill?`<span class="ppl-ev">${evPill}</span>`:""}
         ${linkBadges?`<span class="ppl-links">${linkBadges}</span>`:""}
       </span></div>`;
   };
   const cards = rows.map(cardHtml).join("");
+  // EVIDENCE distribution (spec coverage panel): how many rows by headline evidence state.
+  const evGroups = cb.evidence_groups||[];
+  const evDist = evGroups.length
+    ? `<div class="ppl-cov ev-dist">◈ Evidence: ${evGroups.map(g=>`<span class="ev-pill ${({corroborated:"ev-strong",structured:"ev-strong","artifact-backed":"ev-strong","employer-stated":"ev-stated","self-stated":"ev-self","mixed evidence":"ev-mixed","needs evidence":"ev-gap"}[g.label]||"ev-self")}">${esc(g.label)} ${g.count}</span>`).join(" ")} <span class="ppl-fc" style="text-transform:none;">— self-stated is labeled, never shown as verified</span></div>`
+    : "";
   const head = isEnum
-    ? `<div class="ppl-head"><b>${rows.length}</b> ${rows.length===1?"person":"people"} found${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}`
+    ? `<div class="ppl-head"><b>${rows.length}</b> ${rows.length===1?"person":"people"} found${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evDist}`
     : `<div class="ppl-head">Profile</div>`;   // single-person profile card (no enumeration coverage)
   // TALENT CLUSTERS: a multi-company staffing comparison renders per-company sections — index
   // headcount + code-computed seniority/function mix, then that company's people cards.
@@ -7681,6 +7731,87 @@ window.addEventListener("hashchange", ()=>{
   card.addEventListener("mouseenter", cancel);
   card.addEventListener("mouseleave", scheduleHide);
   document.addEventListener("scroll", hide, true);
+})();
+// ---- EVIDENCE RAIL (talent-intelligence redesign, Phase 2): the persistent inspector for a selected
+// person — why surfaced, the evidence LADDER (each claim typed by source provenance), sources, gaps,
+// freshness, links, and a human review state. Everything shown comes from the row payload the
+// server already grounded; nothing here is model-generated. Right rail on desktop, bottom sheet ≤560px.
+(function(){
+  const EV_LABEL = {corroborated:"corroborated",structured:"structured record",artifact_backed:"artifact-backed",employer_stated:"employer-stated",self_stated:"self-stated",mixed:"mixed evidence",gap:"needs evidence"};
+  const EV_CLASS = {corroborated:"ev-strong",structured:"ev-strong",artifact_backed:"ev-strong",employer_stated:"ev-stated",self_stated:"ev-self",mixed:"ev-mixed",gap:"ev-gap"};
+  const FAMILY = {github:"the person's own GitHub profile (self-stated)",openalex:"OpenAlex scholarly registry — derived from published works",
+    yc:"Y Combinator company directory",npi:"NPI clinician registry",sec:"SEC EDGAR filings",theorg:"TheOrg org-chart page (employer-stated)",
+    aifund:"AI Fund portfolio page",ef:"Entrepreneur First company page",pear:"Pear VC portfolio page",sosv:"SOSV portfolio page"};
+  const REVIEW = ["unreviewed","shortlisted","needs more evidence","reviewed"];   // human decision support — never a verdict
+  let rail = null;
+  function ensure(){
+    if(rail) return rail;
+    rail = document.createElement("aside"); rail.id = "evrail"; rail.setAttribute("aria-label","Evidence inspector");
+    document.body.appendChild(rail);
+    rail.addEventListener("click", e => { if(e.target.closest(".er-x")) close(); });
+    document.addEventListener("keydown", e => { if(e.key === "Escape") close(); });
+    return rail;
+  }
+  function close(){ if(rail){ rail.classList.remove("on"); rail.setAttribute("aria-hidden","true"); } }
+  function reviewKey(ref){ return "roster_review_" + ref; }
+  function getReview(ref){ try{ return localStorage.getItem(reviewKey(ref)) || "unreviewed"; }catch(e){ return "unreviewed"; } }
+  function setReview(ref, v){ try{ localStorage.setItem(reviewKey(ref), v); }catch(e){} }
+  function pill(t){ return `<span class="ev-pill ${EV_CLASS[t]||"ev-self"}">${esc(EV_LABEL[t]||t||"")}</span>`; }
+  function open(ref){
+    const rec = (window.PEOPLE_INDEX||{})[ref]; if(!rec || !rec.row) return;
+    const p = rec.row, ev = p.evidence||{}, perKey = ev.per_key||{};
+    const attr = k => (p.attributes||[]).find(a=>a.key===k) || {};
+    const role = attr("title").display || attr("role").display || "";
+    const co = attr("company").display || "";
+    const loc = attr("metro").display || attr("country").display || "";
+    const brief = window.LAST_PEOPLE_FACETS || {};
+    // WHY SURFACED — the brief's compiled facets this person actually carries (grounded matches),
+    // plus relevance similarity / match reasons when the engine ranked semantically.
+    const hits = [];
+    Object.entries(brief).forEach(([k, vals]) => {
+      const mine = (p.attributes||[]).filter(a=>a.key===k).map(a=>String(a.display||"").toLowerCase().replace(/\s+/g,"_"));
+      (vals||[]).forEach(v => { if(mine.includes(String(v).toLowerCase())) hits.push(`${k}: ${String(v).replace(/_/g," ")}`); });
+    });
+    const why = [];
+    if(hits.length) why.push(`Matches the brief on <b>${hits.map(esc).join("</b>, <b>")}</b>.`);
+    if(p.match_pct) why.push(`Relevance ${p.match_pct}% — embedding similarity between the brief and this profile (a retrieval signal, not a fit score).`);
+    if(Array.isArray(p.reasons) && p.reasons.length) why.push(`Also: ${p.reasons.map(esc).join(", ")}.`);
+    if(!why.length) why.push("Surfaced by the compiled facet filter for this brief.");
+    // EVIDENCE LADDER — one row per grounded attribute, typed by its source provenance.
+    const ladder = (p.attributes||[]).filter(a=>a.display && !/^link_/.test(a.key||"")).map(a => {
+      const t = (perKey[a.key]||{}).type || ev.strength || "self_stated";
+      const fam = (perKey[a.key]||{}).family || (ev.families||[])[0] || "";
+      const src = FAMILY[fam] || (fam ? fam : "source in Roster's index");
+      const link = a.document_id && /^https?:\/\//i.test(a.document_id) ? ` · <a href="${esc(a.document_id)}" target="_blank" rel="noopener noreferrer">source ↗</a>` : "";
+      return `<div class="er-row"><div><div class="er-k">${esc(String(a.key||"").replace(/_/g," "))}</div><div class="er-v">${esc(a.display)}</div></div><div>${pill(t)}</div><div class="er-src">from ${esc(src)}${link}</div></div>`;
+    }).join("");
+    const gaps = (ev.gaps||[]).length ? `<div class="er-gap">No evidence in the corpus for: ${ev.gaps.map(g=>esc(g.replace(/_/g," "))).join(", ")} — a coverage gap, not a finding.</div>` : `<div class="er-src">No missing core dimensions.</div>`;
+    const corro = (ev.corroborated_keys||[]).length ? `<div class="er-src">Corroborated across independent sources: ${ev.corroborated_keys.map(esc).join(", ")}.</div>` : `<div class="er-src">No claim is corroborated by two independent source families yet — treat every row above as its stated type.</div>`;
+    const links = (p.links||[]).filter(l=>/^https?:\/\//i.test(l.url||"")).map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.kind==="x"?"𝕏":l.kind)} ↗</a>`).join("")
+      + (rec.github ? `<a href="${esc(rec.github)}" target="_blank" rel="noopener noreferrer">github ↗</a>` : "");
+    const cur = getReview(ref);
+    const review = `<select class="er-review" style="min-height:40px;font-size:.85rem;">${REVIEW.map(r=>`<option value="${esc(r)}"${r===cur?" selected":""}>${esc(r)}</option>`).join("")}</select>`;
+    const el = ensure();
+    el.innerHTML = `<button type="button" class="er-x" aria-label="Close">✕</button>
+      <h3>${esc(p.name||"")}</h3>
+      <div class="er-sub">${esc([role, co].filter(Boolean).join(" · ") || "—")}${loc?` · ${esc(loc)}`:""} &nbsp;${pill(ev.strength||"gap")}</div>
+      <div class="er-sec">Why surfaced</div><div class="er-why">${why.join(" ")}</div>
+      ${p.blurb?`<div class="er-src" style="margin-top:.4rem;">Profile text (self-stated): “${esc(p.blurb)}”</div>`:""}
+      <div class="er-sec">Evidence ladder</div>${ladder || '<div class="er-src">No grounded attributes on this row.</div>'}
+      <div class="er-sec">Corroboration</div>${corro}
+      <div class="er-sec">Gaps</div>${gaps}
+      <div class="er-sec">Freshness</div><div class="er-src">Undated — Roster does not yet track source dates for profile facets; treat current-role and current-employer claims as needing confirmation before outreach.</div>
+      ${links?`<div class="er-sec">Public links</div><div class="er-links">${links}</div>`:""}
+      <div class="er-sec">Review state</div>${review}
+      <div class="er-note">Evidence types are derived from where each fact came from — never from a model's opinion. Self-stated claims are useful for inclusion but are never shown as verified.</div>`;
+    el.querySelector(".er-review").addEventListener("change", e => setReview(ref, e.target.value));
+    el.classList.add("on"); el.setAttribute("aria-hidden","false"); el.scrollTop = 0;
+  }
+  document.addEventListener("click", e => {
+    const b = e.target.closest && e.target.closest(".ev-inspect");
+    if(b){ e.preventDefault(); open(b.dataset.ref); }
+  });
+  window.openEvidenceRail = open; window.closeEvidenceRail = close;
 })();
 // ---- selection → "Learn more" — grounded explain (Roster) or a free AI deep-dive (Google / Perplexity)
 // A floating popover on any highlighted text in the readable content. No backend, no cost: the external

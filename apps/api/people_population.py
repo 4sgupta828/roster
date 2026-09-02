@@ -706,8 +706,10 @@ def _person_row_from_facets(r: dict) -> dict:
             attrs.append({"key": f["facet_key"], "display": f["display_value"],
                           "document_id": f["document_id"], "block_id": f["block_id"]})
     links, attrs = _dedupe_links(links), _dedupe_attrs(attrs)
+    from api.evidence import evidence_packet
     return {"entity_id": r["entity_id"], "name": r["name"], "blurb": _person_blurb(attrs),
-            "attributes": attrs, "links": links, "citation": cite}
+            "attributes": attrs, "links": links, "citation": cite,
+            "evidence": evidence_packet(facets, r["entity_id"])}
 
 
 class _JDCompany(BaseModel):
@@ -1466,9 +1468,11 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             terms = " ".join(t for t in [r["name"], title_disp, company_disp, "LinkedIn"] if t)
             links.append({"kind": "linkedin_search",
                           "url": "https://www.google.com/search?q=" + urllib.parse.quote(terms)})
+        from api.evidence import evidence_packet
         people_rows.append({
             "entity_id": r["entity_id"], "name": r["name"], "blurb": _person_blurb(attrs),
-            "attributes": attrs, "links": links, "citation": cite})
+            "attributes": attrs, "links": links, "citation": cite,
+            "evidence": evidence_packet(r["facets"], r["entity_id"])})
 
     if semantic_first:                            # surface the relevance score on each card (like JD-match)
         for p in people_rows:
@@ -1570,5 +1574,10 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                     "(e.g. company leadership/team pages, conference speakers) to populate it.")
         grounded = False
 
+    # EVIDENCE DISTRIBUTION (spec: coverage is a first-class surface) — how many rows per headline
+    # evidence state, counted by code from the per-row packets (rows are fully built here).
+    if people_rows:
+        from api.evidence import evidence_groups
+        coverage["evidence_groups"] = evidence_groups(people_rows)
     return {"grounded": grounded, "not_people_query": False, "answer": answer,
             "people_rows": people_rows, "coverage_basis": coverage}

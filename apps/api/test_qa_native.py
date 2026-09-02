@@ -1077,3 +1077,51 @@ def test_cluster_query_relaxes_low_yield_seniority_first(monkeypatch):
     assert res["coverage_basis"]["relaxed_from"] == ["seniority"]
     cl = res["coverage_basis"]["clusters"]
     assert cl[0]["count"] == 8 and cl[1]["count"] == 6       # both clusters filled
+
+
+def test_evidence_packet_types_by_source_family():
+    """Evidence is TYPED by source provenance (spec): github facets = self-stated, theorg =
+    employer-stated, openalex = structured; a self-stated bio never becomes verified."""
+    from api.evidence import evidence_packet, evidence_groups
+
+    gh = evidence_packet([
+        {"facet_key": "role", "value_norm": "ml_engineer", "document_id": "github-metro"},
+        {"facet_key": "company", "value_norm": "anthropic", "document_id": "https://github.com/x"},
+    ], "github:x")
+    assert gh["strength"] == "self_stated" and gh["types"] == ["self_stated"]
+
+    org = evidence_packet([
+        {"facet_key": "role", "value_norm": "director", "document_id": "https://theorg.com/org/3m"},
+    ], "theorg:y")
+    assert org["strength"] == "employer_stated"
+
+    oa = evidence_packet([
+        {"facet_key": "function", "value_norm": "machine_learning",
+         "document_id": "https://openalex.org/A5"},
+    ], "openalex:z")
+    assert oa["strength"] == "structured"
+
+    # gap accounting: no role/company/etc → 'gap' with the missing dimensions listed
+    empty = evidence_packet([], "github:none")
+    assert empty["strength"] == "gap" and "role" in empty["gaps"]
+
+    groups = evidence_groups([{"evidence": gh}, {"evidence": org}, {"evidence": org}])
+    labels = {g["state"]: g["count"] for g in groups}
+    assert labels["employer_stated"] == 2 and labels["self_stated"] == 1
+
+
+def test_evidence_corroboration_needs_independent_families():
+    """Corroborated only when ≥2 INDEPENDENT source families agree on a claim value — two github
+    rows for the same value are NOT corroboration (echoing one biography)."""
+    from api.evidence import evidence_packet
+    same = evidence_packet([
+        {"facet_key": "company", "value_norm": "anthropic", "document_id": "https://github.com/x"},
+        {"facet_key": "company", "value_norm": "anthropic", "document_id": "github-metro"},
+    ], "github:x")
+    assert "company" not in same["corroborated_keys"]
+    cross = evidence_packet([
+        {"facet_key": "company", "value_norm": "anthropic", "document_id": "https://github.com/x"},
+        {"facet_key": "company", "value_norm": "anthropic", "document_id": "https://theorg.com/o"},
+    ], "github:x")
+    assert "company" in cross["corroborated_keys"]
+    assert cross["per_key"]["company"]["type"] == "corroborated"
