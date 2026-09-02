@@ -282,8 +282,18 @@ _TICKERS: dict[str, str] = {}   # company title → ticker (SEC list) — an ext
 
 def load_universe(top: int, names_file: str) -> list[str]:
     if names_file:
+        # one company per line; an optional second TAB column is the ticker (SEC list staged from a
+        # laptop — sec.gov serves 403 to datacenter IPs)
+        out = []
         with open(names_file) as fh:
-            return [ln.strip() for ln in fh if ln.strip()][:top or None]
+            for ln in fh:
+                parts = [x.strip() for x in ln.rstrip("\n").split("\t")]
+                if not parts or not parts[0]:
+                    continue
+                out.append(parts[0])
+                if len(parts) > 1 and 2 <= len(parts[1]) <= 12:
+                    _TICKERS[parts[0]] = parts[1].lower().replace("-", "").replace(".", "")
+        return out[:top or None]
     req = urllib.request.Request(_SEC_TICKERS, headers=_UA)
     with urllib.request.urlopen(req, timeout=30) as r:
         d = json.load(r)
