@@ -996,3 +996,44 @@ def test_people_card_chips_deduped():
     assert kinds.count("github") == 1 and kinds.count("x") == 1 and kinds.count("site") == 1
     metros = [a for a in card["attributes"] if a["key"] == "metro"]
     assert len(metros) == 1                          # one place, one chip
+
+
+def test_multi_company_query_builds_talent_clusters():
+    """'Infra talent at Anthropic and OpenAI' clusters per company with code-computed composition
+    (count, seniority/function mix) — the staffing-comparison view."""
+    from roster_kernel.providers.llm import LLMResult
+    from api.people_population import _FacetParse, answer_people_population
+
+    class _LLM:
+        async def complete(self, *, system, messages, response_format, max_tokens=2048,
+                           temperature=None):
+            return LLMResult(parsed=_FacetParse(function=["infrastructure"],
+                                                company=["anthropic", "openai"]), output_tokens=5)
+
+    def _p(eid, name, co, sen):
+        return {"entity_id": eid, "name": name, "facets": [
+            {"facet_key": "company", "facet_value_norm": co, "value_norm": co,
+             "display_value": co.title(), "document_id": "d", "block_id": "b"},
+            {"facet_key": "function", "facet_value_norm": "infrastructure", "value_norm": "infrastructure",
+             "display_value": "Infrastructure", "document_id": "d", "block_id": "b"},
+            {"facet_key": "seniority", "facet_value_norm": sen, "value_norm": sen,
+             "display_value": sen.title(), "document_id": "d", "block_id": "b"}]}
+
+    class _Store:
+        async def people_index_stats(self, *, tenant_id):
+            return {"persons_indexed": 9, "source_documents": 3, "facet_coverage": {}}
+
+        async def enumerate_by_facets(self, facets, *, tenant_id, cap):
+            return [_p("a1", "Ada", "anthropic", "staff"), _p("a2", "Alan", "anthropic", "staff"),
+                    _p("o1", "Omar", "openai", "senior")]
+
+    import asyncio
+    res = asyncio.get_event_loop().run_until_complete(answer_people_population(
+        question="infra talent at Anthropic and OpenAI", tenant_id="demo",
+        store=_Store(), llm=_LLM()))
+    cl = res["coverage_basis"]["clusters"]
+    assert [c["company"] for c in cl] == ["anthropic", "openai"]
+    a = cl[0]
+    assert a["count"] == 2 and set(a["entity_ids"]) == {"a1", "a2"}
+    assert a["seniority_mix"][0][0] == "Staff" and a["seniority_mix"][0][1] == 2
+    assert cl[1]["count"] == 1

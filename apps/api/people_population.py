@@ -1499,6 +1499,42 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         people_rows = ([p for p in people_rows if _primary_role(p) in _want_roles]
                        + [p for p in people_rows if _primary_role(p) not in _want_roles])
 
+    # TALENT CLUSTERS: a query naming SEVERAL companies ("top infra talent at Anthropic and
+    # OpenAI") is a STAFFING COMPARISON — group the results per company, each cluster with its
+    # code-computed composition (headcount in index, seniority mix, function mix). Numbers come
+    # from the rows, never the model; this is Roster's indexed view, not true headcount.
+    _comp_vals = [_norm_co(c) for c in (facets.get("company") or []) if str(c).strip()]
+    if len(_comp_vals) > 1 and people_rows:
+        _by_co: dict[str, list[dict]] = {}
+        for p in people_rows:
+            _p_cos = {_norm_co(a.get("display") or "") for a in p["attributes"]
+                      if a.get("key") == "company"}
+            for c in _comp_vals:
+                if c in _p_cos:
+                    _by_co.setdefault(c, []).append(p)
+                    break                     # a person clusters under the FIRST queried company hit
+        clusters = []
+        for c in _comp_vals:
+            members = _by_co.get(c) or []
+            if not members:
+                clusters.append({"company": c, "count": 0, "entity_ids": [],
+                                 "seniority_mix": [], "function_mix": []})
+                continue
+            _sen: dict[str, int] = {}
+            _fn: dict[str, int] = {}
+            for p in members:
+                for a in p["attributes"]:
+                    if a.get("key") == "seniority" and a.get("display"):
+                        _sen[a["display"]] = _sen.get(a["display"], 0) + 1
+                    elif a.get("key") == "function" and a.get("display"):
+                        _fn[a["display"]] = _fn.get(a["display"], 0) + 1
+            clusters.append({
+                "company": c, "count": len(members),
+                "entity_ids": [p["entity_id"] for p in members],
+                "seniority_mix": sorted(_sen.items(), key=lambda kv: -kv[1])[:4],
+                "function_mix": sorted(_fn.items(), key=lambda kv: -kv[1])[:4]})
+        coverage["clusters"] = clusters
+
     summary = _facet_summary(facets)
     if people_rows:
         relax_note = (f" (no exact match, so the {', '.join(relaxed_from)} filter"

@@ -67,7 +67,9 @@ and connections using public evidence. Classify the QUESTION into exactly ONE ro
 
 - indexed_people_discovery — enumerate/find PEOPLE by attributes (role, skill, seniority, company, \
 location): "find ML engineers in Berlin", "senior payments people at fintechs". The user wants a \
-LIST of matching people from Roster's index.
+LIST of matching people from Roster's index. Multi-company TALENT/STAFFING comparisons ("top infra \
+talent at Anthropic and OpenAI", "how have X and Y staffed their research teams") are ALSO this \
+route — the index clusters the results per company.
 - indexed_job_search — search OPEN ROLES / job postings: "backend roles at Stripe", "remote ML jobs".
 - person_dossier — who a SINGLE NAMED person is: identity, background, career, work, footprint.
 - company_hiring — a company as an EMPLOYER / its hiring: "what is Databricks like to work for", \

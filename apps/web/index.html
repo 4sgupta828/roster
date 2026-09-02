@@ -2484,7 +2484,7 @@ function peopleRowsMarkup(data){
   const facetChips = Object.entries(facets).map(([k,v])=>
     `<span class="ppl-fc">${esc(k)}: ${esc((v||[]).join(" / "))}</span>`).join("");
   const cov = esc(cb.population_statement||"");
-  const cards = rows.map(p=>{
+  const cardHtml = (p)=>{
     // citation.document_id is a SOURCE token — sometimes a full URL (github.com/…), sometimes a
     // bare provenance tag ("yc", "openalex"). Only an absolute http(s) URL may become an href;
     // a bare tag as href resolves to a broken same-origin path (e.g. /yc → 404).
@@ -2525,11 +2525,37 @@ function peopleRowsMarkup(data){
         ${tags?`<span class="ppl-tags">${tags}</span>`:""}
         ${linkBadges?`<span class="ppl-links">${linkBadges}</span>`:""}
       </span></div>`;
-  }).join("");
+  };
+  const cards = rows.map(cardHtml).join("");
   const head = isEnum
     ? `<div class="ppl-head"><b>${rows.length}</b> ${rows.length===1?"person":"people"} found${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}`
     : `<div class="ppl-head">Profile</div>`;   // single-person profile card (no enumeration coverage)
-  return `<div class="ppl-wrap">${head}<div class="ppl-grid">${cards}</div></div>`;
+  // TALENT CLUSTERS: a multi-company staffing comparison renders per-company sections — index
+  // headcount + code-computed seniority/function mix, then that company's people cards.
+  const clusters = cb.clusters || null;
+  let body;
+  if(clusters && clusters.length){
+    const byId = {}; rows.forEach(p=>{ byId[p.entity_id] = p; });
+    const mix = m => (m||[]).map(x=>`${String(x[0]||"").replace(/_/g," ")} ${x[1]}`).join(" · ");
+    body = clusters.map(c=>{
+      const members = (c.entity_ids||[]).map(id=>byId[id]).filter(Boolean);
+      const meta = [`${c.count} in index`,
+        mix(c.seniority_mix) && ("seniority: " + mix(c.seniority_mix)),
+        mix(c.function_mix) && ("functions: " + mix(c.function_mix))].filter(Boolean).join("  ·  ");
+      const coName = esc(String(c.company||"").replace(/_/g," ").replace(/\b\w/g,ch=>ch.toUpperCase()));
+      return `<div class="ppl-cluster" style="margin:1.05rem 0 .35rem;">
+        <div class="ppl-head" style="margin-bottom:.2rem;"><b>${coName}</b> <span class="ppl-fc">${esc(meta)}</span></div>
+        ${members.length?`<div class="ppl-grid">${members.map(cardHtml).join("")}</div>`
+                        :`<div class="pitem-empty">No indexed people at ${coName} match this filter yet — an index coverage gap, not proof of no team.</div>`}
+      </div>`;
+    }).join("");
+    const inCluster = new Set([].concat(...clusters.map(c=>c.entity_ids||[])));
+    const rest = rows.filter(p=>!inCluster.has(p.entity_id));
+    if(rest.length) body += `<div class="ppl-head" style="margin-top:1rem;">Also matching</div><div class="ppl-grid">${rest.map(cardHtml).join("")}</div>`;
+  } else {
+    body = `<div class="ppl-grid">${cards}</div>`;
+  }
+  return `<div class="ppl-wrap">${head}${body}</div>`;
 }
 
 // [n] AND grouped [n, m, k] citation refs → clickable sups, in ONE pass (a chained second replace
