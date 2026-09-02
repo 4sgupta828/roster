@@ -191,6 +191,37 @@ def _country_ok(loc: str, want: str) -> bool:
     return True if jc == "" else jc == want   # drop ONLY jobs clearly in a DIFFERENT country
 
 
+async def widen_jobs_locally(store, rows: list[dict], *, qvec: str | None, terms=None, country: str = "",
+                             metro: str = "", state: str = "", query_location: str = "",
+                             cap: int = 150) -> list[dict]:
+    """LOCAL RECALL for roles: the semantic cohort is drawn before the scope applies, so few of its
+    rows are located in the user's metro. Add roles whose location text is inside the scope (ranked
+    by the same similarity when we have a query vector), de-duplicated by id / (company,title,loc)."""
+    metro, state = (metro or "").lower(), (state or "").lower()
+    if (query_location or "").strip() or not (metro or state) or (country or "us").lower() != "us":
+        return rows
+    try:
+        from api.geo import location_regex
+        rx = location_regex(metro, state)
+        extra = await store.jobs_local(location_regex=rx, qvec=qvec, terms=terms, cap=cap)
+    except Exception as ex:  # noqa: BLE001 — additive
+        _log.info("local job recall skipped: %s", ex)
+        return rows
+    seen = {r.get("id") for r in rows if r.get("id") is not None}
+    seen_k = {((r.get("company") or ""), (r.get("title") or ""), (r.get("location") or "")) for r in rows}
+    out = list(rows)
+    for j in extra:
+        k = ((j.get("company") or ""), (j.get("title") or ""), (j.get("location") or ""))
+        if j.get("id") in seen or k in seen_k:
+            continue
+        if j.get("sim") is not None:
+            j["match_pct"] = min(99, round(float(j["sim"]) * 100))
+        out.append(j); seen.add(j.get("id")); seen_k.add(k)
+    if any(r.get("sim") is not None for r in out):
+        out.sort(key=lambda r: -(float(r.get("sim") or 0.0)))
+    return out
+
+
 def apply_job_scope(rows: list[dict], *, country: str = "", metro: str = "", state: str = "",
                     query_location: str = "") -> tuple[list[dict], dict | None]:
     """Country + LOCAL scope for job rows: drop the clearly-elsewhere, lead with the local, keep
@@ -249,6 +280,10 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
     _seen_n = len(prefs.get("seen_ids") or [])
     cands = await store.match_jobs_scored(
         qvec, cap=int(prefs.get("candidate_cap", 400)) + min(3 * _seen_n, 800))
+    cands = await widen_jobs_locally(store, cands, qvec=qvec, terms=(prefs.get("role_keywords") or None),
+                                     country=str(prefs.get("country") or "us"),
+                                     metro=str(prefs.get("metro") or ""), state=str(prefs.get("state") or ""),
+                                     query_location="")
     # ROLE-KEYWORD pool widening: the semantic top-N may hold only a HANDFUL of jobs actually titled
     # what the user asked for (verified live: ~10 'payments' titles in a 430-job pool → rotation had
     # nothing fresh to promote). Pull a title-keyword slice of the WHOLE index per named role and

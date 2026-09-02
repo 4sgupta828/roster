@@ -75,3 +75,15 @@ def test_apply_job_scope_leads_local_keeps_remote_and_respects_query_location():
     assert gs2 is None and len(rows2) == 5                                     # the query's own place wins
     rows3, gs3 = apply_job_scope(jobs, country="de", metro="bay_area")
     assert gs3 is None and [r["location"] for r in rows3] == ["Berlin, Germany", "Remote", ""]   # non-US country: no metro scope
+
+
+def test_location_regex_matches_scope_only():
+    import re
+    from api.geo import location_regex
+    rx = re.compile(location_regex("bay_area"), re.I)
+    assert rx.search("San Francisco, CA") and rx.search("Mountain View, California") and rx.search("SF Bay Area")
+    assert not rx.search("Seattle, WA") and not rx.search("Remote - US")
+    rs = re.compile(location_regex(state="ca"), re.I)
+    assert rs.search("Los Angeles, CA") and rs.search("Sacramento, California")
+    assert not rs.search("Toronto, Canada") and not rs.search("New York, NY")
+    assert location_regex() == ""

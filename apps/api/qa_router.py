@@ -304,7 +304,10 @@ async def indexed_jobs_answer(store, question: str, llm, *, country: str = "", m
             rows = await store.search_jobs(terms=q.get("title_keywords") or [],
                                            company=q.get("company") or None,
                                            location=(q.get("location") or None), cap=120)
-        from api.people_population import apply_job_scope
+        from api.people_population import apply_job_scope, widen_jobs_locally
+        rows = await widen_jobs_locally(store, rows, qvec=qvec, terms=(q.get("title_keywords") or None),
+                                        country=country, metro=metro, state=state,
+                                        query_location=(q.get("location") or ""))
         rows, _gs = apply_job_scope(rows, country=country, metro=metro, state=state,
                                     query_location=(q.get("location") or ""))   # an explicit location wins
         rows = rows[:40]

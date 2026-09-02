@@ -1836,6 +1836,36 @@ class ClaimGraphStore:
             return []
         return [dict(r) for r in rows]
 
+    async def jobs_local(self, *, location_regex: str, qvec: str | None = None, terms=None,
+                         cap: int = 150) -> list[dict]:
+        """Roles whose LOCATION text matches the scope regex (the local-recall path): ranked by
+        similarity to `qvec` when given (with sim), else newest first. Optional title terms narrow."""
+        if not location_regex:
+            return []
+        pool = await self._get_pool()
+        conds, args = ["location ~* $1"], [location_regex]
+        for t in (terms or [])[:6]:
+            t = str(t).strip().lower()
+            if t:
+                args.append("%" + t + "%"); conds.append(f"title_norm ILIKE ${len(args)}")
+        if qvec:
+            args.append(qvec)
+            sql = (f"SELECT id, company, title, location, department, url, source, "
+                   f"1 - (embedding <=> ${len(args)}::vector) AS sim FROM rs_job "
+                   f"WHERE embedding IS NOT NULL AND {' AND '.join(conds)} "
+                   f"ORDER BY embedding <=> ${len(args)}::vector LIMIT {int(cap)}")
+        else:
+            sql = (f"SELECT id, company, title, location, department, url, source, NULL::float AS sim "
+                   f"FROM rs_job WHERE {' AND '.join(conds)} ORDER BY updated_at DESC LIMIT {int(cap)}")
+        try:
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute("SET LOCAL hnsw.ef_search = 200")
+                    rows = await conn.fetch(sql, *args)
+        except Exception:
+            return []
+        return [dict(r) for r in rows]
+
     async def match_jobs_scored(self, qvec: str, *, cap: int = 400) -> list[dict]:
         """Top `cap` jobs by cosine similarity to the résumé embedding, WITH the similarity score and
         id, so the caller can re-rank by user preferences (location/seniority/company-type/…)."""

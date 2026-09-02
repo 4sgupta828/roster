@@ -241,3 +241,19 @@ def scope_statement(kind: str, metro: str, state: str, counts: dict) -> str:
                 f"{counts.get('unknown', 0)} unplaced follow; {counts.get('out', 0)} elsewhere were left out. {wider}")
     return (f"{counts.get('in', 0)} people placed there lead; {counts.get('unknown', 0)} with no "
             f"location on record are kept (they may be local); {counts.get('out', 0)} placed elsewhere were left out. {wider}")
+
+
+def location_regex(metro: str = "", state: str = "") -> str:
+    """A PostgreSQL case-insensitive regex matching job locations INSIDE the scope (metro city names,
+    or the state code / name) — the recall query for local roles. '' when no scope."""
+    parts: list[str] = []
+    if metro and metro in US_METROS:
+        cities = [re.escape(c) for c in US_METROS[metro]["cities"] if len(c) >= 4]
+        parts.append(r"(^|[^a-z])(" + "|".join(cities) + r")([^a-z]|$)")
+    st = state or (US_METROS.get(metro, {}).get("state") if metro else "")
+    if st and not metro:
+        parts.append(r",\s*" + re.escape(st.upper()) + r"([^a-z]|$)")
+        name = US_STATES.get(st, "")
+        if name:
+            parts.append(r"(^|[^a-z])" + re.escape(name) + r"([^a-z]|$)")
+    return "|".join(parts)

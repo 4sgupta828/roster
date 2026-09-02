@@ -2647,7 +2647,11 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 res = await agentic_job_search(store, body.question, build_llm(mode=resolve_mode()),
                                                country=(body.country or "us"))
                 if people_geo_scope_enabled():
-                    from api.people_population import apply_job_scope
+                    from api.people_population import (apply_job_scope, embed_query as _eq,
+                                                       semantic_enabled as _sem, widen_jobs_locally)
+                    res["jobs"] = await widen_jobs_locally(
+                        store, res.get("jobs") or [], qvec=(_eq(body.question) if _sem() else None),
+                        country=(body.country or "us"), metro=(body.metro or ""), state=(body.state or ""))
                     res["jobs"], res["geo_scope"] = apply_job_scope(
                         res.get("jobs") or [], metro=(body.metro or ""), state=(body.state or ""),
                         country=(body.country or "us"))
@@ -2696,7 +2700,11 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         # global, so an unscoped search now surfaces Stuttgart/Tokyo rows to a US user.
         _gs = None
         if people_geo_scope_enabled():
-            from api.people_population import apply_job_scope
+            from api.people_population import apply_job_scope, widen_jobs_locally
+            rows = await widen_jobs_locally(store, rows, qvec=qvec, terms=(q.get("title_keywords") or None),
+                                            country=(body.country or "us").strip().lower(),
+                                            metro=(body.metro or ""), state=(body.state or ""),
+                                            query_location=(q.get("location") or ""))
             rows, _gs = apply_job_scope(rows, country=(body.country or "us").strip().lower(),
                                         metro=(body.metro or ""), state=(body.state or ""),
                                         query_location=(q.get("location") or ""))   # an explicit location wins
