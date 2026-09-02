@@ -2673,7 +2673,7 @@ function peopleRowsMarkup(data){
       + `<div class="ppl-cov" style="border-left-color:var(--gap);">◔ ${esc(lk.clarify||"")} ${qaBtn}</div>`;
   }
   const head = isEnum
-    ? `<div class="ppl-head"><b>${rows.length}</b> ${rows.length===1?"person":"people"} found${paged.length<rows.length?` <span class="ppl-fc" style="text-transform:none;">· showing the ${paged.length} most relevant</span>`:""}${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evDist}${fpLine}${rankLine}<div class="ppl-enrich" data-pid="${esc(data._pid)}"></div>`
+    ? `<div class="ppl-head">${paged.length<rows.length?`Top <b>${paged.length}</b> most relevant <span class="ppl-fc" style="text-transform:none;">· of ${rows.length} matched in the index (the full cohort stays behind the coverage counts, saved maps and CSV)</span>`:`<b>${rows.length}</b> ${rows.length===1?"person":"people"} found`}${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evDist}${fpLine}${rankLine}<div class="ppl-enrich" data-pid="${esc(data._pid)}"></div>`
     : (lkHead || `<div class="ppl-head">Profile</div>`);   // single-person profile card (no enumeration coverage)
   // ambiguous lookup: each candidate card gets a PICK control (sends its entity id back as the choice)
   const pickCards = (lk && lk.resolution === "ambiguous")
@@ -7987,7 +7987,8 @@ async function openMapsList(){
     }
     // EVIDENCE LADDER — one row per grounded attribute, typed by its source provenance.
     const ladder = (p.attributes||[]).filter(a=>a.display && !/^link_/.test(a.key||"")
-        && !(a.key==="title" && String(a.display).toLowerCase()===String(p.name||"").toLowerCase())).map(a => {
+        && !(a.key==="title" && String(a.display).toLowerCase()===String(p.name||"").toLowerCase())
+        && !/^linkedin_/.test(a.key||"")).map(a => {
       const t = (perKey[a.key]||{}).type || ev.strength || "self_stated";
       const fam = (perKey[a.key]||{}).family || (ev.families||[])[0] || "";
       const src = FAMILY[fam] || (fam ? fam : "source in Roster's index");
@@ -8031,6 +8032,26 @@ async function openMapsList(){
     const fresh = (fp && fp.newest)
       ? `Newest linked artifact: <b>${esc(fp.newest)}</b>. Profile text itself is undated — treat current-role and current-employer claims as needing confirmation before outreach.`
       : `Undated — no dated artifact linked yet; treat current-role and current-employer claims as needing confirmation before outreach.`;
+    // LINKEDIN SNIPPET (evidence-model-v2): what the search engine's snippet of the profile says —
+    // self-stated headline, its fit to the brief, and how it was matched. Never read from linkedin.com.
+    const lis = p.linkedin || null;
+    const liHead = lis && lis.headline ? lis.headline : (attr("linkedin_headline").display || "");
+    const liUrl = (lis && lis.url) || ((p.links||[]).find(l=>(l.kind||"")==="linkedin")||{}).url || "";
+    let liSec;
+    if(liHead){
+      const fitTxt = lis && typeof lis.headline_fit === "number" ? ` · fits the brief <b>${Math.round(lis.headline_fit*100)}%</b> (embedding similarity of headline vs brief)` : "";
+      const how = lis && lis.hits && Object.keys(lis.hits).length ? ` Matched on ${esc(Object.entries(lis.hits).map(([k,v])=>k.replace(/_/g," ")+": "+v.join(", ")).join("; "))} — so agreement on those is consistency, not independent proof.` : "";
+      liSec = `<div class="er-row"><div><div class="er-k">linkedin headline</div><div class="er-v">“${esc(liHead)}”</div></div><div>${pill("self_stated")}</div><div class="er-src">quoted from a search-engine snippet of the profile${liUrl?` · <a href="${esc(liUrl)}" target="_blank" rel="noopener noreferrer">profile ↗</a>`:""}${fitTxt}.${how}</div></div>`;
+    } else if(lis && lis.status === "ambiguous"){
+      liSec = `<div class="er-gap">Several same-named LinkedIn profiles surfaced and none carried the company on file — nothing was guessed.</div>`
+        + ((lis.candidates||[]).map(c=>`<div class="er-art"><a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.name)} ↗</a><span class="er-art-m">${esc(c.headline||"")} · unverified</span></div>`).join(""));
+    } else if(lis && lis.status === "none"){
+      liSec = `<div class="er-gap">No same-named LinkedIn profile in search snippets — a coverage gap, not evidence of absence.</div>`;
+    } else if(lis && lis.status){
+      liSec = `<div class="er-src">Snippet read not completed (${esc(lis.status)}).</div>`;
+    } else {
+      liSec = `<div class="er-src">Not read yet — ${(window.USER&&USER.token)?"snippets are read for the people shown as they load; use “Resolve LinkedIn ⌕” below to read this one now":"sign in to read LinkedIn snippets for the people shown"}.</div>`;
+    }
     const mapRev = (window.ACTIVE_MAP && ACTIVE_MAP.reviews && ACTIVE_MAP.reviews[ref]) || null;
     const cur = (mapRev && mapRev.state) || getReview(ref);   // a saved map's review state wins over device memory
     const review = `<select class="er-review" style="min-height:40px;font-size:.85rem;">${REVIEW.map(r=>`<option value="${esc(r)}"${r===cur?" selected":""}>${esc(r)}</option>`).join("")}</select>`;
@@ -8041,6 +8062,7 @@ async function openMapsList(){
       <div class="er-sec">Why surfaced</div><div class="er-why">${why.join(" ")}</div>
       ${p.blurb?`<div class="er-src" style="margin-top:.4rem;">Profile text (self-stated): “${esc(p.blurb)}”</div>`:""}
       <div class="er-sec">Evidence ladder</div>${ladder || '<div class="er-src">No grounded attributes on this row.</div>'}
+      <div class="er-sec">LinkedIn snippet</div>${liSec}
       ${artSec}
       <div class="er-sec">Corroboration</div>${corro}${consist}
       ${calHtml?`<div class="er-sec">Calibration</div>${calHtml}`:""}
@@ -8123,7 +8145,12 @@ function showMorePeople(pid, step){
 }
 const ENRICH_BUSY = new Set();
 async function enrichVisible(pid){
-  const data = (window.PEOPLE_RENDERS||{})[pid]; if(!data || !(window.USER && USER.token)) return;
+  const data = (window.PEOPLE_RENDERS||{})[pid]; if(!data) return;
+  if(!(window.USER && USER.token)){
+    const n0 = document.querySelector(`.ppl-enrich[data-pid="${CSS.escape(pid)}"]`);
+    if(n0 && !n0.innerHTML) n0.innerHTML = `<div class="ppl-cov">⌕ Sign in (◈ Account) to read public LinkedIn snippets for the people shown — one search per person; the headline becomes labeled self-stated evidence and feeds the ranking.</div>`;
+    return;
+  }
   if(ENRICH_BUSY.has(pid)) return;
   const rows = (data.people_rows||[]).slice(0, data._shown || 20);
   const todo = rows.filter(p => p.entity_id && !p.linkedin && !/^search:/.test(p.entity_id));
