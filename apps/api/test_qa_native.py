@@ -967,8 +967,9 @@ def test_rotation_counts_twin_rows_as_seen(monkeypatch):
     monkeypatch.setattr(pp, "embed_query", lambda text: "[0.1]")
     import asyncio
     run = asyncio.get_event_loop().run_until_complete
-    r1 = run(match_resume_jobs(_Store(), {"_resume_text": "payments"}, {"limit": 2}))
+    r1 = run(match_resume_jobs(_Store(), {"_resume_text": "payments"}, {"limit": 1}))
     seen = [j["key"] for j in r1["jobs"]]           # FE now remembers the job KEY
+    assert r1["jobs"][0]["title"] == "Backend Engineer, Payments"
     r2 = run(match_resume_jobs(_Store(), {"_resume_text": "payments"},
                                {"limit": 2, "seen_ids": seen}))
     assert r2["jobs"][0]["title"] == "Staff Payments Engineer"   # twin row did NOT lead again
