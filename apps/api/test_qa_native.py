@@ -943,3 +943,32 @@ def test_match_jobs_dedupes_excludes_and_leads_with_named_roles(monkeypatch):
     assert 3 not in ids                              # excluded word never shows
     assert titles[0] == "Staff Payments Engineer"    # user-named role LEADS over higher-sim look-alikes
     assert "excluded by your title filters" in res["note"]
+
+
+def test_rotation_counts_twin_rows_as_seen(monkeypatch):
+    """A twin row of an already-seen job (same company|title via another source/id) must be demoted
+    too — rotating by row id alone re-served the identical posting under a fresh id."""
+    from api.people_population import match_resume_jobs
+    import api.people_population as pp
+
+    def _j(i, company, title, sim):
+        return {"id": i, "company": company, "title": title, "location": "Remote",
+                "url": "u", "source": "s", "sim": sim}
+
+    class _Store:
+        async def match_jobs_scored(self, qvec, cap=400):
+            return [_j(1, "Stripe", "Backend Engineer, Payments", 0.90),
+                    _j(2, "stripe", "Backend Engineer, Payments", 0.899),   # twin, other source
+                    _j(3, "globex", "Staff Payments Engineer", 0.88)]
+
+        async def companies_with_facet(self, keys, values=None):
+            return set()
+
+    monkeypatch.setattr(pp, "embed_query", lambda text: "[0.1]")
+    import asyncio
+    run = asyncio.get_event_loop().run_until_complete
+    r1 = run(match_resume_jobs(_Store(), {"_resume_text": "payments"}, {"limit": 2}))
+    seen = [j["key"] for j in r1["jobs"]]           # FE now remembers the job KEY
+    r2 = run(match_resume_jobs(_Store(), {"_resume_text": "payments"},
+                               {"limit": 2, "seen_ids": seen}))
+    assert r2["jobs"][0]["title"] == "Staff Payments Engineer"   # twin row did NOT lead again

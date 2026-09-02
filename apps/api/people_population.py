@@ -272,10 +272,15 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
         if "startup" in want and is_startup:
             score += 0.12; reasons.append("startup")
         types = [t for t, ok in (("F500", is_f500), ("Startup", is_startup), ("Public", is_public)) if ok]
-        fresh = str(j.get("id") or "") not in seen
+        # Rotation identity = the JOB (company|title), not the row id: the same posting arrives as
+        # multiple rows (second source, company-case variants) and the twin row must count as SEEN
+        # too — otherwise run 2 re-serves what the user just saw under a fresh id.
+        _key = _norm_co(co) + "|" + _norm_title(title)
+        fresh = str(j.get("id") or "") not in seen and _key not in seen
         if not fresh:
             score -= 0.30       # already shown → fresh comparable matches lead this run
         out.append({**{k: j.get(k) for k in ("id", "company", "title", "location", "url", "source")},
+                    "key": _key,
                     "score": round(score, 4), "match_pct": min(99, round(sim * 100)),
                     "seniority": jsen, "company_types": types, "reasons": reasons,
                     "fresh": fresh})

@@ -94,6 +94,31 @@ The interface must therefore foreground evidence type, source strength, freshnes
 8. Mobile remains supported.
    Every user-facing surface must work at <=400px. Dense tables need stacked cards or horizontal scrolling with clear preserved labels.
 
+## Evidence Taxonomy
+
+Roster should treat self-stated professional information as useful evidence, not as noise. The product's job is to label evidence accurately, not to pretend only public artifacts count.
+
+### Evidence types
+
+- Self-stated: LinkedIn page, personal site, resume, GitHub bio, X bio, or other profile controlled by the person.
+- Employer-stated: company team page, job announcement, press release, speaker page, portfolio page, or other organization-authored source.
+- Artifact-backed: GitHub repository, commit, technical post, paper, patent, talk, dataset, package, or other public work product tied to the person.
+- Structured: constrained public systems such as GitHub organizations, OpenAlex, ORCID, EDGAR, Companies House, Wikidata, or other registry-like sources.
+- Corroborated: two or more independent evidence families support the same material claim.
+- Inferred: Roster normalizes meaning from grounded text, such as mapping "ML platform lead" to a canonical function.
+- Weak: the source mentions the person or adjacent topic but does not strongly support the exact claim.
+- Gap: the useful field is missing or not yet in the corpus.
+- Stale: the source is old or insufficient for current-role/current-affiliation claims.
+
+### Evidence rules
+
+- Self-stated evidence can justify inclusion in a Talent Map when relevant, but it must render as self-stated.
+- Self-stated evidence cannot silently become "verified" or "corroborated."
+- Employer-stated evidence is stronger than self-stated for role and affiliation claims, but still remains stated evidence unless independently corroborated.
+- Artifact-backed evidence is strongest for capability claims, but lack of artifacts must not suppress otherwise relevant private-company talent.
+- Structured evidence is strong for the fields the source actually constrains, not for broader capability claims.
+- Corroboration upgrades confidence only when the sources are independent enough to avoid echoing the same biography.
+
 ## Information Architecture
 
 Replace the current top-level emphasis on People / Jobs / Q&A with buyer tasks.
@@ -423,9 +448,9 @@ Type:
 
 Layout:
 
-- Three-pane desktop workbench: brief and coverage on the left, map in the center, dossier/path inspector on the right.
+- Three-pane desktop workbench: brief and coverage on the left, map in the center, evidence inspector on the right.
 - Single-column mobile stack: brief, coverage summary, candidate cards, then inspector.
-- Tables for comparison, cards for individual review, path strips for relationships.
+- Tables for comparison, cards for individual review, and optional path strips for relationships.
 
 Signature element:
 
@@ -668,7 +693,7 @@ Changes:
 Acceptance:
 
 - A user can ask how two people/companies connect and inspect every hop.
-- A Talent Map can be filtered by reachable warm paths.
+- A Talent Map can be filtered by reachable warm paths when seed network data exists.
 - Empty and weak-path states are explicit and do not imply missing people are unconnected.
 
 ## Open Questions

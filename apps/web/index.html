@@ -7131,7 +7131,9 @@ function collectMatchPrefs(){
 // per-device); the match engine demotes those so every run exposes different available options.
 function seenJobIds(){ try{ return JSON.parse(localStorage.getItem("roster_seen_job_ids")||"[]").slice(-300); }catch(e){ return []; } }
 function rememberSeenJobs(jobs){ try{
-  const add = (jobs||[]).map(j=>String(j.id||"")).filter(Boolean);
+  // remember the JOB identity (server-provided company|title key) — a twin row of the same posting
+  // under another id/source must count as seen too; fall back to the row id for old payloads.
+  const add = (jobs||[]).map(j=>String(j.key||j.id||"")).filter(Boolean);
   const merged = [...new Set([...seenJobIds(), ...add])].slice(-300);
   localStorage.setItem("roster_seen_job_ids", JSON.stringify(merged));
 }catch(e){} }
