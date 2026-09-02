@@ -63,7 +63,8 @@ def _run(coro):
     return loop.run_until_complete(coro)
 
 
-def test_lookup_person_resolves_clarifies_and_handles_absence():
+def test_lookup_person_resolves_clarifies_and_handles_absence(monkeypatch):
+    monkeypatch.setenv("ROSTER_LINKEDIN_RESOLVE", "0")     # no network in unit tests
     store = _Store([_facet_person("github:a", "Mukul Gupta", company="Google", metro="Bay Area"),
                     _facet_person("github:b", "Mukul Gupta", company="IIT Delhi", role="Researcher")])
     amb = _run(lookup_person(store, "Mukul Gupta"))
@@ -108,6 +109,7 @@ def test_people_surface_person_lookup_end_to_end(monkeypatch):
 
     svc = _AskSpy(answer="MUST NOT RUN")
     monkeypatch.setenv("ROSTER_QA_ROUTER", "1"); monkeypatch.setenv("ROSTER_PEOPLE_POPULATION", "1")
+    monkeypatch.setenv("ROSTER_LINKEDIN_RESOLVE", "0")     # no network: the snippet leg is not under test here
     monkeypatch.delenv("ROSTER_REASONED_DEFAULT", raising=False)
     monkeypatch.setattr(appmod, "build_llm", lambda *a, **k: _NameLLM())
     app = create_app(svc); app.state.claim_store = _AppStore(people)

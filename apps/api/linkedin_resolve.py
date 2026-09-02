@@ -118,19 +118,42 @@ def hints_from_row(row: dict) -> dict[str, list[str]]:
 async def search_snippets(query: str, *, max_results: int = 10) -> list[dict]:
     """Search-engine results (url/title/snippet) — NO page fetches. Keyless DuckDuckGo HTML leg
     (works from the prod datacenter, verified); Brave when BRAVE_API_KEY is set."""
+    import asyncio
     import os
     try:
         if os.environ.get("BRAVE_API_KEY"):
             from roster_kernel.providers.brave_web import BraveWebSearch
-            client = BraveWebSearch()
-        else:
-            from roster_kernel.providers.ddg_web import DuckDuckGoWebSearch
-            client = DuckDuckGoWebSearch(fetch_bodies=False, timeout=10.0)
-        res = await client.search(query, max_results=max_results, open_web=True)
-        return [{"url": r.url, "title": r.title, "snippet": r.snippet or ""} for r in res]
+            res = await BraveWebSearch().search(query, max_results=max_results, open_web=True)
+            return [{"url": r.url, "title": r.title, "snippet": r.snippet or ""} for r in res]
+        return await asyncio.to_thread(_ddg_get, query, max_results)
     except Exception as e:  # noqa: BLE001 — the leg is best-effort
         _log.info("linkedin snippet search failed: %s", e)
         return []
+
+
+_DDG_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+           "(KHTML, like Gecko) Chrome/124 Safari/537.36")
+
+
+def _ddg_get(query: str, max_results: int) -> list[dict]:
+    """DuckDuckGo HTML results via a plain GET (verified to return results from the prod datacenter
+    where the kernel provider's POST shape draws the anti-bot page). Parsing reuses the kernel's
+    result regexes; no result page is fetched."""
+    import urllib.parse
+    import urllib.request
+    from roster_kernel.providers.ddg_web import _LINK, _SNIP, _clean, _real_url
+    url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)
+    req = urllib.request.Request(url, headers={"User-Agent": _DDG_UA})
+    with urllib.request.urlopen(req, timeout=12) as r:
+        body = r.read().decode("utf-8", "ignore")
+    links = _LINK.findall(body)[:max_results]
+    snips = [_clean(s) for s in _SNIP.findall(body)][:max_results]
+    out = []
+    for i, (href, title) in enumerate(links):
+        u = _real_url(href)
+        if u.startswith("http"):
+            out.append({"url": u, "title": _clean(title), "snippet": snips[i] if i < len(snips) else ""})
+    return out
 
 
 def build_query(name: str, hints: dict[str, list[str]]) -> str:

@@ -1162,7 +1162,8 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
             pass
         # on demand: resolve their LinkedIn from search snippets (never reads linkedin.com) when the
         # index holds no LinkedIn link yet; a confident match is stored as self-stated facets
-        if not any((l.get("kind") or "") == "linkedin" for l in rows[0].get("links") or []):
+        if (os.environ.get("ROSTER_LINKEDIN_RESOLVE", "1") == "1"
+                and not any((l.get("kind") or "") == "linkedin" for l in rows[0].get("links") or [])):
             try:
                 import asyncio
                 from api.linkedin_resolve import persist_resolution, resolve_linkedin
