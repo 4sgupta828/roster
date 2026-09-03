@@ -144,3 +144,37 @@ def test_grade_requirements_gates_on_verbatim_resume_quotes():
     assert not quote_in_text("payments team", resume)                           # < 4 words never proves anything
     # a missing grade is a gap; order follows the requirements list
     assert [r["verdict"] for r in grade_requirements(reqs, [], resume)] == ["gap", "gap", "gap"]
+
+
+def test_jd_match_uses_scope_keys_for_locations_and_skill_boost(monkeypatch):
+    """Explicit locations are metro keys / state codes: people placed in any chosen scope lead and are
+    boosted; clearly-elsewhere people are dropped; unknown-location people stay."""
+    import asyncio
+    from api import people_population as pp
+    facets = lambda **kw: [{"facet_key": k, "value_norm": v, "display_value": v, "document_id": "d", "block_id": ""} for k, v in kw.items()]
+    people = {"a": facets(name="A", metro="bay_area", country="us", skill="kubernetes"),
+              "b": facets(name="B", metro="austin", country="us"),
+              "c": facets(name="C", country="us"),
+              "d": facets(name="D", metro="seattle", country="us")}
+    class _S:
+        async def match_people_scored(self, qvec, cap=400):
+            return [{"entity_id": k, "sim": 0.6} for k in people]
+        async def people_by_ids(self, ids, tenant_id="demo"):
+            return [{"entity_id": i, "name": i.upper(), "facets": people[i]} for i in ids]
+        async def _get_pool(self):
+            return None
+    monkeypatch.setattr(pp, "embed_query", lambda t: "[0.1]")
+    async def _attach(store, rows):
+        return None
+    monkeypatch.setattr(pp, "attach_artifacts", _attach, raising=False)
+    import api.artifacts as art
+    monkeypatch.setattr(art, "attach_artifacts", _attach)
+    loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
+    res = loop.run_until_complete(pp.match_jd_people(_S(), "Senior platform engineer with Kubernetes experience, 8+ years.",
+                                                     {"locations": ["bay_area", "tx"], "skills": ["kubernetes"], "country": "us"}))
+    ids = [r["entity_id"] for r in res["people_rows"]]
+    assert ids[:2] == ["a", "b"]                      # in Bay Area / Texas lead (a boosted by skill too)
+    assert "c" in ids and "d" not in ids              # unknown kept; Seattle dropped
+    a = res["people_rows"][0]
+    assert "location" in a["reasons"] and any(x.startswith("skills:") for x in a["reasons"])
+    assert res["geo_scope"]["source"] == "chosen" and "Bay Area" in res["geo_scope"]["label"]

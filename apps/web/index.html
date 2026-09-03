@@ -2052,15 +2052,20 @@
     </section>
 
     <section class="mstep">
-      <div class="mstep-h"><span class="mstep-n">2</span> Who you're looking for</div>
+      <div class="mstep-h"><span class="mstep-n">2</span> Who you're looking for
+        <button type="button" class="histbtn mfine" id="jdFineTune" title="A recruiter AI reads the job description and proposes who to look for — roles, seniority, locations, must-have skills">✨ Let AI fill this from the JD</button></div>
+      <div id="jdBrief"></div>
       <div class="mgrid">
         <div>
           <span class="mlabel">Seniority <span class="mhint">pick any</span></span>
           <div class="sentogs" id="jdSenBox"></div>
+          <span class="mlabel" style="margin-top:.6rem;">Must-have skills <span class="mhint">boost, not a gate</span></span>
+          <div class="chipbox" id="jdSkillBox"><input id="jdSkill" type="text" placeholder="Add a skill, press Enter"/></div>
         </div>
         <div>
-          <span class="mlabel">Locations <span class="mhint">leave empty to use your scope</span></span>
-          <div class="chipbox" id="jdLocBox"><input id="jdLoc" type="text" placeholder="Add a metro, press Enter"/></div>
+          <span class="mlabel">Locations <span class="mhint">pick any — empty = your top-right scope</span></span>
+          <select id="jdLocSel" style="width:100%;font-size:.86rem;"><option value="">Pick a metro or state…</option></select>
+          <div class="chipbox" id="jdLocBox" style="margin-top:.35rem;"></div>
         </div>
       </div>
       <label id="jdSrcCoRow" hidden class="mcheck" style="margin-top:.6rem;color:var(--muted);cursor:pointer;">
@@ -7723,10 +7728,62 @@ function populateRoleSelect(){
 populateRoleSelect();
 
 // ===== Recruiter reverse-match: job description → ranked candidate people =====
-let JD_LOCS = [], JD_SENS = new Set();
+let JD_LOCS = [], JD_SENS = new Set(), JD_SKILLS = [], JD_SEARCH_TEXT = "", JD_LOC_LABEL = {};
 function renderJDSen(){ const box=$("#jdSenBox"); if(!box) return;
   box.innerHTML = SEN_OPTS.map(([k,l])=>`<span class="sentog ${JD_SENS.has(k)?"on":""}" data-sen="${k}">${esc(l)}</span>`).join(""); }
-function openJD(){ $("#jdmodal").hidden=false; $("#jdresults").innerHTML=""; $("#jdnote").textContent=""; renderJDSen(); }
+// LOCATIONS = the app's own scope list (metros + states from /geo/options), multi-select as chips
+async function populateJDLocSelect(){
+  const sel = $("#jdLocSel"); if(!sel || sel.dataset.filled) return;
+  let opts = null;
+  try{ const r = await fetch("/geo/options"); if(r.ok) opts = await r.json(); }catch(e){}
+  if(!opts) return;
+  const og1 = document.createElement("optgroup"); og1.label = "Metros";
+  (opts.metros||[]).forEach(m=>{ const o=document.createElement("option"); o.value=m.key; o.textContent=m.label; og1.appendChild(o); JD_LOC_LABEL[m.key]=m.label; });
+  const og2 = document.createElement("optgroup"); og2.label = "States";
+  (opts.states||[]).forEach(st=>{ const o=document.createElement("option"); o.value=st.code.toLowerCase(); o.textContent=st.name; og2.appendChild(o); JD_LOC_LABEL[st.code.toLowerCase()]=st.name; });
+  sel.appendChild(og1); sel.appendChild(og2); sel.dataset.filled = "1";
+  sel.addEventListener("change", ()=>{ const v = sel.value; sel.value = ""; if(v && !JD_LOCS.includes(v)){ JD_LOCS.push(v); renderJDLocs(); } });
+}
+function renderJDLocs(){
+  const box = $("#jdLocBox"); if(!box) return;
+  box.innerHTML = JD_LOCS.map((k,i)=>`<span class="chip">${esc(JD_LOC_LABEL[k]||k)} <b data-i="${i}">×</b></span>`).join("")
+    || `<span class="mhint">No locations chosen — your top-right scope applies.</span>`;
+}
+$("#jdLocBox") && $("#jdLocBox").addEventListener("click", e=>{ const b = e.target.closest("b[data-i]"); if(!b) return; JD_LOCS.splice(parseInt(b.dataset.i,10),1); renderJDLocs(); });
+function renderJDBrief(b){
+  const box = $("#jdBrief"); if(!box) return;
+  if(!b){ box.innerHTML = ""; return; }
+  const tags = a => (a||[]).map(x=>`<span class="ppl-tag">${esc(x)}</span>`).join(" ");
+  box.innerHTML = `<details class="plain plain-d" open><summary class="plain-h">🧭 Recruiter's read of the role${b.role_title?` — ${esc(b.role_title)}`:""}</summary>
+    <div class="plain-b" style="font-size:.82rem;line-height:1.5;padding-top:.4rem;">
+      ${b.rationale?`<p style="margin:.2rem 0 .5rem;">${esc(b.rationale)}</p>`:""}
+      ${(b.target_roles||[]).length?`<div><b>Look for:</b> ${tags(b.target_roles)}</div>`:""}
+      ${(b.must_have_skills||[]).length?`<div style="margin-top:.3rem;"><b>Must have:</b> ${tags(b.must_have_skills)}</div>`:""}
+      ${(b.nice_to_have_skills||[]).length?`<div style="margin-top:.3rem;"><b>Nice to have:</b> ${tags(b.nice_to_have_skills)}</div>`:""}
+      ${b.remote_ok?`<div style="margin-top:.3rem;"><b>Remote OK</b> — no location restriction proposed.</div>`:""}
+      ${b.search_text?`<div style="margin-top:.3rem;color:var(--muted);"><b>Search brief:</b> ${esc(b.search_text)}</div>`:""}
+    </div></details>`;
+}
+async function runJDFineTune(){
+  const btn = $("#jdFineTune"); const orig = btn ? btn.textContent : "";
+  const jd = ($("#jdText").value||"").trim(), url = ($("#jdUrl").value||"").trim();
+  if(jd.length < 40 && !url){ $("#jdnote").textContent = "Step 1: paste the job description (or a link) first."; return; }
+  if(btn){ btn.disabled = true; btn.textContent = "✨ Reading the role like a recruiter…"; }
+  try{
+    const r = await fetch("/match-people/fine-tune", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({job_description: jd, job_url: url})});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); $("#jdnote").textContent = e.detail || "Couldn't read the JD — fill the form by hand."; return; }
+    const d = await r.json(); const c = d.config || {};
+    if(d.job_description && jd.length < 40){ $("#jdText").value = d.job_description; }   // fetched from the link: show what was read
+    JD_SENS = new Set(c.seniorities||[]); renderJDSen();
+    JD_LOCS = (c.locations||[]).slice(); renderJDLocs();
+    JD_SKILLS = (c.skills||[]).slice(); renderChips("jdSkillBox", JD_SKILLS);
+    JD_SEARCH_TEXT = c.search_text || "";
+    renderJDBrief(d.brief);
+    $("#jdnote").textContent = "Filled from the job description — review, adjust, then find candidates.";
+  }catch(e){ $("#jdnote").textContent = "AI fill failed — try again."; }
+  finally{ if(btn){ btn.disabled = false; btn.textContent = orig; } }
+}
+function openJD(){ $("#jdmodal").hidden=false; $("#jdresults").innerHTML=""; $("#jdnote").textContent=""; renderJDSen(); renderJDLocs(); populateJDLocSelect(); }
 async function runJDMatch(){
   const jd = ($("#jdText").value||"").trim();
   const url = ($("#jdUrl").value||"").trim();
@@ -7734,6 +7791,7 @@ async function runJDMatch(){
   $("#jdnote").textContent = (url && jd.length<20) ? "Fetching the JD from the link…" : "Finding matching candidates…";
   $("#jdresults").innerHTML = "";
   const prefs = { job_description: jd, job_url: url, seniorities: Array.from(JD_SENS), locations: JD_LOCS.slice(),
+                  skills: JD_SKILLS.slice(), search_text: JD_SEARCH_TEXT,
                   ...geoPayload(), limit: 40,
                   allow_source_company: !!($("#jdAllowSrcCo")||{}).checked };
   try{
@@ -7752,7 +7810,8 @@ $("#jdclose") && $("#jdclose").addEventListener("click", ()=>{ $("#jdmodal").hid
 $("#jdGo") && $("#jdGo").addEventListener("click", runJDMatch);
 $("#jdSenBox") && $("#jdSenBox").addEventListener("click",(e)=>{ const t=e.target.closest(".sentog"); if(!t) return;
   const k=t.dataset.sen; JD_SENS.has(k)?JD_SENS.delete(k):JD_SENS.add(k); renderJDSen(); });
-wireChipInput("jdLocBox", JD_LOCS);
+wireChipInput("jdSkillBox", JD_SKILLS);
+$("#jdFineTune") && $("#jdFineTune").addEventListener("click", runJDFineTune);
 
 // ---- product settings (⚙, password-gated): live flag toggles served by /admin/settings ----
 function openSettings(){

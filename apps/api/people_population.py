@@ -424,6 +424,66 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
             "note": " · ".join(notes)}
 
 
+class _JDBrief(BaseModel):
+    role_title: str = ""
+    target_roles: list[str] = []         # search phrases for the people we want (canonical, lowercase)
+    seniorities: list[str] = []          # subset of intern|junior|mid|senior|staff_plus|leadership
+    locations: list[str] = []            # scope KEYS from the allowed list (metro keys / state codes)
+    remote_ok: bool = False
+    must_have_skills: list[str] = []
+    nice_to_have_skills: list[str] = []
+    functions: list[str] = []
+    search_text: str = ""                # the profile-language paragraph used to find candidates
+    rationale: str = ""                  # one or two lines on why these parameters
+
+
+async def build_jd_brief(jd_text: str, llm) -> dict | None:
+    """AI FILL for Find candidates: read the JD like a recruiter and propose WHO to look for — target
+    roles, seniority, locations (only from the app's own metro/state list), must-have skills — plus a
+    search paragraph. LLM-owned judgment (Rule 18); every code-checkable field is validated in code
+    (unknown location keys / seniority words are dropped, never invented). None on error/short input."""
+    jd = (jd_text or "").strip()
+    if len(jd) < 40 or llm is None:
+        return None
+    _SEN = ("intern", "junior", "mid", "senior", "staff_plus", "leadership")
+    metro_list = ", ".join(f"{k} ({m['label']})" for k, m in sorted(US_METROS.items(), key=lambda kv: kv[1]["label"]))
+    state_list = ", ".join(f"{c} ({n})" for c, n in sorted(US_STATES.items(), key=lambda kv: kv[1]))
+    try:
+        comp = await llm.complete(
+            system=(
+                "You are a senior technical recruiter planning a candidate search from ONE job description. "
+                "Propose who to look for: target_roles (3–6 short canonical role phrases, lowercase, e.g. "
+                "'staff machine learning engineer', 'ml platform lead'); seniorities (only from: "
+                f"{', '.join(_SEN)}); locations as scope KEYS chosen ONLY from these lists — metros: {metro_list}; "
+                f"states: {state_list} — pick the metro(s)/state(s) the posting names or clearly implies (its office "
+                "city, 'hybrid in Austin', etc.); leave locations empty when the role is remote or names no place, "
+                "and set remote_ok accordingly. must_have_skills (≤8) and nice_to_have_skills (≤6) as short lowercase "
+                "terms taken from the posting; functions (≤4, e.g. 'machine learning', 'infrastructure'). search_text: "
+                "one rich paragraph describing the IDEAL candidate's profile in the language a profile would use "
+                "(titles, technologies, domains, scale) — this drives the semantic search. rationale: one or two "
+                "lines on the choices. Never invent requirements the posting does not state."),
+            messages=[{"role": "user", "content": f"JOB DESCRIPTION:\n{jd[:9000]}"}],
+            response_format=_JDBrief, max_tokens=1200, temperature=0.0)
+        b = comp.parsed
+        locs = []
+        for l in (b.locations or []):
+            k = str(l).strip().lower().replace(" ", "_")
+            if k in US_METROS or k in US_STATES:
+                if k not in locs:
+                    locs.append(k)
+        return {"role_title": (b.role_title or "").strip()[:120],
+                "target_roles": [str(r).strip().lower().replace("_", " ") for r in (b.target_roles or []) if str(r).strip()][:6],
+                "seniorities": [x for x in dict.fromkeys(str(x).strip().lower() for x in (b.seniorities or [])) if x in _SEN],
+                "locations": locs[:6], "remote_ok": bool(b.remote_ok),
+                "must_have_skills": [str(x).strip().lower() for x in (b.must_have_skills or []) if str(x).strip()][:8],
+                "nice_to_have_skills": [str(x).strip().lower() for x in (b.nice_to_have_skills or []) if str(x).strip()][:6],
+                "functions": [str(x).strip().lower() for x in (b.functions or []) if str(x).strip()][:4],
+                "search_text": (b.search_text or "").strip()[:2000], "rationale": (b.rationale or "").strip()[:400]}
+    except Exception as e:   # noqa: BLE001 — never break the form; the recruiter can fill it by hand
+        _log.warning("build_jd_brief failed: %s", e)
+        return None
+
+
 class _CandidateBrief(BaseModel):
     technical_skills: list[str] = []     # ranked, strongest/most-recent first
     tech_breadth: str = ""               # one line on range across stacks/domains
@@ -1051,7 +1111,10 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
     jd = (jd_text or "").strip()
     if len(jd) < 20:
         return {"people_rows": [], "note": "Paste a job description (a sentence or more) to match."}
-    qvec = embed_query(jd)
+    # RECRUITER BRIEF: when the AI fill produced a search paragraph (what the role really needs, in
+    # candidate-profile language), it LEADS the query; the raw JD still rides along so niche vocab counts
+    _brief = str(prefs.get("search_text") or "").strip()[:2000]
+    qvec = embed_query((_brief + "\n\n" + jd) if _brief else jd)
     if not qvec:
         return {"people_rows": [], "note": "Matching is unavailable right now."}
     cands = await store.match_people_scored(qvec, cap=int(prefs.get("candidate_cap", 400)))
@@ -1077,7 +1140,11 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
     rows = await store.people_by_ids(cand_ids)
     want_sens = {str(s).lower() for s in (prefs.get("seniorities") or []) if str(s).strip()}
     want_country = (prefs.get("country") or "").lower()
-    locs = [str(l).lower() for l in (prefs.get("locations") or []) if str(l).strip()]
+    # LOCATIONS are SCOPE KEYS from the app's own selector (metro keys like 'bay_area' / state codes
+    # like 'tx' — the same vocabulary as the top-right scope), never free text
+    locs = [str(l).lower().strip() for l in (prefs.get("locations") or []) if str(l).strip()]
+    loc_scopes = [(l, "") if l in US_METROS else ("", l) for l in locs if l in US_METROS or l in US_STATES]
+    want_skills = [str(k).lower().strip() for k in (prefs.get("skills") or []) if str(k).strip()][:8]
     # LOCAL scope (the recruiter's metro / state) applies when no explicit locations were given:
     # clearly-elsewhere candidates dropped, unknown kept, confirmed-local lead (partition below)
     _lm = (str(prefs.get("metro") or "").lower() if not locs and want_country in ("", "us") else "")
@@ -1098,6 +1165,15 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
         if (_lm or _ls) and person_geo_status(facets, metro=_lm, state=_ls) == "out":
             _geo_dropped += 1
             continue
+        # EXPLICIT locations (multi-select): a person clearly outside EVERY chosen scope is dropped;
+        # unknown-location people stay (recall); inside any chosen scope → boosted, and they lead
+        _loc_in = False
+        if loc_scopes:
+            _sts = [person_geo_status(facets, metro=m, state=st) for m, st in loc_scopes]
+            if _sts and all(x == "out" for x in _sts):
+                _geo_dropped += 1
+                continue
+            _loc_in = any(x == "in" for x in _sts)
         # Hide people at the hiring company — check ALL of the person's company facets (a profile can
         # carry more than one), not just the first, so a current employer listed after a prior one is
         # still caught. Still exact-match per alias, so no false positives.
@@ -1109,8 +1185,14 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
         score, reasons = sim, []
         if want_sens and sen and sen in want_sens:
             score += 0.12; reasons.append(f"{sen.replace('_',' ')} level")
-        if locs and metro and any(l in metro or metro in l for l in locs):
+        if _loc_in:
             score += 0.12; reasons.append("location")
+        if want_skills:
+            _hay = " ".join(str(f.get("value_norm") or "") + " " + str(f.get("display_value") or "")
+                            for f in facets if f["facet_key"] in ("skill", "function", "title")).lower().replace("_", " ")
+            _hits = [k for k in want_skills if k.replace("_", " ") in _hay]
+            if _hits:
+                score += min(0.15, 0.05 * len(_hits)); reasons.append("skills: " + ", ".join(_hits[:3]))
         card = _person_row_from_facets(r)
         card["match_pct"] = min(99, round(sim * 100)); card["reasons"] = reasons; card["_score"] = score
         out.append(card)
@@ -1118,7 +1200,18 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
     for c in out:
         c.pop("_score", None)
     _gs = None
-    if _lm or _ls:
+    if loc_scopes:                       # chosen locations: people placed in any of them lead
+        _fac = {r["entity_id"]: r["facets"] for r in rows}
+        def _multi(p):
+            sts = [person_geo_status(_fac.get(p["entity_id"], []), metro=m, state=st) for m, st in loc_scopes]
+            return "in" if "in" in sts else ("out" if sts and all(x == "out" for x in sts) else "unknown")
+        out, _gc = partition_local(out, _multi)
+        _gc["out"] = _geo_dropped
+        _lab = ", ".join(US_METROS.get(m, {}).get("label", m) if m else US_STATES.get(st, st) for m, st in loc_scopes)
+        _gs = {"metro": "", "state": "", "label": _lab, "state_label": "", "counts": _gc, "source": "chosen",
+               "statement": f"{_gc.get('in', 0)} candidates located in {_lab} lead; {_gc.get('unknown', 0)} with no known location follow; "
+                            f"{_geo_dropped} clearly elsewhere were left out."}
+    elif _lm or _ls:
         _fac = {r["entity_id"]: r["facets"] for r in rows}
         out, _gc = partition_local(out, lambda p: person_geo_status(_fac.get(p["entity_id"], []), metro=_lm, state=_ls))
         _gc["out"] = _geo_dropped

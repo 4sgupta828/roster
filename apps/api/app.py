@@ -1237,6 +1237,8 @@ class MatchPeopleIn(BaseModel):        # recruiter reverse-match: JD → candida
     state: str = ""
     limit: int = 40
     allow_source_company: bool = False   # recruiter opt-in: include people at the JD's hiring company
+    skills: list[str] = []               # must-have skills (AI fill or typed) — boost, never a gate
+    search_text: str = Field(default="", max_length=2000)   # the AI-fill search paragraph (leads the query)
 
 
 class ApplyIn(BaseModel):                  # Apply Assistant — length-capped to bound LLM input + memory
@@ -3105,6 +3107,24 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             return await match_jd_people(cstore, jd, prefs)
         except Exception as e:   # noqa: BLE001
             raise HTTPException(status_code=502, detail=f"match failed: {e}") from e
+
+    @app.post("/match-people/fine-tune")
+    async def match_people_fine_tune(body: MatchPeopleIn) -> dict:
+        """✨ AI fill for Find candidates: read the JD (pasted or linked) like a recruiter → target roles,
+        seniority, locations (from the app's own scope list), must-have skills, and the search paragraph.
+        The FE fills the form from `config`; the recruiter reviews, then searches."""
+        jd = (body.job_description or "").strip()
+        if not jd and body.job_url.strip():
+            jd = await asyncio.to_thread(_fetch_jd_text, body.job_url)
+        if len(jd) < 40:
+            raise HTTPException(status_code=400, detail="Paste the job description (or a readable link) first.")
+        from api.people_population import build_jd_brief
+        brief = await build_jd_brief(jd, build_llm(mode=resolve_mode()))
+        if not brief:
+            raise HTTPException(status_code=502, detail="Couldn't read the job description right now — fill the form by hand.")
+        return {"config": {"seniorities": brief["seniorities"], "locations": brief["locations"],
+                           "skills": brief["must_have_skills"], "search_text": brief["search_text"]},
+                "brief": brief, "job_description": jd[:20000] if not body.job_description.strip() else ""}
 
     @app.post("/research/focus")
     async def research_focus(body: FocusIn, x_roster_token: str = Header(default="")) -> dict:
