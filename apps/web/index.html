@@ -2700,7 +2700,7 @@ function jobsMarkup(d){
     const dept = j.department?`<span class="ppl-tag">${esc(j.department)}</span>`:"";
     const jref = j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||""));
     window.JOBS_INDEX = window.JOBS_INDEX || {}; window.JOBS_INDEX[String(jref)] = j;
-    const apply = j.url?`<button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="Analyze your fit, then draft the application with the Apply Assistant">✨ Apply with assistant</button><a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer" title="Go straight to the company's apply page">Apply directly ↗</a>`:"";
+    const apply = j.url?`<button type="button" class="ppl-lnk js-sum" data-ref="${esc(String(jref))}" title="AI reads the posting and gives you the key requirements, pay, location and work mode">✨ Summarize</button><button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="Analyze your fit, then draft the application with the Apply Assistant">Apply with assistant</button><a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer" title="Go straight to the company's apply page">Apply directly ↗</a>`:"";
     const jsave = `<div class="ppl-acts"><button type="button" class="rsave" data-kind="job" data-ref="${esc(String(jref))}" data-label="${esc(j.title||"")}" data-sub="${esc(((j.company||"").replace(/_/g," "))+(j.location?" · "+j.location:""))}" data-url="${esc(j.url||"")}" title="Save to a shortlist">☆</button></div>`;
     const pct = j.match_pct ? ` <span style="color:var(--gold);font-weight:700;font-size:.76rem;">${j.match_pct}% match</span>` : "";
     const jr = (j.reasons&&j.reasons.length) ? ` <span style="color:var(--muted);font-size:.74rem;">· ${j.reasons.map(esc).join(" · ")}</span>` : "";
@@ -2708,7 +2708,7 @@ function jobsMarkup(d){
       <span class="ppl-name">${esc(j.title)}${pct}</span>
       <span class="ppl-blurb">${co}${j.source?` · via ${esc(j.source)}`:""}${jr}</span>
       ${loc||dept?`<span class="ppl-tags">${loc}${dept}</span>`:""}
-      ${apply?`<span class="ppl-links">${apply}</span>`:""}</span></div>`;
+      ${apply?`<span class="ppl-links">${apply}</span>`:""}<span class="js-sumbox" data-ref="${esc(String(jref))}"></span></span></div>`;
   }).join("");
   const at = (q.company&&q.company.length)?` at ${esc(q.company.join(", ").replace(/_/g," "))}`:"";
   const angleChips = (d.query_angles&&d.query_angles.length>1) ? `<div style="margin-top:.4rem;display:flex;flex-wrap:wrap;gap:.3rem;">${d.query_angles.map(a=>`<span class="ppl-tag">${esc(a)}</span>`).join("")}</div>` : "";
@@ -7540,13 +7540,13 @@ function renderMatchResults(d){
     const jref = j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||""));
     const save = `<div class="ppl-acts"><button type="button" class="rsave" data-kind="job" data-ref="${esc(String(jref))}" data-label="${esc(j.title||"")}" data-sub="${esc(co+(j.location?" · "+j.location:""))}" data-url="${esc(j.url||"")}" title="Save to a shortlist">☆</button></div>`;
     window.MATCH_JOBS = window.MATCH_JOBS || {}; window.MATCH_JOBS[String(jref)] = {...j, from: "match"};
-    const assist = j.url?`<button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="Analyze your fit for this role, then draft the application with the Apply Assistant">✨ Apply with assistant</button>`:"";
+    const assist = j.url?`<button type="button" class="ppl-lnk js-sum" data-ref="${esc(String(jref))}" title="AI reads the posting and gives you the key requirements, pay, location and work mode">✨ Summarize</button><button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="Analyze your fit for this role, then draft the application with the Apply Assistant">Apply with assistant</button>`:"";
     const apply = j.url?`<a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer" title="Go straight to the company's apply page">Apply directly ↗</a>`:"";
     return `<div class="ppl-card">${save}<span class="ppl-body">
       <span class="ppl-name">${esc(j.title)} <span style="color:var(--gold);font-weight:700;font-size:.78rem;">${j.match_pct}% match</span></span>
       <span class="ppl-blurb">${co}${j.location?` · ${esc(j.location)}`:""}${reasons}</span>
       ${tags?`<span class="ppl-tags">${tags}</span>`:""}
-      ${apply?`<span class="ppl-links">${assist}${apply}</span>`:""}</span></div>`;
+      ${apply?`<span class="ppl-links">${assist}${apply}</span>`:""}<span class="js-sumbox" data-ref="${esc(String(jref))}"></span></span></div>`;
   }).join("");
 }
 $("#matchclose") && $("#matchclose").addEventListener("click", ()=>{ $("#matchmodal").hidden = true; });
@@ -7568,8 +7568,16 @@ function openApplyAssist(url, job){
     if(!ctx.hidden){
       ctx.innerHTML = `<b>${esc(job.title||"")}</b>${job.company?` · ${esc((job.company||"").replace(/_/g," "))}`:""}${job.location?` · ${esc(job.location)}`:""}`
         + (job.match_pct?` <span style="color:var(--gold);font-weight:700;">${job.match_pct}% match</span>`:"")
-        + (AA_FROM==="match"?` <a href="#" id="aaBackMatches" style="margin-left:.5rem;color:var(--gold);">← back to your matches</a>`:"");
+        + (url?` <a class="ppl-lnk lnk-linkedin" href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="margin-left:.4rem;">Apply directly ↗</a>`:"")
+        + (AA_FROM==="match"?` <a href="#" id="aaBackMatches" style="margin-left:.5rem;color:var(--gold);">← back to your matches</a>`:"")
+        + `<div id="aaJobSum"></div>`;
       const b = $("#aaBackMatches"); if(b) b.addEventListener("click", e=>{ e.preventDefault(); $("#applyassist").hidden = true; $("#matchmodal").hidden = false; });
+      // JOB AT A GLANCE: the summary the seeker already saw travels with them; fetched here when they skipped it
+      const sumBox = $("#aaJobSum");
+      const sm = job.summary || (url ? window.JOB_SUMMARIES[url] : null);
+      // the summary the seeker already saw travels with them; otherwise the fit analysis (which reads
+      // the same posting) brings it back — one read, no second fetch
+      sumBox.innerHTML = sm ? jobSummaryMarkup(sm, job, {noLinks:true, noReqs:true}) : "";
     }
   }
   $("#aaClose").textContent = AA_FROM==="match" ? "← Back to matches" : "← Back";
@@ -7579,7 +7587,40 @@ function openApplyAssist(url, job){
 function applyWithAssistant(ref){
   const j = (window.MATCH_JOBS||{})[ref] || (window.JOBS_INDEX||{})[ref];
   if(!j) return;
-  openApplyAssist(j.url||"", {...j, from: j.from||"", autorun: !!j.url});
+  openApplyAssist(j.url||"", {...j, from: j.from||"", autorun: !!j.url, summary: (window.JOB_SUMMARIES||{})[j.url||""] || null});
+}
+// ===== ✨ Job summary: AI reads the posting so the job seeker doesn't have to =====
+window.JOB_SUMMARIES = window.JOB_SUMMARIES || {};      // url → summary (this page load)
+function jobSummaryMarkup(sm, j, opts){
+  opts = opts || {};
+  const ns = "<span style=\"color:var(--muted)\">not stated</span>";
+  const chip = (k, v) => `<span class="ppl-tag" title="${esc(k)}"><b style="font-weight:600;">${esc(k)}:</b> ${v ? esc(v) : ns}</span>`;
+  const wm = sm.work_mode ? ({remote:"Remote", hybrid:"Hybrid", onsite:"On-site"}[sm.work_mode] || sm.work_mode) : "";
+  const li = a => (a||[]).map(x=>`<li>${esc(x)}</li>`).join("");
+  const links = opts.noLinks ? "" : `<div class="ppl-links" style="margin-top:.45rem;">${j && j.url ? `<a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer">Apply directly ↗</a>` : ""}${opts.assist && j ? `<button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(opts.ref||""))}">Apply with assistant</button>` : ""}</div>`;
+  return `<div class="js-summary" style="margin-top:.5rem;padding:.55rem .7rem;border:1px solid var(--hair);border-left:3px solid var(--gold);border-radius:8px;background:var(--panel);font-size:.8rem;line-height:1.45;">
+    ${sm.one_liner ? `<div style="margin-bottom:.35rem;">${esc(sm.one_liner)}</div>` : ""}
+    <div class="ppl-tags" style="gap:.3rem;">${chip("Location", sm.location)}${chip("Work", wm)}${chip("Pay", sm.compensation)}${chip("Type", sm.employment_type)}${sm.seniority ? chip("Level", sm.seniority) : ""}${sm.team ? chip("Team", sm.team) : ""}</div>
+    ${(sm.key_requirements||[]).length && !opts.noReqs ? `<div style="margin-top:.4rem;"><b>Key requirements</b><ul style="margin:.15rem 0 0;padding-left:1.1rem;">${li(sm.key_requirements)}</ul></div>` : ""}
+    ${(sm.responsibilities||[]).length && !opts.noReqs ? `<details style="margin-top:.3rem;"><summary style="cursor:pointer;color:var(--muted);">What you'd do · nice-to-haves · notes</summary><ul style="margin:.15rem 0 0;padding-left:1.1rem;">${li(sm.responsibilities)}</ul>${(sm.nice_to_have||[]).length?`<div style="margin-top:.25rem;"><b>Nice to have:</b> ${(sm.nice_to_have||[]).map(esc).join(" · ")}</div>`:""}${(sm.notes||[]).length?`<div style="margin-top:.25rem;"><b>Notes:</b> ${(sm.notes||[]).map(esc).join(" · ")}</div>`:""}</details>` : ""}
+    <div class="sethint" style="margin-top:.3rem;">Read from the posting by AI; pay and work mode shown only when the posting states them.${opts.cached ? " (saved read)" : ""}</div>
+    ${links}</div>`;
+}
+async function summarizeJob(ref){
+  const j = (window.MATCH_JOBS||{})[ref] || (window.JOBS_INDEX||{})[ref];
+  if(!j || !j.url) return;
+  const boxes = document.querySelectorAll(`.js-sumbox[data-ref="${CSS.escape(String(ref))}"]`);
+  const set = html => boxes.forEach(b => { b.innerHTML = html; });
+  const have = window.JOB_SUMMARIES[j.url];
+  if(have){ set(jobSummaryMarkup(have, j, {ref, assist:true})); return; }
+  set(`<div class="sethint" style="margin-top:.4rem;">✨ Reading the posting…</div>`);
+  try{
+    const r = await fetch("/jobs/summarize", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({job_url: j.url, title: j.title||"", company: j.company||""})});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); set(`<div class="sethint" style="margin-top:.4rem;">${esc(e.detail || "Couldn't read that posting — open the apply link.")}</div>`); return; }
+    const d = await r.json();
+    window.JOB_SUMMARIES[j.url] = d.summary;
+    set(jobSummaryMarkup(d.summary, j, {ref, assist:true, cached: !!d.cached}));
+  }catch(e){ set(`<div class="sethint" style="margin-top:.4rem;">Summary failed — open the apply link.</div>`); }
 }
 async function runApplyAnalysis(){
   const url = ($("#aaUrl").value||"").trim(), text = ($("#aaText").value||"").trim();
@@ -7596,6 +7637,12 @@ async function runApplyAnalysis(){
 }
 function renderApplyAnalysis(a){
   a = a || {};
+  // JOB AT A GLANCE from the same read: fill the context box when the seeker didn't summarize first
+  const sumBox = $("#aaJobSum");
+  if(sumBox && a.summary && !sumBox.innerHTML){
+    const url = ($("#aaUrl").value||"").trim(); if(url) window.JOB_SUMMARIES[url] = a.summary;
+    sumBox.innerHTML = jobSummaryMarkup(a.summary, {url}, {noLinks:true, noReqs:true});
+  }
   const V = {strong:"strong", partial:"partial", gap:"gap"};
   const rows = (a.requirements||[]).map(q=>{
     const v = V[q.verdict]||"gap";
@@ -8458,6 +8505,8 @@ document.addEventListener("click", e => {
   if(ef){ e.preventDefault(); toggleEvidenceFilter(ef.dataset.kind); return; }
   const aa = e.target.closest && e.target.closest(".aa-apply");
   if(aa){ e.preventDefault(); applyWithAssistant(aa.dataset.ref); return; }
+  const js = e.target.closest && e.target.closest(".js-sum");
+  if(js){ e.preventDefault(); summarizeJob(js.dataset.ref); return; }
 });
 // PRE-search "must have": toggling changes what the NEXT search requires; nothing re-runs by itself
 function toggleEvidenceFilter(kind){

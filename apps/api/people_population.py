@@ -424,6 +424,122 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
             "note": " · ".join(notes)}
 
 
+class _JobSummary(BaseModel):
+    title: str = ""
+    company: str = ""
+    location: str = ""                    # as stated in the posting ('' when not stated)
+    work_mode: str = ""                   # remote | hybrid | onsite | ''  (only when the posting says so)
+    compensation: str = ""                # the posting's own pay statement, verbatim-ish ('' when not stated)
+    employment_type: str = ""             # full-time | contract | intern | part-time | ''
+    seniority: str = ""                   # as stated (e.g. 'Senior', 'Staff') or ''
+    team: str = ""                        # team / org line, if stated
+    one_liner: str = ""                   # what the job is, in one plain sentence
+    key_requirements: list[str] = []      # ≤6, the must-haves as the posting states them
+    nice_to_have: list[str] = []          # ≤4
+    responsibilities: list[str] = []      # ≤4, what you'd actually do
+    notes: list[str] = []                 # ≤3: visa, clearance, travel, on-call, deadline… only if stated
+
+
+_WORK_MODE_RX = {"remote": re.compile(r"\bremote\b", re.I), "hybrid": re.compile(r"\bhybrid\b", re.I),
+                 "onsite": re.compile(r"\b(on-?site|in[- ]office|in[- ]person)\b", re.I)}
+_MONEY_RX = re.compile(r"(\$|€|£|USD|CAD|GBP|EUR)\s?\d[\d,]*(\.\d+)?\s?(k|K)?|\b\d{2,3},\d{3}\b|\b\d{2,3}\s?[kK]\b")
+
+
+def verify_job_summary(summary: dict, jd_text: str) -> dict:
+    """CODE-OWNED honesty gate on the model's read: work_mode only if the posting uses the word;
+    compensation only if the posting carries a money figure AND the model's statement shares one of
+    those figures; everything else is passed through bounded. Missing = '' (shown as 'not stated')."""
+    jd = jd_text or ""
+    out = dict(summary)
+    wm = (out.get("work_mode") or "").strip().lower()
+    out["work_mode"] = wm if wm in _WORK_MODE_RX and _WORK_MODE_RX[wm].search(jd) else ""
+    comp = (out.get("compensation") or "").strip()
+    jd_money = {m.group(0).replace(",", "").replace(" ", "").lower() for m in _MONEY_RX.finditer(jd)}
+    stated = {m.group(0).replace(",", "").replace(" ", "").lower() for m in _MONEY_RX.finditer(comp)}
+    out["compensation"] = comp[:160] if comp and jd_money and (stated & jd_money) else ""
+    et = (out.get("employment_type") or "").strip().lower()
+    out["employment_type"] = et if et in ("full-time", "part-time", "contract", "intern", "internship", "temporary") and re.search(re.escape(et.split("-")[0]), jd, re.I) else ""
+    for k, n in (("key_requirements", 6), ("nice_to_have", 4), ("responsibilities", 4), ("notes", 3)):
+        out[k] = [str(x).strip()[:160] for x in (out.get(k) or []) if str(x).strip()][:n]
+    for k in ("title", "company", "location", "seniority", "team", "one_liner"):
+        out[k] = str(out.get(k) or "").strip()[:200]
+    return out
+
+
+async def build_job_summary(jd_text: str, llm, *, title: str = "", company: str = "") -> dict | None:
+    """AI SUMMARY of one job posting for a job seeker: what it is, the standard parameters (location,
+    remote/hybrid, pay, type, seniority) and the key requirements — so nobody has to read the whole
+    page. LLM-owned reading (Rule 18) at temperature 0; code verifies the checkable parameters
+    (work mode, pay) against the posting text and blanks anything the posting does not state."""
+    jd = (jd_text or "").strip()
+    if len(jd) < 80 or llm is None:
+        return None
+    try:
+        comp = await llm.complete(
+            system=(
+                "You summarize ONE job posting for a job seeker deciding whether to apply. Read only what the "
+                "posting says. Fill: title, company, location (as written), work_mode (remote / hybrid / onsite "
+                "ONLY if the posting says so, else empty), compensation (the posting's own pay range or figure, "
+                "copied closely; empty if none is stated), employment_type, seniority (as stated), team, "
+                "one_liner (what the job is, one plain sentence), key_requirements (the must-haves, ≤6, short, "
+                "in the posting's words), nice_to_have (≤4), responsibilities (≤4, what you'd actually do), "
+                "notes (≤3: visa/sponsorship, clearance, travel, on-call, application deadline — only if stated). "
+                "Never infer or invent; leave a field empty rather than guess."),
+            messages=[{"role": "user", "content": (f"KNOWN: title={title!r} company={company!r}\n\n" if (title or company) else "")
+                                                   + f"JOB POSTING:\n{jd[:12000]}"}],
+            response_format=_JobSummary, max_tokens=1200, temperature=0.0)
+        d = comp.parsed.model_dump()
+        d["title"] = d.get("title") or title
+        d["company"] = d.get("company") or company
+        return verify_job_summary(d, jd)
+    except Exception as e:   # noqa: BLE001
+        _log.warning("build_job_summary failed: %s", e)
+        return None
+
+
+_JOB_SUMMARY_DDL = """
+CREATE TABLE IF NOT EXISTS rs_job_summary (
+    url_hash   text PRIMARY KEY,
+    url        text NOT NULL,
+    summary    jsonb NOT NULL,
+    fetched_at timestamptz NOT NULL DEFAULT now()
+);
+"""
+
+
+async def cached_job_summary(pool, url: str, *, max_age_days: int = 7) -> dict | None:
+    """A posting's summary is per JOB, not per user — deterministic at temperature 0 and the page is
+    slow to fetch, so it is kept for `max_age_days` (postings change; a stale one re-reads)."""
+    import hashlib
+    h = hashlib.sha256((url or "").strip().encode()).hexdigest()[:40]
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(_JOB_SUMMARY_DDL)
+            row = await conn.fetchrow(
+                "SELECT summary, fetched_at FROM rs_job_summary WHERE url_hash = $1 "
+                "AND fetched_at > now() - ($2::int * interval '1 day')", h, int(max_age_days))
+        if row:
+            d = row["summary"]
+            return json.loads(d) if isinstance(d, str) else dict(d)
+    except Exception as e:   # noqa: BLE001
+        _log.info("job summary cache read skipped: %s", e)
+    return None
+
+
+async def store_job_summary(pool, url: str, summary: dict) -> None:
+    import hashlib
+    h = hashlib.sha256((url or "").strip().encode()).hexdigest()[:40]
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(_JOB_SUMMARY_DDL)
+            await conn.execute(
+                """INSERT INTO rs_job_summary (url_hash, url, summary, fetched_at) VALUES ($1, $2, $3::jsonb, now())
+                   ON CONFLICT (url_hash) DO UPDATE SET summary = EXCLUDED.summary, fetched_at = now()""",
+                h, (url or "")[:1000], json.dumps(summary))
+    except Exception as e:   # noqa: BLE001
+        _log.info("job summary cache write skipped: %s", e)
+
+
 class _JDBrief(BaseModel):
     role_title: str = ""
     target_roles: list[str] = []         # search phrases for the people we want (canonical, lowercase)

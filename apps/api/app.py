@@ -1241,6 +1241,13 @@ class MatchPeopleIn(BaseModel):        # recruiter reverse-match: JD → candida
     search_text: str = Field(default="", max_length=2000)   # the AI-fill search paragraph (leads the query)
 
 
+class JobSummarizeIn(BaseModel):          # ✨ summarize one posting (job seeker: "do I need to read this?")
+    job_url: str = Field(default="", max_length=2000)
+    title: str = Field(default="", max_length=300)
+    company: str = Field(default="", max_length=200)
+    refresh: bool = False
+
+
 class ApplyIn(BaseModel):                  # Apply Assistant — length-capped to bound LLM input + memory
     job_url: str = Field(default="", max_length=2000)
     job_description: str = Field(default="", max_length=40000)
@@ -3107,6 +3114,31 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             return await match_jd_people(cstore, jd, prefs)
         except Exception as e:   # noqa: BLE001
             raise HTTPException(status_code=502, detail=f"match failed: {e}") from e
+
+    @app.post("/jobs/summarize")
+    async def jobs_summarize(body: JobSummarizeIn) -> dict:
+        """✨ AI summary of one job posting: reads the apply link (SSRF-guarded) and returns the key
+        requirements + the standard parameters (location, remote/hybrid, pay, type, seniority), with
+        the checkable ones verified against the posting text ('' = not stated). Cached per URL for 7 days."""
+        url = (body.job_url or "").strip()
+        if not url:
+            raise HTTPException(status_code=400, detail="job_url required")
+        cstore = _claim_store_cached()
+        pool = await cstore._get_pool() if cstore is not None else None
+        from api.people_population import build_job_summary, cached_job_summary, store_job_summary
+        if pool is not None and not body.refresh:
+            hit = await cached_job_summary(pool, url)
+            if hit:
+                return {"summary": hit, "cached": True, "job_url": url}
+        jd = await asyncio.to_thread(_fetch_jd_text, url)
+        if len(jd) < 80:
+            raise HTTPException(status_code=400, detail="Couldn't read that posting — open the apply link directly.")
+        summ = await build_job_summary(jd, build_llm(mode=resolve_mode()), title=body.title, company=body.company)
+        if not summ:
+            raise HTTPException(status_code=502, detail="Couldn't summarize right now — open the apply link directly.")
+        if pool is not None:
+            await store_job_summary(pool, url, summ)
+        return {"summary": summ, "cached": False, "job_url": url}
 
     @app.post("/match-people/fine-tune")
     async def match_people_fine_tune(body: MatchPeopleIn) -> dict:
@@ -5763,11 +5795,27 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=404, detail="apply assistant not enabled")
         store, user = await _require_user(x_roster_token)
         jd, profile = await _apply_jd_and_profile(store, user, body)
-        from api.people_population import build_apply_analysis
+        from api.people_population import (build_apply_analysis, build_job_summary, cached_job_summary,
+                                           store_job_summary)
         a = await build_apply_analysis(jd, profile, profile.get("_resume_text", ""), build_llm(mode=resolve_mode()))
         if not a:
             raise HTTPException(status_code=400,
                 detail="Add or parse a résumé first, and make sure the job link/description is readable.")
+        # JOB AT A GLANCE rides along: the posting was already fetched for the fit analysis, so its
+        # summary (location / work mode / pay / type) is built from the SAME text — cached per URL,
+        # one extra read only the first time; the FE shows it above the fit table (no second fetch)
+        url = (body.job_url or "").strip()
+        try:
+            cstore = _claim_store_cached()
+            pool = await cstore._get_pool() if cstore is not None else None
+            summ = await cached_job_summary(pool, url) if (pool is not None and url) else None
+            if not summ:
+                summ = await build_job_summary(jd, build_llm(mode=resolve_mode()))
+                if summ and pool is not None and url:
+                    await store_job_summary(pool, url, summ)
+            a["summary"] = summ
+        except Exception:   # noqa: BLE001 — the summary is additive
+            a["summary"] = None
         return a
 
     @app.post("/me/apply-analysis/cover-letter")

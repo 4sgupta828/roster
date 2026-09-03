@@ -178,3 +178,19 @@ def test_jd_match_uses_scope_keys_for_locations_and_skill_boost(monkeypatch):
     a = res["people_rows"][0]
     assert "location" in a["reasons"] and any(x.startswith("skills:") for x in a["reasons"])
     assert res["geo_scope"]["source"] == "chosen" and "Bay Area" in res["geo_scope"]["label"]
+
+
+def test_job_summary_verification_blanks_what_the_posting_does_not_state():
+    from api.people_population import verify_job_summary
+    jd = "Senior Backend Engineer at Acme. Hybrid, 3 days in our Austin office. Base salary $180,000 – $220,000 plus equity. Full-time."
+    s = verify_job_summary({"work_mode": "hybrid", "compensation": "$180,000–$220,000 base + equity", "employment_type": "full-time",
+                            "key_requirements": ["Go", "Postgres", "", "x"] * 3, "title": "Senior Backend Engineer"}, jd)
+    assert s["work_mode"] == "hybrid" and s["compensation"].startswith("$180,000") and s["employment_type"] == "full-time"
+    assert len(s["key_requirements"]) == 6
+    # the posting says nothing about pay or remote → the model's guesses are blanked
+    s2 = verify_job_summary({"work_mode": "remote", "compensation": "$150k-$200k", "employment_type": "contract"},
+                            "Backend Engineer at Acme in Austin. Build services in Go.")
+    assert s2["work_mode"] == "" and s2["compensation"] == "" and s2["employment_type"] == ""
+    # a pay figure that is not the posting's figure is blanked too
+    s3 = verify_job_summary({"compensation": "$300,000"}, jd)
+    assert s3["compensation"] == ""
