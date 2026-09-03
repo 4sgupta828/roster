@@ -2743,6 +2743,6 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         coverage["ranking"] = ("how closely each profile's wording matches your brief first; among "
                                "near-equal matches, the strength of public evidence (confirmed employer, "
                                "linked papers and repos, recent activity, LinkedIn headline fit) — the "
-                               "reasons for each person are under Inspect evidence")
+                               "reasons for each person are under their card (click it)")
     return {"grounded": grounded, "not_people_query": False, "answer": answer,
             "people_rows": people_rows, "coverage_basis": coverage}
