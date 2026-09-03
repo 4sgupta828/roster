@@ -1717,7 +1717,7 @@ def _person_blurb(attrs: list[dict]) -> str:
         # AUTHORSHIP evidence (OpenAlex): the source shows papers under an affiliation, not a job —
         # say exactly that; never "Researcher at X" (a software engineer who co-authored one paper
         # under Anthropic's affiliation is not "a researcher at Anthropic")
-        segs.append(f"Published author affiliated with {comp} (role not stated by the source)" if comp else "Published author")
+        segs.append(f"Published author · {comp}" if comp else "Published author")   # affiliation, not a job title
     elif headline and comp:
         segs.append(f"{headline} at {comp}")
     elif headline:

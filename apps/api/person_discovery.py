@@ -127,7 +127,7 @@ def rows_from_openalex(authors: list[dict]) -> list[dict]:
         facets = [("company", insts[0] if insts else ""), ("role", "Published author"), ("country", country.lower()),
                   ("title", ", ".join(t for t in topics if t)[:120]), ("link_orcid", a.get("orcid") or "")]
         links = ([{"kind": "orcid", "url": a["orcid"]}] if a.get("orcid") else [])
-        blurb = " — ".join(x for x in [f"Published author affiliated with {insts[0]} (role not stated by the source)" if insts else "Published author",
+        blurb = " — ".join(x for x in [f"Published author · {insts[0]}" if insts else "Published author",
                                         f"{a.get('works_count', 0)} works, {a.get('cited_by_count', 0)} citations",
                                         ", ".join(t for t in topics if t)] if x)
         out.append(_row("openalex:" + aid, nm, facets, f"https://openalex.org/{aid}", links, blurb, "OpenAlex"))

@@ -124,9 +124,9 @@ def test_openalex_rows_say_published_author_not_researcher_at():
     role = next(f for f in r["_facets"] if f["facet_key"] == "role")
     assert role["display_value"] == "Published author" and role["value_norm"] == "researcher"   # search key kept
     assert not any(f["facet_key"] == "seniority" for f in r["_facets"])
-    assert r["blurb"].startswith("Published author affiliated with Anthropic (role not stated by the source)")
+    assert r["blurb"].startswith("Published author · Anthropic")
     assert "Researcher at" not in r["blurb"]
     blurb = _person_blurb([{"key": "role", "display": "Published author"}, {"key": "company", "display": "Anthropic"},
                            {"key": "function", "display": "Computer Science"}])
-    assert blurb.startswith("Published author affiliated with Anthropic (role not stated by the source)")
+    assert blurb.startswith("Published author · Anthropic") and "not stated" not in blurb
     assert "Researcher" not in blurb
