@@ -107,7 +107,7 @@ def test_apply_job_must_requires_every_selected_kind():
     assert [r["title"] for r in run(["hybrid"])[0]] == ["Staff Engineer"]
     assert [r["title"] for r in run(["f500"])[0]] == ["Senior Software Engineer", "Software Engineer II"]
     assert [r["company"] for r in run(["startup"])[0]] == ["tubi"]
-    assert [r["title"] for r in run(["remote", "senior"])[0]] == ["Senior Software Engineer", "Director of Engineering"]
+    assert run(["remote", "senior"])[1]["kinds"] == ["remote"]          # 'senior' is not a must-have kind
     assert [r["title"] for r in run(["leadership"])[0]] == ["Director of Engineering"]
     assert [r["title"] for r in run(["f500", "remote"])[0]] == ["Senior Software Engineer"]
     assert run(["bogus"])[1] is None                    # unknown kinds are ignored, not enforced

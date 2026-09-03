@@ -2250,8 +2250,8 @@ let EVIDENCE_KINDS = new Set();      // Talent Map PRE-search "must have": empty
 const EV_LABEL = {repo:"repos", paper:"papers", post:"blog posts", talk:"talks", patent:"patents"};
 // Jobs PRE-search "must have": every selected kind is REQUIRED (remote AND startup…); empty = all roles
 let JOB_MUST = new Set();
-const JOB_MUST_ALL = ["remote","hybrid","f500","public","startup","senior","leadership"];
-const JOB_MUST_LABEL = {remote:"Remote", hybrid:"Hybrid", f500:"Fortune 500", public:"Public company", startup:"Startup", senior:"Senior+", leadership:"Leadership"};
+const JOB_MUST_ALL = ["remote","hybrid","f500","public","startup","leadership"];
+const JOB_MUST_LABEL = {remote:"Remote", hybrid:"Hybrid", f500:"Fortune 500", public:"Public company", startup:"Startup", leadership:"Leadership"};
 function evFilterActive(){ return EVIDENCE_KINDS.size > 0; }
 function renderEvFilters(){
   const box = document.getElementById("evfchips"), wrap = document.getElementById("evfilters"), rs = document.getElementById("evfreset");

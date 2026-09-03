@@ -876,9 +876,9 @@ def dedupe_jobs(rows: list[dict]) -> list[dict]:
     return out
 
 
-JOB_MUST_KINDS = ("remote", "hybrid", "f500", "public", "startup", "senior", "leadership")
+JOB_MUST_KINDS = ("remote", "hybrid", "f500", "public", "startup", "leadership")
 JOB_MUST_LABELS = {"remote": "Remote", "hybrid": "Hybrid", "f500": "Fortune 500", "public": "Public company",
-                   "startup": "Startup", "senior": "Senior+", "leadership": "Leadership"}
+                   "startup": "Startup", "leadership": "Leadership"}
 
 
 async def widen_for_must(store, rows: list[dict], must: list[str], *, qvec=None, terms=None, company=None) -> list[dict]:
@@ -934,7 +934,7 @@ async def apply_job_must(store, rows: list[dict], must: list[str]) -> tuple[list
         checks = {"remote": "remote" in loc or "remote" in title.lower(),
                   "hybrid": "hybrid" in loc or "hybrid" in title.lower(),
                   "f500": f500, "public": f500 and not st, "startup": st,
-                  "senior": sen in ("senior", "staff_plus", "leadership"), "leadership": sen == "leadership"}
+                  "leadership": sen == "leadership"}
         return all(checks[m] for m in must)
     kept = [j for j in rows if _ok(j)]
     return kept, {"kinds": must, "labels": [JOB_MUST_LABELS[m] for m in must],
