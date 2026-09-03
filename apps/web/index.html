@@ -548,6 +548,9 @@
   .ppl-lifit{font-family:var(--mono);font-size:.64rem;color:var(--muted);margin-left:.3rem;}
   .ppl-tag-topic{background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);font-weight:600;}
   .ppl-scopebar{border-left-color:var(--person)!important;}
+  .job-card{cursor:pointer;}
+  .job-card:hover{border-color:var(--gold);}
+  .job-card .js-summary{cursor:default;}
   button.aa-apply{font:inherit;font-size:.7rem;cursor:pointer;border:1px solid var(--gold);color:var(--gold-strong);background:rgba(var(--gold-rgb),.08);font-weight:600;}
   button.aa-apply:hover{background:rgba(var(--gold-rgb),.18);}
   .ev-filterbar{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;}
@@ -2700,11 +2703,11 @@ function jobsMarkup(d){
     const dept = j.department?`<span class="ppl-tag">${esc(j.department)}</span>`:"";
     const jref = j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||""));
     window.JOBS_INDEX = window.JOBS_INDEX || {}; window.JOBS_INDEX[String(jref)] = j;
-    const apply = j.url?`<button type="button" class="ppl-lnk js-sum" data-ref="${esc(String(jref))}" title="AI reads the posting and gives you the key requirements, pay, location and work mode">✨ Summarize</button><button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="Analyze your fit, then draft the application with the Apply Assistant">Apply with assistant</button><a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer" title="Go straight to the company's apply page">Apply directly ↗</a>`:"";
+    const apply = j.url?`<button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="Analyze your fit, then draft the application with the Apply Assistant">✨ Apply with assistant</button><a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer" title="Go straight to the company's apply page">Apply directly ↗</a>`:"";
     const jsave = `<div class="ppl-acts"><button type="button" class="rsave" data-kind="job" data-ref="${esc(String(jref))}" data-label="${esc(j.title||"")}" data-sub="${esc(((j.company||"").replace(/_/g," "))+(j.location?" · "+j.location:""))}" data-url="${esc(j.url||"")}" title="Save to a shortlist">☆</button></div>`;
     const pct = j.match_pct ? ` <span style="color:var(--gold);font-weight:700;font-size:.76rem;">${j.match_pct}% match</span>` : "";
     const jr = (j.reasons&&j.reasons.length) ? ` <span style="color:var(--muted);font-size:.74rem;">· ${j.reasons.map(esc).join(" · ")}</span>` : "";
-    return `<div class="ppl-card">${jsave}<span class="ppl-body">
+    return `<div class="ppl-card job-card" data-jref="${esc(String(jref))}" title="Click for a summary of this posting">${jsave}<span class="ppl-body">
       <span class="ppl-name">${esc(j.title)}${pct}</span>
       <span class="ppl-blurb">${co}${j.source?` · via ${esc(j.source)}`:""}${jr}</span>
       ${loc||dept?`<span class="ppl-tags">${loc}${dept}</span>`:""}
@@ -7541,9 +7544,9 @@ function renderMatchResults(d){
     const jref = j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||""));
     const save = `<div class="ppl-acts"><button type="button" class="rsave" data-kind="job" data-ref="${esc(String(jref))}" data-label="${esc(j.title||"")}" data-sub="${esc(co+(j.location?" · "+j.location:""))}" data-url="${esc(j.url||"")}" title="Save to a shortlist">☆</button></div>`;
     window.MATCH_JOBS = window.MATCH_JOBS || {}; window.MATCH_JOBS[String(jref)] = {...j, from: "match"};
-    const assist = j.url?`<button type="button" class="ppl-lnk js-sum" data-ref="${esc(String(jref))}" title="AI reads the posting and gives you the key requirements, pay, location and work mode">✨ Summarize</button><button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="Analyze your fit for this role, then draft the application with the Apply Assistant">Apply with assistant</button>`:"";
+    const assist = j.url?`<button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="Analyze your fit for this role, then draft the application with the Apply Assistant">✨ Apply with assistant</button>`:"";
     const apply = j.url?`<a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer" title="Go straight to the company's apply page">Apply directly ↗</a>`:"";
-    return `<div class="ppl-card">${save}<span class="ppl-body">
+    return `<div class="ppl-card job-card" data-jref="${esc(String(jref))}" title="Click for a summary of this posting">${save}<span class="ppl-body">
       <span class="ppl-name">${esc(j.title)} <span style="color:var(--gold);font-weight:700;font-size:.78rem;">${j.match_pct}% match</span></span>
       <span class="ppl-blurb">${co}${j.location?` · ${esc(j.location)}`:""}${reasons}</span>
       ${tags?`<span class="ppl-tags">${tags}</span>`:""}
@@ -7606,6 +7609,12 @@ function jobSummaryMarkup(sm, j, opts){
     ${(sm.responsibilities||[]).length && !opts.noReqs ? `<details style="margin-top:.3rem;"><summary style="cursor:pointer;color:var(--muted);">What you'd do · nice-to-haves · notes</summary><ul style="margin:.15rem 0 0;padding-left:1.1rem;">${li(sm.responsibilities)}</ul>${(sm.nice_to_have||[]).length?`<div style="margin-top:.25rem;"><b>Nice to have:</b> ${(sm.nice_to_have||[]).map(esc).join(" · ")}</div>`:""}${(sm.notes||[]).length?`<div style="margin-top:.25rem;"><b>Notes:</b> ${(sm.notes||[]).map(esc).join(" · ")}</div>`:""}</details>` : ""}
     <div class="sethint" style="margin-top:.3rem;">Read from the posting by AI; pay and work mode shown only when the posting states them.${opts.cached ? " (saved read)" : ""}</div>
     ${links}</div>`;
+}
+function toggleJobSummary(ref){
+  const boxes = document.querySelectorAll(`.js-sumbox[data-ref="${CSS.escape(String(ref))}"]`);
+  if(!boxes.length) return;
+  if(boxes[0].innerHTML.trim()){ boxes.forEach(b => { b.innerHTML = ""; }); return; }   // second click folds it
+  summarizeJob(ref);
 }
 async function summarizeJob(ref){
   const j = (window.MATCH_JOBS||{})[ref] || (window.JOBS_INDEX||{})[ref];
@@ -8507,8 +8516,10 @@ document.addEventListener("click", e => {
   if(ef){ e.preventDefault(); toggleEvidenceFilter(ef.dataset.kind); return; }
   const aa = e.target.closest && e.target.closest(".aa-apply");
   if(aa){ e.preventDefault(); applyWithAssistant(aa.dataset.ref); return; }
-  const js = e.target.closest && e.target.closest(".js-sum");
-  if(js){ e.preventDefault(); summarizeJob(js.dataset.ref); return; }
+  const jc = e.target.closest && e.target.closest(".job-card");
+  if(jc && !e.target.closest("a, button, input, select, textarea, .js-summary, details, summary")){
+    e.preventDefault(); toggleJobSummary(jc.dataset.jref); return;
+  }
 });
 // PRE-search "must have": toggling changes what the NEXT search requires; nothing re-runs by itself
 function toggleEvidenceFilter(kind){
