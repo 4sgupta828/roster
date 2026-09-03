@@ -314,6 +314,27 @@ async def upsert_jobs(conn, source: str, rows: list[dict], vecs: list[str | None
     return n
 
 
+async def backfill_embeddings(conn, limit: int) -> int:
+    """Embed rs_job rows whose vector is NULL (same blurb the ingest paths embed), newest first,
+    100 per HTTP call; a failed batch is skipped, never retried in-run. Returns rows embedded."""
+    rows = await conn.fetch(
+        "SELECT id, company, title, location, department FROM rs_job WHERE embedding IS NULL "
+        "ORDER BY updated_at DESC LIMIT $1", int(limit))
+    n = 0
+    for i in range(0, len(rows), 100):
+        chunk = rows[i:i + 100]
+        texts = [f"{r['title']} at {r['company']}. {r['location'] or ''}. {r['department'] or ''}".replace("..", ".")
+                 for r in chunk]
+        vecs = embed_batch(texts)
+        for r, v in zip(chunk, vecs):
+            if v:
+                await conn.execute("UPDATE rs_job SET embedding = $1::vector WHERE id = $2 AND embedding IS NULL", v, r["id"])
+                n += 1
+        if (i // 100) % 10 == 9:
+            print(f"  backfill: {n}/{len(rows)}", flush=True)
+    return n
+
+
 async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--live", action="store_true", help="write to rs_job (+ embed); default is dry")
@@ -324,6 +345,9 @@ async def main() -> None:
     ap.add_argument("--no-aggregators", action="store_true", help="skip the aggregator feeds (RemoteOK/Remotive/…)")
     ap.add_argument("--no-workday", action="store_true", help="skip the Workday tenant sweep")
     ap.add_argument("--workday-file", default="", help="TSV company<TAB>host<TAB>wd<TAB>tenant<TAB>site to use instead of WORKDAY_TENANTS")
+    ap.add_argument("--backfill", type=int, default=0,
+                    help="EMBED-ONLY mode: give up to N rs_job rows written without a vector their embedding "
+                         "(rows a sweep wrote during an embed hiccup are invisible to résumé matching until then)")
     args = ap.parse_args()
     live = args.live and not args.dry
 
@@ -351,6 +375,13 @@ async def main() -> None:
         sys.exit(2)
     import asyncpg
     conn = await asyncpg.connect(dsn)
+    if args.backfill:
+        try:
+            n = await backfill_embeddings(conn, args.backfill)
+        finally:
+            await conn.close()
+        print(f"backfill: embedded {n} jobs (~${n * 20 / 1_000_000 * 0.02:.4f})")
+        return
     await ensure_checkpoint(conn)
     already = set() if args.refresh else await done_boards(conn)
 

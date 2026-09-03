@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections import defaultdict
 
 _log = logging.getLogger("roster.artifacts")
@@ -622,10 +623,49 @@ def fetch_site_posts(link: str, *, timeout: int = 12) -> tuple[list[dict], str]:
     return [], ""
 
 
+_PLACEHOLDER_HOSTS = {"example.com", "example.org", "example.net", "localhost", "127.0.0.1", "yoursite.com",
+                      "your-domain.com", "yourdomain.com", "mysite.com", "domain.com"}
+_PLACEHOLDER_TITLE = re.compile(
+    r"^(a post with\b|blog post number \d+|a distill-style|welcome( to jekyll)?!?$|hello,? world!?$|"
+    r"(my )?first post!?$|(test|sample|example|demo) post|lorem ipsum|about( me)?$|home$|contact$|"
+    r"projects?$|blog$|resume$|cv$|untitled)", re.I)
+_PLACEHOLDER_PATH = re.compile(
+    r"(/blog/post-\d+/?$|/projects?/project-\d+/?$|/post-\d+/?$|/(hello|first|sample|example)-post/?$|"
+    r"/blog/(post|sample|example)\d*/?$)", re.I)
+
+
+def _site_of(host: str) -> str:
+    """Registrable-domain approximation: the last two labels (blog.foo.com → foo.com)."""
+    h = (host or "").lower().removeprefix("www.")
+    parts = h.split(".")
+    return ".".join(parts[-2:]) if len(parts) >= 2 else h
+
+
+def placeholder_post(post: dict, feed_url: str) -> str:
+    """Why a feed item is TEMPLATE FILLER rather than the person's writing ('' = genuine). A site
+    built from a starter theme (astro-nano, al-folio, Jekyll…) ships with sample posts whose links
+    point at the theme's demo host or at placeholder paths; a personal site's feed must link to the
+    person's OWN site (Medium feeds may land on publication domains, so those are exempt)."""
+    from urllib.parse import urlparse
+    url, title = (post.get("url") or "").strip(), (post.get("title") or "").strip()
+    pu, fu = urlparse(url), urlparse(feed_url or "")
+    host = pu.netloc.lower().removeprefix("www.")
+    if not host or host in _PLACEHOLDER_HOSTS or re.search(r"(^|[.-])demo[.-]|template|starter|\.example$", host):
+        return "demo host"
+    if _PLACEHOLDER_TITLE.match(title) or _PLACEHOLDER_PATH.search(pu.path or ""):
+        return "template sample"
+    fhost = fu.netloc.lower().removeprefix("www.")
+    if fhost and "medium.com" not in fhost and _site_of(fhost) != _site_of(host):
+        return "off-site link"          # the feed lives on their site; the item points elsewhere
+    return ""
+
+
 def site_post_artifact(post: dict, feed_url: str) -> dict | None:
     from urllib.parse import urlparse
     title, url = (post.get("title") or "").strip(), (post.get("url") or "").strip()
     if not title or not url.startswith("http"):
+        return None
+    if placeholder_post(post, feed_url):
         return None
     host = urlparse(url).netloc.lower().removeprefix("www.")
     return {"kind": "post", "artifact_key": url[:300], "title": title[:300], "url": url[:500],

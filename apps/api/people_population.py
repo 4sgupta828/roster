@@ -761,6 +761,46 @@ def _dedupe_attrs(attrs: list[dict]) -> list[dict]:
     return out
 
 
+def collapse_linked(rows: list[dict], linked: dict[str, list[str]]) -> list[dict]:
+    """ONE CARD PER PERSON: when two rows are LINKED identities of the same person (rs_person_link —
+    name + shared employer, code-written), the earlier (better-ranked) row absorbs the other's
+    profile links and attributes and lists it under `merged_identities`; the other row is dropped.
+    Same-named rows that are NOT linked stay separate (never merged by name alone). Order stable."""
+    if not rows or not linked:
+        return rows
+    by_id = {r.get("entity_id"): r for r in rows}
+    absorbed: dict[str, str] = {}                   # dropped id → the id that kept it
+    out = []
+    for r in rows:
+        eid = r.get("entity_id")
+        if eid in absorbed:
+            continue
+        keep = r
+        group = [eid]
+        # transitive closure over links within this result set (a↔b, b↔c → one card)
+        stack = list(linked.get(eid) or [])
+        while stack:
+            o = stack.pop()
+            if o in group or o not in by_id:
+                continue
+            group.append(o)
+            stack.extend(linked.get(o) or [])
+        for o in group[1:]:
+            if o in absorbed:
+                continue
+            absorbed[o] = eid
+            src = by_id[o]
+            keep["links"] = _dedupe_links(list(keep.get("links") or []) + list(src.get("links") or []))
+            if any(l.get("kind") == "linkedin" for l in keep["links"]):      # a real link beats the proxy
+                keep["links"] = [l for l in keep["links"] if l.get("kind") != "linkedin_search"]
+            keep["attributes"] = _dedupe_attrs(list(keep.get("attributes") or []) + list(src.get("attributes") or []))
+            keep.setdefault("merged_identities", []).append(o)
+            if not keep.get("blurb") and src.get("blurb"):
+                keep["blurb"] = src["blurb"]
+        out.append(keep)
+    return out
+
+
 def _person_countries(facet_rows: list[dict]) -> set[str]:
     """Best-effort countries for a person under a geo scope: explicit country facets first; when
     none, a known METRO implies its country (vertical map) — so metro=berlin with no country facet
@@ -1335,6 +1375,12 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
         else:
             raw = await store.people_by_name(name, tenant_id=tenant_id, limit=12)
         rows = [_person_row_from_facets(r) for r in raw]
+        if len(rows) > 1 and getattr(store, "_get_pool", None):   # linked identities = one candidate
+            from api.identity_links import links_for
+            _ls = await links_for(await store._get_pool(), [r["entity_id"] for r in rows])
+            if _ls:
+                rows.sort(key=lambda r: -len(r.get("attributes") or []))   # the richer identity keeps
+                rows = collapse_linked(rows, {k: [l["id"] for l in v] for k, v in _ls.items()})
     except Exception as e:  # noqa: BLE001 — index trouble → honest 'none', never a crash
         _log.warning("lookup_person(%s) index read failed: %s", name, e)
         rows = []
@@ -2001,6 +2047,14 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             p["rank_read"] = rank_read(p, facets)
         people_rows.sort(key=rank_sort_key)
         _ranked_by_evidence = True
+        # ONE CARD PER PERSON: linked identities (papers + repos of the same person) collapse into
+        # the better-ranked row — no more "the same name twice" from two sources
+        _linked = {p["entity_id"]: [l["id"] for l in ((p.get("artifacts") or {}).get("linked") or [])]
+                   for p in people_rows}
+        _n0 = len(people_rows)
+        people_rows = collapse_linked(people_rows, _linked)
+        if len(people_rows) < _n0:
+            coverage["merged_identities"] = _n0 - len(people_rows)
 
     # CONFIRMED-COUNTRY priority under a geo scope: people we can PLACE in the scoped country lead;
     # unknown-location profiles follow (recall keeps them; rank stops them crowding out confirmed).

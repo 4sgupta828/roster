@@ -182,3 +182,22 @@ def test_items_cover_every_kind_not_just_starred_repos():
     kinds = [it["kind"] for it in s["items"]]
     assert kinds[:2] == ["talk", "post"] and kinds.count("repo") == 4          # every kind present; repos capped
     assert s["counts"] == {"repo": 10, "post": 1, "talk": 1}
+
+
+# ---- template-filler posts never become artifacts -------------------------------------------
+def test_placeholder_post_rejects_demo_hosts_and_offsite_links():
+    from api.artifacts import placeholder_post, site_post_artifact
+    feed = "https://akhil-k.com/rss.xml"
+    assert placeholder_post({"title": "GAIA Benchmarking", "url": "https://astro-nano-demo.vercel.app/projects/project-16/"}, feed) == "demo host"
+    assert placeholder_post({"title": "Something real", "url": "https://example.com/blog/x"}, feed)
+    assert placeholder_post({"title": "Real title", "url": "https://other-site.io/posts/real"}, feed) == "off-site link"
+    assert placeholder_post({"title": "Blog Post number 2", "url": "https://akhil-k.com/blog/2"}, feed) == "template sample"
+    assert placeholder_post({"title": "a post with diagrams", "url": "https://akhil-k.com/blog/2020/diagrams/"}, feed) == "template sample"
+    assert placeholder_post({"title": "About Me", "url": "https://akhil-k.com/about/"}, feed) == "template sample"
+    assert placeholder_post({"title": "Interview at Oracle", "url": "https://akhil-k.com/blog/post-04/"}, feed) == "template sample"
+    # genuine: same site (subdomain ok), real title
+    assert placeholder_post({"title": "Scaling our ingest pipeline", "url": "https://blog.akhil-k.com/scaling-ingest/"}, feed) == ""
+    # Medium feeds land on publication domains — allowed
+    assert placeholder_post({"title": "Kubernetes at scale", "url": "https://levelup.gitconnected.com/k8s-abc"}, "https://medium.com/feed/@someone") == ""
+    assert site_post_artifact({"title": "GAIA", "url": "https://astro-nano-demo.vercel.app/projects/project-16/"}, feed) is None
+    assert site_post_artifact({"title": "Scaling our ingest pipeline", "url": "https://akhil-k.com/scaling/"}, feed)["kind"] == "post"

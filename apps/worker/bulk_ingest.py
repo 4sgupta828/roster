@@ -13,6 +13,7 @@ Enabled with ROSTER_BULK_INGEST=1 on a worker service (ROSTER_ROLE=worker). Knob
   ROSTER_BULK_SWEEP_TOP       job-board sweep each cycle over SEC top-2000 + the N most-staffed
                               companies in the people index (jobs_sweep.py --universe all); 0 = off
   ROSTER_BULK_ARTIFACTS_CHUNK  people per source per cycle for the public-artifact linker
+  ROSTER_BULK_EMBED_BACKFILL  jobs per cycle given a missing embedding (default 20000; pennies)
                               (scripts/ingest_artifacts.py: papers/repos/orgs by identity key; HTTP
                               only, no LLM spend). 0 = off (default).
   ROSTER_BULK_INTERVAL_SEC    seconds between cycles (default 900) — paces GitHub's 5k/hr + 30/min
@@ -70,6 +71,7 @@ def run_bulk_ingest_loop() -> None:
     # job-board SWEEP (7 ATS + Workday discovery over the SEC top-2000 + the N most-staffed companies
     # in the people index): resumable via rs_ats_probed, so each cycle only probes new pairs; 0 = off
     sweep_top = int(os.environ.get("ROSTER_BULK_SWEEP_TOP", "0") or 0)
+    embed_backfill = int(os.environ.get("ROSTER_BULK_EMBED_BACKFILL", "20000") or 20000)
     per_window = int(os.environ.get("ROSTER_BULK_PEOPLE_PERWINDOW", "1000") or 1000)
     interval = int(os.environ.get("ROSTER_BULK_INTERVAL_SEC", "900") or 900)
     max_cycles_day = int(os.environ.get("ROSTER_BULK_MAX_CYCLES_DAY", "96") or 96)
@@ -91,6 +93,9 @@ def run_bulk_ingest_loop() -> None:
         cycles_today += 1
         jobs_argv = ["scripts/ingest_jobs.py", "--live"] + (["--limit", str(jobs_chunk)] if jobs_chunk else [])
         _run_chunk(jobs_argv)
+        # self-heal: jobs written without a vector (embed hiccups during big sweeps) are invisible to
+        # résumé matching — give them their embedding (~$0.0004 / 1k jobs)
+        _run_chunk(["scripts/ingest_jobs.py", "--backfill", str(embed_backfill)])
         if people_on:
             _run_chunk(["scripts/ingest_people.py", "--live", "--limit", str(people_chunk),
                         "--per-window", str(per_window)])

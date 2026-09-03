@@ -35,9 +35,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from datetime import date
 from typing import Any, Sequence
+
+_log = logging.getLogger("roster.claimgraph")
+
+
+def _ef_search(cap: int) -> int:
+    """HNSW candidate depth for a `cap`-row vector query: at least 100, at most Postgres's hard
+    limit of 1000 (a larger value makes SET LOCAL fail → the whole query fails → an empty slate)."""
+    return max(100, min(int(cap) + 40, 1000))
 
 _WS = re.compile(r"\s+")
 
@@ -1820,7 +1829,7 @@ class ClaimGraphStore:
         try:
             async with pool.acquire() as conn:
                 async with conn.transaction():
-                    await conn.execute(f"SET LOCAL hnsw.ef_search = {max(int(cap) + 40, 100)}")  # HNSW cap fix
+                    await conn.execute(f"SET LOCAL hnsw.ef_search = {_ef_search(cap)}")  # HNSW cap fix
                     if candidate_ids:
                         rows = await conn.fetch(
                             "SELECT entity_id FROM rs_person_vec WHERE entity_id = ANY($1) "
@@ -1894,9 +1903,10 @@ class ClaimGraphStore:
                     # HNSW's ef_search (default 40) caps how many candidates the index returns REGARDLESS
                     # of LIMIT — raise it so a large `cap` actually yields a real candidate pool. (int-only,
                     # so string interpolation is safe; SET LOCAL doesn't accept bound parameters.)
-                    await conn.execute(f"SET LOCAL hnsw.ef_search = {max(int(cap) + 40, 100)}")
+                    await conn.execute(f"SET LOCAL hnsw.ef_search = {_ef_search(cap)}")
                     rows = await conn.fetch(sql, qvec, int(cap))
-        except Exception:
+        except Exception as e:  # noqa: BLE001
+            _log.warning("match_jobs_scored failed (cap=%s): %s", cap, e)
             return []
         return [dict(r) for r in rows]
 
@@ -1909,7 +1919,7 @@ class ClaimGraphStore:
         try:
             async with pool.acquire() as conn:
                 async with conn.transaction():
-                    await conn.execute(f"SET LOCAL hnsw.ef_search = {max(int(cap) + 40, 100)}")
+                    await conn.execute(f"SET LOCAL hnsw.ef_search = {_ef_search(cap)}")
                     rows = await conn.fetch(sql, qvec, int(cap))
         except Exception:
             return []
