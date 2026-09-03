@@ -2076,6 +2076,51 @@ def _facet_summary(facets: dict[str, list[str]]) -> str:
     return "; ".join(parts)
 
 
+_SENIOR_WORDS_RX = re.compile(r"\b(senior|staff|principal|lead|head|director|vp|chief|distinguished)\b", re.I)
+_GEO_WORDS_RX = re.compile(r"\b(remote|anywhere|worldwide|global|in|near|based|located|area|bay area|nyc|sf|london|europe|india)\b", re.I)
+
+
+def brief_contract_for(question: str, facets: dict, *, hard_keys: list[str], soft_keys: list[str],
+                       guard_added: list[str] | None = None, relaxed_from: list[str] | None = None,
+                       semantic_first: bool = False, ev_kinds: list[str] | None = None,
+                       scope: dict | None = None, topic_terms: list[str] | None = None) -> dict:
+    """THE INTERPRETED BRIEF as a code-owned contract (recruiter-workflows P1): which constraints
+    GATED the cohort ("must") and which only RANK it ("prefer"), the scope, what the search
+    assumed because the brief did not say, and at most ONE clarifying question that ships WITH the
+    map (never before it). Everything here is derived from how this run actually filtered."""
+    facets = facets or {}
+    def vals(k):
+        return [str(v).replace("_", " ") for v in (facets.get(k) or []) if str(v).strip()]
+    hard = {k: vals(k) for k in hard_keys if vals(k)}
+    soft = {k: vals(k) for k in soft_keys if vals(k) and k not in hard}
+    if ev_kinds:
+        hard["evidence"] = list(ev_kinds)
+    scope = scope or {}
+    assumptions: list[str] = []
+    clarification: dict | None = None
+    q = question or ""
+    if _SENIOR_WORDS_RX.search(q) and not facets.get("seniority"):
+        assumptions.append("seniority was not compiled as a filter — all levels are shown, senior-sounding titles rank first")
+        clarification = {"ask": "Which level do you mean — senior IC, staff/principal, or manager/lead?",
+                         "why": "your brief reads senior but no level gated the search",
+                         "key": "seniority"}
+    if not (facets.get("metro") or facets.get("state") or facets.get("country")) and not scope.get("label"):
+        assumptions.append("no location in the brief and no scope selected — results are worldwide")
+    elif scope.get("label") and not (facets.get("metro") or facets.get("state")):
+        assumptions.append(f"location follows your scope selector ({scope.get('label')}) — the brief named no place")
+    if relaxed_from:
+        assumptions.append("relaxed to find people: " + ", ".join(str(k).replace("_", " ") for k in relaxed_from) + " became preferences, not filters")
+    if guard_added:
+        assumptions.append("company kept as a filter from your wording: " + ", ".join(str(c).replace("_", " ") for c in guard_added))
+    if semantic_first and not hard:
+        assumptions.append("no hard filter applied — ranked by how closely each profile's wording matches the brief")
+    if not hard and not soft and not topic_terms:
+        assumptions.append("nothing compiled into filters — pure wording match")
+    return {"hard": hard, "soft": soft, "scope": {k: scope.get(k) for k in ("label", "metro", "state") if scope.get(k)},
+            "topic": list(topic_terms or [])[:6], "assumptions": assumptions[:4], "clarification": clarification,
+            "guard_added": list(guard_added or []), "relaxed": list(relaxed_from or [])}
+
+
 def _coverage_basis(facets, stats, matches: int) -> dict:
     return {
         "query_facets": facets,
@@ -2290,10 +2335,12 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         topic_terms = topic_terms_for(facets, topic_terms)
     # COMPANY GUARD (code-owned): a company the question names gates the cohort even when the
     # compiler dropped it — unless this is a single-person lookup ("Mukul Gupta at Cisco")
+    guard_added: list[str] = []
     if not (not facets and person):
         facets = await company_guard(question, facets, store)
-        if facets.get("_company_guard"):
-            _log.info("company guard added %s for %r", facets["_company_guard"], question[:80])
+        guard_added = list(facets.get("_company_guard") or [])
+        if guard_added:
+            _log.info("company guard added %s for %r", guard_added, question[:80])
             facets.pop("_company_guard", None)
     if not facets and person and not _prior:
         # SINGLE-PERSON identity/profile lookup — everything the index holds on them, on demand
@@ -2539,6 +2586,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     # stays the gate and role/function/skill become ranking signals: everyone at the company,
     # role-matching people first. Honest note via relaxed_from.
     _soft_keys = [k for k in ("role", "function", "skill", "seniority") if facets.get(k)]
+    _thin_soft: list[str] = []                   # the keys that became preferences on a thin company cohort
     if facets.get("company") and _soft_keys and len(rows) < 10:
         _wide = await _enum_recall({k: v for k, v in facets.items() if k not in _soft_keys}, cap=200)
         if len(_wide) > len(rows):
@@ -2549,6 +2597,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             _hit_ids = {r["entity_id"] for r in _hits}
             rows = _hits + [r for r in _wide if r["entity_id"] not in _hit_ids]
             relaxed_from = list(dict.fromkeys(relaxed_from + _soft_keys))
+            _thin_soft = list(_soft_keys)
             facets = {k: v for k, v in facets.items() if k not in _soft_keys}
     coverage = _coverage_basis(facets, stats, len(rows))
     if _worked_at_union_used:
@@ -2835,6 +2884,14 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             await attach_artifacts(store, people_rows)
         coverage["footprint"] = footprint_coverage(people_rows)
         coverage["evidence_groups"] = evidence_groups(people_rows)
+        _hard_keys = list(_identity_facets) + [k for k in ("country", "state", "metro") if facets.get(k)]
+        _soft_all = [k for k in ("role", "function", "skill", "seniority", "industry", "stage", "accelerator") if facets.get(k)]
+        if not semantic_first:                       # facet-gated run: the non-identity facets DID gate
+            _hard_keys += [k for k in _soft_all if k not in (relaxed_from or []) and k not in _thin_soft]
+        coverage["brief_contract"] = brief_contract_for(
+            question, facets, hard_keys=_hard_keys, soft_keys=_soft_all, guard_added=guard_added,
+            relaxed_from=relaxed_from, semantic_first=semantic_first, ev_kinds=_ev_kinds,
+            scope=(coverage.get("geo_scope") or {}), topic_terms=topic_terms)
         coverage["ranking"] = ("how closely each profile's wording matches your brief first; among "
                                "near-equal matches, the strength of public evidence (confirmed employer, "
                                "linked papers and repos, recent activity, LinkedIn headline fit) — the "

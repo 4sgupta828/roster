@@ -555,6 +555,15 @@
   .ppl-card.person-card .ev-inline, .ppl-card.person-card .ev-inline *{cursor:auto;}
   .ppl-card.person-card .ev-inline a, .ppl-card.person-card .ev-inline button, .ppl-card.person-card .ev-inline select, .ppl-card.person-card .ev-inline summary{cursor:pointer;}
   .ev-hint{font-size:.7rem;color:var(--muted);margin-left:.35rem;}
+  .bc-strip{display:block;margin:.35rem 0 .2rem;font-size:.78rem;line-height:1.6;}
+  .bc-grp{display:inline-flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:0 .7rem .25rem 0;}
+  .bc-h{font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
+  .bc-item{display:inline-block;padding:.1rem .5rem;border-radius:999px;border:1px solid var(--hair);}
+  .bc-item.bc-hard{border-color:var(--gold);background:rgba(var(--gold-rgb),.1);color:var(--gold-strong);font-weight:600;}
+  .bc-item.bc-soft{color:var(--ink);background:var(--panel2);}
+  .bc-k{font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.05em;opacity:.75;margin-right:.2rem;}
+  .bc-assume{font-size:.74rem;color:var(--muted);margin-top:.1rem;}
+  .bc-ask{margin-top:.3rem;padding:.35rem .6rem;border-left:3px solid var(--gold);background:rgba(var(--gold-rgb),.06);font-size:.8rem;}
   details.ppl-meta > summary{list-style:none;cursor:pointer;}
   details.ppl-meta > summary::-webkit-details-marker{display:none;}
   details.ppl-meta[open] > summary .ppl-fc{opacity:.6;}
@@ -2753,8 +2762,21 @@ function peopleRowsMarkup(data){
   const cb = data.coverage_basis||{};
   const facets = cb.query_facets||{};
   window.LAST_PEOPLE_FACETS = facets;   // the brief's compiled filter — the Evidence Rail explains "why surfaced" against it
-  const facetChips = Object.entries(facets).map(([k,v])=>
-    `<span class="ppl-fc">${esc(k)}: ${esc((v||[]).join(" / "))}</span>`).join("");
+  // INTERPRETED BRIEF (recruiter contract): what gated the cohort vs what only ranks it, the scope,
+  // what was assumed, and at most one clarifying question — shown WITH the map, never before it.
+  const bc = cb.brief_contract || null;
+  const LBL = {company:"at", worked_at:"previously at", role:"role", function:"function", skill:"skill", seniority:"level", industry:"industry", metro:"metro", state:"state", country:"country", evidence:"must have", stage:"stage", accelerator:"accelerator"};
+  const kv = (o, cls) => Object.entries(o||{}).map(([k,v]) => `<span class="bc-item ${cls}"><span class="bc-k">${esc(LBL[k]||k)}</span> ${esc((v||[]).join(" / "))}</span>`).join("");
+  const facetChips = bc
+    ? `<div class="bc-strip">`
+      + (Object.keys(bc.hard||{}).length ? `<span class="bc-grp"><span class="bc-h">Must</span>${kv(bc.hard,"bc-hard")}</span>` : "")
+      + (Object.keys(bc.soft||{}).length ? `<span class="bc-grp"><span class="bc-h">Prefer</span>${kv(bc.soft,"bc-soft")}</span>` : "")
+      + ((bc.topic||[]).length ? `<span class="bc-grp"><span class="bc-h">Subject</span><span class="bc-item bc-soft">${esc(bc.topic.join(", "))}</span></span>` : "")
+      + (bc.scope && bc.scope.label ? `<span class="bc-grp"><span class="bc-h">Scope</span><span class="bc-item bc-hard">${esc(bc.scope.label)}</span></span>` : "")
+      + ((bc.assumptions||[]).length ? `<div class="bc-assume">${bc.assumptions.map(a=>`<span>· ${esc(a)}</span>`).join(" ")}</div>` : "")
+      + (bc.clarification ? `<div class="bc-ask">❓ ${esc(bc.clarification.ask)} <span class="ppl-fc" style="text-transform:none;">— ${esc(bc.clarification.why)}; answer in the box below to refine this map</span></div>` : "")
+      + `</div>`
+    : Object.entries(facets).map(([k,v])=>`<span class="ppl-fc">${esc(k)}: ${esc((v||[]).join(" / "))}</span>`).join("");
   const cov = esc(cb.population_statement||"");
   const cardHtml = (p)=>{
     // citation.document_id is a SOURCE token — sometimes a full URL (github.com/…), sometimes a

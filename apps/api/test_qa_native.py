@@ -1176,3 +1176,17 @@ def test_topic_terms_fall_back_to_non_canonical_role_words():
     assert topic_terms_for({"role": ["chip_design_engineer"], "country": ["us"]}, None) == ["chip design"]
     assert topic_terms_for({"role": ["software_engineer"], "skill": ["vector_search"]}, None) == ["vector search"]
     assert topic_terms_for({"role": ["ml_engineer"]}, ["given"]) == ["given"]          # the compiler's terms win
+
+
+def test_brief_contract_separates_must_from_prefer_and_ships_one_clarification():
+    from api.people_population import brief_contract_for
+    f = {"company": ["stripe"], "role": ["backend_engineer"], "country": ["us"]}
+    c = brief_contract_for("senior backend engineers at Stripe", f, hard_keys=["company", "country"], soft_keys=["role"],
+                           guard_added=["stripe"], semantic_first=False, scope={"label": "Bay Area", "metro": "bay_area"})
+    assert c["hard"] == {"company": ["stripe"], "country": ["us"]} and c["soft"] == {"role": ["backend engineer"]}
+    assert c["clarification"]["key"] == "seniority" and "senior" in c["assumptions"][0]
+    assert any("company kept as a filter" in a for a in c["assumptions"]) and c["scope"]["label"] == "Bay Area"
+    c2 = brief_contract_for("ML engineers", {"role": ["ml_engineer"]}, hard_keys=[], soft_keys=["role"], semantic_first=True,
+                            ev_kinds=["repo"], relaxed_from=["skill"])
+    assert c2["hard"] == {"evidence": ["repo"]} and c2["clarification"] is None
+    assert any("worldwide" in a for a in c2["assumptions"]) and any("relaxed" in a for a in c2["assumptions"])
