@@ -548,9 +548,15 @@
   .ppl-tag-topic{background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);font-weight:600;}
   .ppl-scopebar{border-left-color:var(--person)!important;}
   .ev-filterbar{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;}
-  .evfilters{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin:.45rem auto 0;max-width:var(--wrapw,880px);padding:0 .2rem;font-size:.78rem;color:var(--muted);}
-  .evf-lbl{font-family:var(--mono);font-size:.64rem;letter-spacing:.08em;text-transform:uppercase;margin-right:.2rem;}
-  .evf-reset{min-height:32px;padding:.15rem .6rem;border:0;background:none;color:var(--gold);font-size:.76rem;cursor:pointer;text-decoration:underline;}
+  .evfilters{position:relative;margin:.35rem auto 0;max-width:var(--wrapw,880px);padding:0 .2rem;font-size:.78rem;color:var(--muted);}
+  .evfilters>summary{list-style:none;display:inline-flex;align-items:center;gap:.3rem;cursor:pointer;min-height:36px;padding:.2rem .6rem;border-radius:999px;border:1px solid transparent;}
+  .evfilters>summary::-webkit-details-marker{display:none;}
+  .evfilters>summary::after{content:"▾";opacity:.6;}
+  .evfilters>summary:hover{border-color:var(--hair);background:var(--panel);}
+  .evfilters.active>summary{color:var(--gold);font-weight:600;}
+  .evf-pop{position:absolute;z-index:20;margin-top:.2rem;background:var(--panel);border:1px solid var(--hair);border-radius:10px;padding:.5rem .7rem;box-shadow:0 8px 24px rgba(0,0,0,.08);display:flex;flex-direction:column;gap:.15rem;min-width:200px;}
+  .evf-opt{display:flex;align-items:center;gap:.45rem;min-height:36px;font-size:.84rem;color:var(--ink);cursor:pointer;}
+  .evf-reset{min-height:32px;padding:.15rem .3rem;border:0;background:none;color:var(--gold);font-size:.76rem;cursor:pointer;text-decoration:underline;text-align:left;}
   .ev-filter{min-height:36px;padding:.25rem .7rem;border:1px solid var(--hair);border-radius:999px;background:var(--panel);color:var(--ink);font-size:.76rem;cursor:pointer;}
   .ev-filter.on{background:var(--gold);color:var(--on-accent);border-color:var(--gold);font-weight:600;}
   .ppl-scope{display:inline-block;margin-left:.3rem;min-height:40px;padding:.3rem .7rem;border:1px solid var(--person);border-radius:999px;background:none;color:var(--person);font-size:.76rem;font-weight:600;cursor:pointer;}
@@ -1714,11 +1720,10 @@
   </form>
   <!-- Talent Map PRE-SEARCH evidence filter: which kinds of linked public work a person must have.
        All on = no restriction; deselect to require at least one of the remaining kinds. -->
-  <div id="evfilters" class="evfilters" hidden>
-    <span class="evf-lbl" title="Only people with at least one of the selected kinds of linked public work. All selected = everyone.">Evidence</span>
-    <span id="evfchips"></span>
-    <button type="button" class="evf-reset" id="evfreset" hidden title="Select all kinds again">reset</button>
-  </div>
+  <details id="evfilters" class="evfilters" hidden>
+    <summary class="evf-sum" title="Only people with at least one of the selected kinds of linked public work. All selected = everyone."><span id="evfsummary">Evidence: any</span></summary>
+    <div class="evf-pop"><span id="evfchips"></span><button type="button" class="evf-reset" id="evfreset" hidden title="Select all kinds again">reset</button></div>
+  </details>
 
   <section id="out" aria-live="polite">
   </section>
@@ -2240,8 +2245,10 @@ function renderEvFilters(){
   const box = document.getElementById("evfchips"), wrap = document.getElementById("evfilters"), rs = document.getElementById("evfreset");
   if(!box || !wrap) return;
   wrap.hidden = (SEARCH_MODE !== "people");
-  box.innerHTML = EV_ALL.map(k => `<button type="button" class="ev-filter${EVIDENCE_KINDS.has(k)?" on":""}" data-kind="${k}" title="${EVIDENCE_KINDS.has(k)?"Included — click to exclude":"Excluded — click to include"} people with linked ${EV_LABEL[k]}">${EV_LABEL[k]}</button>`).join("");
+  box.innerHTML = EV_ALL.map(k => `<label class="evf-opt"><input type="checkbox" class="ev-filter" data-kind="${k}" ${EVIDENCE_KINDS.has(k)?"checked":""}/> ${EV_LABEL[k]}</label>`).join("");
   if(rs) rs.hidden = !evFilterActive();
+  const sum = document.getElementById("evfsummary");
+  if(sum){ sum.textContent = evFilterActive() ? ("Evidence: " + EV_ALL.filter(k=>EVIDENCE_KINDS.has(k)).map(k=>EV_LABEL[k]).join(", ")) : "Evidence: any"; wrap.classList.toggle("active", evFilterActive()); }
 }
 let TAB_THREADS = {};           // per-tab CONVERSATION state: People and Q&A each keep their OWN thread —
 //                                 a Q&A question must never append onto a People search's thread (the
@@ -8192,6 +8199,9 @@ async function openMapsList(){
 
     // ---- 4. WHAT THEY'VE DONE (public work + their own words) ----
     let done = "";
+    if(fp && (fp.linked||[]).length){
+      done += `<div class="er-src" style="margin-bottom:.3rem;">🔗 Linked identit${fp.linked.length===1?"y":"ies"}: ${fp.linked.map(l=>`<code>${esc(l.id)}</code> (${esc(l.method)}${l.employer?" · "+esc(String(l.employer).replace(/_/g," ")):""})`).join(", ")} — same name and the same employer on both profiles, and the name is unique enough to link. Work from linked identities is included below.</div>`;
+    }
     if(fp && fp.total){
       // grouped by KIND — papers, talks, posts, patents, repos, orgs — each with its links and its
       // full count, so a starred repo never hides a talk or a post
@@ -8203,7 +8213,7 @@ async function openMapsList(){
         if(!n) return;
         done += `<div class="er-kind"><span class="er-kind-h">${FP_LABEL[k]||esc(k)} · ${n}</span> <span class="er-art-m" style="display:inline;">${esc(HOW[k]||"")}</span></div>`;
         done += its.map(it=>{
-          const meta = [it.venue, (it.date||"").slice(0,4), it.stat, it.role==="first_author"?"first author":(it.role==="member"?"member":"")].filter(Boolean).join(" · ");
+          const meta = [it.venue, (it.date||"").slice(0,4), it.stat, it.role==="first_author"?"first author":(it.role==="member"?"member":""), it.via?"via linked identity":""].filter(Boolean).join(" · ");
           return `<div class="er-art">${it.url?`<a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">${esc(it.title)} ↗</a>`:esc(it.title)}${meta?`<span class="er-art-m">${esc(meta)}</span>`:""}</div>`;
         }).join("");
         if(n > its.length) done += `<div class="er-src">+${n-its.length} more ${FP_LABEL[k]||k}.</div>`;
@@ -8316,7 +8326,7 @@ document.addEventListener("click", e => {
   const rr = e.target.closest && e.target.closest(".ppl-rerank");
   if(rr){ e.preventDefault(); rerankShown(rr.dataset.pid); return; }
   const ef = e.target.closest && e.target.closest("#evfilters .ev-filter");
-  if(ef){ e.preventDefault(); toggleEvidenceFilter(ef.dataset.kind); return; }
+  if(ef){ toggleEvidenceFilter(ef.dataset.kind); return; }        // checkbox: no preventDefault
   const rs = e.target.closest && e.target.closest("#evfreset");
   if(rs){ e.preventDefault(); EVIDENCE_KINDS = new Set(EV_ALL); renderEvFilters(); }
 });

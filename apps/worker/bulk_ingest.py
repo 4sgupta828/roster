@@ -98,6 +98,8 @@ def run_bulk_ingest_loop() -> None:
             _run_chunk(["scripts/ingest_people.py", "--backfill", str(people_chunk)])
         if artifacts_chunk:
             _run_chunk(["scripts/ingest_artifacts.py", "--source", "all", "--limit", str(artifacts_chunk)])
+            # cross-source identity links (name + shared employer, unique-name guarded) — one SQL pass
+            _run_chunk(["scripts/link_identities.py"])
         if sweep_top:
             _run_chunk(["scripts/jobs_sweep.py", "--live", "--universe", "all", "--top", str(sweep_top),
                         "--workday", "--concurrency", "8"])

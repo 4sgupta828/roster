@@ -293,11 +293,41 @@ async def attach_artifacts(store, rows: list[dict]) -> None:
         return
     from api.evidence import calibrate
     found: dict[str, dict] = {}
+    links: dict[str, list] = {}
     get_pool = getattr(store, "_get_pool", None)
     if get_pool is not None:
         try:
+            from api.identity_links import links_for
             pool = await get_pool()
-            found = await fetch_person_artifacts(pool, [r.get("entity_id") for r in rows])
+            ids = [r.get("entity_id") for r in rows]
+            links = await links_for(pool, ids)
+            linked_ids = sorted({l["id"] for ls in links.values() for l in ls})
+            found = await fetch_person_artifacts(pool, ids + linked_ids)
+            # CROSS-SOURCE: a person's papers (openalex identity) and repos (github identity) show on
+            # ONE card when the identities are linked (name + shared employer, unique-name guarded)
+            for eid, ls in links.items():
+                base = found.get(eid) or {"scanned": [], "counts": {}, "total": 0, "newest": None,
+                                          "items": [], "affiliations": [], "reported": {}}
+                merged = None
+                for l in ls:
+                    other = found.get(l["id"])
+                    if not other:
+                        continue
+                    merged = merged or dict(base)
+                    merged["scanned"] = sorted(set(merged.get("scanned") or []) | set(other.get("scanned") or []))
+                    cnt = dict(merged.get("counts") or {})
+                    for k, n in (other.get("counts") or {}).items():
+                        cnt[k] = cnt.get(k, 0) + n
+                    merged["counts"] = cnt
+                    merged["total"] = int(merged.get("total") or 0) + int(other.get("total") or 0)
+                    if (other.get("newest") or "") > (merged.get("newest") or ""):
+                        merged["newest"] = other.get("newest")
+                    merged["items"] = (merged.get("items") or []) + [{**it, "via": l["id"]} for it in (other.get("items") or [])]
+                    merged["affiliations"] = (merged.get("affiliations") or []) + (other.get("affiliations") or [])
+                if merged is not None:
+                    merged["linked"] = [{"id": l["id"], "method": l["method"], "confidence": l["confidence"],
+                                         "employer": (l.get("evidence") or {}).get("employer", "")} for l in ls]
+                    found[eid] = merged
         except Exception as e:  # noqa: BLE001 — artifacts are additive; the map must still render
             _log.warning("attach_artifacts failed: %s", e)
     for r in rows:
