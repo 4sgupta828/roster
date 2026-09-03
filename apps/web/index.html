@@ -7022,6 +7022,9 @@ document.addEventListener("keydown", e=>{ if(e.key==="Escape" && !sessionsEl.hid
 // ---- identity gate (name + email captured at landing, stored per session) ----
 function initIdentity(){
   try{ USER = JSON.parse(localStorage.getItem("roster_user")||"null"); }catch(e){ USER = null; }
+  // A SHARED MAP LINK (#m/<id>?t=…) is a read-and-review surface for people without an account —
+  // a hiring manager reviews under a name; the identity gate must not block them.
+  if(/^#m\//.test(location.hash || "")) return;
   // Show the gate for new users AND for returning users who predate the disclaimer (never attested).
   if(!USER || !USER.email || !USER.disclaimer_ack){
     if(USER){ if(USER.name) $("#idname").value = USER.name; if(USER.email) $("#idemail").value = USER.email; }
