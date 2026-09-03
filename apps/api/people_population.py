@@ -461,7 +461,8 @@ async def build_jd_brief(jd_text: str, llm) -> dict | None:
                 "terms taken from the posting; functions (≤4, e.g. 'machine learning', 'infrastructure'). search_text: "
                 "one rich paragraph describing the IDEAL candidate's profile in the language a profile would use "
                 "(titles, technologies, domains, scale) — this drives the semantic search. rationale: one or two "
-                "lines on the choices. Never invent requirements the posting does not state."),
+                "lines on the choices, naming places by their names (never by key). Never invent requirements the "
+                "posting does not state."),
             messages=[{"role": "user", "content": f"JOB DESCRIPTION:\n{jd[:9000]}"}],
             response_format=_JDBrief, max_tokens=1200, temperature=0.0)
         b = comp.parsed

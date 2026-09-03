@@ -8537,7 +8537,8 @@ function scopeChip(gs){
   if(gs.metro || gs.state) btns.push(`<button type="button" class="ppl-scope" data-scope="us">All US</button>`);
   const geo = window.ROSTER_GEO || {};
   const detected = (gs.metro && geo.metro === gs.metro) || (!gs.metro && gs.state && geo.state === gs.state && !geo.metro);
-  return `<div class="ppl-cov ppl-scopebar">📍 <b>${esc(gs.label)}</b>${gs.source==="query"?"":(detected?" (your location)":" (your choice — change it in the top-right selector)")}: ${esc(gs.statement||"")} ${btns.join(" ")}</div>`;
+  const src = gs.source==="query" ? "" : gs.source==="chosen" ? " (chosen above)" : (detected?" (your location)":" (your choice — change it in the top-right selector)");
+  return `<div class="ppl-cov ppl-scopebar">📍 <b>${esc(gs.label)}</b>${src}: ${esc(gs.statement||"")} ${btns.join(" ")}</div>`;
 }
 document.addEventListener("click", e => {
   const b = e.target.closest && e.target.closest(".ppl-scope");
