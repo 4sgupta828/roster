@@ -1581,7 +1581,8 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
     clarify = _clarify_text(display_name, rows, resolution)
     if resolution == "none" and searched_web:
         _ns = f" {namesakes} {display_name} namesake{'s' if namesakes != 1 else ''} were found but match none of these hints." if namesakes else ""
-        clarify = (f"No public page mentions “{display_name}” together with {', '.join(searched_web.split()[1:])} — "
+        from api.person_discovery import hint_tokens as _ht
+        clarify = (f"No public page mentions “{display_name}” together with {', '.join(_ht(ctx))} — "
                    f"and no GitHub, OpenAlex or LinkedIn profile fits.{_ns} Not evidence of absence: try another "
                    f"detail (employer, school, city) or paste a profile URL.")
     if resolution == "ambiguous" and any(r.get("web") for r in rows):
