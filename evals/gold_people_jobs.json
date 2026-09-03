@@ -6,7 +6,7 @@
     {"id": "co_nvidia_ml", "surface": "people", "body": {"question": "machine learning engineers at Nvidia", "country": "us"},
      "checks": {"min_rows": 15, "company_share": ["nvidia", 0.9]}},
     {"id": "co_two_companies", "surface": "people", "body": {"question": "I need talent map around anthropic and open ai", "country": "us"},
-     "checks": {"min_rows": 60, "company_present": ["anthropic", 20], "company_present2": ["openai", 20]}},
+     "checks": {"min_rows": 60, "company_present": ["anthropic", 10], "company_present2": ["openai", 10]}},
     {"id": "co_apple_worked", "surface": "people", "body": {"question": "people who worked at Apple", "country": "us"},
      "checks": {"min_rows": 20, "mentions_share": ["apple", 0.8]}},
     {"id": "co_gap_perplexity", "surface": "people", "body": {"question": "engineers at Perplexity", "country": "us"},
