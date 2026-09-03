@@ -7593,14 +7593,26 @@ function renderApplyAnalysis(a){
   const V = {strong:"strong", partial:"partial", gap:"gap"};
   const rows = (a.requirements||[]).map(q=>{
     const v = V[q.verdict]||"gap";
-    return `<tr><td>${esc(q.requirement)}</td><td>${q.evidence?esc(q.evidence):'<span style="color:var(--muted)">—</span>'}</td>`
+    const imp = q.importance === "nice" ? `<span class="ppl-tag" title="Preferred / bonus — weighs half a must-have">nice-to-have</span>` : `<span class="ppl-tag" style="background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);" title="Required / core — weighs twice a nice-to-have">must-have</span>`;
+    const ev = q.evidence ? esc(q.evidence) + (q.evidence_quote && q.evidence_quote !== q.evidence ? `<div style="color:var(--muted);font-size:.74rem;margin-top:.15rem;">“${esc(q.evidence_quote)}”${q.verified?" ✓ verified in your résumé":""}</div>` : (q.verified?` <span style="color:var(--muted);font-size:.74rem;">✓ verified</span>`:"")) : '<span style="color:var(--muted)">—</span>';
+    return `<tr><td>${esc(q.requirement)} ${imp}</td><td>${ev}</td>`
       + `<td><span class="aa-v ${v}">${v}</span></td></tr>`;
   }).join("");
+  // HOW THE SCORE IS MADE (code-computed from the table; the same table always gives the same number)
+  const b = a.score_basis || null;
+  const basisLine = b ? (()=>{
+    const m = b.must||{}, n = b.nice||{};
+    const nm = (m.strong||0)+(m.partial||0)+(m.gap||0), nn = (n.strong||0)+(n.partial||0)+(n.gap||0);
+    const part = (lbl, o, k) => k ? `${k} ${lbl}${k===1?"":"s"} (${o.strong||0} strong · ${o.partial||0} partial · ${o.gap||0} gap)` : "";
+    return `<div class="ppl-cov" style="margin:.2rem 0 .8rem;">◔ Score = share of the fit table your résumé evidences: strong counts fully, partial half, a gap nothing; must-haves weigh twice nice-to-haves. ${[part("must-have", m, nm), part("nice-to-have", n, nn)].filter(Boolean).join(" · ")}. `
+      + `Every strong/partial verdict is backed by a verbatim résumé quote that we verify; an unverifiable claim counts as a gap.</div>`;
+  })() : "";
   const sec = (title, arr) => (arr&&arr.length) ? `<div class="aa-sec"><h4>${esc(title)}</h4><ul>${arr.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>` : "";
   const head = (a.role_title||a.company) ? `<div style="font-weight:600;font-size:.95rem;margin-bottom:.2rem;">${esc(a.role_title||"")}${a.company?` · ${esc(a.company)}`:""}</div>` : "";
   $("#aaResults").innerHTML = head
     + `<div class="aa-score"><div class="aa-ring" style="--pct:${a.fit_score||0}"><b>${a.fit_score||0}</b></div>`
     + `<div class="aa-sum">${esc(a.fit_summary||"")}</div></div>`
+    + basisLine
     + (rows ? `<table class="aa-tbl"><thead><tr><th>What the role needs</th><th>Your evidence</th><th>Fit</th></tr></thead><tbody>${rows}</tbody></table>` : "")
     + sec("Lead with", a.lead_with)
     + sec("Honest gaps to address", a.gaps)
@@ -7671,7 +7683,7 @@ function runCoverLetter(){ return runAaDoc("cover-letter"); }
 function runTailoredResume(){ return runAaDoc("tailored-resume"); }
 $("#applyhdr") && $("#applyhdr").addEventListener("click", ()=>openApplyAssist());
 $("#aaClose") && $("#aaClose").addEventListener("click", ()=>{ $("#applyassist").hidden = true; if(AA_FROM==="match"){ $("#matchmodal").hidden = false; } AA_FROM = ""; });
-$("#aaGo") && $("#aaGo").addEventListener("click", runApplyAnalysis);
+$("#aaGo") && $("#aaGo").addEventListener("click", ()=>runApplyAnalysis());
 $("#matchbtn2") && $("#matchbtn2").addEventListener("click", ()=>{ $("#applymodal").hidden=true; openMatch(); });
 $("#mSenBox") && $("#mSenBox").addEventListener("click",(e)=>{ const t=e.target.closest(".sentog"); if(!t) return;
   const k=t.dataset.sen; MATCH_SENS.has(k)?MATCH_SENS.delete(k):MATCH_SENS.add(k); renderSenToggles(); });

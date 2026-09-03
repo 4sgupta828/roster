@@ -112,3 +112,35 @@ def test_apply_job_must_requires_every_selected_kind():
     assert [r["title"] for r in run(["f500", "remote"])[0]] == ["Senior Software Engineer"]
     assert run(["bogus"])[1] is None                    # unknown kinds are ignored, not enforced
     assert run(["public"])[1]["labels"] == ["Public company"]
+
+
+def test_fit_score_is_code_computed_and_deterministic():
+    from api.people_population import fit_score_from_requirements
+    reqs = [{"requirement": "Python", "importance": "must", "verdict": "strong"},
+            {"requirement": "Go", "importance": "must", "verdict": "partial"},
+            {"requirement": "Fraud domain", "importance": "must", "verdict": "gap"},
+            {"requirement": "Kubernetes", "importance": "nice", "verdict": "strong"}]
+    score, basis = fit_score_from_requirements(reqs)
+    assert score == 57                                   # (2*1 + 2*.5 + 0 + 1*1) / (2+2+2+1) = 4/7
+    assert basis == {"must": {"strong": 1, "partial": 1, "gap": 1}, "nice": {"strong": 1, "partial": 0, "gap": 0}}
+    assert fit_score_from_requirements(list(reversed(reqs)))[0] == 57      # order-independent
+    assert fit_score_from_requirements([]) == (0, {"must": {"strong": 0, "partial": 0, "gap": 0}, "nice": {"strong": 0, "partial": 0, "gap": 0}})
+    assert fit_score_from_requirements([{"requirement": "x", "importance": "??", "verdict": "??"}])[0] == 0   # unknowns → must/gap
+
+
+def test_grade_requirements_gates_on_verbatim_resume_quotes():
+    from api.people_population import grade_requirements, quote_in_text
+    resume = "Senior software engineer, 10 years building distributed systems in Python and Go at Google and Stripe.\nLed the payments infrastructure team."
+    reqs = [{"requirement": "Python", "importance": "must"}, {"requirement": "Fraud domain", "importance": "must"},
+            {"requirement": "Go", "importance": "nice"}]
+    grades = [{"index": 0, "verdict": "strong", "evidence_quote": "distributed systems in Python and Go", "evidence": "Python at scale"},
+              {"index": 1, "verdict": "strong", "evidence_quote": "built fraud models for banks", "evidence": "fraud"},   # not in résumé → gap
+              {"index": 2, "verdict": "partial", "evidence_quote": "Go", "evidence": "Go"}]                                   # too short → gap
+    out = grade_requirements(reqs, grades, resume)
+    assert [r["verdict"] for r in out] == ["strong", "gap", "gap"]
+    assert out[0]["verified"] and out[0]["evidence"] == "Python at scale"
+    assert out[1]["evidence"] == "" and out[1]["evidence_quote"] == ""
+    assert quote_in_text("LED THE PAYMENTS   infrastructure team", resume)      # case / whitespace normalized
+    assert not quote_in_text("payments team", resume)                           # < 4 words never proves anything
+    # a missing grade is a gap; order follows the requirements list
+    assert [r["verdict"] for r in grade_requirements(reqs, [], resume)] == ["gap", "gap", "gap"]

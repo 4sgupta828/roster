@@ -499,16 +499,34 @@ async def build_candidate_brief(resume_text: str, profile: dict, llm) -> dict | 
 
 class _ApplyReq(BaseModel):
     requirement: str = ""      # a concrete requirement/skill the JD asks for
+    importance: str = "must"   # must (required / core) | nice (preferred / bonus)
     evidence: str = ""         # the candidate's supporting experience FROM THE RÉSUMÉ ('' if none)
     verdict: str = "gap"       # strong | partial | gap
 
 
-class _ApplyAnalysis(BaseModel):
+class _JDRequirement(BaseModel):
+    requirement: str = ""
+    importance: str = "must"
+
+
+class _JDRequirements(BaseModel):
+    """Stage A — read the JOB ONLY: what it asks for. A function of the job text alone."""
     role_title: str = ""
     company: str = ""
-    fit_score: int = 0                     # honest 0–100
+    requirements: list[_JDRequirement] = []
+
+
+class _FitGrade(BaseModel):
+    index: int = 0                          # position in the requirements list
+    verdict: str = "gap"                    # strong | partial | gap
+    evidence_quote: str = ""                # VERBATIM span copied from the résumé that backs the verdict
+    evidence: str = ""                      # one-line paraphrase for display
+
+
+class _FitGrades(BaseModel):
+    """Stage B — grade each requirement against the RÉSUMÉ with a verbatim quote per verdict."""
+    grades: list[_FitGrade] = []
     fit_summary: str = ""                  # one-line honest verdict
-    requirements: list[_ApplyReq] = []     # the match table
     lead_with: list[str] = []              # real strengths to emphasize when applying
     gaps: list[str] = []                   # honest missing pieces (+ how to address)
     how_to_apply: list[str] = []           # tactical advice
@@ -525,46 +543,109 @@ def _resume_text_of(profile: dict, resume_text: str) -> str:
     return t.strip()
 
 
+_VERDICT_CREDIT = {"strong": 1.0, "partial": 0.5, "gap": 0.0}
+_IMPORTANCE_W = {"must": 2.0, "nice": 1.0}
+
+
+def fit_score_from_requirements(reqs: list[dict]) -> tuple[int, dict]:
+    """CODE-OWNED fit score: the weighted share of requirements the résumé evidences — strong = full
+    credit, partial = half, gap = none; must-haves weigh twice a nice-to-have. Deterministic: the same
+    fit table always yields the same number (the model never picks the score). Returns (0–100, basis)."""
+    basis = {"must": {"strong": 0, "partial": 0, "gap": 0}, "nice": {"strong": 0, "partial": 0, "gap": 0}}
+    got = total = 0.0
+    for r in reqs or []:
+        imp = r.get("importance") if r.get("importance") in _IMPORTANCE_W else "must"
+        v = r.get("verdict") if r.get("verdict") in _VERDICT_CREDIT else "gap"
+        basis[imp][v] += 1
+        got += _IMPORTANCE_W[imp] * _VERDICT_CREDIT[v]
+        total += _IMPORTANCE_W[imp]
+    return (int(round(100 * got / total)) if total else 0), basis
+
+
+def _norm_ws(t: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (t or "").lower()).strip()
+
+
+def quote_in_text(quote: str, text: str) -> bool:
+    """Span check for a résumé quote: the quote (whitespace/case/punctuation-normalized) must appear
+    in the résumé. Short quotes (< 4 words) are rejected — they prove nothing."""
+    q, t = _norm_ws(quote), _norm_ws(text)
+    return len(q.split()) >= 4 and q in t
+
+
+def grade_requirements(reqs: list[dict], grades: list[dict], resume_text: str) -> list[dict]:
+    """CODE-OWNED merge of Stage B grades onto Stage A requirements with the grounding gate: a
+    strong/partial verdict must carry a verbatim résumé quote that span-checks; otherwise it is a GAP
+    with no evidence. Missing grades are gaps. The order is the JD's order (Stage A)."""
+    by_i = {}
+    for g in grades or []:
+        try:
+            by_i.setdefault(int(g.get("index")), g)
+        except (TypeError, ValueError):
+            continue
+    out = []
+    for i, r in enumerate(reqs or []):
+        g = by_i.get(i) or {}
+        v = g.get("verdict") if g.get("verdict") in _VERDICT_CREDIT else "gap"
+        quote = (g.get("evidence_quote") or "").strip()
+        verified = v != "gap" and quote_in_text(quote, resume_text)
+        if v != "gap" and not verified:
+            v = "gap"
+        out.append({"requirement": r.get("requirement") or "", "importance": r.get("importance") or "must",
+                    "verdict": v, "evidence": ((g.get("evidence") or quote) if v != "gap" else ""),
+                    "evidence_quote": (quote if v != "gap" else ""), "verified": verified})
+    return out
+
+
 async def build_apply_analysis(jd_text: str, profile: dict, resume_text: str, llm) -> dict | None:
-    """Grounded APPLY analysis: read the JD + the candidate's résumé and lay out an honest fit table
-    (each JD requirement × the candidate's real evidence × a verdict), what to lead with, honest gaps,
-    how to apply best, and résumé tuning that ONLY re-surfaces REAL experience (never fabricates).
-    LLM-owned (Rule 18); grounded in the two documents. None on any error/insufficient input."""
+    """Grounded APPLY analysis in TWO deterministic stages (temperature 0):
+      A) the JOB alone → its requirements (must / nice), in the JD's own order;
+      B) each requirement graded against the RÉSUMÉ with a VERBATIM quote per verdict.
+    Code then span-checks every quote (an unverifiable quote is a gap) and computes the score
+    arithmetically from the verdicts. The model never picks the number; the same job and résumé
+    give the same table and score. LLM-owned judgment (Rule 18); None on any error/insufficient input."""
     jd = (jd_text or "").strip()
     rt = _resume_text_of(profile, resume_text)
     if len(jd) < 40 or len(rt) < 40 or llm is None:
         return None
     try:
-        comp = await llm.complete(
+        ca = await llm.complete(
             system=(
-                "You are an expert career coach and technical recruiter helping THIS candidate decide how "
-                "to apply to THIS role. Read the JOB DESCRIPTION and the CANDIDATE RÉSUMÉ and produce an "
-                "HONEST, GROUNDED fit analysis so the candidate can focus on what matters. For each key "
-                "requirement in the JD, set `evidence` to the candidate's supporting experience DRAWN FROM "
-                "THE RÉSUMÉ (paraphrase real roles/achievements) and a `verdict`: 'strong' (clear match), "
-                "'partial' (adjacent/some), or 'gap' (not shown). NEVER fabricate — if the résumé doesn't "
-                "show it, verdict='gap' and evidence=''. fit_score: an honest 0–100. lead_with: the real "
-                "strengths to emphasize. gaps: honest missing pieces and how to address them. how_to_apply: "
-                "tactical advice for THIS application. resume_tips: concrete edits that ONLY re-emphasize, "
-                "reorder, or surface the candidate's REAL experience for this role — never invent anything. "
-                "Ground every statement in the two documents."),
-            messages=[{"role": "user", "content": f"JOB DESCRIPTION:\n{jd[:9000]}\n\nCANDIDATE RÉSUMÉ:\n{rt[:9000]}"}],
-            response_format=_ApplyAnalysis, max_tokens=4000)
-        a = comp.parsed
-        reqs = []
-        for r in (a.requirements or []):
-            if not r.requirement:
-                continue
-            v = r.verdict if r.verdict in ("strong", "partial", "gap") else "gap"
-            # CODE-enforce the grounding invariant: a 'gap' carries NO evidence, even if the model
-            # attached some — so the "no fabricated evidence" promise doesn't rest on the prompt alone.
-            reqs.append({"requirement": r.requirement, "evidence": ("" if v == "gap" else r.evidence), "verdict": v})
-        reqs = reqs[:14]
-        return {"role_title": a.role_title, "company": a.company,
-                "fit_score": max(0, min(100, int(a.fit_score or 0))), "fit_summary": a.fit_summary,
-                "requirements": reqs, "lead_with": a.lead_with[:6], "gaps": a.gaps[:6],
-                "how_to_apply": a.how_to_apply[:6], "resume_tips": a.resume_tips[:8]}
-    except Exception as e:   # noqa: BLE001
+                "You are a technical recruiter reading ONE job description. List the concrete requirements "
+                "it asks for — skills, experience, domains, credentials — one per entry, in the ORDER the "
+                "job description states them, each in a short literal phrase taken from the posting. Mark "
+                "`importance` 'must' for required / core items and 'nice' for preferred / bonus items. Be "
+                "literal and exhaustive up to 16 entries; do not invent, merge, or rank. Also give the role "
+                "title and company as stated."),
+            messages=[{"role": "user", "content": f"JOB DESCRIPTION:\n{jd[:9000]}"}],
+            response_format=_JDRequirements, max_tokens=2000, temperature=0.0)
+        reqs = [{"requirement": r.requirement.strip(), "importance": (r.importance if r.importance in ("must", "nice") else "must")}
+                for r in (ca.parsed.requirements or []) if (r.requirement or "").strip()][:16]
+        if not reqs:
+            return None
+        listing = "\n".join(f"{i}. [{r['importance']}] {r['requirement']}" for i, r in enumerate(reqs))
+        cb = await llm.complete(
+            system=(
+                "You are an expert career coach grading ONE candidate's résumé against a fixed list of job "
+                "requirements. For EVERY requirement index, return a grade: verdict 'strong' when the résumé "
+                "explicitly shows that skill/experience, 'partial' when it shows something adjacent or "
+                "lighter, 'gap' when the résumé does not show it. For strong and partial, `evidence_quote` "
+                "MUST be an exact, verbatim span copied from the résumé (at least 4 words, unchanged) that "
+                "backs the verdict — a verdict without a verbatim quote will be treated as a gap. NEVER "
+                "fabricate. Apply the same standard to every requirement. Then: fit_summary (one honest "
+                "line), lead_with (real strengths), gaps (honest missing pieces + how to address them), "
+                "how_to_apply (tactical advice), resume_tips (edits that ONLY re-emphasize, reorder, or "
+                "surface REAL experience — never invent)."),
+            messages=[{"role": "user", "content": f"REQUIREMENTS:\n{listing}\n\nCANDIDATE RÉSUMÉ:\n{rt[:9000]}"}],
+            response_format=_FitGrades, max_tokens=4000, temperature=0.0)
+        b = cb.parsed
+        graded = grade_requirements(reqs, [g.model_dump() for g in (b.grades or [])], rt)
+        score, basis = fit_score_from_requirements(graded)
+        return {"role_title": ca.parsed.role_title, "company": ca.parsed.company,
+                "fit_score": score, "score_basis": basis, "fit_summary": b.fit_summary,
+                "requirements": graded, "lead_with": b.lead_with[:6], "gaps": b.gaps[:6],
+                "how_to_apply": b.how_to_apply[:6], "resume_tips": b.resume_tips[:8]}
+    except Exception as e:  # noqa: BLE001
         _log.warning("build_apply_analysis failed: %s", e)
         return None
 

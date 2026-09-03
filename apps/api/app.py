@@ -7,6 +7,7 @@ serves its sources + gating + persona. Providers run in ROSTER_PROVIDER_MODE
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import urllib.parse
