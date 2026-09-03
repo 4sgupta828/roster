@@ -149,3 +149,18 @@ def test_topic_terms_fall_back_to_compiled_facets():
     assert topic_terms_for({"skill": ["ad_serving"], "function": ["engineering"]}, ["ad serving", "adtech"]) == ["ad serving", "adtech"]
     assert topic_terms_for({"skill": ["ad_serving", "kafka"], "function": ["infrastructure", "advertising"]}, []) == ["ad serving", "kafka", "advertising"]
     assert topic_terms_for({"role": ["engineering_manager"], "function": ["backend"]}, None) == []   # no subject → no anchor
+
+
+def test_every_card_gets_a_linkedin_way_in_with_distinguishing_keywords():
+    from urllib.parse import unquote
+    from api.people_population import _person_row_from_facets, ensure_linkedin_search, linkedin_search_link
+    attrs = [{"key": "company", "display": "Anthropic"}, {"key": "role", "display": "Published author"},
+             {"key": "title", "display": "Computer Science, AI"}, {"key": "metro", "display": "Bay Area"}]
+    q = unquote(linkedin_search_link("Kushal Thakkar", attrs)["url"].split("q=", 1)[1])
+    assert q == '"Kushal Thakkar" Anthropic Computer Science, AI Bay Area site:linkedin.com/in'   # author label dropped, short headline kept
+    q2 = unquote(linkedin_search_link("Jane Doe", [{"key": "company", "display": "stripe"}, {"key": "role", "display": "staff_software_engineer"}])["url"].split("q=", 1)[1])
+    assert q2 == '"Jane Doe" stripe staff software engineer site:linkedin.com/in'
+    row = _person_row_from_facets(_facet_person("github:x", "Jane Doe", company="Stripe"))
+    assert any(l["kind"] == "linkedin_search" for l in row["links"])
+    direct = {"name": "A B", "attributes": [], "links": [{"kind": "linkedin", "url": "https://linkedin.com/in/ab"}]}
+    assert [l["kind"] for l in ensure_linkedin_search(direct)["links"]] == ["linkedin"]      # a real link → no proxy

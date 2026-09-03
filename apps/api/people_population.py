@@ -974,6 +974,8 @@ def _person_row_from_facets(r: dict) -> dict:
             attrs.append({"key": f["facet_key"], "display": _attr_display(f),
                           "document_id": f["document_id"], "block_id": f["block_id"]})
     links, attrs = _dedupe_links(links), _dedupe_attrs(attrs)
+    if not any(l["kind"] == "linkedin" for l in links):
+        links.append(linkedin_search_link(r.get("name") or "", attrs))   # every card: a way to LinkedIn
     from api.evidence import evidence_packet
     return {"entity_id": r["entity_id"], "name": r["name"], "blurb": _person_blurb(attrs),
             "attributes": attrs, "links": links, "citation": cite,
@@ -1497,6 +1499,36 @@ async def agentic_job_search(store, question: str, llm, country: str = "us") -> 
             "dropped_out_of_country": dropped}
 
 
+def linkedin_search_link(name: str, attrs: list[dict]) -> dict:
+    """The 'find on LinkedIn' navigation aid for a card with no direct LinkedIn link: a search
+    RESTRICTED to linkedin.com/in over the person's exact name plus their strongest distinguishers
+    (current company, then a short role/title, then metro) — the combination that lands the profile
+    within the first few results. A search, clearly labeled; never grounded evidence."""
+    def g(key):
+        return str(next((a.get("display") for a in attrs or [] if a.get("key") == key and a.get("display")), "") or "").strip()
+    nm = " ".join((name or "").split())
+    company = g("company").replace("_", " ")
+    role = (g("role") or g("seniority")).replace("_", " ")
+    if role.lower() in ("published author", "mid", "junior", "ic", "individual contributor"):
+        role = ""                                   # adds noise, not identity
+    title = g("title")
+    if not role and title and len(title.split()) <= 6:
+        role = title                                # a short headline beats nothing
+    metro = g("metro").replace("_", " ")
+    bits = [f'"{nm}"'] + [b for b in (company, " ".join(role.split()[:3]), metro) if b]
+    q = " ".join(bits)[:160] + " site:linkedin.com/in"
+    return {"kind": "linkedin_search", "url": "https://www.google.com/search?q=" + urllib.parse.quote(q)}
+
+
+def ensure_linkedin_search(row: dict) -> dict:
+    """Every people card gets a LinkedIn way in: a direct link when we hold one, else the search aid."""
+    links = list(row.get("links") or [])
+    if not any((l.get("kind") or "") in ("linkedin", "linkedin_search") for l in links):
+        links.append(linkedin_search_link(row.get("name") or "", row.get("attributes") or []))
+        row["links"] = links
+    return row
+
+
 def build_person_profile_card(name: str, context: str = "") -> dict:
     """A single-person profile card built from EXPLICIT profile searches — GitHub (direct user search),
     X (direct search), and LinkedIn (Google search over name + hints, since LinkedIn has no open
@@ -1536,7 +1568,9 @@ def _row_text(row: dict) -> str:
     """Everything grounded we hold on a row, lowercased — the haystack for context matching."""
     parts = [row.get("name") or "", row.get("entity_id") or "", row.get("blurb") or ""]
     parts += [str(a.get("display") or "") for a in row.get("attributes") or []]
-    parts += [str(l.get("url") or "") for l in row.get("links") or []]
+    # profile links are grounded text; SEARCH AIDS (…_search) are navigation, not evidence — their
+    # URLs carry 'google.com' and the person's own hints, which would match any context
+    parts += [str(l.get("url") or "") for l in row.get("links") or [] if not str(l.get("kind") or "").endswith("_search")]
     for a in ((row.get("artifacts") or {}).get("affiliations") or []):
         parts.append(str(a.get("name") or ""))
     return " ".join(parts).lower()
@@ -2328,12 +2362,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         # person's name + role + company that reliably lands on their LinkedIn — a navigation aid
         # (clearly a SEARCH, not grounded evidence). Skipped when a real LinkedIn link exists.
         if not any(l["kind"] == "linkedin" for l in links):
-            title_disp = (next((a["display"] for a in attrs if a["key"] == "title"), "")
-                          or next((a["display"] for a in attrs if a["key"] == "seniority"), ""))
-            company_disp = next((a["display"] for a in attrs if a["key"] == "company"), "")
-            terms = " ".join(t for t in [r["name"], title_disp, company_disp, "LinkedIn"] if t)
-            links.append({"kind": "linkedin_search",
-                          "url": "https://www.google.com/search?q=" + urllib.parse.quote(terms)})
+            links.append(linkedin_search_link(r["name"], attrs))
         from api.evidence import evidence_packet
         people_rows.append({
             "entity_id": r["entity_id"], "name": r["name"], "blurb": _person_blurb(attrs),

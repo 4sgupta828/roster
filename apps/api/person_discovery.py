@@ -87,9 +87,11 @@ def _row(eid: str, name: str, facets: list[tuple[str, str]], doc: str, links: li
               "document_id": doc, "block_id": ""}
              for k, v in facets if v]
     attrs = [{"key": f["facet_key"], "display": f["display_value"], "document_id": doc, "block_id": ""} for f in frows]
-    return {"entity_id": eid, "name": name, "blurb": blurb, "attributes": attrs, "links": links,
-            "citation": {"document_id": doc, "block_id": ""}, "evidence": evidence_packet(frows, eid),
-            "web": True, "source_label": source_label, "_facets": frows}
+    row = {"entity_id": eid, "name": name, "blurb": blurb, "attributes": attrs, "links": links,
+           "citation": {"document_id": doc, "block_id": ""}, "evidence": evidence_packet(frows, eid),
+           "web": True, "source_label": source_label, "_facets": frows}
+    from api.people_population import ensure_linkedin_search
+    return ensure_linkedin_search(row)
 
 
 def rows_from_github(profiles: list[dict]) -> list[dict]:
