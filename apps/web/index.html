@@ -8767,8 +8767,15 @@ function setScopeOnly(value){
 function rerenderPeople(pid){
   const data = (window.PEOPLE_RENDERS||{})[pid]; if(!data) return null;
   const wrap = document.querySelector(`.ppl-wrap[data-pid="${CSS.escape(pid)}"]`); if(!wrap) return null;
+  // the enrichment loop repaints this grid every few seconds — keep the evidence panels the user
+  // has opened (and the page's scroll position) across the repaint
+  const open = [...wrap.querySelectorAll(".ev-inline-box")].filter(b => b.innerHTML.trim()).map(b => b.dataset.ref);
+  const y = window.scrollY;
   wrap.outerHTML = peopleRowsMarkup(data);
-  return document.querySelector(`.ppl-wrap[data-pid="${CSS.escape(pid)}"]`);
+  const nw = document.querySelector(`.ppl-wrap[data-pid="${CSS.escape(pid)}"]`);
+  if(open.length && typeof window.openEvidenceRail === "function") open.forEach(ref => { try{ window.openEvidenceRail(ref); }catch(e){} });
+  if(open.length) window.scrollTo({top: y});
+  return nw;
 }
 function gotoJobsPage(jpid, page){
   const d = (window.JOBS_RENDERS||{})[jpid]; if(!d) return;
