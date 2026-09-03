@@ -367,6 +367,34 @@ class AccountStore:
             out.append(d)
         return out
 
+    async def accounts_overview(self, *, limit: int = 500) -> list[dict]:
+        """Registered accounts with what each has on file — résumé, saved Talent Maps, searches — for
+        the admin listing. PII: the caller gates access (panel password AND an admin account)."""
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT u.id, u.name, u.email, u.created_at, u.last_seen, (u.pw_hash IS NOT NULL) AS has_password,
+                          EXISTS (SELECT 1 FROM roster_candidate_profile p WHERE p.user_id = u.id AND p.resume_bytes IS NOT NULL) AS has_resume,
+                          (SELECT count(*) FROM rs_map m WHERE m.owner_id = u.id) AS maps,
+                          (SELECT count(*) FROM roster_research_session s WHERE s.user_email = u.email) AS searches
+                   FROM roster_user u WHERE u.vertical=$1 ORDER BY u.created_at DESC LIMIT $2""",
+                self._vertical, int(limit))
+        out = []
+        for r in rows:
+            d = dict(r)
+            for k in ("created_at", "last_seen"):
+                if d.get(k) is not None:
+                    d[k] = d[k].isoformat()
+            out.append(d)
+        return out
+
+    async def first_user_email(self) -> str:
+        """The earliest-registered account (the owner) — the default admin when ROSTER_ADMIN_EMAILS is unset."""
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            return (await conn.fetchval(
+                "SELECT email FROM roster_user WHERE vertical=$1 ORDER BY created_at ASC LIMIT 1", self._vertical)) or ""
+
     # ---- per-user preferences (Roster IN D-7: the server-authoritative profile substrate) ----
 
     async def get_pref(self, user_id: str, key: str) -> str:

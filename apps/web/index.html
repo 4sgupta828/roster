@@ -7755,12 +7755,6 @@ $("#jdSenBox") && $("#jdSenBox").addEventListener("click",(e)=>{ const t=e.targe
 wireChipInput("jdLocBox", JD_LOCS);
 
 // ---- product settings (⚙, password-gated): live flag toggles served by /admin/settings ----
-const SET_LABELS = {
-  duel_enabled:      ["A/B duel answers", "Fresh questions run BOTH engines with a which-is-better vote (2× cost/question)"],
-  triage_enabled:    ["Guided intake mode", "The ◍ Guided clarify-then-route mode"],
-  ask_panel_enabled: ["Expert Panel", "The ◈ multi-analyst panel mode"],
-  reasoned_default_enabled: ["Dynamic engine selection", "Auto-routes each question: management/case → decision-first engine · why/how → understanding engine (causal model) · evidence lookup → standard synthesis. Duel arms unaffected."],
-};
 function openSettings(){
   $("#setmodal").hidden = false;
   const unlocked = sessionStorage.getItem("roster_apw");
@@ -7783,24 +7777,19 @@ async function loadSettingsUI(){
   }catch(e){ $("#seterr").textContent = "Settings unavailable — try again."; $("#setlock").hidden = false; }
 }
 function renderSettingsUI(d){
+  // ROSTER settings only — the engine A/B / guided-intake / expert-panel / relationship-graph toggles
+  // inherited from the parent codebase are not part of this product and are not shown.
   const body = $("#setbody"); body.hidden = false;
-  const rows = Object.entries(d.settings || {}).map(([k, s]) => {
-    const [label, hint] = SET_LABELS[k] || [k, ""];
-    const opt = (v, t) => `<option value="${v}" ${s.override === v ? "selected" : ""}>${t}</option>`;
-    return `<div class="setrow"><b>${esc(label)}</b>
-      <select data-k="${k}">${opt("", "Default (" + (s.env_default ? "on" : "off") + ")")}${opt("on", "On")}${opt("off", "Off")}</select>
-      <span class="setlive ${s.resolved ? "on" : ""}">${s.resolved ? "ACTIVE" : "off"}</span>
-      <span class="sethint">${esc(hint)}</span></div>`;
-  }).join("");
-  body.innerHTML = rows + `<div class="sethint" style="margin-top:.6rem;">Applies to the API within ~15 s; this page picks it up on the next reload.</div>` +
-    `<div class="setrow"><b>⬡ Relationship graph</b><button type="button" class="idgo" id="setgraph" style="width:auto;padding:.3rem .8rem;font-size:.78rem;">Open console</button>
-     <span class="sethint">Curated knowledge edges powering retrieval expansion + the is-it-helping quality watch.</span></div>` +
+  body.innerHTML =
+    `<div class="setrow"><b>👥 Accounts</b><button type="button" class="idgo" id="setaccts" style="width:auto;padding:.3rem .8rem;font-size:.78rem;">Show accounts</button>
+     <span class="sethint">Who is registered, when they last signed in, and what each has on file (résumé, saved Talent Maps, searches). Visible to admin accounts only.</span></div>
+     <div id="setacctbox"></div>` +
     `<div class="setrow"><b>⇪ Ingestion</b><button type="button" class="idgo" id="seting" style="width:auto;padding:.3rem .8rem;font-size:.78rem;">Open console</button>
      <span class="sethint">All corpus sources, their live footprint, and push-ingestion controls.</span></div>` +
     `<div class="setrow"><b>◷ Performance</b><button type="button" class="idgo" id="setperf" style="width:auto;padding:.3rem .8rem;font-size:.78rem;">Open dashboard</button>
      <span class="sethint">Latency (avg / P95 / P99), phase breakdown, failure types &amp; stop reasons across all Q&amp;A runs.</span></div>`;
-  const gbtn = body.querySelector("#setgraph");
-  if(gbtn) gbtn.addEventListener("click", () => { $("#setmodal").hidden = true; openGraphConsole(); });
+  const abtn = body.querySelector("#setaccts");
+  if(abtn) abtn.addEventListener("click", loadAccountsList);
   const ibtn = body.querySelector("#seting");
   if(ibtn) ibtn.addEventListener("click", () => { $("#setmodal").hidden = true; openIngest(); });
   const pbtn = body.querySelector("#setperf");
@@ -7814,6 +7803,23 @@ function renderSettingsUI(d){
     if(r.ok) renderSettingsUI(await r.json());
     else $("#seterr").textContent = "Save failed (" + r.status + ").";
   }));
+}
+// ---- accounts listing (admin accounts only: panel password + signed-in admin) ----
+async function loadAccountsList(){
+  const box = $("#setacctbox"); if(!box) return;
+  box.innerHTML = `<div class="sethint">Loading…</div>`;
+  if(!loggedIn()){ box.innerHTML = `<div class="sethint">Sign in with an admin account to see the accounts list.</div>`; return; }
+  try{
+    const r = await fetch("/admin/users", {headers: {"x-admin-password": sessionStorage.getItem("roster_apw") || "", ...authHeaders()}});
+    if(r.status === 403){ box.innerHTML = `<div class="sethint">Your account is not an admin (set ROSTER_ADMIN_EMAILS to change who is).</div>`; return; }
+    if(!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    const day = s => s ? String(s).slice(0,10) : "—";
+    const rows = (d.users||[]).map(u => `<tr><td>${esc(u.email||"")}</td><td>${esc(u.name||"")}</td><td>${day(u.created_at)}</td><td>${day(u.last_seen)}</td>`
+      + `<td style="text-align:center;">${u.has_resume ? "✓" : "—"}</td><td style="text-align:center;">${u.maps||0}</td><td style="text-align:center;">${u.searches||0}</td></tr>`).join("");
+    box.innerHTML = `<div class="sethint" style="margin:.2rem 0 .4rem;"><b>${d.count||0}</b> registered account${d.count===1?"":"s"} · newest first</div>`
+      + `<div style="overflow-x:auto;"><table class="aa-tbl" style="font-size:.78rem;"><thead><tr><th>Email</th><th>Name</th><th>Registered</th><th>Last seen</th><th>Résumé</th><th>Maps</th><th>Searches</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }catch(e){ box.innerHTML = `<div class="sethint">Couldn't load accounts (${esc(String(e.message||e))}).</div>`; }
 }
 $("#setbtn").addEventListener("click", openSettings);
 $("#setgo").addEventListener("click", loadSettingsUI);

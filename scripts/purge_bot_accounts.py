@@ -23,7 +23,7 @@ NAME_RX = (
 )
 # login patterns only where the login itself DECLARES automation — a login merely ending in 'bot'
 # is a person often enough ('paleolimbot' = Dewey Dunnington, 'KadoBOT' = Ricardo Ambrogi)
-ID_RX = r"^github:(.*\[bot\]|.*-bot|bot-.*|chatgpt.*|codex.*|dependabot.*|renovate.*|github-actions.*|copilot.*|actions-user)$"
+ID_RX = r"^github:(.*\[bot\]|chatgpt.*|codex.*|dependabot.*|renovate.*|github-actions.*|copilot.*|actions-user)$"   # '-bot' logins are people too (akshay003-bot)
 
 
 async def main() -> None:

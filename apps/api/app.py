@@ -6374,17 +6374,28 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     def admin_page(accept_encoding: str = Header(default="")):
         return _html_response("admin.html", accept_encoding)
 
+    async def _require_admin_account(x_roster_token: str):
+        """PII gate for account listings: the panel password alone (an alpha-grade UI gate) is not
+        enough — the caller must ALSO be signed in as an ADMIN account: an email in ROSTER_ADMIN_EMAILS,
+        or, when that is unset, the earliest-registered account (the owner)."""
+        store, user = await _require_user(x_roster_token)
+        admins = {e.strip().lower() for e in os.environ.get("ROSTER_ADMIN_EMAILS", "").split(",") if e.strip()}
+        if not admins:
+            admins = {(await store.first_user_email()).lower()}
+        if (user.get("email") or "").lower() not in admins:
+            raise HTTPException(status_code=403, detail="admin account required")
+        return store, user
+
     @app.get("/admin/users")
-    async def admin_users(limit: int = 500, x_admin_password: str = Header(default="")) -> dict:
-        """Registered users (name/email/profession/country/verified/registered/last-seen). PII →
-        admin-password gated."""
+    async def admin_users(limit: int = 500, x_admin_password: str = Header(default=""),
+                          x_roster_token: str = Header(default="")) -> dict:
+        """Registered accounts with what each has on file (résumé, saved maps, searches). PII →
+        panel password AND a signed-in admin account."""
         if x_admin_password != _admin_ui_pw():
             raise HTTPException(status_code=401, detail="bad admin password")
-        acc = _accounts()
-        if acc is None:
-            return {"users": [], "count": 0, "note": "accounts not enabled / no corpus DSN"}
+        acc, _me = await _require_admin_account(x_roster_token)
         try:
-            users = await acc.list_users(limit=max(1, min(int(limit), 5000)))
+            users = await acc.accounts_overview(limit=max(1, min(int(limit), 5000)))
             return {"users": users, "count": len(users)}
         except Exception as e:   # noqa: BLE001
             raise HTTPException(status_code=502, detail=f"users query failed: {e}") from e
