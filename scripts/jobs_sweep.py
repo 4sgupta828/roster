@@ -280,7 +280,23 @@ async def record_probe(conn, ats: str, token: str, hit: int) -> None:
 _TICKERS: dict[str, str] = {}   # company title → ticker (SEC list) — an extra Workday tenant guess
 
 
+_SEC_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         "packages", "vertical_roster", "roster_vertical", "data", "sec_top2000.tsv")
+
+
+async def load_universe_db(conn, top: int) -> list[str]:
+    """The `people` universe: the most-staffed companies in Roster's own people index (facet
+    display names) — no file to stage, so the WORKER can run this leg unattended."""
+    rows = await conn.fetch(
+        """SELECT display_value AS name, count(DISTINCT entity_id) AS n FROM roster_entity_facet
+           WHERE facet_key = 'company' AND length(display_value) BETWEEN 3 AND 40
+           GROUP BY 1 ORDER BY 2 DESC LIMIT $1""", int(top or 6000))
+    return [r["name"] for r in rows]
+
+
 def load_universe(top: int, names_file: str) -> list[str]:
+    if not names_file and os.path.exists(_SEC_FILE):
+        names_file = _SEC_FILE       # committed SEC top-2000 (name<TAB>ticker): sec.gov 403s datacenters
     if names_file:
         # one company per line; an optional second TAB column is the ticker (SEC list staged from a
         # laptop — sec.gov serves 403 to datacenter IPs)
@@ -313,6 +329,9 @@ async def main() -> None:
     ap.add_argument("--names-file", default="", help="one company name per line (overrides SEC list)")
     ap.add_argument("--workday", action="store_true", help="also run Workday tenant discovery")
     ap.add_argument("--concurrency", type=int, default=16)
+    ap.add_argument("--universe", choices=("sec", "people", "all"), default="sec",
+                    help="sec = committed SEC top-2000 (default); people = most-staffed companies in the "
+                         "people index (--top); all = both (the worker leg)")
     args = ap.parse_args()
     live = args.live and not args.dry
 
@@ -325,7 +344,13 @@ async def main() -> None:
     await ij.ensure_checkpoint(conn)
     done = await already_probed(conn)
 
-    companies = load_universe(args.top, args.names_file)
+    if args.names_file or args.universe == "sec":
+        companies = load_universe(args.top, args.names_file)
+    elif args.universe == "people":
+        companies = await load_universe_db(conn, args.top)
+    else:
+        companies = load_universe(2000, "") + await load_universe_db(conn, args.top)
+        companies = list(dict.fromkeys(companies))
     print(f"universe: {len(companies)} companies | already probed pairs: {len(done)}", flush=True)
 
     sem = asyncio.Semaphore(max(2, args.concurrency))

@@ -10,6 +10,8 @@ Enabled with ROSTER_BULK_INGEST=1 on a worker service (ROSTER_ROLE=worker). Knob
   ROSTER_BULK_JOBS_CHUNK      max job boards/aggregators per cycle (0 = all remaining)
   ROSTER_BULK_PEOPLE_CHUNK    max people per cycle (default 500 — bounds GitHub + LLM/embed spend/cycle)
   ROSTER_BULK_PEOPLE_PERWINDOW  per search-window depth (default 1000)
+  ROSTER_BULK_SWEEP_TOP       job-board sweep each cycle over SEC top-2000 + the N most-staffed
+                              companies in the people index (jobs_sweep.py --universe all); 0 = off
   ROSTER_BULK_ARTIFACTS_CHUNK  people per source per cycle for the public-artifact linker
                               (scripts/ingest_artifacts.py: papers/repos/orgs by identity key; HTTP
                               only, no LLM spend). 0 = off (default).
@@ -65,6 +67,9 @@ def run_bulk_ingest_loop() -> None:
     people_chunk = int(os.environ.get("ROSTER_BULK_PEOPLE_CHUNK", "500") or 500)
     # public-artifact linking (papers/repos/orgs by identity key): people per source per cycle; 0 = off
     artifacts_chunk = int(os.environ.get("ROSTER_BULK_ARTIFACTS_CHUNK", "0") or 0)
+    # job-board SWEEP (7 ATS + Workday discovery over the SEC top-2000 + the N most-staffed companies
+    # in the people index): resumable via rs_ats_probed, so each cycle only probes new pairs; 0 = off
+    sweep_top = int(os.environ.get("ROSTER_BULK_SWEEP_TOP", "0") or 0)
     per_window = int(os.environ.get("ROSTER_BULK_PEOPLE_PERWINDOW", "1000") or 1000)
     interval = int(os.environ.get("ROSTER_BULK_INTERVAL_SEC", "900") or 900)
     max_cycles_day = int(os.environ.get("ROSTER_BULK_MAX_CYCLES_DAY", "96") or 96)
@@ -93,4 +98,7 @@ def run_bulk_ingest_loop() -> None:
             _run_chunk(["scripts/ingest_people.py", "--backfill", str(people_chunk)])
         if artifacts_chunk:
             _run_chunk(["scripts/ingest_artifacts.py", "--source", "all", "--limit", str(artifacts_chunk)])
+        if sweep_top:
+            _run_chunk(["scripts/jobs_sweep.py", "--live", "--universe", "all", "--top", str(sweep_top),
+                        "--workday", "--concurrency", "8"])
         time.sleep(interval)
