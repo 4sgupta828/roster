@@ -8283,7 +8283,7 @@ function talentMapBar(){
       ? `<input class="mb-title" id="mapTitle" value="${esc(m.title||"")}" placeholder="Map title" onchange="saveMapMeta()">`
       : `<span class="mb-title">${esc(m.title||"Talent Map")}</span>`;
     const nFb = (m.feedback||[]).filter(f => f.reviewer_key).length;
-    const reviewAs = m.is_owner ? "" : `<span class="mb-meta" style="flex-basis:auto;">Review as <input class="mb-title" id="reviewerName" style="max-width:180px;" placeholder="your name" value="${esc(reviewerName())}" onchange="setReviewerName(this.value); renderThread();"> <span class="ppl-fc" style="text-transform:none;">(no account needed — your review states and feedback save to this map under your name)</span></span>`;
+    const reviewAs = m.is_owner ? "" : `<span class="mb-meta" style="flex-basis:auto;">Review as <input class="mb-title" id="reviewerName" style="max-width:180px;" placeholder="your name" value="${esc(reviewerName())}" onchange="setReviewerName(this.value);"> <span class="ppl-fc" style="text-transform:none;">(no account needed — your review states and feedback save to this map under your name)</span></span>`;
     return `<div class="mapbar">${title}${share}<a class="mb-btn" href="${csvHref}" target="_blank" rel="noopener">⬇ Export CSV</a>
       <span class="mb-meta">Saved Talent Map · ${m.n_rows||0} people · ${m.is_owner?"you own this map — review states, feedback and notes persist here":"shared view"}${nFb?` · ${nFb} reviewer feedback item${nFb===1?"":"s"}`:""}${m.created_at?` · saved ${esc(String(m.created_at).slice(0,10))}`:""}</span>
       ${reviewAs}
@@ -8385,10 +8385,21 @@ async function saveMapMeta(){
 // private link reviews under a NAME they type once (stored in this browser) — no account needed.
 const REVIEW_STATES = ["unreviewed","shortlist","maybe","needs more evidence","not relevant"];
 const FEEDBACK_TAGS = [["more_like_this","more like this"],["less_like_this","less like this"],["wrong_domain","wrong domain"],["wrong_seniority","wrong seniority"],["wrong_location","wrong location"],["wrong_company_target","wrong company target"],["evidence_too_weak","evidence too weak"],["needs_artifact_evidence","needs public work"],["self_stated_is_enough","self-stated is enough"],["private_company_talent","private-company talent"]];
-function reviewerKey(){ try{ let k = localStorage.getItem("roster_reviewer_key"); if(!k){ k = Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem("roster_reviewer_key", k); } return k; }catch(e){ return "anon"; } }
-function reviewerName(){ try{ return localStorage.getItem("roster_reviewer_name") || ""; }catch(e){ return ""; } }
-function setReviewerName(n){ try{ localStorage.setItem("roster_reviewer_name", (n||"").trim().slice(0,80)); }catch(e){} }
-function canReview(){ const m = window.ACTIVE_MAP; return !!(m && m.map_type !== "jobs" && (m.is_owner || (m.token && reviewerName()))); }
+// a guest reviewer is REGISTERED per map: the server signs {key, name} → token; stored in this browser
+function reviewerRec(){ const m = window.ACTIVE_MAP; if(!m) return null; try{ return JSON.parse(localStorage.getItem("roster_reviewer_" + m.id) || "null"); }catch(e){ return null; } }
+function reviewerKey(){ const r = reviewerRec(); return (r && r.reviewer_key) || ""; }
+function reviewerName(){ const r = reviewerRec(); return (r && r.reviewer_name) || ""; }
+async function setReviewerName(n){
+  const m = window.ACTIVE_MAP; if(!m || !m.token) return;
+  const name = (n||"").trim().slice(0,80); if(!name) return;
+  try{
+    const r = await fetch(`/maps/${encodeURIComponent(m.id)}/reviewer`, {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({share_token: m.token, name})});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); alert(e.detail || "Couldn't register you as a reviewer."); return; }
+    localStorage.setItem("roster_reviewer_" + m.id, JSON.stringify(await r.json()));
+    renderThread();
+  }catch(e){ alert("Couldn't register you as a reviewer — try again."); }
+}
+function canReview(){ const m = window.ACTIVE_MAP; return !!(m && m.map_type !== "jobs" && (m.is_owner || (m.token && reviewerKey()))); }
 function myReview(ref){
   const m = window.ACTIVE_MAP; if(!m) return null;
   if(m.is_owner) return (m.reviews||{})[ref] || null;
@@ -8401,7 +8412,7 @@ async function syncMapReview(ref, state, tags, note){
   const body = {entity_id: ref, state: state || cur.state || "unreviewed"};
   if(tags !== undefined) body.tags = tags;
   if(note !== undefined) body.note = note;
-  if(!m.is_owner){ body.share_token = m.token; body.reviewer_key = reviewerKey(); body.reviewer_name = reviewerName(); }
+  if(!m.is_owner){ const rr = reviewerRec() || {}; body.reviewer_key = rr.reviewer_key || ""; body.reviewer_name = rr.reviewer_name || ""; body.reviewer_token = rr.reviewer_token || ""; }
   const rec = {...cur, state: body.state, tags: (tags !== undefined ? tags : (cur.tags||[])), note: (note !== undefined ? note : (cur.note||"")), reviewer_key: m.is_owner ? "" : reviewerKey(), reviewer_name: m.is_owner ? "" : reviewerName(), entity_id: ref};
   if(m.is_owner){ m.reviews = m.reviews || {}; m.reviews[ref] = rec; }
   else { m.feedback = (m.feedback||[]).filter(f => !(f.entity_id === ref && f.reviewer_key === reviewerKey())).concat([rec]); }

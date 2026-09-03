@@ -1247,9 +1247,14 @@ class MapReviewIn(BaseModel):
     state: str = "unreviewed"         # unreviewed | shortlist | maybe | needs more evidence | not relevant
     note: str | None = None
     tags: list[str] | None = None     # feedback tags (maps.FEEDBACK_TAGS) — calibrate the NEXT map, never the evidence
-    share_token: str = ""             # a NAMED REVIEWER on the private link (no account): token + their key/name
-    reviewer_key: str = ""
-    reviewer_name: str = ""
+    reviewer_key: str = ""            # a NAMED REVIEWER (no account): key + name + the SERVER-SIGNED token from
+    reviewer_name: str = ""           #   POST /maps/{id}/reviewer — the read-only share token never authorizes a write
+    reviewer_token: str = ""
+
+
+class MapReviewerIn(BaseModel):
+    share_token: str
+    name: str = Field(default="", max_length=80)
 
 
 class SettingIn(BaseModel):
@@ -5528,19 +5533,46 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=404, detail="map not found")
         return {"ok": True}
 
+    _REVIEW_RATE: dict[str, list[float]] = {}     # (map|reviewer) → recent write timestamps (in-process)
+
+    def _review_rate_ok(key: str, *, per_hour: int = 240) -> bool:
+        import time as _t
+        now = _t.time()
+        hist = [t for t in _REVIEW_RATE.get(key, []) if now - t < 3600]
+        if len(hist) >= per_hour:
+            _REVIEW_RATE[key] = hist
+            return False
+        hist.append(now); _REVIEW_RATE[key] = hist
+        return True
+
+    @app.post("/maps/{map_id}/reviewer")
+    async def map_reviewer(map_id: str, body: MapReviewerIn) -> dict:
+        """A guest on the private link registers a NAME and receives a server-signed reviewer token
+        (no account). Capped per map; the token is what authorizes their review writes."""
+        ms = _require_maps()
+        if not _review_rate_ok(f"reg|{map_id}", per_hour=60):
+            raise HTTPException(status_code=429, detail="too many reviewer registrations for this map — try later")
+        res = await ms.register_reviewer(map_id, share_token=body.share_token, name=body.name)
+        if not res:
+            raise HTTPException(status_code=400, detail="invalid link, empty name, or this map already has its maximum number of reviewers")
+        return res
+
     @app.post("/maps/{map_id}/review")
     async def map_review(map_id: str, body: MapReviewIn,
                          x_roster_token: str = Header(default="")) -> dict:
         """A human review of one row: state + feedback tags + note. The owner (signed in) writes the
-        row's headline review; a named reviewer on the private link writes their own alongside."""
+        row's headline review; a named reviewer writes their own alongside (server-signed token)."""
         ms = _require_maps()
         user = await _optional_user(x_roster_token)
+        who = (user or {}).get("id") or body.reviewer_key or "anon"
+        if not _review_rate_ok(f"rv|{map_id}|{who}"):
+            raise HTTPException(status_code=429, detail="too many review writes — slow down")
         ok = await ms.review(map_id, owner_id=(user or {}).get("id"), entity_id=body.entity_id,
                              state=body.state, note=body.note, tags=body.tags,
-                             share_token=(body.share_token or None), reviewer_key=body.reviewer_key[:64],
-                             reviewer_name=body.reviewer_name[:80])
+                             reviewer_key=body.reviewer_key[:64], reviewer_name=body.reviewer_name[:80],
+                             reviewer_token=body.reviewer_token[:64])
         if not ok:
-            raise HTTPException(status_code=400, detail="invalid review, or neither the owner nor a named reviewer on the link")
+            raise HTTPException(status_code=400, detail="invalid review, or neither the owner nor a registered reviewer")
         return {"ok": True}
 
     @app.get("/maps/{map_id}/export.csv")

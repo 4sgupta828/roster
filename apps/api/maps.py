@@ -12,8 +12,12 @@ the snapshot; nothing is model-generated.
 from __future__ import annotations
 
 import csv
+import hashlib
+import hmac
 import io
 import json
+import os
+import re
 import secrets
 import uuid
 
@@ -68,6 +72,32 @@ REVISION_REASONS = ("initial", "hiring_manager_feedback", "manual_filter_change"
 _MAX_ROWS = 400
 
 
+_MAX_REVIEWERS_PER_MAP = int(os.environ.get("ROSTER_MAX_REVIEWERS_PER_MAP", "10") or 10)
+_CTRL_RX = re.compile(r"[\x00-\x1f\x7f<>]")
+
+
+def sanitize_text(v: str | None, limit: int) -> str:
+    """Reviewer-supplied text at the API boundary: control characters and angle brackets stripped,
+    whitespace collapsed, length-capped (output is escaped too; this keeps the stored value clean)."""
+    return re.sub(r"\s+", " ", _CTRL_RX.sub("", str(v or ""))).strip()[:limit]
+
+
+def _review_secret() -> bytes:
+    return (os.environ.get("ROSTER_REVIEW_SECRET") or os.environ.get("ROSTER_ADMIN_TOKEN") or "roster-review-dev").encode()
+
+
+def sign_reviewer(map_id: str, reviewer_key: str, name: str) -> str:
+    """A SERVER-SIGNED reviewer token: HMAC over (map, key, name). A guest gets one by registering a
+    name on the private link; review writes must present it — the read-only share token alone never
+    authorizes a write, and a key cannot be spoofed without the secret."""
+    msg = f"{map_id}|{reviewer_key}|{name}".encode()
+    return hmac.new(_review_secret(), msg, hashlib.sha256).hexdigest()[:40]
+
+
+def verify_reviewer(map_id: str, reviewer_key: str, name: str, token: str) -> bool:
+    return bool(token) and hmac.compare_digest(sign_reviewer(map_id, reviewer_key, name), token)
+
+
 class MapStore:
     def __init__(self, dsn: str, *, vertical: str):
         self._dsn = dsn
@@ -87,6 +117,18 @@ class MapStore:
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             await conn.execute(_DDL)
+            # MIGRATION (idempotent): one review row per (map, entity, reviewer) — the owner's row has
+            # reviewer_key '' — instead of the old (map, entity) key that could hold a single review
+            pk_cols = [r["attname"] for r in await conn.fetch(
+                """SELECT a.attname FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+                   WHERE i.indrelid = 'rs_map_review'::regclass AND i.indisprimary ORDER BY a.attnum""")]
+            if "reviewer_key" not in pk_cols:
+                async with conn.transaction():
+                    await conn.execute("ALTER TABLE rs_map_review DROP CONSTRAINT IF EXISTS rs_map_review_pkey")
+                    await conn.execute("ALTER TABLE rs_map_review ADD PRIMARY KEY (map_id, entity_id, reviewer_key)")
+            # one-time vocabulary migration (the read path no longer needs the legacy map for new rows)
+            await conn.execute("UPDATE rs_map_review SET state = 'shortlist' WHERE state = 'shortlisted'")
+            await conn.execute("UPDATE rs_map_review SET state = 'maybe' WHERE state = 'reviewed'")
         self._ready = True
 
     async def create(self, *, tenant_id: str, map_type: str, brief: str, rows: list[dict],
@@ -141,7 +183,7 @@ class MapStore:
                    "reviewer_name": x["reviewer_name"] or "", "updated_at": str(x["updated_at"])}
             if not x["reviewer_key"]:            # the owner's own review is the row's headline state
                 d["reviews"][x["entity_id"]] = rec
-            d["feedback"].append({"entity_id": x["entity_id"].split("##", 1)[0], **rec})
+            d["feedback"].append({"entity_id": x["entity_id"], **rec})
         d["revisions"] = [{"revision_id": r["revision_id"], "reason": r["reason"], "created_at": str(r["created_at"])} for r in revs]
         d["is_owner"] = bool(owner_id and r["owner_id"] == owner_id)
         d["created_at"] = str(d["created_at"]); d["updated_at"] = str(d["updated_at"])
@@ -175,9 +217,29 @@ class MapStore:
                 (notes[:8000] if notes is not None else None))
         return res.endswith("1")
 
+    async def register_reviewer(self, map_id: str, *, share_token: str, name: str) -> dict | None:
+        """A guest on the private link becomes a NAMED REVIEWER: returns {reviewer_key, reviewer_name,
+        reviewer_token}. Capped at ROSTER_MAX_REVIEWERS_PER_MAP distinct reviewers per map. None when
+        the link is wrong, the name is empty, or the map is full."""
+        await self._ensure()
+        name = sanitize_text(name, 80)
+        if not name:
+            return None
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            r = await conn.fetchrow("SELECT share_token FROM rs_map WHERE id = $1", map_id)
+            if r is None or not (share_token and secrets.compare_digest(share_token, r["share_token"])):
+                return None
+            n = await conn.fetchval(
+                "SELECT count(DISTINCT reviewer_key) FROM rs_map_review WHERE map_id = $1 AND reviewer_key <> ''", map_id)
+            if int(n or 0) >= _MAX_REVIEWERS_PER_MAP:
+                return None
+        key = secrets.token_urlsafe(12)
+        return {"reviewer_key": key, "reviewer_name": name, "reviewer_token": sign_reviewer(map_id, key, name)}
+
     async def review(self, map_id: str, *, owner_id: str | None, entity_id: str, state: str,
                      note: str | None = None, tags: list[str] | None = None,
-                     share_token: str | None = None, reviewer_key: str = "", reviewer_name: str = "") -> bool:
+                     reviewer_key: str = "", reviewer_name: str = "", reviewer_token: str = "") -> bool:
         """Set a row's HUMAN review state, feedback tags and note (never a verdict — no 'reject').
         The OWNER writes the row's headline review (reviewer_key ''); a NAMED REVIEWER on the private
         link (share token + their own key/name) writes their own row alongside — reviewers never
@@ -188,24 +250,24 @@ class MapStore:
             return False
         tags_given = tags is not None
         tags = [t for t in (tags or []) if t in FEEDBACK_TAGS][:6]
+        reviewer_name = sanitize_text(reviewer_name, 80)
+        note = sanitize_text(note, 2000) if note is not None else None
         pool = await self._get_pool()
         async with pool.acquire() as conn:
-            r = await conn.fetchrow("SELECT owner_id, share_token FROM rs_map WHERE id = $1", map_id)
+            r = await conn.fetchrow("SELECT owner_id FROM rs_map WHERE id = $1", map_id)
             if r is None:
                 return False
             is_owner = bool(owner_id and r["owner_id"] == owner_id)
-            via_link = bool(share_token and secrets.compare_digest(share_token, r["share_token"]) and reviewer_key)
-            if not (is_owner or via_link):
+            via_token = bool(reviewer_key and reviewer_name and verify_reviewer(map_id, reviewer_key, reviewer_name, reviewer_token))
+            if not (is_owner or via_token):
                 return False
             rkey = "" if is_owner else reviewer_key[:64]
-            rname = ("" if is_owner else (reviewer_name or "reviewer")[:80])
-            # one row per (map, entity, reviewer) — the table's PK is (map, entity) for the owner's row;
-            # reviewer rows key on reviewer_key inside entity_id's namespace to stay additive
-            eid = entity_id if is_owner else f"{entity_id}##{rkey}"
+            rname = "" if is_owner else reviewer_name
+            eid = entity_id
             await conn.execute(
                 """INSERT INTO rs_map_review (map_id, entity_id, state, note, tags, reviewer_key, reviewer_name)
                    VALUES ($1,$2,$3,$4,$5::text[],$6,$7)
-                   ON CONFLICT (map_id, entity_id) DO UPDATE SET
+                   ON CONFLICT (map_id, entity_id, reviewer_key) DO UPDATE SET
                      state = EXCLUDED.state,
                      note = CASE WHEN $8 THEN EXCLUDED.note ELSE rs_map_review.note END,
                      tags = CASE WHEN $9 THEN EXCLUDED.tags ELSE rs_map_review.tags END,
