@@ -175,22 +175,63 @@ def summarize_artifacts(rows: list[dict], scans: list[dict] | None = None) -> di
     for k in _KIND_ORDER:
         ordered += sorted([a for a in rows if a["kind"] == k], key=_prominence)[:_PER_KIND]
     ordered += [a for a in sorted(rows, key=_prominence) if a["kind"] not in _KIND_ORDER][:2]
-    items = []
-    for a in ordered[:_TOP_ITEMS]:
-        d = a.get("detail") or {}
-        items.append({"kind": a["kind"], "title": a.get("title") or "", "url": a.get("url") or "",
-                      "date": str(a.get("date") or "")[:10] or None, "venue": a.get("venue") or "",
-                      "role": a.get("role") or "",
-                      "stat": (f"{d['citations']} citations" if d.get("citations") else
-                               f"{d['stars']}★" if d.get("stars") else ""),
-                      # name+hint matches (talks) are shown as 'verify', never as proven
-                      "verify": (a.get("link_method") == "name_hint")})
+    items = [artifact_item(a) for a in ordered[:_TOP_ITEMS]]
     reported = {}
     for s in scans or []:
         reported[s["source"]] = int(s.get("n_total") or 0)
     return {"scanned": sorted({s["source"] for s in (scans or [])}), "counts": counts,
             "total": len(rows), "newest": newest or None, "items": items,
             "affiliations": aff_list, "reported": reported}
+
+
+def artifact_item(a: dict) -> dict:
+    """One artifact row → the card/panel item shape (title, link, date, venue, role, a stat)."""
+    d = a.get("detail") or {}
+    if isinstance(d, str):
+        try:
+            d = json.loads(d)
+        except Exception:  # noqa: BLE001
+            d = {}
+    return {"kind": a["kind"], "title": a.get("title") or "", "url": a.get("url") or "",
+            "date": str(a.get("date") or "")[:10] or None, "venue": a.get("venue") or "",
+            "role": a.get("role") or "",
+            "stat": (f"{d['citations']} citations" if d.get("citations") else
+                     f"{d['stars']}★" if d.get("stars") else ""),
+            # name+hint matches (talks) are shown as 'verify', never as proven
+            "verify": (a.get("link_method") == "name_hint")}
+
+
+async def all_person_artifacts(pool, entity_id: str, *, cap_per_kind: int = 200) -> dict:
+    """EVERY linked artifact for a person (and their linked identities), grouped by kind and ordered
+    by prominence — the 'show all' behind the panel's top-3 per kind. Read-only, no scan."""
+    ids = [entity_id]
+    try:
+        from api.identity_links import links_for
+        ids += [l["id"] for l in (await links_for(pool, [entity_id])).get(entity_id) or []]
+    except Exception:  # noqa: BLE001
+        pass
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT entity_id, kind, artifact_key, title, url, date, venue, role, detail, link_method
+               FROM rs_person_artifact WHERE entity_id = ANY($1)""", ids)
+    by_kind: dict[str, list] = defaultdict(list)
+    for r in rows:
+        a = dict(r)
+        d = a.get("detail")
+        if isinstance(d, str):
+            try:
+                a["detail"] = json.loads(d)
+            except Exception:  # noqa: BLE001
+                a["detail"] = {}
+        it = artifact_item(a)
+        if a["entity_id"] != entity_id:
+            it["via"] = a["entity_id"]
+        by_kind[a["kind"]].append((a, it))
+    out = {}
+    for k, pairs in by_kind.items():
+        pairs.sort(key=lambda p: _prominence(p[0]))
+        out[k] = [it for _, it in pairs[:cap_per_kind]]
+    return {"entity_id": entity_id, "counts": {k: len(v) for k, v in by_kind.items()}, "items": out}
 
 
 def apply_artifacts_to_packet(packet: dict, summary: dict | None) -> dict:

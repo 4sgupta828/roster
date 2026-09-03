@@ -8539,7 +8539,7 @@ async function openMapsList(){
           const meta = [it.venue, (it.date||"").slice(0,4), it.stat, it.role==="first_author"?"first author":""].filter(Boolean).join(" · ");
           return `<div class="er-art">${it.url?`<a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">${esc(it.title)} ↗</a>`:esc(it.title)}${meta?`<span class="er-art-m">${esc(meta)}</span>`:""}</div>`;
         }).join("");
-        parts.push(`<div class="er-kind"><span class="er-kind-h">${FP_LABEL[k]||esc(k)} · ${n}</span></div>${top}${n>3?`<div class="er-src">+${n-3} more</div>`:""}`);
+        parts.push(`<div class="er-kind" data-kind="${esc(k)}"><span class="er-kind-h">${FP_LABEL[k]||esc(k)} · ${n}</span></div><div class="er-kind-list" data-kind="${esc(k)}">${top}${n>3?`<a href="#" class="er-src er-more" data-kind="${esc(k)}" data-ref="${esc(ref)}" style="display:block;margin-top:.25rem;">show all ${n} ${FP_LABEL[k]||esc(k)} ↓</a>`:""}</div>`);
       });
       work = parts.join("");
     }
@@ -8610,7 +8610,23 @@ async function openMapsList(){
       if(typeof syncMapReview === "function") syncMapReview(ref, e.target.value);   // persists on the saved map (owner)
     });
   }
+  const ALL_ARTS = {};   // ref → full grouped artifacts (fetched once per person)
+  async function showAll(link){
+    const ref = link.dataset.ref, kind = link.dataset.kind;
+    const list = link.closest(".er-kind-list"); if(!list) return;
+    link.textContent = "loading…";
+    try{
+      if(!ALL_ARTS[ref]){ const r = await fetch("/people/artifacts?entity_id=" + encodeURIComponent(ref)); if(!r.ok) throw new Error(r.status); ALL_ARTS[ref] = await r.json(); }
+      const its = ((ALL_ARTS[ref].items||{})[kind]) || [];
+      list.innerHTML = its.map(it => {
+        const meta = [it.venue, (it.date||"").slice(0,4), it.stat, it.role==="first_author"?"first author":"", it.via?"via linked identity":""].filter(Boolean).join(" · ");
+        return `<div class="er-art">${it.url?`<a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">${esc(it.title)} ↗</a>`:esc(it.title)}${meta?`<span class="er-art-m">${esc(meta)}</span>`:""}</div>`;
+      }).join("") || `<div class="er-src">none stored</div>`;
+    }catch(err){ link.textContent = "couldn't load — try again"; }
+  }
   document.addEventListener("click", e => {
+    const more = e.target.closest && e.target.closest(".er-more");
+    if(more){ e.preventDefault(); e.stopPropagation(); showAll(more); return; }
     const b = e.target.closest && e.target.closest(".ev-inspect");
     if(b){ e.preventDefault(); toggle(b.dataset.ref); return; }
     const card = e.target.closest && e.target.closest(".ppl-card.person-card");

@@ -5556,6 +5556,19 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         states = [{"code": c, "name": n} for c, n in sorted(US_STATES.items(), key=lambda kv: kv[1])]
         return {"metros": metros, "states": states}
 
+    @app.get("/people/artifacts")
+    async def people_artifacts(entity_id: str) -> dict:
+        """ALL linked public work for one person (papers, repos, talks, posts, patents, orgs — and
+        their linked identities'), grouped by kind — the 'show all' behind the card panel's top 3."""
+        cstore = _claim_store_cached()
+        if cstore is None or not (entity_id or "").strip():
+            raise HTTPException(status_code=404, detail="no people index")
+        from api.artifacts import all_person_artifacts
+        try:
+            return await all_person_artifacts(await cstore._get_pool(), entity_id.strip())
+        except Exception as e:   # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"artifacts unavailable: {e}") from e
+
     @app.post("/people/enrich")
     async def people_enrich(body: EnrichIn, x_roster_token: str = Header(default="")) -> dict:
         """Read LinkedIn SNIPPETS for the people SHOWN on a Talent Map page (≤20 per call): each
