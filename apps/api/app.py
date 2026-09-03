@@ -2615,7 +2615,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=502, detail=f"provider error: {e}") from e
 
     @app.post("/jobs")
-    async def jobs(body: ResearchIn) -> dict:
+    async def jobs(body: ResearchIn, x_roster_token: str = Header(default="")) -> dict:
         """JOBS MODE (flag ROSTER_JOBS): search open roles aggregated from public ATS boards
         (Greenhouse/Ashby/Lever) — LLM parses the query into company/title-keywords/location, code
         filters `rs_job`, each result carries an apply link. 404 when off."""
@@ -2666,12 +2666,30 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 prof = await asyncio.wait_for(profile_from_url(_li_m.group(0)), 20)
             except Exception:   # noqa: BLE001
                 prof = {}
-            if not prof:
-                return {"jobs": [], "count": 0, "query": {}, "stats": await store.jobs_stats(),
-                        "note": "Couldn't read that LinkedIn profile from search results (it may be private or not "
-                                "indexed). Paste your headline or a few lines about your experience instead, or upload "
-                                "a résumé under Find jobs."}
             extra = (body.question or "").replace(_li_m.group(0), " ").strip()
+            slug_name = " ".join(w.capitalize() for w in re.split(r"[-_]+", _li_m.group(0).rstrip("/").rsplit("/in/", 1)[-1]) if w and not w.isdigit() and len(w) > 1)
+            matched_on = "headline"
+            if not prof:
+                # NOT VISIBLE TO SEARCH ENGINES (private / not indexed — we never read linkedin.com itself):
+                # fall back to what we DO hold — the signed-in user's résumé, or text pasted with the link
+                _user = await _optional_user(x_roster_token)
+                _acc = _accounts() if _user else None
+                _saved = ((await _acc.get_profile(_user["id"])).get("profile") or {}) if _acc else {}
+                _parsed = ((await _acc.get_parse(_user["id"])).get("profile") or {}) if _acc else {}
+                _prof_text = " ".join(str(x) for x in [_parsed.get("_resume_text", ""), _saved.get("summary", ""), _saved.get("current_title", "")] if x).strip()
+                if len(_prof_text) >= 40:
+                    prof = {"name": _user.get("name") or slug_name, "headline": _saved.get("current_title") or "", "snippet": _prof_text[:2000],
+                            "url": _li_m.group(0)}
+                    matched_on = "resume"
+                elif len(extra) >= 20:
+                    prof = {"name": slug_name, "headline": "", "snippet": extra, "url": _li_m.group(0)}
+                    matched_on = "pasted"
+                else:
+                    return {"jobs": [], "count": 0, "query": {}, "stats": await store.jobs_stats(),
+                            "note": f"That LinkedIn profile isn't visible to search engines (private, or not indexed), and Roster never "
+                                    f"reads linkedin.com directly — so there is nothing to match on yet. Two ways in: paste your headline "
+                                    f"after the link (e.g. “{_li_m.group(0)} Senior backend engineer at Stripe, Go/Postgres/Kafka”), or "
+                                    f"sign in and upload your résumé under Find jobs — then paste the link again."}
             text = " ".join(x for x in [prof.get("name", ""), prof.get("headline", ""), prof.get("snippet", ""), extra] if x)
             res = await match_resume_jobs(store, {"_resume_text": text, "summary": prof.get("headline", "")},
                                           {"limit": 40, "country": (body.country or "us"), "metro": (body.metro or ""),
@@ -2682,8 +2700,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 jobs, res["must"] = await apply_job_must(store, jobs, body.job_must)
             res.update({"jobs": jobs, "count": len(jobs), "query": {"company": [], "title_keywords": [], "location": ""},
                         "linkedin_profile": {"name": prof.get("name"), "headline": prof.get("headline"), "url": prof.get("url")},
-                        "note": f"Matched to {prof.get('name')}'s LinkedIn headline — “{prof.get('headline') or 'no headline shown'}” "
-                                f"(as search engines show it). For a deeper match, upload a résumé under Find jobs.",
+                        "note": ({"headline": f"Matched to {prof.get('name')}'s LinkedIn headline — “{prof.get('headline') or 'no headline shown'}” "
+                                              f"(as search engines show it). For a deeper match, upload a résumé under Find jobs.",
+                                  "resume": f"That profile isn't visible to search engines, so these roles are matched to the résumé on your account instead.",
+                                  "pasted": f"That profile isn't visible to search engines, so these roles are matched to the text you pasted with the link."}[matched_on]),
                         "stats": await store.jobs_stats()})
             res["session_id"] = await _save_job_session(jobs, res["query"])
             return res
