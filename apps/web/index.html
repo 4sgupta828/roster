@@ -2811,7 +2811,8 @@ function peopleRowsMarkup(data){
     // linkedin.com) + how well it fits the brief; shown once the cohort enrichment has run.
     const liH = (p.linkedin && p.linkedin.headline) || (attr("linkedin_headline").display || "");
     const liFit = p.linkedin && typeof p.linkedin.headline_fit === "number" ? Math.round(p.linkedin.headline_fit*100) : null;
-    const liLine = liH ? `<span class="ppl-li" title="The person's own LinkedIn headline, quoted from a search-engine snippet (self-stated)">in “${esc(liH)}”${liFit!==null?` <span class="ppl-lifit">${liFit>=50?"fits the brief well":liFit>=30?"partly fits the brief":"does not obviously fit the brief"}</span>`:""}</span>`
+    // the headline is the evidence; no wording-fit verdict (it read as noise: "does not obviously fit")
+    const liLine = liH ? `<span class="ppl-li" title="The person's own LinkedIn headline, quoted from a search-engine snippet (self-stated)">in “${esc(liH)}”</span>`
       : "";   // no headline → nothing on the card (a 'not found / ambiguous' line is noise; the panel's Unconfirmed line covers it)
     return `<div class="ppl-card person-card" data-ref="${esc(ref)}" title="Click for the evidence behind this card">${acts}${avatar}
       <span class="ppl-body">
@@ -8559,7 +8560,6 @@ async function openMapsList(){
     // FIT (one line, only with a brief)
     const fitBits = [];
     if(hits.length) fitBits.push(`matches ${hits.map(esc).join(", ")}`);
-    if(liHead && lis && typeof lis.headline_fit === "number") fitBits.push(lis.headline_fit >= 0.5 ? "headline fits the brief" : lis.headline_fit >= 0.3 ? "headline partly fits" : "headline does not obviously fit");
     if(rrs.length) fitBits.push(rrs.map(esc).join(" · "));
     el.innerHTML = `<div class="ev-inline">
       <div class="er-head" style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;"><span class="ev-pill ${hl[1]}">${esc(hl[0])}</span>${fitBits.length?`<span class="er-src" style="font-size:.78rem;">Fit: ${fitBits.join(" · ")}</span>`:""}</div>
@@ -8837,7 +8837,7 @@ function enrichSummary(rows, pid, quota){
   const withHead = rows.filter(p => p.linkedin && p.linkedin.headline).length;
   const fits = rows.filter(p => p.linkedin && typeof p.linkedin.headline_fit === "number").map(p=>p.linkedin.headline_fit);
   const strong = fits.filter(f => f >= 0.5).length;
-  return `<div class="ppl-cov" style="border-left-color:var(--gold);">⌕ LinkedIn snippets read for the ${rows.length} shown: <b>${withHead}</b> with a headline (${st.resolved} newly resolved, ${st.already} on file), ${st.ambiguous} ambiguous (several same-named — none guessed), ${st.none} not found${st.other?`, ${st.other} unavailable`:""}.${fits.length?` The headline fits the brief well for <b>${strong}</b> of ${fits.length}.`:""} <button type="button" class="ppl-rerank" data-pid="${esc(pid)}" title="Reorder the people shown by relevance, headline fit and evidence depth — code-computed, reasons under each card">⇅ Re-rank shown by evidence</button>${quota&&quota.cap?` <span class="ppl-fc" style="text-transform:none;">· snippet quota ${quota.used_today}/${quota.cap} today</span>`:""}</div>`;
+  return `<div class="ppl-cov" style="border-left-color:var(--gold);">⌕ LinkedIn snippets read for the ${rows.length} shown: <b>${withHead}</b> with a headline (${st.resolved} newly resolved, ${st.already} on file), ${st.ambiguous} ambiguous (several same-named — none guessed), ${st.none} not found${st.other?`, ${st.other} unavailable`:""}. <button type="button" class="ppl-rerank" data-pid="${esc(pid)}" title="Reorder the people shown by relevance, headline fit and evidence depth — code-computed, reasons under each card">⇅ Re-rank shown by evidence</button>${quota&&quota.cap?` <span class="ppl-fc" style="text-transform:none;">· snippet quota ${quota.used_today}/${quota.cap} today</span>`:""}</div>`;
 }
 function rerankShown(pid){
   const data = (window.PEOPLE_RENDERS||{})[pid]; if(!data) return;
