@@ -100,7 +100,8 @@ def test_lookup_uses_all_hints_web_search_when_keyed_sources_miss(monkeypatch):
     async def _pool():
         return None
     store._get_pool = _pool
-    out = asyncio.run(pp.lookup_person(store, "Mukul Gupta", "the one at Cisco in Bangalore"))
+    loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
+    out = loop.run_until_complete(pp.lookup_person(store, "Mukul Gupta", "the one at Cisco in Bangalore"))
     lk = out["person_lookup"]
     assert calls["q"] == ("Mukul Gupta", "the one at Cisco in Bangalore")
     assert lk["resolution"] == "resolved" and lk["searched_web"] == '"Mukul Gupta" cisco bangalore'
@@ -108,6 +109,6 @@ def test_lookup_uses_all_hints_web_search_when_keyed_sources_miss(monkeypatch):
     assert out["people_rows"][0]["entity_id"].startswith("web:mukul-gupta")
     # a namesake page confirming ONE of two hints resolves nothing — honest 'none' names the query
     PAGES[:] = [{"title": "Mukul Gupta - Bangalore University", "url": "https://x.org/other", "snippet": "student, Delhi"}]
-    out2 = asyncio.run(pp.lookup_person(store, "Mukul Gupta", "the one at Cisco in Bangalore"))
+    out2 = loop.run_until_complete(pp.lookup_person(store, "Mukul Gupta", "the one at Cisco in Bangalore"))
     assert out2["person_lookup"]["resolution"] == "none"
     assert "cisco, bangalore" in out2["person_lookup"]["clarify"]

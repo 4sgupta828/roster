@@ -881,6 +881,33 @@ JOB_MUST_LABELS = {"remote": "Remote", "hybrid": "Hybrid", "f500": "Fortune 500"
                    "startup": "Startup", "senior": "Senior+", "leadership": "Leadership"}
 
 
+async def widen_for_must(store, rows: list[dict], must: list[str], *, qvec=None, terms=None, company=None) -> list[dict]:
+    """MUST-HAVE needs a DEEP pool: a semantic top-200 holds a handful of remote+F500 roles while
+    the index holds hundreds. Add a 1000-deep semantic slice, the remote/hybrid location slice, and
+    — for F500 / public / startup — the roles at those company sets directly. Deduped, order kept."""
+    must = [m for m in (must or []) if m in JOB_MUST_KINDS]
+    if not must:
+        return dedupe_jobs(rows)
+    extra = list(rows)
+    try:
+        if qvec:
+            extra += await store.semantic_jobs(qvec, company=company, cap=1000)
+        for kw in [k for k in ("remote", "hybrid") if k in must]:
+            extra += await store.search_jobs(terms=(terms or []) or [kw], company=company, location=kw, cap=400)
+        cos: set = set()
+        if "f500" in must or "public" in must:
+            cos |= set(_F500)
+        if "startup" in must:
+            st = (await store.companies_with_facet(("accelerator",))
+                  | await store.companies_with_facet(("stage",), ["startup"]))
+            cos |= {_norm_co(c) for c in st if c}
+        if cos and not company and hasattr(store, "jobs_for_companies"):
+            extra += await store.jobs_for_companies(sorted(cos), terms=terms, cap=800)
+    except Exception as e:  # noqa: BLE001 — widening is additive
+        _log.info("must-have widening skipped: %s", e)
+    return dedupe_jobs(extra)
+
+
 async def apply_job_must(store, rows: list[dict], must: list[str]) -> tuple[list[dict], dict | None]:
     """JOBS 'MUST HAVE' (pre-search toggles): keep only roles satisfying EVERY selected kind. All
     code-derived from the row — remote/hybrid from the location or title text, Fortune 500 from
@@ -892,8 +919,8 @@ async def apply_job_must(store, rows: list[dict], must: list[str]) -> tuple[list
     startup: set = set()
     if "startup" in must or "public" in must:
         try:
-            startup = (await store.companies_with_facet(("accelerator",))
-                       | await store.companies_with_facet(("stage",), ["startup"]))
+            startup = {_norm_co(c) for c in (await store.companies_with_facet(("accelerator",))
+                                             | await store.companies_with_facet(("stage",), ["startup"])) if c}
         except Exception:  # noqa: BLE001
             startup = set()
     def _ok(j: dict) -> bool:
@@ -902,7 +929,7 @@ async def apply_job_must(store, rows: list[dict], must: list[str]) -> tuple[list
         co = j.get("company") or ""
         con = _norm_co(co)
         f500 = co in _F500 or con in _F500
-        st = co in startup or con in startup or co.lower() in startup
+        st = con in startup
         sen = _title_seniority(title)
         checks = {"remote": "remote" in loc or "remote" in title.lower(),
                   "hybrid": "hybrid" in loc or "hybrid" in title.lower(),

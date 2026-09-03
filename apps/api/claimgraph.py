@@ -1618,6 +1618,24 @@ class ClaimGraphStore:
             return []
         return [dict(r) for r in rows]
 
+    async def jobs_for_companies(self, norm_companies: list[str], *, terms=None, cap: int = 600) -> list[dict]:
+        """Jobs at a SET of companies keyed by the alphanumeric-only company key (the same key the
+        F500 / startup sets use), optionally narrowed by title terms. Newest first."""
+        pool = await self._get_pool()
+        conds, args, i = ["regexp_replace(lower(company),'[^a-z0-9]','','g') = ANY($1)"], [list(norm_companies)], 2
+        for t in (terms or [])[:4]:
+            t = str(t).strip().lower()
+            if t:
+                conds.append(f"title_norm ILIKE ${i}"); args.append(f"%{t}%"); i += 1
+        sql = (f"SELECT id,company,title,location,department,url,source,to_char(updated_at,'YYYY-MM-DD') AS updated_at "
+               f"FROM rs_job WHERE {' AND '.join(conds)} ORDER BY updated_at DESC LIMIT {int(cap)}")
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(sql, *args)
+        except Exception:
+            return []
+        return [dict(r) for r in rows]
+
     async def people_coverage(self) -> dict:
         """A coverage summary for the Coverage UI: total people, breakdown by SOURCE (github/openalex/
         npi/yc/sec/theorg/aifund/ef), and how many people each searchable DIMENSION covers. Honest —
