@@ -2716,7 +2716,9 @@ function jobsMarkup(d){
   const at = (q.company&&q.company.length)?` at ${esc(q.company.join(", ").replace(/_/g," "))}`:"";
   const angleChips = (d.query_angles&&d.query_angles.length>1) ? `<div style="margin-top:.4rem;display:flex;flex-wrap:wrap;gap:.3rem;">${d.query_angles.map(a=>`<span class="ppl-tag">${esc(a)}</span>`).join("")}</div>` : "";
   const intentHtml = (d.agentic && (d.intent||angleChips)) ? `<div class="ppl-cov" style="border-left-color:var(--gold);background:rgba(var(--gold-rgb),.06);"><b>⚡ Smart search</b>${d.intent?` — ${esc(d.intent)}`:""}${angleChips}</div>` : "";
+  const jobMapBar = (jobs.length && typeof jobMapBarMarkup === "function" && !d._noMapBar) ? jobMapBarMarkup(d) : "";
   const head = `<div class="ppl-head"><b>${jobs.length}</b> open role${jobs.length===1?"":"s"}${at}${jpagesN>1?` <span class="ppl-fc" style="text-transform:none;">· showing ${jfrom}–${jto} · page ${jpage+1} of ${jpagesN}</span>`:""}${d.agentic?` <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">⚡ smart search</span>`:""}</div>`
+    + jobMapBar
     + intentHtml
     + (d.linkedin_profile ? `<div class="ppl-cov" style="border-left-color:var(--gold);">in Jobs for <b>${esc(d.linkedin_profile.name||"")}</b>${d.linkedin_profile.headline?` — ${esc(d.linkedin_profile.headline)}`:""} <span class="ppl-fc" style="text-transform:none;">· read from search-engine results for the pasted profile · <a href="${esc(d.linkedin_profile.url||"#")}" target="_blank" rel="noopener noreferrer">profile ↗</a></span></div>` : "")
     + (d.must && d.must.kinds && d.must.kinds.length ? `<div class="ppl-cov" style="border-left-color:var(--gold);">✓ Must have: <b>${esc((d.must.labels||d.must.kinds).join(" · "))}</b> — ${d.must.kept} role${d.must.kept===1?"":"s"} qualify${d.must.dropped?`, ${d.must.dropped} left out`:""}. Remote/hybrid read from the posting's location, company type from Roster's curated sets, seniority from the title.</div>` : "")
@@ -2728,7 +2730,7 @@ function jobsMarkup(d){
   // counted as the company's.
   const rel = Array.isArray(d.related_jobs) ? d.related_jobs : [];
   const relHtml = rel.length
-    ? `<details class="jobs-related"><summary>Related roles at other companies (${rel.length}) — similar titles from the semantic search, not ${esc((q.company||[]).join(", ").replace(/_/g," ")||"this company")}</summary>${jobsMarkup({jobs: rel, query: {}, stats: {}, geo_scope: d.geo_scope, _jpid: d._jpid + "r", _jpage: d._rpage||0})}</details>`
+    ? `<details class="jobs-related"><summary>Related roles at other companies (${rel.length}) — similar titles from the semantic search, not ${esc((q.company||[]).join(", ").replace(/_/g," ")||"this company")}</summary>${jobsMarkup({jobs: rel, query: {}, stats: {}, geo_scope: d.geo_scope, _jpid: d._jpid + "r", _jpage: d._rpage||0, _noMapBar: true})}</details>`
     : "";
   return `<div class="ppl-wrap" data-jpid="${esc(d._jpid)}">${head}${jpage>0?jpager:""}<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">' + esc((d.must && d.must.dropped && !d.must.kept) ? `No role in this search satisfies Must have: ${(d.must.labels||d.must.kinds).join(" · ")} (${d.must.dropped} left out) — drop a toggle above or widen the search.` : (d.note || "No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.")) + '</div>'}</div>${jpager}${relHtml}</div>`;
 }
@@ -8197,7 +8199,7 @@ window.addEventListener("hashchange", ()=>{
 window.ACTIVE_MAP = null;
 function talentMapBar(){
   const m = window.ACTIVE_MAP;
-  if(m){
+  if(m && m.map_type !== "jobs"){
     const share = m.share_path ? `<button type="button" class="mb-btn" onclick="copyMapLink()">🔗 Copy private link</button>` : "";
     const csvHref = `/maps/${encodeURIComponent(m.id)}/export.csv${m.token?`?t=${encodeURIComponent(m.token)}`:""}`;
     const title = m.is_owner
@@ -8210,6 +8212,41 @@ function talentMapBar(){
   }
   return `<div class="mapbar"><span class="mb-meta" style="flex-basis:auto;flex:1 1 200px;">Turn this result into a durable, shareable artifact.</span>
     <button type="button" class="mb-btn" onclick="saveTalentMap()">💾 Save as Talent Map</button></div>`;
+}
+// ---- JOB MAPS: the same durable artifact for a job search — snapshot of the roles (with any
+// summaries already read), notes, private link, CSV. Saved with map_type 'jobs'.
+function jobMapBarMarkup(d){
+  const m = window.ACTIVE_MAP;
+  if(m && m.map_type === "jobs"){
+    const share = m.share_path ? `<button type="button" class="mb-btn" onclick="copyMapLink()">🔗 Copy private link</button>` : "";
+    const csvHref = `/maps/${encodeURIComponent(m.id)}/export.csv${m.token?`?t=${encodeURIComponent(m.token)}`:""}`;
+    const title = m.is_owner
+      ? `<input class="mb-title" id="mapTitle" value="${esc(m.title||"")}" placeholder="Job map title" onchange="saveMapMeta()">`
+      : `<span class="mb-title">${esc(m.title||"Job Map")}</span>`;
+    return `<div class="mapbar">${title}${share}<a class="mb-btn" href="${csvHref}" target="_blank" rel="noopener">⬇ Export CSV</a>
+      <span class="mb-meta">Saved Job Map · ${m.n_rows||0} roles · ${m.is_owner?"you own this map — notes persist here":"shared read-only view"}${m.created_at?` · saved ${esc(String(m.created_at).slice(0,10))}`:""}</span>
+      ${m.is_owner?`<textarea class="mapnotes" id="mapNotes" placeholder="Map notes — where you are with these roles (persisted)" onchange="saveMapMeta()">${esc(m.notes||"")}</textarea>`:(m.notes?`<div class="mb-meta">Notes: ${esc(m.notes)}</div>`:"")}
+    </div>`;
+  }
+  if(!d || !d._jpid) return "";
+  return `<div class="mapbar"><span class="mb-meta" style="flex-basis:auto;flex:1 1 200px;">Keep this job search as a durable, shareable list.</span>
+    <button type="button" class="mb-btn" onclick="saveJobMap('${esc(d._jpid)}')">💾 Save as Job Map</button></div>`;
+}
+async function saveJobMap(jpid){
+  if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
+  const d = (window.JOBS_RENDERS||{})[jpid]; if(!d) return;
+  const t = (THREAD.turns||[]).slice().reverse().find(x => x.kind === "jobs") || {};
+  const rows = (d.jobs||[]).slice(0,400).map(j => ({...j, summary: (window.JOB_SUMMARIES||{})[j.url||""] || undefined}));
+  const body = {tenant_id:"demo", map_type:"jobs", brief:(t.question||CURRENT_Q||"Job search"), title:(t.question||"Job search").slice(0,80),
+    rows, coverage:{must:d.must||null, geo_scope:d.geo_scope||null, linkedin_profile:d.linkedin_profile||null, note:d.note||""}, filters:(d.query||{})};
+  try{
+    const r = await fetch("/maps", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(body)});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); alert(e.detail || "Couldn't save the job map."); return; }
+    const res = await r.json();
+    window.ACTIVE_MAP = {id:res.id, map_type:"jobs", title:res.title, share_path:res.share_path, token:(res.share_token||""), is_owner:true, reviews:{}, n_rows:res.rows, notes:"", created_at:new Date().toISOString()};
+    try{ history.replaceState(null, "", res.share_path); }catch(e){}
+    renderThread();
+  }catch(e){ alert("Couldn't save the job map — " + (e.message||e)); }
 }
 function lastPeopleTurn(){
   for(let i = THREAD.turns.length - 1; i >= 0; i--){ const t = THREAD.turns[i]; if(Array.isArray(t.people_rows) && t.people_rows.length) return t; }
@@ -8236,8 +8273,21 @@ async function loadMapView(id, token){
     const r = await fetch(`/maps/${encodeURIComponent(id)}${token?`?t=${encodeURIComponent(token)}`:""}`, {headers: authHeaders()});
     if(!r.ok){ if(out) out.innerHTML = `<div class="pitem-empty">This map isn't available — the link may be incomplete or private.</div>`; return; }
     const m = (await r.json()).map;
-    if(typeof setSearchMode === "function") setSearchMode("people");   // a map lives in the Talent Map tab
-    window.ACTIVE_MAP = {id:m.id, title:m.title, notes:m.notes||"", share_path:m.share_path||"", token:(token||""),
+    if(m.map_type === "jobs"){
+      if(typeof setSearchMode === "function") setSearchMode("jobs");
+      window.ACTIVE_MAP = {id:m.id, map_type:"jobs", title:m.title, notes:m.notes||"", share_path:m.share_path||"", token:(token||""),
+        is_owner:!!m.is_owner, reviews:(m.reviews||{}), n_rows:(m.rows||[]).length, created_at:m.created_at};
+      window.JOB_SUMMARIES = window.JOB_SUMMARIES || {};
+      (m.rows||[]).forEach(j => { if(j.summary && j.url) window.JOB_SUMMARIES[j.url] = j.summary; });   // saved reads travel with the map
+      const cov = m.coverage || {};
+      THREAD = {session_id:null, turns:[{question:m.brief||m.title||"Job Map", kind:"jobs", jobs:(m.rows||[]), query:(m.filters||{}), stats:{},
+        geo_scope:cov.geo_scope||null, must:cov.must||null, linkedin_profile:cov.linkedin_profile||null, note:cov.note||"", related_jobs:[], answer:""}]};
+      TAB_THREADS.jobs = THREAD;
+      renderThread(); window.scrollTo({top:0});
+      return;
+    }
+    if(typeof setSearchMode === "function") setSearchMode("people");   // a talent map lives in the Talent Map tab
+    window.ACTIVE_MAP = {id:m.id, map_type:"talent", title:m.title, notes:m.notes||"", share_path:m.share_path||"", token:(token||""),
       is_owner:!!m.is_owner, reviews:(m.reviews||{}), n_rows:(m.rows||[]).length, created_at:m.created_at};
     THREAD = {session_id:null, turns:[{question:m.brief||m.title||"Talent Map", people_rows:(m.rows||[]), coverage_basis:(m.coverage||{}), grounded:true, claims:[], coverage_gaps:[]}]};
     TAB_THREADS.people = THREAD;
@@ -8269,9 +8319,9 @@ async function openMapsList(){
   try{
     const r = await fetch("/maps", {headers: authHeaders()});
     const maps = r.ok ? ((await r.json()).maps||[]) : [];
-    out.innerHTML = `<div class="ppl-wrap"><div class="ppl-head"><b>${maps.length}</b> saved Talent Map${maps.length===1?"":"s"}</div>
-      <div class="maplist">${maps.length ? maps.map(m=>`<a class="mrow" href="${esc(m.share_path)}"><b>${esc(m.title||m.brief||"Talent Map")}</b><small>${m.n_rows||0} people · saved ${esc(String(m.created_at||"").slice(0,10))} · ${esc((m.brief||"").slice(0,120))}</small></a>`).join("")
-        : `<div class="pitem-empty">No saved maps yet — run a Talent Map search and press “Save as Talent Map”.</div>`}</div></div>`;
+    out.innerHTML = `<div class="ppl-wrap"><div class="ppl-head"><b>${maps.length}</b> saved map${maps.length===1?"":"s"} <span class="ppl-fc" style="text-transform:none;">· Talent Maps and Job Maps</span></div>
+      <div class="maplist">${maps.length ? maps.map(m=>`<a class="mrow" href="${esc(m.share_path)}"><b>${m.map_type==="jobs"?"💼 ":"🗺️ "}${esc(m.title||m.brief||(m.map_type==="jobs"?"Job Map":"Talent Map"))}</b><small>${m.map_type==="jobs"?`Job Map · ${m.n_rows||0} roles`:`Talent Map · ${m.n_rows||0} people`} · saved ${esc(String(m.created_at||"").slice(0,10))} · ${esc((m.brief||"").slice(0,120))}</small></a>`).join("")
+        : `<div class="pitem-empty">No saved maps yet — run a Talent Map or job search and press “Save as Talent Map” / “Save as Job Map”.</div>`}</div></div>`;
   }catch(e){ out.innerHTML = `<div class="pitem-empty">Couldn't load maps — ${esc(e.message||e)}</div>`; }
 }
 // ---- EVIDENCE RAIL (talent-intelligence redesign, Phase 2): the persistent inspector for a selected

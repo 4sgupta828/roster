@@ -5642,7 +5642,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         m = await ms.get(map_id, owner_id=(user or {}).get("id"), share_token=(t or None))
         if m is None:
             raise HTTPException(status_code=404, detail="map not found")
-        fname = re.sub(r"[^A-Za-z0-9_-]+", "-", (m.get("title") or "talent-map"))[:60] or "talent-map"
+        fname = re.sub(r"[^A-Za-z0-9_-]+", "-", (m.get("title") or ("job-map" if m.get("map_type") == "jobs" else "talent-map")))[:60] or "map"
         return Response(content=build_csv(m), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="{fname}.csv"'})
 

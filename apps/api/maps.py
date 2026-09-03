@@ -165,10 +165,31 @@ class MapStore:
         return True
 
 
+def build_jobs_csv(m: dict) -> str:
+    """JOB MAP export: one row per role — title, company, location, match, reasons, apply link,
+    posting summary parameters when a summary was saved with the row, review state, note."""
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["title", "company", "location", "match_pct", "reasons", "apply_url", "source",
+                "work_mode", "compensation", "employment_type", "review_state", "review_note", "job_ref"])
+    reviews = m.get("reviews") or {}
+    for j in m.get("rows") or []:
+        ref = str(j.get("id") or j.get("key") or ((j.get("company") or "") + "|" + (j.get("title") or "")))
+        rv = reviews.get(ref, {})
+        sm = j.get("summary") or {}
+        w.writerow([j.get("title") or "", (j.get("company") or "").replace("_", " "), j.get("location") or "",
+                    j.get("match_pct") or "", "|".join(j.get("reasons") or []), j.get("url") or "", j.get("source") or "",
+                    sm.get("work_mode") or "", sm.get("compensation") or "", sm.get("employment_type") or "",
+                    rv.get("state") or "unreviewed", rv.get("note") or "", ref])
+    return out.getvalue()
+
+
 def build_csv(m: dict) -> str:
     """The export: one row per entity, preserving links and evidence strength (spec acceptance).
     Columns follow the Talent Map table: person, company, role, location, evidence strength,
     evidence types, sources, why surfaced, profile links, review state, note, entity id."""
+    if (m.get("map_type") or "") == "jobs":
+        return build_jobs_csv(m)
     out = io.StringIO()
     w = csv.writer(out)
     w.writerow(["name", "current_company", "role", "location", "evidence_strength",
