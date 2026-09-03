@@ -168,3 +168,17 @@ def test_talks_are_gated_on_full_name_and_hint():
     s = __import__("api.artifacts", fromlist=["summarize_artifacts"]).summarize_artifacts(
         [{**t, "detail": t["detail"]} for t in talks], [{"source": "talks"}])
     assert s["counts"] == {"talk": 2} and s["items"][0]["verify"] is True
+
+
+def test_items_cover_every_kind_not_just_starred_repos():
+    from api.artifacts import summarize_artifacts
+    repos = [github_repo_artifact({"full_name": f"ada/r{i}", "name": f"r{i}", "owner": {"login": "ada"},
+                                   "stargazers_count": 100 - i, "pushed_at": "2025-01-01T00:00:00Z"}, "ada") for i in range(10)]
+    post = {"kind": "post", "artifact_key": "p1", "title": "On sharding", "url": "https://ada.dev/p", "date": "2025-06-01",
+            "venue": "ada.dev", "role": "author", "detail": {}}
+    talk = {"kind": "talk", "artifact_key": "t1", "title": "Ada at QCon", "url": "https://youtube.com/watch?v=1", "date": None,
+            "venue": "YouTube", "role": "speaker", "detail": {"hits": {"company": ["Acme"]}}, "link_method": "name_hint"}
+    s = summarize_artifacts(repos + [post, talk], [{"source": "github"}, {"source": "site"}, {"source": "talks"}])
+    kinds = [it["kind"] for it in s["items"]]
+    assert kinds[:2] == ["talk", "post"] and kinds.count("repo") == 4          # every kind present; repos capped
+    assert s["counts"] == {"repo": 10, "post": 1, "talk": 1}

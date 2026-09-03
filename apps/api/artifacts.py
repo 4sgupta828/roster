@@ -53,7 +53,8 @@ KIND_LABELS = {"paper": "papers", "repo": "repos", "org": "orgs", "patent": "pat
                "talk": "talks", "podcast": "podcasts", "press": "press"}
 # the kinds that evidence CAPABILITY (org membership evidences affiliation, not capability)
 _CAPABILITY_KINDS = {"paper", "repo", "patent", "talk", "post"}
-_TOP_ITEMS = 8
+_TOP_ITEMS = 24
+_PER_KIND = 4
 
 
 # --------------------------------------------------------------------------- #
@@ -166,7 +167,13 @@ def summarize_artifacts(rows: list[dict], scans: list[dict] | None = None) -> di
     aff_list = sorted(affs.values(), key=lambda r: (-r["n"], r["name"]))[:6]
     for r in aff_list:
         r["years"] = sorted(r["years"])
-    ordered = sorted(rows, key=_prominence)
+    # items: the top few of EVERY kind (papers, talks, posts, patents, repos, orgs) — a starred
+    # repo must not crowd a talk or a post out of the Rail
+    _KIND_ORDER = ("paper", "talk", "post", "patent", "repo", "org")
+    ordered = []
+    for k in _KIND_ORDER:
+        ordered += sorted([a for a in rows if a["kind"] == k], key=_prominence)[:_PER_KIND]
+    ordered += [a for a in sorted(rows, key=_prominence) if a["kind"] not in _KIND_ORDER][:2]
     items = []
     for a in ordered[:_TOP_ITEMS]:
         d = a.get("detail") or {}

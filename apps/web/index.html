@@ -576,6 +576,8 @@
   #evrail details summary{cursor:pointer;font-size:.8rem;color:var(--gold);min-height:40px;line-height:40px;}
   #evrail .er-li{display:inline-block;min-height:40px;margin:.15rem 0;padding:.3rem .7rem;border:1px dashed var(--gold);border-radius:999px;background:none;color:var(--gold);font-size:.78rem;font-weight:600;cursor:pointer;}
   #evrail .er-li:disabled{opacity:.6;cursor:wait;}
+  #evrail .er-kind{margin:.55rem 0 .1rem;}
+  #evrail .er-kind-h{font-family:var(--mono);font-size:.66rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink);font-weight:700;}
   #evrail .er-art{font-size:.8rem;line-height:1.4;padding:.32rem 0;border-top:1px solid var(--hair);}
   #evrail .er-art a{color:var(--gold);text-decoration:none;}
   #evrail .er-art-k{font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-right:.3rem;}
@@ -8191,11 +8193,21 @@ async function openMapsList(){
     // ---- 4. WHAT THEY'VE DONE (public work + their own words) ----
     let done = "";
     if(fp && fp.total){
-      done += (fp.items||[]).slice(0,6).map(it=>{
-        const meta = [it.venue, (it.date||"").slice(0,4), it.stat, it.role==="first_author"?"first author":(it.role==="member"?"member":""), it.verify?"matched on name + employer — verify":""].filter(Boolean).join(" · ");
-        return `<div class="er-art"><span class="er-art-k">${FP_LABEL[it.kind]||esc(it.kind)}</span>${it.url?`<a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">${esc(it.title)} ↗</a>`:esc(it.title)}${meta?`<span class="er-art-m">${esc(meta)}</span>`:""}</div>`;
-      }).join("");
-      if(fp.total > 6) done += `<div class="er-src">+${fp.total-6} more.</div>`;
+      // grouped by KIND — papers, talks, posts, patents, repos, orgs — each with its links and its
+      // full count, so a starred repo never hides a talk or a post
+      const ORDER = ["paper","talk","post","patent","repo","org"];
+      const HOW = {paper:"linked by author id", talk:"matched on name + employer — verify", post:"from their declared site or newsletter", patent:"inventor + assignee", repo:"own non-fork repos", org:"public org membership"};
+      const byKind = {}; (fp.items||[]).forEach(it => { (byKind[it.kind] = byKind[it.kind] || []).push(it); });
+      ORDER.concat(Object.keys(byKind).filter(k=>!ORDER.includes(k))).forEach(k => {
+        const its = byKind[k] || []; const n = (fp.counts||{})[k] || 0;
+        if(!n) return;
+        done += `<div class="er-kind"><span class="er-kind-h">${FP_LABEL[k]||esc(k)} · ${n}</span> <span class="er-art-m" style="display:inline;">${esc(HOW[k]||"")}</span></div>`;
+        done += its.map(it=>{
+          const meta = [it.venue, (it.date||"").slice(0,4), it.stat, it.role==="first_author"?"first author":(it.role==="member"?"member":"")].filter(Boolean).join(" · ");
+          return `<div class="er-art">${it.url?`<a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">${esc(it.title)} ↗</a>`:esc(it.title)}${meta?`<span class="er-art-m">${esc(meta)}</span>`:""}</div>`;
+        }).join("");
+        if(n > its.length) done += `<div class="er-src">+${n-its.length} more ${FP_LABEL[k]||k}.</div>`;
+      });
       const affs = (fp.affiliations||[]);
       if(affs.length) done += `<div class="er-src" style="margin-top:.3rem;">Affiliations on published work: ${affs.slice(0,3).map(a=>{const y=a.years||[]; return esc(a.name)+(y.length?` (${y.length>1?y[0]+"–"+y[y.length-1]:y[0]})`:"");}).join("; ")}.</div>`;
     } else if(fp && (fp.scanned||[]).length){
