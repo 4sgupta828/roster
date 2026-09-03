@@ -549,6 +549,7 @@
   .ppl-scopebar{border-left-color:var(--person)!important;}
   .ev-filterbar{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;}
   .evfilters{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:.4rem auto 0;max-width:var(--wrapw,880px);padding:0 .2rem;font-size:.76rem;color:var(--muted);}
+  .evfilters[hidden]{display:none!important;}   /* the flex rule must not defeat the hidden attribute (Jobs / Q&A) */
   .evf-lbl{font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;margin-right:.25rem;opacity:.8;}
   #evfilters .ev-filter{min-height:32px;padding:.2rem .65rem;border:1px dashed var(--hair);border-radius:999px;background:transparent;color:var(--muted);font-size:.74rem;cursor:pointer;}
   #evfilters .ev-filter:hover{border-style:solid;color:var(--ink);}
