@@ -8319,7 +8319,7 @@ function revisionsMarkup(m){
     <div class="rev-h">What changed since revision ${last.revision_id-1} <span class="ppl-fc" style="text-transform:none;">(revision ${last.revision_id}, ${esc(REASON[last.reason]||last.reason)}${last.created_at?`, ${esc(String(last.created_at).slice(0,10))}`:""})</span></div>
     ${lines?`<div class="rev-sum">${lines}</div>`:""}
     <div class="rev-meta">${d.n_added||0} new${names("added")?` (${names("added")}${(d.n_added||0)>6?", …":""})`:""} · ${d.n_removed||0} dropped${names("removed")?` (${names("removed")}${(d.n_removed||0)>6?", …":""})`:""} · ${d.n_moved||0} moved 10+ places</div>
-    ${(d.edits||[]).length?`<details class="rev-edits"><summary>Brief edits applied (${d.edits.length})</summary><ul>${d.edits.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></details>`:""}
+    ${(d.edits||[]).length?`<details class="rev-edits" open><summary>Brief edits applied (${d.edits.length}) — code-owned, from the feedback tags</summary><ul>${d.edits.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></details>`:""}
     ${revs.length>1?`<div class="rev-meta">Earlier: ${revs.slice(0,-1).reverse().map(r=>`rev ${r.revision_id} (${esc(REASON[r.reason]||r.reason)})`).join(" · ")}</div>`:""}
   </div>`;
 }

@@ -148,36 +148,37 @@ def diff_text(delta: dict, edits: list[str]) -> str:
 
 
 class _WhatChanged(BaseModel):
-    line_1: str = ""      # what changed in the brief (from the edit log only)
-    line_2: str = ""      # what changed in the list (from the counts / names only)
+    line: str = ""        # what changed in the LIST (from the counts / names only)
+
+
+def _list_line(delta: dict) -> str:
+    return (f"{delta.get('n_after', 0)} people (was {delta.get('n_before', 0)}): {delta.get('n_added', 0)} new, "
+            f"{delta.get('n_removed', 0)} dropped, {delta.get('n_moved', 0)} moved 10+ places.")
 
 
 async def phrase_delta(llm, delta: dict, edits: list[str]) -> str:
-    """Two plain lines phrased by the LLM FROM THE CODE-COMPUTED DIFF ONLY (temperature 0; the prompt
-    carries the numbers, the names and the edit log, nothing else). Any failure → `diff_text`."""
-    fallback = diff_text(delta, edits)
+    """ONE plain line about the list, phrased by the LLM FROM THE CODE-COMPUTED DIFF ONLY (temperature 0;
+    the prompt carries the counts and the names, nothing else). The brief edits are never rephrased —
+    the code-owned edit log is shown verbatim (a rephrase inverted one in testing). Failure → code line."""
+    fallback = _list_line(delta)
     if llm is None:
         return fallback
     names = lambda k: ", ".join(str(x.get("name") or "") for x in (delta.get(k) or [])[:5] if x.get("name"))  # noqa: E731
     facts = (f"COUNTS: before={delta.get('n_before', 0)} after={delta.get('n_after', 0)} added={delta.get('n_added', 0)} "
              f"removed={delta.get('n_removed', 0)} moved_10_or_more={delta.get('n_moved', 0)}\n"
-             f"ADDED (first few): {names('added') or 'none'}\nREMOVED (first few): {names('removed') or 'none'}\n"
-             f"BRIEF EDITS (code-owned, in order):\n" + ("\n".join(f"- {e}" for e in edits[:8]) or "- none"))
+             f"ADDED (first few): {names('added') or 'none'}\nREMOVED (first few): {names('removed') or 'none'}")
     try:
         comp = await llm.complete(
-            system=("You write a two-line 'what changed' note for a recruiter's revised candidate list. Use ONLY "
-                    "the facts given: line_1 restates the brief edits in plain words (≤ 30 words); line_2 states "
-                    "what changed in the list using the counts and the named people (≤ 30 words). No adjectives "
-                    "about quality, no advice, no numbers that are not in the facts, no people not named."),
-            messages=[{"role": "user", "content": facts[:3000]}],
-            response_format=_WhatChanged, max_tokens=300, temperature=0.0)
-        l1 = (getattr(comp.parsed, "line_1", "") or "").strip()
-        l2 = (getattr(comp.parsed, "line_2", "") or "").strip()
+            system=("You write ONE plain sentence (≤ 35 words) saying what changed in a recruiter's revised "
+                    "candidate list. Use ONLY the counts and the named people given. No adjectives about quality, "
+                    "no advice, no reasons, no numbers that are not in the facts, no people not named."),
+            messages=[{"role": "user", "content": facts[:2000]}],
+            response_format=_WhatChanged, max_tokens=200, temperature=0.0)
+        line = (getattr(comp.parsed, "line", "") or "").strip()
         # guard: every number the model wrote must be one the facts carried
         allowed = {str(delta.get(k, 0)) for k in ("n_before", "n_after", "n_added", "n_removed", "n_moved")} | {"10"}
-        for tok in re.findall(r"\d+", l1 + " " + l2):
-            if tok not in allowed:
-                return fallback
-        return "\n".join(x for x in (l1, l2) if x) or fallback
-    except Exception:  # noqa: BLE001 — phrasing is cosmetic; the code narrative always exists
+        if not line or any(tok not in allowed for tok in re.findall(r"\d+", line)):
+            return fallback
+        return line
+    except Exception:  # noqa: BLE001 — phrasing is cosmetic; the code line always exists
         return fallback
