@@ -1147,3 +1147,25 @@ def test_map_csv_preserves_links_and_evidence_strength():
     assert rows[0]["evidence_strength"] == "self_stated"
     assert "https://github.com/ada" in rows[0]["profile_links"]
     assert rows[0]["review_state"] == "shortlisted" and rows[0]["gaps"] == "seniority"
+
+
+def test_company_guard_keeps_a_named_company_in_the_filter():
+    import asyncio
+    from api.people_population import company_guard, company_names_in
+    assert company_names_in("backend engineers at Stripe") == [["stripe"]]
+    assert company_names_in("talent map around Anthropic and OpenAI") == [["anthropic"], ["openai"]]
+    assert company_names_in("top infra people at Anthropic and OpenAI") == [["anthropic"], ["openai"]]
+    assert company_names_in("ML engineers from Jane Street Capital")[0][:2] == ["jane_street_capital", "jane_street"]
+    assert company_names_in("people at the big tech companies") == []
+    class _S:
+        async def companies_known(self, keys):
+            return {k for k in keys if k in ("stripe", "jane_street", "openai", "anthropic")}
+    loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
+    f = loop.run_until_complete(company_guard("backend engineers at Stripe", {"role": ["backend"], "country": ["us"]}, _S()))
+    assert f["company"] == ["stripe"] and f["_company_guard"] == ["stripe"]
+    f2 = loop.run_until_complete(company_guard("backend engineers at Stripe", {"role": ["backend"], "company": ["Stripe"]}, _S()))
+    assert f2.get("company") == ["Stripe"] and "_company_guard" not in f2        # already there → untouched
+    f3 = loop.run_until_complete(company_guard("engineers at Jane Street Capital", {}, _S()))
+    assert f3["company"] == ["jane_street"]                                      # longest KNOWN n-gram
+    f4 = loop.run_until_complete(company_guard("engineers at Nonexistent Corp", {"role": ["engineer"]}, _S()))
+    assert "company" not in f4                                                    # never invents a company

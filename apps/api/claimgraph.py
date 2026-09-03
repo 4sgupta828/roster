@@ -2037,6 +2037,22 @@ class ClaimGraphStore:
             return []
         return [{"value": r["value"], "display": r["display"] or r["value"], "n": int(r["n"])} for r in rows]
 
+    async def companies_known(self, norms: list[str]) -> set:
+        """Which of these normalized company keys exist as a company facet on the people index —
+        the code-side check behind the company guard (a name the query says, the compiler dropped)."""
+        pool = await self._get_pool()
+        keys = [k for k in (norms or []) if k]
+        if not keys:
+            return set()
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT DISTINCT facet_value_norm FROM roster_entity_facet WHERE facet_key = 'company' "
+                    "AND facet_value_norm = ANY($1)", keys)
+        except Exception:
+            return set()
+        return {r["facet_value_norm"] for r in rows}
+
     async def jobs_stats(self) -> dict:
         pool = await self._get_pool()
         try:

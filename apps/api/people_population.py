@@ -1350,6 +1350,57 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
             "excluded_source_company": ({"companies": excl_raw, "count": excluded_n} if excl else None)}
 
 
+_CO_LEAD = re.compile(r"(?:\bat|\bfrom|\bof|\baround|\bwithin|@)\s+([A-Za-z][\w.&'+-]*(?:\s+(?:[A-Z][\w.&'+-]*|and|&))*)", re.I)
+_CO_STOP = {"the", "a", "an", "our", "my", "their", "this", "that", "top", "senior", "big", "large", "small",
+            "tech", "startups", "startup", "companies", "company", "scale", "least", "most", "home", "work"}
+
+
+def company_names_in(question: str) -> list[list[str]]:
+    """Company-name candidates a question STATES after 'at' / 'from' / '@' ("backend engineers at
+    Stripe", "talent at Anthropic and OpenAI") → for each mention, its n-gram keys longest-first
+    (['stripe'], ['anthropic'], ['openai']). Code-owned; the index decides which keys are real."""
+    out = []
+    for m in _CO_LEAD.finditer(question or ""):
+        span = m.group(1)
+        for part in re.split(r"\s+(?:and|&)\s+|,", span):
+            toks = [t for t in part.strip().split() if t.lower() not in _CO_STOP][:3]
+            if not toks:
+                continue
+            cands = []
+            for n in range(len(toks), 0, -1):
+                key = re.sub(r"[^a-z0-9]+", "_", " ".join(toks[:n]).lower()).strip("_")
+                if key and key not in cands:
+                    cands.append(key)
+            out.append(cands)
+    return out
+
+
+async def company_guard(question: str, facets: dict, store) -> dict:
+    """A company the question NAMES is the intent — it must gate the cohort even when the LLM
+    compiler dropped it (seen live: "backend engineers at Stripe" compiled without company →
+    generic backend engineers). Adds every stated company that exists on the index to
+    facets['company'] (never invents one the index lacks). Returns the facets."""
+    mentions = company_names_in(question)
+    if not mentions or store is None or not hasattr(store, "companies_known"):
+        return facets
+    have = {_norm_co(c) for c in (facets.get("company") or [])}
+    keys = sorted({k for cands in mentions for k in cands})
+    try:
+        known = await store.companies_known(keys)
+    except Exception:  # noqa: BLE001
+        return facets
+    added = []
+    for cands in mentions:
+        hit = next((k for k in cands if k in known), "")       # longest matching n-gram wins
+        if hit and _norm_co(hit) not in have:
+            added.append(hit); have.add(_norm_co(hit))
+    if added:
+        facets = dict(facets)
+        facets["company"] = list(facets.get("company") or []) + added
+        facets["_company_guard"] = added
+    return facets
+
+
 async def parse_people_facets(question: str, llm) -> tuple[dict[str, list[str]], str, str]:
     facets, person, ctx, _terms = await parse_people_facets_full(question, llm)
     return facets, person, ctx
@@ -2219,6 +2270,13 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     else:
         facets, person, ctx, topic_terms = await parse_people_facets_full(question, llm)
         topic_terms = topic_terms_for(facets, topic_terms)
+    # COMPANY GUARD (code-owned): a company the question names gates the cohort even when the
+    # compiler dropped it — unless this is a single-person lookup ("Mukul Gupta at Cisco")
+    if not (not facets and person):
+        facets = await company_guard(question, facets, store)
+        if facets.get("_company_guard"):
+            _log.info("company guard added %s for %r", facets["_company_guard"], question[:80])
+            facets.pop("_company_guard", None)
     if not facets and person and not _prior:
         # SINGLE-PERSON identity/profile lookup — everything the index holds on them, on demand
         # (full card, evidence, linked artifacts), or a clarifying question when several people
