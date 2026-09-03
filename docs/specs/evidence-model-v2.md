@@ -1,6 +1,21 @@
 # Evidence model v2: broader footprints, calibrated self-statement, evidence as a portfolio
 
-Status: DRAFT for review. Date: 2026-09-02.
+Status: IN PROGRESS. Date: 2026-09-02 (updated 2026-09-03).
+
+Landed so far (all live in prod, code-owned, strong-key or gated):
+- §5.1 papers (OpenAlex author id), repos + org memberships (GitHub login) — `apps/api/artifacts.py`,
+  `scripts/ingest_artifacts.py`, worker leg ROSTER_BULK_ARTIFACTS_CHUNK.
+- §1/§2 self-published posts from DECLARED site / Medium / Substack / dev.to feeds (strong key).
+- §1/§2 talks: YouTube/Vimeo via search snippets, gated on full name + grounded employer/role hint,
+  stored as `name_hint` (confidence 0.6) and shown as “verify”, never as proven.
+- LinkedIn headline via search snippets (name + employer gate) as self-stated evidence.
+- §3 first calibration band: consistent / uncorroborated with code-derived reasons; corroboration
+  now requires a non-self-authored family.
+- §4 ranking: 0.05 relevance bands, evidence depth within band, brief-aware artifacts, seniority
+  from evidence; the Rail shows the reasons.
+Not yet: patents (PatentsView key), company engineering-blog BYLINES (employer-stated employment at a
+date), conference program pages, podcasts (show notes), standards bodies, press; temporal
+'contradicted' band; identity-linking candidates table.
 Companion to `talent-intelligence-redesign.md` (Phases 0–3 implemented). This note answers three
 questions raised after the first Evidence Rail shipped:
 
