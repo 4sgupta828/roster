@@ -555,6 +555,10 @@
   .ppl-card.person-card .ev-inline, .ppl-card.person-card .ev-inline *{cursor:auto;}
   .ppl-card.person-card .ev-inline a, .ppl-card.person-card .ev-inline button, .ppl-card.person-card .ev-inline select, .ppl-card.person-card .ev-inline summary{cursor:pointer;}
   .ev-hint{font-size:.7rem;color:var(--muted);margin-left:.35rem;}
+  .ev-inline .er-chips{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.25rem;}
+  .ev-inline .er-chip{display:inline-block;font-size:.7rem;line-height:1.3;padding:.12rem .45rem;border:1px solid var(--hair);border-radius:999px;color:var(--ink);background:var(--panel2);text-decoration:none;}
+  .ev-inline a.er-chip{border-color:rgba(var(--gold-rgb),.5);color:var(--gold-strong);}
+  .ev-inline .er-claim{padding:.35rem 0;}
   .job-card{cursor:pointer;}
   .job-card:hover{border-color:var(--gold);}
   .job-card .js-summary{cursor:default;}
@@ -8492,16 +8496,79 @@ async function openMapsList(){
     const cur = (mapRev && mapRev.state) || getReview(ref);   // a saved map's review state wins over device memory
     const review = `<select class="er-review" style="min-height:40px;font-size:.85rem;">${REVIEW.map(r=>`<option value="${esc(r)}"${r===cur?" selected":""}>${esc(r)}</option>`).join("")}</select>`;
     const el = boxFor(ref); if(!el) return;
-    const hasBrief = Object.keys(brief).some(k => (brief[k]||[]).length) || p.match_pct || (rr && rr.reasons && rr.reasons.length);
+    // ---- KEY EVIDENCE, compact: each claim with its hard sources inline; no prose, no repeats ----
+    const chip = (label, url) => url ? `<a class="er-chip" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(label)} ↗</a>` : `<span class="er-chip">${esc(label)}</span>`;
+    const srcUrl = k => { const a = attr(k); return a.document_id && /^https?:\/\//i.test(a.document_id) ? a.document_id : ""; };
+    const famLabel = {github:"GitHub", linkedin:"LinkedIn", openalex:"OpenAlex", yc:"Y Combinator", theorg:"TheOrg", sec:"SEC", npi:"NPI", aifund:"AI Fund", ef:"EF", pear:"Pear", sosv:"SOSV"};
+    const fam = k => famLabel[famOf(k)] || "source";
+    const items = (fp && fp.items) || [];
+    const orgItems = items.filter(it => it.kind === "org");
+    const coNorm = (co||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+    const orgMatch = orgItems.find(it => coNorm && String(it.title||"").toLowerCase().replace(/[^a-z0-9]/g,"") === coNorm);
+    const rows = [];
+    // 1) POSITION — the claim + every independent source that backs it
+    if(role || co){
+      const chips = [chip(`${fam(co?"company":"role")}: self-described`, srcUrl(co?"company":"role"))];
+      if(liHead) chips.push(chip(`LinkedIn: “${liHead.slice(0,60)}${liHead.length>60?"…":""}”`, liUrl));
+      if(orgMatch) chips.push(chip(`member of ${orgMatch.title} org on GitHub`, orgMatch.url));
+      if(typeOf("company") === "corroborated" || typeOf("role") === "corroborated") chips.push(chip("confirmed by two independent sources"));
+      else if(cal && cal.band === "consistent") chips.push(chip("consistent across sources"));
+      if(typeOf("company") === "employer_stated") chips.push(chip("listed by the employer", srcUrl("company")));
+      rows.push(`<div class="er-claim"><div class="er-k">Position</div><div class="er-v">${esc([role, co].filter(Boolean).join(" at ") || co || role)}</div><div class="er-chips">${chips.join("")}</div></div>`);
+    } else if(liHead){
+      rows.push(`<div class="er-claim"><div class="er-k">Position</div><div class="er-v">“${esc(liHead)}”</div><div class="er-chips">${chip("LinkedIn headline", liUrl)}</div></div>`);
+    }
+    if(past.length) rows.push(`<div class="er-claim"><div class="er-k">Previously</div><div class="er-v">${esc(past.slice(0,4).join(", "))}</div><div class="er-chips">${chip(fam("worked_at"), srcUrl("worked_at"))}</div></div>`);
+    if(loc) rows.push(`<div class="er-claim"><div class="er-k">Location</div><div class="er-v">${esc(loc)}</div><div class="er-chips">${chip(fam(attr("metro").display?"metro":"country"), srcUrl(attr("metro").display?"metro":"country"))}</div></div>`);
+    // 2) PUBLIC WORK — the strongest items per kind, with the numbers that make them evidence
+    let work = "";
+    if(fp && fp.total){
+      const ORDER = ["paper","patent","talk","post","repo"];
+      const byKind = {}; items.forEach(it => { if(it.kind !== "org") (byKind[it.kind] = byKind[it.kind] || []).push(it); });
+      const parts = [];
+      ORDER.concat(Object.keys(byKind).filter(k=>!ORDER.includes(k))).forEach(k => {
+        const its = byKind[k] || []; const n = (fp.counts||{})[k] || 0; if(!n) return;
+        const top = its.slice(0,3).map(it => {
+          const meta = [it.venue, (it.date||"").slice(0,4), it.stat, it.role==="first_author"?"first author":""].filter(Boolean).join(" · ");
+          return `<div class="er-art">${it.url?`<a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">${esc(it.title)} ↗</a>`:esc(it.title)}${meta?`<span class="er-art-m">${esc(meta)}</span>`:""}</div>`;
+        }).join("");
+        parts.push(`<div class="er-kind"><span class="er-kind-h">${FP_LABEL[k]||esc(k)} · ${n}</span></div>${top}${n>3?`<div class="er-src">+${n-3} more</div>`:""}`);
+      });
+      work = parts.join("");
+    }
+    // 3) VISIBLE STATUS — org memberships, authorship stats, affiliations, recency (one line each)
+    const status = [];
+    if(orgItems.length) status.push(`Public GitHub orgs: ${orgItems.slice(0,5).map(it=>it.url?`<a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">${esc(it.title)}</a>`:esc(it.title)).join(", ")}`);
+    const firstA = items.filter(it => it.role === "first_author").length;
+    const cites = items.reduce((a,it)=>a+((/citation/.test(it.stat||"")&&parseInt(String(it.stat).replace(/[^0-9]/g,""),10))||0),0);
+    const stars = items.reduce((a,it)=>a+((/★/.test(it.stat||"")&&parseInt(String(it.stat).replace(/[^0-9]/g,""),10))||0),0);
+    if(firstA || cites) status.push(`Authorship: ${[firstA?`${firstA} first-author paper${firstA===1?"":"s"}`:"", cites?`${cites.toLocaleString()} citations on the linked papers`:""].filter(Boolean).join(", ")}`);
+    if(stars) status.push(`${stars.toLocaleString()} stars across the linked repos`);
+    const affs = (fp && fp.affiliations) || [];
+    if(affs.length) status.push(`Affiliations on published work: ${affs.slice(0,3).map(a=>{const y=a.years||[]; return esc(a.name)+(y.length?` (${y.length>1?y[0]+"–"+y[y.length-1]:y[0]})`:"");}).join("; ")}`);
+    if(fp && fp.newest) status.push(`Newest dated evidence: ${esc(String(fp.newest).slice(0,4))}`);
+    if(fp && (fp.linked||[]).length) status.push(`Same person on ${fp.linked.map(l=>esc(l.id.split(":")[0])).join(", ")} (linked by name + employer)`);
+    // 4) UNCONFIRMED — one compact line
+    const unc = [];
+    if(!(ev.corroborated_keys||[]).length && (co||role)) unc.push("no second independent source for the current role");
+    if(!(fp && fp.newest)) unc.push("nothing dated");
+    if(lis && lis.status === "ambiguous") unc.push("LinkedIn: several same-named profiles, none confirmed");
+    else if(lis && lis.status === "none") unc.push("no LinkedIn profile surfaced");
+    if(fp && !fp.total && (fp.scanned||[]).length) unc.push("no public work found");
+    else if(!fp || !(fp.scanned||[]).length) unc.push("public work not checked yet");
+    // FIT (one line, only with a brief)
+    const fitBits = [];
+    if(hits.length) fitBits.push(`matches ${hits.map(esc).join(", ")}`);
+    if(liHead && lis && typeof lis.headline_fit === "number") fitBits.push(lis.headline_fit >= 0.5 ? "headline fits the brief" : lis.headline_fit >= 0.3 ? "headline partly fits" : "headline does not obviously fit");
+    if(rrs.length) fitBits.push(rrs.map(esc).join(" · "));
     el.innerHTML = `<div class="ev-inline">
-      <div class="er-head" style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;"><span class="ev-pill ${hl[1]}">${esc(hl[0])}</span><span class="er-why" style="font-size:.84rem;">${sure.join(" ")}</span></div>
-      ${hasBrief?`<div class="er-sec">Why this person</div><ul class="er-list">${m.join("")}</ul>`:""}
-      ${(roleEmp||where)?`<div class="er-sec">The claims that matter — and who says so</div>${roleEmp}${where}`:""}
-      <div class="er-sec">What they've done</div>${done}
-      ${unknown.length?`<div class="er-sec">What we don't know</div><ul class="er-list er-unknown">${unknown.map(u=>`<li>${u}</li>`).join("")}</ul>`:""}
-      <div class="er-sec">Your review</div><div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">${review}${liBtn}</div><div class="er-li-out"></div>
-      ${facts?`<details class="er-facts"><summary>Other recorded facts (${factsN}) — each with who says so</summary>${facts}</details>`:""}
-      <div class="er-note">Every label comes from where a fact was found — never from a model's opinion. Self-described claims count for inclusion, never as verification.</div>
+      <div class="er-head" style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;"><span class="ev-pill ${hl[1]}">${esc(hl[0])}</span>${fitBits.length?`<span class="er-src" style="font-size:.78rem;">Fit: ${fitBits.join(" · ")}</span>`:""}</div>
+      ${rows.join("")}
+      ${work?`<div class="er-sec">Public work</div>${work}`:(fp && (fp.scanned||[]).length ? `<div class="er-sec">Public work</div><div class="er-gap">None found linked to this person.</div>` : "")}
+      ${status.length?`<div class="er-sec">Visible status</div><ul class="er-list">${status.map(x=>`<li>${x}</li>`).join("")}</ul>`:""}
+      ${unc.length?`<div class="er-src" style="margin-top:.5rem;">Unconfirmed: ${unc.join("; ")}.</div>`:""}
+      ${bio?`<details class="er-bio"><summary>In their own words</summary><div class="er-src">“${esc(bio)}”</div></details>`:""}
+      <div class="er-li-out"></div>
     </div>`;
     const liB = el.querySelector(".er-li");
     if(liB) liB.addEventListener("click", async () => {
@@ -8532,7 +8599,8 @@ async function openMapsList(){
         }
       }catch(err){ out.innerHTML = `<div class="er-gap">Could not resolve right now (${esc(String(err.message||err))}).</div>`; liB.disabled = false; liB.textContent = "Resolve LinkedIn ⌕"; }
     });
-    el.querySelector(".er-review").addEventListener("change", e => {
+    const rv = el.querySelector(".er-review");
+    if(rv) rv.addEventListener("change", e => {
       setReview(ref, e.target.value);
       if(typeof syncMapReview === "function") syncMapReview(ref, e.target.value);   // persists on the saved map (owner)
     });
