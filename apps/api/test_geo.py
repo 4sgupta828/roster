@@ -87,3 +87,27 @@ def test_location_regex_matches_scope_only():
     assert rs.search("Los Angeles, CA") and rs.search("Sacramento, California")
     assert not rs.search("Toronto, Canada") and not rs.search("New York, NY")
     assert location_regex() == ""
+
+
+def test_apply_job_must_requires_every_selected_kind():
+    import asyncio
+    from api.people_population import apply_job_must
+    class _S:
+        async def companies_with_facet(self, keys, values=None):
+            return {"tubi"} if "accelerator" in keys else set()
+    rows = [{"company": "Google", "title": "Senior Software Engineer", "location": "Remote - US"},
+            {"company": "tubi", "title": "Staff Engineer", "location": "San Francisco, CA (Hybrid)"},
+            {"company": "Google", "title": "Software Engineer II", "location": "Mountain View, CA"},
+            {"company": "Acme", "title": "Director of Engineering", "location": "Remote"}]
+    run = lambda m: asyncio.run(apply_job_must(_S(), rows, m))
+    assert run([]) == (rows, None)
+    kept, must = run(["remote"])
+    assert [r["company"] for r in kept] == ["Google", "Acme"] and must["kept"] == 2 and must["dropped"] == 2
+    assert [r["title"] for r in run(["hybrid"])[0]] == ["Staff Engineer"]
+    assert [r["title"] for r in run(["f500"])[0]] == ["Senior Software Engineer", "Software Engineer II"]
+    assert [r["company"] for r in run(["startup"])[0]] == ["tubi"]
+    assert [r["title"] for r in run(["remote", "senior"])[0]] == ["Senior Software Engineer", "Director of Engineering"]
+    assert [r["title"] for r in run(["leadership"])[0]] == ["Director of Engineering"]
+    assert [r["title"] for r in run(["f500", "remote"])[0]] == ["Senior Software Engineer"]
+    assert run(["bogus"])[1] is None                    # unknown kinds are ignored, not enforced
+    assert run(["public"])[1]["labels"] == ["Public company"]

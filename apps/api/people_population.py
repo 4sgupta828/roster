@@ -864,6 +864,44 @@ async def extract_jd_company(jd_text: str, llm) -> list[str]:
         return []
 
 
+JOB_MUST_KINDS = ("remote", "hybrid", "f500", "public", "startup", "senior", "leadership")
+JOB_MUST_LABELS = {"remote": "Remote", "hybrid": "Hybrid", "f500": "Fortune 500", "public": "Public company",
+                   "startup": "Startup", "senior": "Senior+", "leadership": "Leadership"}
+
+
+async def apply_job_must(store, rows: list[dict], must: list[str]) -> tuple[list[dict], dict | None]:
+    """JOBS 'MUST HAVE' (pre-search toggles): keep only roles satisfying EVERY selected kind. All
+    code-derived from the row — remote/hybrid from the location or title text, Fortune 500 from
+    the curated set, startup from accelerator/stage facets on the people index, public = F500 and
+    not a startup, seniority from the title. (Compensation is not in the job index — no toggle.)"""
+    must = [m for m in (must or []) if m in JOB_MUST_KINDS]
+    if not must or not rows:
+        return rows, None
+    startup: set = set()
+    if "startup" in must or "public" in must:
+        try:
+            startup = (await store.companies_with_facet(("accelerator",))
+                       | await store.companies_with_facet(("stage",), ["startup"]))
+        except Exception:  # noqa: BLE001
+            startup = set()
+    def _ok(j: dict) -> bool:
+        loc = (j.get("location") or "").lower()
+        title = j.get("title") or ""
+        co = j.get("company") or ""
+        con = _norm_co(co)
+        f500 = co in _F500 or con in _F500
+        st = co in startup or con in startup or co.lower() in startup
+        sen = _title_seniority(title)
+        checks = {"remote": "remote" in loc or "remote" in title.lower(),
+                  "hybrid": "hybrid" in loc or "hybrid" in title.lower(),
+                  "f500": f500, "public": f500 and not st, "startup": st,
+                  "senior": sen in ("senior", "staff_plus", "leadership"), "leadership": sen == "leadership"}
+        return all(checks[m] for m in must)
+    kept = [j for j in rows if _ok(j)]
+    return kept, {"kinds": must, "labels": [JOB_MUST_LABELS[m] for m in must],
+                  "kept": len(kept), "dropped": len(rows) - len(kept)}
+
+
 def _norm_co(s: str) -> str:
     """Structural (Rule 18-safe) company key for COMPARISON only: lowercase, alphanumerics only.
     The semantic call (which company + its aliases) is the LLM's; this is just string matching."""

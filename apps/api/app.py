@@ -1096,6 +1096,7 @@ class ResearchIn(BaseModel):
     company: str = ""                     # single-company DILIGENCE subject (name / entity_id); used only by /research/diligence
     country: str = ""                     # people geo-scope from the top-right selector (default 'us' when the flag is on)
     evidence_kinds: list[str] = []        # Talent Map evidence filter: only people with linked paper/repo/post/talk/patent
+    job_must: list[str] = []              # Jobs 'must have' toggles: remote|hybrid|f500|public|startup|senior|leadership
     metro: str = ""                       # LOCAL scope: the user's metro (e.g. 'bay_area') — clearly-elsewhere dropped,
     state: str = ""                       #   unknown kept, confirmed-local lead; or a US state code; query-named places win
     surface: str = ""                     # which UI tab asked: "people" | "jobs" | "qa" | "" — People/Jobs are
@@ -2694,6 +2695,11 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         res["jobs"], res["geo_scope"] = apply_job_scope(
                             res.get("jobs") or [], metro=(body.metro or ""), state=(body.state or ""),
                             country=(body.country or "us"), query_location=(_q.get("location") or ""))
+                if body.job_must:
+                    from api.people_population import apply_job_must
+                    res["jobs"], res["must"] = await apply_job_must(store, res.get("jobs") or [], body.job_must)
+                    if res.get("related_jobs"):
+                        res["related_jobs"], _rm = await apply_job_must(store, res["related_jobs"], body.job_must)
                 res["count"] = len(res.get("jobs", []))
                 res["agentic"] = True
                 res["query"] = _q if _cos else {}
@@ -2756,11 +2762,15 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             rows, _gs = apply_job_scope(rows, country=(body.country or "us").strip().lower(),
                                         metro=(body.metro or ""), state=(body.state or ""),
                                         query_location=(q.get("location") or ""))   # an explicit location wins
+        _must = None
+        if body.job_must:
+            from api.people_population import apply_job_must
+            rows, _must = await apply_job_must(store, rows, body.job_must)
         rows = rows[:80]
         stats = await store.jobs_stats()
         sid = await _save_job_session(rows, q)   # JOB searches appear in the user's private History
         return {"jobs": rows, "count": len(rows), "query": q, "semantic": bool(qvec), "stats": stats,
-                "geo_scope": _gs, "session_id": sid}
+                "geo_scope": _gs, "session_id": sid, "must": _must}
 
     @app.post("/insights")
     async def insights(body: ResearchIn) -> dict:

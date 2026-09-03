@@ -2248,11 +2248,22 @@ let PENDING_CTX = "";           // …and the hints given so far (sent back so t
 const EV_ALL = ["repo","paper","post","talk","patent"];
 let EVIDENCE_KINDS = new Set();      // Talent Map PRE-search "must have": empty = everyone; selected kinds are required (any of)
 const EV_LABEL = {repo:"repos", paper:"papers", post:"blog posts", talk:"talks", patent:"patents"};
+// Jobs PRE-search "must have": every selected kind is REQUIRED (remote AND startup…); empty = all roles
+let JOB_MUST = new Set();
+const JOB_MUST_ALL = ["remote","hybrid","f500","public","startup","senior","leadership"];
+const JOB_MUST_LABEL = {remote:"Remote", hybrid:"Hybrid", f500:"Fortune 500", public:"Public company", startup:"Startup", senior:"Senior+", leadership:"Leadership"};
 function evFilterActive(){ return EVIDENCE_KINDS.size > 0; }
 function renderEvFilters(){
   const box = document.getElementById("evfchips"), wrap = document.getElementById("evfilters"), rs = document.getElementById("evfreset");
   if(!box || !wrap) return;
-  wrap.hidden = (SEARCH_MODE !== "people");
+  wrap.hidden = !(SEARCH_MODE === "people" || SEARCH_MODE === "jobs");
+  if(SEARCH_MODE === "jobs"){
+    wrap.title = "Tap to require it — every selected kind must hold for a role to show. Nothing selected = all roles.";
+    box.innerHTML = JOB_MUST_ALL.map(k => `<button type="button" class="ev-filter${JOB_MUST.has(k)?" on":""}" data-kind="${k}" aria-pressed="${JOB_MUST.has(k)}" title="${JOB_MUST.has(k)?"Required — tap to drop":"Tap to require "+JOB_MUST_LABEL[k]}">${JOB_MUST_LABEL[k]}</button>`).join("");
+    wrap.classList.toggle("active", JOB_MUST.size > 0);
+    return;
+  }
+  wrap.title = "Tap a kind to require it — people must have at least one of the selected kinds of linked public work. Nothing selected = everyone.";
   box.innerHTML = EV_ALL.map(k => `<button type="button" class="ev-filter${EVIDENCE_KINDS.has(k)?" on":""}" data-kind="${k}" aria-pressed="${EVIDENCE_KINDS.has(k)}" title="${EVIDENCE_KINDS.has(k)?"Required — tap to drop":"Tap to require linked "+EV_LABEL[k]}">${EV_LABEL[k]}</button>`).join("");
   wrap.classList.toggle("active", evFilterActive());
 }
@@ -2496,6 +2507,7 @@ async function runJobs(question){
   try{ r = await fetch("/jobs", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
       body: JSON.stringify({question, tenant_id:"demo", refine_query: (JOBS_CTX||undefined),
         ...geoPayload(),   // the top-right scope applies to jobs too
+        job_must: JOB_MUST.size ? [...JOB_MUST] : undefined,   // the pre-search "must have" toggles
         user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""})}); }
   catch(e){ return false; }
   if(!r || r.status === 404) return false;
@@ -2693,6 +2705,7 @@ function jobsMarkup(d){
   const intentHtml = (d.agentic && (d.intent||angleChips)) ? `<div class="ppl-cov" style="border-left-color:var(--gold);background:rgba(var(--gold-rgb),.06);"><b>⚡ Smart search</b>${d.intent?` — ${esc(d.intent)}`:""}${angleChips}</div>` : "";
   const head = `<div class="ppl-head"><b>${jobs.length}</b> open role${jobs.length===1?"":"s"}${at}${jpagesN>1?` <span class="ppl-fc" style="text-transform:none;">· showing ${jfrom}–${jto} · page ${jpage+1} of ${jpagesN}</span>`:""}${d.agentic?` <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">⚡ smart search</span>`:""}</div>`
     + intentHtml
+    + (d.must && d.must.kinds && d.must.kinds.length ? `<div class="ppl-cov" style="border-left-color:var(--gold);">✓ Must have: <b>${esc((d.must.labels||d.must.kinds).join(" · "))}</b> — ${d.must.kept} role${d.must.kept===1?"":"s"} qualify${d.must.dropped?`, ${d.must.dropped} left out`:""}. Remote/hybrid read from the posting's location, company type from Roster's curated sets, seniority from the title.</div>` : "")
     + (d.note && (q.company||[]).length ? `<div class="ppl-cov">◔ ${esc(d.note)}</div>` : "")
     + ((q.company||[]).length ? "" : scopeChip(d.geo_scope))   // a company search: the scope only shapes the RELATED list
     + (st.jobs ? `<div class="ppl-cov">◔ Aggregated from public ATS boards — ${st.jobs} jobs across ${st.companies||0} companies indexed. Each links to the company's apply page.</div>`
@@ -2703,7 +2716,7 @@ function jobsMarkup(d){
   const relHtml = rel.length
     ? `<details class="jobs-related"><summary>Related roles at other companies (${rel.length}) — similar titles from the semantic search, not ${esc((q.company||[]).join(", ").replace(/_/g," ")||"this company")}</summary>${jobsMarkup({jobs: rel, query: {}, stats: {}, geo_scope: d.geo_scope, _jpid: d._jpid + "r", _jpage: d._rpage||0})}</details>`
     : "";
-  return `<div class="ppl-wrap" data-jpid="${esc(d._jpid)}">${head}${jpage>0?jpager:""}<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">' + esc(d.note || "No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.") + '</div>'}</div>${jpager}${relHtml}</div>`;
+  return `<div class="ppl-wrap" data-jpid="${esc(d._jpid)}">${head}${jpage>0?jpager:""}<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">' + esc((d.must && d.must.dropped && !d.must.kept) ? `No role in this search satisfies Must have: ${(d.must.labels||d.must.kinds).join(" · ")} (${d.must.dropped} left out) — drop a toggle above or widen the search.` : (d.note || "No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.")) + '</div>'}</div>${jpager}${relHtml}</div>`;
 }
 function peopleRowsMarkup(data){
   const rows = data.people_rows||[];
@@ -6379,7 +6392,7 @@ function newConversation(){
   THREAD = {session_id:null, turns:[]};
   MODE_VIEWS = {}; TAB_THREADS = {};   // "＋ New search" wipes every tab's remembered result/thread
   window.ACTIVE_MAP = null;            // …and leaves any saved-map view
-  PEOPLE_CTX = null; JOBS_CTX = null; PENDING_PERSON = null; PENDING_CTX = ""; EVIDENCE_KINDS = new Set(); renderEvFilters();  // …and both tabs' refinement conversations start fresh
+  PEOPLE_CTX = null; JOBS_CTX = null; PENDING_PERSON = null; PENDING_CTX = ""; EVIDENCE_KINDS = new Set(); JOB_MUST = new Set(); renderEvFilters();  // …and both tabs' refinement conversations start fresh
   GUIDED_REFINED = false;
   document.body.classList.remove("chatting"); out.style.paddingBottom = "";   // back to landing layout
   out.innerHTML = "";
@@ -8341,7 +8354,8 @@ document.addEventListener("click", e => {
 });
 // PRE-search "must have": toggling changes what the NEXT search requires; nothing re-runs by itself
 function toggleEvidenceFilter(kind){
-  if(EVIDENCE_KINDS.has(kind)) EVIDENCE_KINDS.delete(kind); else EVIDENCE_KINDS.add(kind);
+  const set = (SEARCH_MODE === "jobs") ? JOB_MUST : EVIDENCE_KINDS;
+  if(set.has(kind)) set.delete(kind); else set.add(kind);
   renderEvFilters();
 }
 // ---- LOCAL SCOPE (where the user is → default metro; expandable) -------------------------------
