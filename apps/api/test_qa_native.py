@@ -1190,3 +1190,10 @@ def test_brief_contract_separates_must_from_prefer_and_ships_one_clarification()
                             ev_kinds=["repo"], relaxed_from=["skill"])
     assert c2["hard"] == {"evidence": ["repo"]} and c2["clarification"] is None
     assert any("worldwide" in a for a in c2["assumptions"]) and any("relaxed" in a for a in c2["assumptions"])
+
+
+def test_topic_terms_from_question_strips_roles_and_named_entities():
+    from api.people_population import topic_terms_from_question
+    assert topic_terms_from_question("chip design engineers at Nvidia", {"company": ["nvidia"]}) == ["chip design"]
+    assert topic_terms_from_question("software engineers with vector search experience", {}) == ["vector search"]
+    assert topic_terms_from_question("senior engineers at Stripe", {"company": ["stripe"]}) == []

@@ -1481,6 +1481,31 @@ def topic_terms_for(facets: dict, llm_terms: list[str] | None) -> list[str]:
     return out[:6]
 
 
+_TOPIC_DROP = {"engineer", "engineers", "developer", "developers", "people", "person", "talent", "candidates", "candidate",
+               "senior", "staff", "principal", "lead", "leads", "junior", "experienced", "expert", "experts", "specialist",
+               "specialists", "who", "with", "in", "at", "for", "the", "a", "an", "of", "and", "or", "map", "find", "me",
+               "need", "looking", "around", "near", "from", "top", "best", "good", "great", "strong", "software", "us",
+               "remote", "hybrid", "onsite", "experience", "background", "skills", "skill", "work", "working", "worked",
+               "on", "to", "is", "are", "have", "has", "that", "this", "some", "any", "all", "about", "roles", "role"}
+
+
+def topic_terms_from_question(question: str, facets: dict | None = None) -> list[str]:
+    """LAST-RESORT subject terms straight from the brief's words: strip role/seniority/glue words and
+    any named company or place, keep the remaining 1–3 content words as one phrase ("chip design
+    engineers at Nvidia" → "chip design"). Code-owned; used only when neither the compiler nor the
+    facets yielded a subject, so anchoring never depends on the compile."""
+    q = re.sub(r"[^a-z0-9\s+#.-]", " ", (question or "").lower())
+    named = set()
+    for k in ("company", "worked_at", "metro", "state", "country"):
+        for v in (facets or {}).get(k) or []:
+            named.update(str(v).lower().replace("_", " ").split())
+    toks = [t for t in q.split() if t not in _TOPIC_DROP and t not in named and len(t) >= 3]
+    if not toks:
+        return []
+    phrase = " ".join(toks[:3])
+    return [phrase] if len(phrase) >= 4 else []
+
+
 def topic_hit(row: dict, terms: list[str]) -> str:
     """The first topic term that appears in the row's grounded text (attributes + blurb + artifact
     titles), else ''. Code-owned; whole-word-ish substring match on normalized text."""
@@ -2332,7 +2357,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             facets = {**_prior, **f2} if f2 else {}
     else:
         facets, person, ctx, topic_terms = await parse_people_facets_full(question, llm)
-        topic_terms = topic_terms_for(facets, topic_terms)
+        topic_terms = topic_terms_for(facets, topic_terms) or topic_terms_from_question(question, facets)
     # COMPANY GUARD (code-owned): a company the question names gates the cohort even when the
     # compiler dropped it — unless this is a single-person lookup ("Mukul Gupta at Cisco")
     guard_added: list[str] = []
@@ -2638,6 +2663,21 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
 
     _seen_ids: set = set()
     people_rows = [p for p in people_rows if not (p["entity_id"] in _seen_ids or _seen_ids.add(p["entity_id"]))]
+    # COMPANY INVARIANT (code-owned, compile-independent): when the brief names companies, every row
+    # must carry one of them as current employer or past employer — whatever path produced it
+    _named_cos = {_norm_co(c) for c in (facets.get("company") or []) + (facets.get("worked_at") or []) if _norm_co(c)}
+    if _named_cos:
+        def _carries(p):
+            for a in p.get("attributes") or []:
+                if a.get("key") in ("company", "worked_at"):
+                    n = _norm_co(a.get("display") or "")
+                    if n and any(c == n or (len(c) >= 4 and c in n) for c in _named_cos):
+                        return True
+            return False
+        _before_co = len(people_rows)
+        people_rows = [p for p in people_rows if _carries(p)]
+        if _before_co != len(people_rows):
+            coverage["company_gate_dropped"] = _before_co - len(people_rows)
     if semantic_first:                            # surface the relevance score on each card (like JD-match)
         for p in people_rows:
             s = sf_sim.get(p["entity_id"])
@@ -2778,7 +2818,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     # are minted so the gap heals. Max 3 gap companies per query. Off with ROSTER_COMPANY_GAP_DISCOVERY=0.
     _gap_min = int(os.environ.get("ROSTER_COMPANY_GAP_MIN", "10") or 10)
     _named_cos = [c for c in (facets.get("company") or []) if str(c).strip()]
-    if _named_cos and os.environ.get("ROSTER_COMPANY_GAP_DISCOVERY", "1") == "1":
+    if _named_cos and os.environ.get("ROSTER_COMPANY_GAP_DISCOVERY", "1") == "1" and not _ev_kinds:
         _have_ids = {p["entity_id"] for p in people_rows}
         _per_co_n = {}
         for c in _named_cos:
