@@ -5619,7 +5619,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         res = await answer_people_population(
             question=contract["question"], tenant_id=body.tenant_id, store=store, llm=build_llm(mode=resolve_mode()),
             scope_country=((body.country or "us").strip().lower() if geo_on else ""),
-            prior_facets=(contract["refine_facets"] or None), assume_people=True,
+            fixed_facets=contract["refine_facets"], assume_people=True,
             scope_metro=((gs.get("metro") or "").strip().lower() if geo_on else ""),
             scope_state=((gs.get("state") or "").strip().lower() if geo_on else ""),
             evidence_kinds=contract["evidence_kinds"], exclude_ids=contract["exclude_ids"],

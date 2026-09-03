@@ -1207,3 +1207,42 @@ def test_expand_topic_terms_adds_distinctive_words_only():
     assert expand_topic_terms(["vector search", "vector database", "similarity search"], "engineers with vector search experience") == ["vector search", "vector", "vector database", "similarity search"]
     assert expand_topic_terms(["data platform"], "data platform engineers") == ["data platform"]   # both words generic → phrase only
     assert expand_topic_terms(["chip design"], "hardware people") == ["chip design"]                 # 'chip' not in the brief → no single word
+
+
+def test_fixed_facets_skip_the_compiler_and_apply_calibration(monkeypatch):
+    """P2b: a map revision passes a CODE-OWNED contract — no compile, no refinement parse (an LLM
+    call is a failure here), reviewer exclusions leave, demoted values sink to the back."""
+    from api.people_population import answer_people_population
+
+    class _LLM:
+        async def complete(self, **kw):
+            raise AssertionError("the compiler must not run under fixed_facets")
+
+    def _person(eid, name, sen):
+        return {"entity_id": eid, "name": name, "facets": [
+            {"facet_key": "role", "facet_value_norm": "ml_engineer", "value_norm": "ml_engineer",
+             "display_value": "ML Engineer", "document_id": "d", "block_id": "b"},
+            {"facet_key": "seniority", "facet_value_norm": sen, "value_norm": sen,
+             "display_value": sen.title(), "document_id": "d", "block_id": "b"},
+            {"facet_key": "company", "facet_value_norm": "stripe", "value_norm": "stripe",
+             "display_value": "Stripe", "document_id": "d", "block_id": "b"}]}
+
+    class _Store:
+        async def people_index_stats(self, *, tenant_id):
+            return {"persons_indexed": 9, "source_documents": 3, "facet_coverage": {}}
+
+        async def enumerate_by_facets(self, facets, *, tenant_id, cap):
+            assert "seniority" not in facets            # the reviewers softened it; the contract is final
+            return [_person("gh:mid", "Mid Person", "mid"), _person("gh:sr", "Senior Person", "senior"),
+                    _person("gh:gone", "Excluded Person", "senior")]
+
+    import asyncio
+    monkeypatch.delenv("ROSTER_SEMANTIC", raising=False)
+    monkeypatch.delenv("ROSTER_PEOPLE_SEMANTIC_FIRST", raising=False)
+    res = asyncio.get_event_loop().run_until_complete(answer_people_population(
+        question="senior ML engineers at Stripe — prefer ML engineer", tenant_id="demo", store=_Store(), llm=_LLM(),
+        fixed_facets={"role": ["ml_engineer"], "company": ["stripe"]},
+        exclude_ids=["gh:gone"], avoid_terms=["mid"]))
+    names = [p["name"] for p in res["people_rows"]]
+    assert names == ["Senior Person", "Mid Person"], names
+    assert res["coverage_basis"]["calibration"] == {"excluded": 1, "demoted": 1, "avoid_terms": ["mid"]}

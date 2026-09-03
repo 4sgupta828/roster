@@ -2327,7 +2327,8 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                                    evidence_kinds: list[str] | None = None,
                                    exclude_ids: list[str] | None = None,
                                    exclude_companies: list[str] | None = None,
-                                   avoid_terms: list[str] | None = None) -> dict:
+                                   avoid_terms: list[str] | None = None,
+                                   fixed_facets: dict | None = None) -> dict:
     """Answer a people-enumeration question from the grounded people index. Always returns a structured
     result (never raises to the route): a compiled facet filter, grounded rows, and honest coverage.
 
@@ -2372,7 +2373,20 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                 if w.lower() not in _seen_ctx:
                     _seen_ctx.add(w.lower()); _ctx_parts.append(w)
         return await lookup_person(store, prior_person, " ".join(_ctx_parts), tenant_id=tenant_id)
-    if _prior:
+    # FIXED CONTRACT (map revision from reviewer feedback): the filter is CODE-OWNED and final — no
+    # compile, no refinement parse, no guard re-adding what a reviewer removed. The question only
+    # drives wording match and subject terms (the "prefer …" tail is a ranking preference).
+    _fixed: dict | None = None
+    if fixed_facets is not None:
+        from roster_vertical.people_facets import PEOPLE_FACET_KEYS
+        _okf = set(PEOPLE_FACET_KEYS) | {"country", "state", "metro"}
+        _fixed = {k: [str(v).strip().lower().replace(" ", "_") for v in vals if str(v).strip()][:6]
+                  for k, vals in fixed_facets.items() if k in _okf and isinstance(vals, (list, tuple))}
+        _fixed = {k: v for k, v in _fixed.items() if v}
+    if _fixed is not None:
+        facets, person, ctx = dict(_fixed), "", ""
+        topic_terms = expand_topic_terms(topic_terms_from_question(question, facets), question)
+    elif _prior:
         # REFINEMENT turn: the model applies the utterance to the RUNNING filter — narrow, expand,
         # remove, or replace, following the user's lead (Rule 18) — and returns the full new filter.
         facets, person, ctx = await parse_people_refinement(question, _prior, llm), "", ""
@@ -2387,7 +2401,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     # compiler dropped it — unless this is a single-person lookup ("Mukul Gupta at Cisco")
     guard_added: list[str] = []
     _orig_facets = dict(facets or {})              # the compiler's read, before guard / relaxation edits
-    if not (not facets and person):
+    if not (not facets and person) and _fixed is None:
         facets = await company_guard(question, facets, store)
         guard_added = list(facets.get("_company_guard") or [])
         if guard_added:

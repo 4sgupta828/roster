@@ -31,7 +31,7 @@ def _norm(v: str) -> str:
 
 
 def _row_vals(row: dict, key: str) -> list[str]:
-    return [str(a.get("display") or "") for a in (row.get("attributes") or []) if a.get("key") == key and a.get("display")]
+    return [str(a.get("display") or "").replace("_", " ") for a in (row.get("attributes") or []) if a.get("key") == key and a.get("display")]
 
 
 def feedback_to_contract(brief: str, filters: dict, evidence_kinds: list[str], feedback: list[dict],
