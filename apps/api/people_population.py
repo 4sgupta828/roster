@@ -2598,7 +2598,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     # completeness boost (a contactable, linked profile ranks above a bare one), then name for stability.
     _RANK = {"c_level": 10, "cto": 10, "distinguished_scientist": 9, "vp": 9, "head": 8, "director": 8,
              "senior_manager": 7, "engineering_manager": 7, "lead": 6, "principal": 6, "staff": 5,
-             "senior": 4, "researcher": 3, "physician": 3, "mid": 2, "junior": 1, "student": 0}
+             "senior": 4, "researcher": 3, "mid": 2, "junior": 1, "student": 0}
 
     def _score(p):
         sen = next((a["display"] for a in p["attributes"] if a["key"] == "seniority"), "")
