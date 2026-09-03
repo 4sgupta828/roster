@@ -494,6 +494,7 @@ async def build_job_summary(jd_text: str, llm, *, title: str = "", company: str 
         out = verify_job_summary(d, jd)
         if not (out.get("one_liner") or out.get("key_requirements")):
             return None                     # the page held no posting to read (chrome only) — never cache that
+        return out
     except Exception as e:   # noqa: BLE001
         _log.warning("build_job_summary failed: %s", e)
         return None

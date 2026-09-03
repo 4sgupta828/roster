@@ -194,3 +194,24 @@ def test_job_summary_verification_blanks_what_the_posting_does_not_state():
     # a pay figure that is not the posting's figure is blanked too
     s3 = verify_job_summary({"compensation": "$300,000"}, jd)
     assert s3["compensation"] == ""
+
+
+def test_build_job_summary_returns_the_verified_read():
+    import asyncio
+    from api.people_population import _JobSummary, build_job_summary
+    class _Comp:
+        parsed = _JobSummary(title="Backend Engineer", company="Acme", location="Austin, TX", work_mode="hybrid",
+                             compensation="$180,000 – $220,000", one_liner="Own the payments API.", key_requirements=["Go", "Postgres"])
+    class _LLM:
+        async def complete(self, **kw):
+            return _Comp()
+    jd = "Backend Engineer at Acme, Austin, TX. Hybrid. Base $180,000 – $220,000. Own the payments API. Requirements: Go, Postgres. " * 3
+    loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
+    out = loop.run_until_complete(build_job_summary(jd, _LLM(), company="Acme"))
+    assert out and out["one_liner"] == "Own the payments API." and out["work_mode"] == "hybrid" and out["compensation"].startswith("$180,000")
+    class _Empty:
+        parsed = _JobSummary()
+    class _LLM2:
+        async def complete(self, **kw):
+            return _Empty()
+    assert loop.run_until_complete(build_job_summary(jd, _LLM2())) is None      # nothing read → None, never cached
