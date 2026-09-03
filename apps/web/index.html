@@ -557,8 +557,9 @@
   .ev-hint{font-size:.7rem;color:var(--muted);margin-left:.35rem;}
   .rv-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin-top:.4rem;font-size:.74rem;}
   .rv-state{min-height:32px;font-size:.76rem;padding:.15rem .4rem;border:1px solid var(--gold);border-radius:6px;background:var(--panel);color:var(--gold-strong);font-weight:600;}
-  .rv-fb summary{cursor:pointer;color:var(--muted);font-size:.74rem;list-style:none;padding:.2rem .4rem;border:1px dashed var(--hair);border-radius:999px;}
-  .rv-fb summary::-webkit-details-marker{display:none;}
+  .rv-fb-btn{font:inherit;cursor:pointer;color:var(--muted);font-size:.74rem;padding:.2rem .5rem;border:1px dashed var(--hair);border-radius:999px;background:transparent;min-height:32px;}
+  .rv-panel{display:block;width:100%;margin-top:.3rem;}
+  .rv-panel[hidden]{display:none;}
   .rv-tags{display:flex;flex-wrap:wrap;gap:.25rem;margin:.35rem 0;}
   .rv-tag{font:inherit;font-size:.7rem;padding:.15rem .5rem;border:1px solid var(--hair);border-radius:999px;background:var(--panel2);color:var(--ink);cursor:pointer;min-height:28px;}
   .rv-tag.on{border-color:var(--gold);background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);font-weight:600;}
@@ -8407,14 +8408,18 @@ async function syncMapReview(ref, state, tags, note){
 function reviewControlMarkup(ref){
   if(!canReview()) return "";
   const m = window.ACTIVE_MAP, cur = myReview(ref) || {};
-  const others = (m.feedback||[]).filter(f => f.entity_id === ref && !(m.is_owner ? false : f.reviewer_key === reviewerKey()) && (f.state !== "unreviewed" || (f.tags||[]).length));
+  const mine = m.is_owner ? "" : reviewerKey();
+  const others = (m.feedback||[]).filter(f => f.entity_id === ref && (m.is_owner ? !!f.reviewer_key : f.reviewer_key !== mine) && (f.state !== "unreviewed" || (f.tags||[]).length || f.note));
   const opts = REVIEW_STATES.map(st => `<option value="${esc(st)}"${st===(cur.state||"unreviewed")?" selected":""}>${esc(st)}</option>`).join("");
   const tagBtns = FEEDBACK_TAGS.map(([k,l]) => `<button type="button" class="rv-tag${(cur.tags||[]).includes(k)?" on":""}" data-ref="${esc(ref)}" data-tag="${esc(k)}">${esc(l)}</button>`).join("");
+  const nTags = (cur.tags||[]).length;
+  // inline-only markup: the card body is a <span>, so no block elements here (they broke the card)
   return `<span class="rv-ctl" data-ref="${esc(ref)}">
     <select class="rv-state" data-ref="${esc(ref)}" title="Your review of this row — decision support, never a verdict">${opts}</select>
-    <details class="rv-fb"><summary>feedback${(cur.tags||[]).length?` · ${cur.tags.length}`:""}</summary><div class="rv-tags">${tagBtns}</div>
-      <input class="rv-note" data-ref="${esc(ref)}" placeholder="note for the team (optional)" value="${esc(cur.note||"")}" /></div></details>
-    ${others.length?`<span class="rv-others" title="${esc(others.map(o=>`${o.reviewer_name||"owner"}: ${o.state}${(o.tags||[]).length?" · "+o.tags.join(", "):""}`).join("\n"))}">${others.length} other review${others.length===1?"":"s"}</span>`:""}
+    <button type="button" class="rv-fb-btn" data-ref="${esc(ref)}">feedback${nTags?` · ${nTags}`:""} ▾</button>
+    ${others.length?`<span class="rv-others" title="${esc(others.map(o=>`${o.reviewer_name||"owner"}: ${o.state}${(o.tags||[]).length?" · "+o.tags.join(", "):""}${o.note?" — "+o.note:""}`).join("\n"))}">${others.length} other review${others.length===1?"":"s"}</span>`:""}
+    <span class="rv-panel" data-ref="${esc(ref)}" hidden><span class="rv-tags">${tagBtns}</span>
+      <input class="rv-note" data-ref="${esc(ref)}" placeholder="note for the team (optional)" value="${esc(cur.note||"")}" /></span>
   </span>`;
 }
 document.addEventListener("change", e => {
@@ -8422,12 +8427,14 @@ document.addEventListener("change", e => {
   const nt = e.target.closest && e.target.closest(".rv-note"); if(nt){ syncMapReview(nt.dataset.ref, undefined, undefined, nt.value); }
 });
 document.addEventListener("click", e => {
+  const fb = e.target.closest && e.target.closest(".rv-fb-btn");
+  if(fb){ e.preventDefault(); e.stopPropagation(); const p = fb.closest(".rv-ctl").querySelector(".rv-panel"); if(p) p.hidden = !p.hidden; return; }
   const b = e.target.closest && e.target.closest(".rv-tag"); if(!b) return;
   e.preventDefault(); e.stopPropagation();
   const cur = myReview(b.dataset.ref) || {}; const tags = new Set(cur.tags||[]);
   if(tags.has(b.dataset.tag)) tags.delete(b.dataset.tag); else tags.add(b.dataset.tag);
   b.classList.toggle("on"); syncMapReview(b.dataset.ref, undefined, [...tags]);
-  const sum = b.closest(".rv-fb") && b.closest(".rv-fb").querySelector("summary"); if(sum) sum.textContent = "feedback" + (tags.size ? " · " + tags.size : "");
+  const btn = b.closest(".rv-ctl") && b.closest(".rv-ctl").querySelector(".rv-fb-btn"); if(btn) btn.textContent = "feedback" + (tags.size ? " · " + tags.size : "") + " ▾";
 });
 function copyMapLink(){
   const m = window.ACTIVE_MAP; if(!m || !m.share_path) return;
@@ -8734,7 +8741,7 @@ async function openMapsList(){
     const b = e.target.closest && e.target.closest(".ev-inspect");
     if(b){ e.preventDefault(); toggle(b.dataset.ref); return; }
     const card = e.target.closest && e.target.closest(".ppl-card.person-card");
-    if(card && !e.target.closest("a, button, input, select, textarea, details, summary, .ev-inline")){
+    if(card && !e.target.closest("a, button, input, select, textarea, details, summary, .ev-inline, .rv-ctl")){
       e.preventDefault(); toggle(card.dataset.ref);
     }
   });
