@@ -1631,8 +1631,11 @@ def linkedin_search_link(name: str, attrs: list[dict]) -> dict:
     if not role and title and len(title.split()) <= 6:
         role = title                                # a short headline beats nothing
     metro = g("metro").replace("_", " ")
-    bits = [f'"{nm}"'] + [b for b in (company, " ".join(role.split()[:3]), metro) if b]
-    q = " ".join(bits)[:160] + " site:linkedin.com/in"
+    # NOT quoted and NOT site-restricted: a quoted name with diacritics or a GitHub display name
+    # ("Eigen Tensôr") plus site: returned NO results at all (regression). Name + company + role +
+    # 'linkedin' always returns a page, with the profile among the first links when it exists.
+    bits = [nm] + [b for b in (company, " ".join(role.split()[:3]), metro) if b]
+    q = " ".join(bits)[:160] + " linkedin"
     return {"kind": "linkedin_search", "url": "https://www.google.com/search?q=" + urllib.parse.quote(q)}
 
 

@@ -157,9 +157,9 @@ def test_every_card_gets_a_linkedin_way_in_with_distinguishing_keywords():
     attrs = [{"key": "company", "display": "Anthropic"}, {"key": "role", "display": "Published author"},
              {"key": "title", "display": "Computer Science, AI"}, {"key": "metro", "display": "Bay Area"}]
     q = unquote(linkedin_search_link("Kushal Thakkar", attrs)["url"].split("q=", 1)[1])
-    assert q == '"Kushal Thakkar" Anthropic Computer Science, AI Bay Area site:linkedin.com/in'   # author label dropped, short headline kept
+    assert q == 'Kushal Thakkar Anthropic Computer Science, AI Bay Area linkedin'   # author label dropped, short headline kept; never quoted/site-restricted
     q2 = unquote(linkedin_search_link("Jane Doe", [{"key": "company", "display": "stripe"}, {"key": "role", "display": "staff_software_engineer"}])["url"].split("q=", 1)[1])
-    assert q2 == '"Jane Doe" stripe staff software engineer site:linkedin.com/in'
+    assert q2 == 'Jane Doe stripe staff software engineer linkedin'
     row = _person_row_from_facets(_facet_person("github:x", "Jane Doe", company="Stripe"))
     assert any(l["kind"] == "linkedin_search" for l in row["links"])
     direct = {"name": "A B", "attributes": [], "links": [{"kind": "linkedin", "url": "https://linkedin.com/in/ab"}]}
