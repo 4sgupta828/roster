@@ -510,7 +510,7 @@
   .ppl-facets{display:inline-flex;gap:.35rem;flex-wrap:wrap;}
   .ppl-fc{font-size:.64rem;text-transform:uppercase;letter-spacing:.06em;color:var(--faint,#8a93ad);background:rgba(138,147,173,.14);padding:.14rem .42rem;border-radius:4px;}
   .ppl-cov{font-size:.78rem;line-height:1.5;color:var(--faint,#8a93ad);background:rgba(138,147,173,.08);border-left:2px solid rgba(138,147,173,.45);padding:.5rem .7rem;border-radius:0 6px 6px 0;margin-bottom:.95rem;}
-  .ppl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(258px,1fr));gap:.7rem;}
+  .ppl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(258px,1fr));gap:.7rem;align-items:start;}
   .ppl-card{display:flex;gap:.7rem;align-items:flex-start;text-decoration:none;color:inherit;border:1px solid var(--hair);border-radius:10px;padding:.72rem .82rem;background:var(--card,rgba(127,127,127,.03));transition:border-color .15s,transform .15s,box-shadow .15s;}
   .ppl-card:hover{border-color:var(--gold);transform:translateY(-1px);box-shadow:0 5px 16px rgba(0,0,0,.14);}
   .ppl-av{width:40px;height:40px;border-radius:50%;flex:none;object-fit:cover;background:rgba(138,147,173,.18);}
@@ -8434,7 +8434,7 @@ async function openMapsList(){
       + (liHead ? `<div class="er-claim"><div class="er-k">LinkedIn says</div><div class="er-v">“${esc(liHead)}”</div><div class="er-src">self-described on LinkedIn, quoted from a search snippet${liUrl?` <a href="${esc(liUrl)}" target="_blank" rel="noopener noreferrer">profile ↗</a>`:""}${lis && lis.hits && lis.hits.company ? " · matched to this person on name + employer, so agreement on the employer is consistency, not proof" : ""}</div></div>` : "")
       + (past.length ? claimRow("Previously", past.slice(0,4).join(", "), "worked_at") : "");
     const where = claimRow("Location", loc, attr("metro").display ? "metro" : "country")
-      + (level && level.toLowerCase() !== role.toLowerCase() ? claimRow("Level", level, "seniority") : "");
+      + (level && level.toLowerCase() !== role.toLowerCase() && !/^(mid|junior|entry|ic|individual contributor)$/i.test(level.trim()) ? claimRow("Level", level, "seniority") : "");
 
     // ---- 4. WHAT THEY'VE DONE (public work + their own words) ----
     let done = "";
