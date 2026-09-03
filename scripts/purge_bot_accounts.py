@@ -21,7 +21,9 @@ NAME_RX = (
     r"openai ?\(|\(openai\)|gpt-?[0-9o]|gpt-?o?bot|llm assistant|ai assistant)([^a-z]|$)"
     r"|(^|\s)bot(\s|$)|\[bot\]$|^bot\b"
 )
-ID_RX = r"^github:(.*\[bot\]|.*-bot|.*bot[0-9]*|chatgpt.*|codex.*|dependabot.*|renovate.*|github-actions.*|copilot.*|actions-user)$"
+# login patterns only where the login itself DECLARES automation — a login merely ending in 'bot'
+# is a person often enough ('paleolimbot' = Dewey Dunnington, 'KadoBOT' = Ricardo Ambrogi)
+ID_RX = r"^github:(.*\[bot\]|.*-bot|bot-.*|chatgpt.*|codex.*|dependabot.*|renovate.*|github-actions.*|copilot.*|actions-user)$"
 
 
 async def main() -> None:

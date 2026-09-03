@@ -2052,6 +2052,14 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     # dominate "people who worked at Apple" (the index is ~53% academics); with an identity facet
     # present we route to the HYBRID path below: hard facet filter first, semantic rank within it.
     _identity_facets = [k for k in ("company", "worked_at") if facets.get(k)]
+    # A NAMED COMPANY already says which industry — an inferred industry facet must not ALSO gate
+    # (industry coverage is sparse and uneven: 1 of 619 OpenAI people carry one vs 165 of 256 at
+    # Anthropic → "anthropic and openai" returned zero OpenAI people). Drop it from the filter.
+    _industry_dropped = False
+    if _identity_facets and facets.get("industry"):
+        facets = {k: v for k, v in facets.items() if k != "industry"}
+        real_facets = [k for k in facets if k not in ("country", "state", "metro")]
+        _industry_dropped = True
     semantic_used = False
     semantic_first = False
     sf_sim: dict = {}                            # entity_id -> similarity (semantic-first → match_pct)
@@ -2314,6 +2322,26 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         coverage["population_statement"] = (
             f"Showing only people with linked {_lab} ({len(people_rows)} of {_before} in this cohort; people "
             f"whose public work has not been scanned yet cannot appear here). " + coverage.get("population_statement", ""))
+
+    # MULTI-COMPANY BALANCE: with several named companies, the cohort cut (200) must not let one
+    # company's rows crowd the others out — interleave per company (round-robin in rank order) so
+    # each named company gets a fair share; ranks stay within each company.
+    _comp_vals0 = [_norm_co(c) for c in (facets.get("company") or []) if str(c).strip()]
+    if len(_comp_vals0) > 1 and people_rows:
+        _per: dict[str, list[dict]] = {c: [] for c in _comp_vals0}
+        _rest: list[dict] = []
+        for p in people_rows:
+            _p_cos = {_norm_co(a.get("display") or "") for a in p["attributes"] if a.get("key") == "company"}
+            _hit = next((c for c in _comp_vals0 if c in _p_cos), None)
+            (_per[_hit] if _hit else _rest).append(p)
+        _inter: list[dict] = []
+        _queues = [list(v) for v in _per.values() if v]
+        while _queues:
+            for q in list(_queues):
+                _inter.append(q.pop(0))
+                if not q:
+                    _queues.remove(q)
+        people_rows = _inter + _rest
 
     # LOCAL-SCOPE partition: people we can PLACE in the user's metro/state lead; unknown-location
     # rows follow (kept for recall). Then the topic partition, so subject-mentioning locals lead.
