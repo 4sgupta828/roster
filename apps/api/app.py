@@ -2654,6 +2654,40 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 pass
             return None
 
+        # A PASTED LINKEDIN PROFILE URL: "jobs for this person" — read what search engines show for
+        # that profile (name, headline, snippet; never linkedin.com itself) and run the résumé-style
+        # match on it, honoring the scope. No sign-in needed; a résumé upload gives a deeper match.
+        _li_m = re.search(r"https?://(?:[a-z]{2,3}\.)?linkedin\.com/in/[^\s]+", (body.question or ""), re.I)
+        if _li_m:
+            from api.linkedin_resolve import profile_from_url
+            from api.people_population import match_resume_jobs
+            prof = {}
+            try:
+                prof = await asyncio.wait_for(profile_from_url(_li_m.group(0)), 20)
+            except Exception:   # noqa: BLE001
+                prof = {}
+            if not prof:
+                return {"jobs": [], "count": 0, "query": {}, "stats": await store.jobs_stats(),
+                        "note": "Couldn't read that LinkedIn profile from search results (it may be private or not "
+                                "indexed). Paste your headline or a few lines about your experience instead, or upload "
+                                "a résumé under Find jobs."}
+            extra = (body.question or "").replace(_li_m.group(0), " ").strip()
+            text = " ".join(x for x in [prof.get("name", ""), prof.get("headline", ""), prof.get("snippet", ""), extra] if x)
+            res = await match_resume_jobs(store, {"_resume_text": text, "summary": prof.get("headline", "")},
+                                          {"limit": 40, "country": (body.country or "us"), "metro": (body.metro or ""),
+                                           "state": (body.state or "")})
+            jobs = res.get("jobs") or []
+            if body.job_must:
+                from api.people_population import apply_job_must
+                jobs, res["must"] = await apply_job_must(store, jobs, body.job_must)
+            res.update({"jobs": jobs, "count": len(jobs), "query": {"company": [], "title_keywords": [], "location": ""},
+                        "linkedin_profile": {"name": prof.get("name"), "headline": prof.get("headline"), "url": prof.get("url")},
+                        "note": f"Matched to {prof.get('name')}'s LinkedIn headline — “{prof.get('headline') or 'no headline shown'}” "
+                                f"(as search engines show it). For a deeper match, upload a résumé under Find jobs.",
+                        "stats": await store.jobs_stats()})
+            res["session_id"] = await _save_job_session(jobs, res["query"])
+            return res
+
         # AGENTIC mode (flag): LLM expands the query into multiple angles → multi-leg retrieval → rerank
         if agentic_jobs_enabled():
             from api.people_population import agentic_job_search, parse_job_query

@@ -436,3 +436,24 @@ async def enrich_cohort(store, entity_ids: list[str], brief: str, *, tenant_id: 
     for r in out_rows:
         r["rank_read"] = rank_read(r, facets)
     return {"rows": out_rows, "quota": {"used_today": used_today, "cap": cap}, "skipped": skipped}
+
+
+async def profile_from_url(url: str, *, search=search_snippets) -> dict:
+    """A PASTED LinkedIn profile URL → what search engines show for it: name, headline, snippet.
+    Never reads linkedin.com; accepts only a result whose URL is that exact profile path.
+    Returns {} when the profile is not indexed anywhere we can see."""
+    path = re.sub(r"^https?://", "", (url or "").strip()).rstrip("/")
+    path = re.sub(r"[?#].*$", "", path)
+    if "/in/" not in path:
+        return {}
+    want = path.lower().split("/in/", 1)[1].split("/")[0]
+    results = await search(f"site:{path}")
+    for r in results or []:
+        u = (r.get("url") or "").lower()
+        if "/in/" not in u or u.split("/in/", 1)[1].split("/")[0].rstrip("/") != want:
+            continue
+        rname, headline = parse_title(r.get("title") or "")
+        if rname:
+            return {"name": rname, "headline": headline, "snippet": (r.get("snippet") or "")[:400],
+                    "url": "https://www.linkedin.com/in/" + want}
+    return {}
