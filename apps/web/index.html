@@ -2522,7 +2522,7 @@ async function runJobs(question){
                        stats: d.stats||{}, semantic: d.semantic, geo_scope: d.geo_scope||null,
                        related_jobs: d.related_jobs||[], company_indexed: d.company_indexed,
                        agentic: !!d.agentic, intent: d.intent||"", query_angles: d.query_angles||[],
-                       redirect_to_qa: !!d.redirect_to_qa, note: d.note||"", answer: ""});
+                       redirect_to_qa: !!d.redirect_to_qa, note: d.note||"", must: d.must||null, answer: ""});
     renderThread();
   }
   catch(e){ const out = $("#out"); if(out){ out.hidden = false;

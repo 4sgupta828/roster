@@ -1498,6 +1498,7 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
                 searched_web = web_query(name, ctx)
                 _held2 = {r["entity_id"] for r in merged}
                 _profs = [p for p in fp.get("profiles") or [] if p["entity_id"] not in _held2]
+                _settled = False                       # did the web search settle it (resolve / ask)?
                 if _profs:
                     res3, rows3 = resolve_candidates(merged + _profs, ctx)
                     if res3 == "resolved" and rows3 and rows3[0].get("web"):
@@ -1507,12 +1508,12 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
                             out["person_lookup"]["searched_web"] = searched_web
                             out["person_lookup"]["web_hits"] = rows3[0].get("hint_hits") or []
                             return out
-                        resolution, rows, res2 = "resolved", rows3, "resolved"
+                        resolution, rows, res2, _settled = "resolved", rows3, "resolved", True
                     elif res3 == "ambiguous":
                         _amb = [r for r in rows3 if r.get("web") and r.get("hint_hits")] or rows3
                         resolution, rows, res2, rows2 = "ambiguous", _amb[:12], "ambiguous", _amb
-                        web_rows = _amb
-                if resolution not in ("resolved", "ambiguous") and fp.get("identity"):
+                        web_rows, _settled = _amb, True
+                if not _settled and fp.get("identity"):
                     _idn = fp["identity"]
                     if await _mint(await store._get_pool(), _idn["entity_id"], _idn):
                         out = await lookup_person(store, _idn["entity_id"], "", tenant_id=tenant_id,
@@ -1521,8 +1522,8 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
                         out["person_lookup"]["web_pages"] = _idn.get("web_pages") or []
                         out["person_lookup"]["web_hits"] = _idn.get("web_hits") or []
                         return out
-                    resolution, rows, res2 = "resolved", [_idn], "resolved"
-                if resolution not in ("resolved", "ambiguous"):
+                    resolution, rows, res2, _settled = "resolved", [_idn], "resolved", True
+                if not _settled:
                     # NOBODY fits the hints — index, keyed sources, or the open web. Say so; do not
                     # list namesakes that match none of them (the "lots of options, all wrong" trap)
                     namesakes = len(merged)

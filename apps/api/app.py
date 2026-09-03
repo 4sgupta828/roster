@@ -2709,6 +2709,11 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     res["jobs"], res["must"] = await apply_job_must(store, _pool, body.job_must)
                     if res.get("related_jobs"):
                         res["related_jobs"], _rm = await apply_job_must(store, res["related_jobs"], body.job_must)
+                    if people_geo_scope_enabled() and not _cos and res.get("geo_scope"):
+                        # the scope line must describe the roles SHOWN (post must-have), not the pool
+                        res["jobs"], res["geo_scope"] = apply_job_scope(
+                            res["jobs"], metro=(body.metro or ""), state=(body.state or ""),
+                            country=(body.country or "us"), query_location=(_q.get("location") or ""))
                 res["count"] = len(res.get("jobs", []))
                 res["agentic"] = True
                 res["query"] = _q if _cos else {}
@@ -2783,6 +2788,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                           metro=(body.metro or ""), state=(body.state or ""),
                                           query_location=(q.get("location") or ""))
             rows, _must = await apply_job_must(store, rows, body.job_must)
+            if people_geo_scope_enabled() and _gs:
+                rows, _gs = apply_job_scope(rows, country=(body.country or "us").strip().lower(),
+                                            metro=(body.metro or ""), state=(body.state or ""),
+                                            query_location=(q.get("location") or ""))
         rows = rows[:80]
         stats = await store.jobs_stats()
         sid = await _save_job_session(rows, q)   # JOB searches appear in the user's private History
