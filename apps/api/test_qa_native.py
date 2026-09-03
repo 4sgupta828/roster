@@ -1201,6 +1201,7 @@ def test_topic_terms_from_question_strips_roles_and_named_entities():
 
 def test_expand_topic_terms_adds_distinctive_words_only():
     from api.people_population import expand_topic_terms
-    assert expand_topic_terms(["chip design"]) == ["chip design", "chip"]
-    assert expand_topic_terms(["vector search", "embeddings"]) == ["vector search", "vector", "embeddings"]
-    assert expand_topic_terms(["data platform"]) == ["data platform"]         # both words generic → phrase only
+    assert expand_topic_terms(["chip design"], "chip design engineers") == ["chip design", "chip"]
+    assert expand_topic_terms(["vector search", "vector database", "similarity search"], "engineers with vector search experience") == ["vector search", "vector", "vector database", "similarity search"]
+    assert expand_topic_terms(["data platform"], "data platform engineers") == ["data platform"]   # both words generic → phrase only
+    assert expand_topic_terms(["chip design"], "hardware people") == ["chip design"]                 # 'chip' not in the brief → no single word
