@@ -23,7 +23,7 @@ _DOC_FAMILY_PATTERNS = (
     ("openalex.org", "openalex"), ("github", "github"), ("ycombinator.com", "yc"),
     ("npiregistry", "npi"), ("theorg.com", "theorg"), ("edgar", "sec"), ("sec.gov", "sec"),
     ("aifund.ai", "aifund"), ("joinef.com", "ef"), ("pear.vc", "pear"), ("sosv", "sosv"),
-    ("linkedin.com", "linkedin"),
+    ("linkedin.com", "linkedin"), ("youtube.com", "youtube"), ("youtu.be", "youtube"), ("vimeo.com", "vimeo"),
 )
 
 FAMILY_EVIDENCE_TYPE = {
@@ -38,6 +38,8 @@ FAMILY_EVIDENCE_TYPE = {
     "pear": "employer_stated",
     "sosv": "employer_stated",
     "linkedin": "self_stated",      # headline quoted from a search-engine snippet of the profile
+    "site": "self_stated",          # the person's own site / newsletter (self-published writing)
+    "youtube": "artifact_backed", "vimeo": "artifact_backed",
 }
 
 # ladder position (higher = stronger support for what the source constrains)
@@ -65,6 +67,9 @@ FAMILY_LABELS = {
     "pear": "Pear VC portfolio page",
     "sosv": "SOSV portfolio page",
     "linkedin": "the person's LinkedIn headline, quoted from a search-engine snippet (self-stated)",
+    "site": "the person's own site or newsletter (declared on their profile)",
+    "youtube": "a recorded talk (matched on name + employer — verify)",
+    "vimeo": "a recorded talk (matched on name + employer — verify)",
 }
 
 

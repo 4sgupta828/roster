@@ -129,3 +129,42 @@ def test_attach_is_a_noop_without_a_pool_and_lines_render():
     assert any("Attention Is Enough" in l and "NeurIPS" in l for l in lines)
     assert any("affiliation on published work: Acme Research (2023, 1 works)" in l for l in lines)
     assert artifact_lines(None) == []
+
+
+def test_feed_candidates_and_parse_rss_atom():
+    from api.artifacts import feed_candidates, parse_feed, site_post_artifact
+    assert feed_candidates("https://medium.com/@ada")[0] == "https://medium.com/feed/@ada"
+    assert feed_candidates("https://ada.substack.com") == ["https://ada.substack.com/feed"]
+    assert feed_candidates("https://dev.to/ada") == ["https://dev.to/feed/ada"]
+    assert feed_candidates("https://github.com/ada") == []                       # not a writing site
+    c = feed_candidates("ada.dev/blog")
+    assert c[0] == "https://ada.dev/blog/feed" and "https://ada.dev/rss.xml" in c
+    rss = """<?xml version="1.0"?><rss version="2.0"><channel><title>Ada</title>
+      <item><title>Sharding Postgres</title><link>https://ada.dev/p/shard</link><pubDate>Tue, 03 Jun 2025 10:00:00 GMT</pubDate></item>
+      <item><title>no link</title></item></channel></rss>"""
+    posts = parse_feed(rss)
+    assert posts == [{"title": "Sharding Postgres", "url": "https://ada.dev/p/shard", "date": "2025-06-03"}]
+    atom = """<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Vector DBs</title>
+      <link rel="alternate" href="https://ada.dev/p/vec"/><published>2024-11-02T12:00:00Z</published></entry></feed>"""
+    assert parse_feed(atom) == [{"title": "Vector DBs", "url": "https://ada.dev/p/vec", "date": "2024-11-02"}]
+    assert parse_feed("<html>not a feed</html>") == [] and parse_feed("garbage <<") == []
+    a = site_post_artifact(posts[0], "https://ada.dev/feed")
+    assert a["kind"] == "post" and a["venue"] == "ada.dev" and a["link_method"] == "declared_site" and a["date"] == "2025-06-03"
+
+
+def test_talks_are_gated_on_full_name_and_hint():
+    from api.artifacts import talk_artifacts_from_results
+    row = {"name": "Ada Byte", "attributes": [{"key": "company", "display": "Acme"}, {"key": "role", "display": "Staff Engineer"}]}
+    res = [{"url": "https://www.youtube.com/watch?v=1", "title": "Scaling Kafka at Acme - Ada Byte - YouTube", "snippet": "QCon 2024 talk"},
+           {"url": "https://www.youtube.com/watch?v=2", "title": "Ada Byte cooking show", "snippet": "recipes"},          # no hint
+           {"url": "https://www.youtube.com/watch?v=3", "title": "Acme keynote", "snippet": "by Ada B."},                 # no full name
+           {"url": "https://example.com/talk", "title": "Ada Byte at Acme", "snippet": ""},                             # not a video host
+           {"url": "https://vimeo.com/12345", "title": "Ada Byte — Staff Engineer panel", "snippet": ""}]
+    talks = talk_artifacts_from_results(row, res)
+    assert [t["url"] for t in talks] == ["https://www.youtube.com/watch?v=1", "https://vimeo.com/12345"]
+    assert talks[0]["title"] == "Scaling Kafka at Acme - Ada Byte" and talks[0]["link_method"] == "name_hint"
+    assert talks[0]["detail"]["hits"] == {"company": ["Acme"]} and talks[1]["detail"]["hits"] == {"role": ["Staff Engineer"]}
+    assert talk_artifacts_from_results({"name": "Prince"}, res) == []
+    s = __import__("api.artifacts", fromlist=["summarize_artifacts"]).summarize_artifacts(
+        [{**t, "detail": t["detail"]} for t in talks], [{"source": "talks"}])
+    assert s["counts"] == {"talk": 2} and s["items"][0]["verify"] is True

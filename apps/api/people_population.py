@@ -1330,8 +1330,12 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
     resolution, rows = resolve_candidates(rows, ctx)
     if resolution == "resolved":
         try:
+            from api.artifacts import scan_person_extras
             pool = await store._get_pool()
             await scan_person_now(pool, rows[0]["entity_id"])   # on demand: papers/repos/orgs now
+            _fr = next((r["facets"] for r in raw if r["entity_id"] == rows[0]["entity_id"]), [])
+            await scan_person_extras(pool, rows[0]["entity_id"], _fr, rows[0],
+                                     talks=(os.environ.get("ROSTER_TALKS_ENRICH", "1") == "1"))
         except Exception:  # noqa: BLE001
             pass
         # on demand: resolve their LinkedIn from search snippets (never reads linkedin.com) when the

@@ -396,20 +396,31 @@ async def enrich_cohort(store, entity_ids: list[str], brief: str, *, tenant_id: 
             else:
                 li["status"] = st          # unavailable: not recorded → retried next time
         row["linkedin"] = li
+        row["_facets"] = r.get("facets") or []
         out_rows.append(row)
     # PUBLIC WORK for the people shown: scan anyone not yet scanned (OpenAlex works / GitHub repos +
     # orgs by identity key — 1–2 metadata calls each, bounded) so 'What they've done' is filled for
-    # the visible cohort rather than 'not checked yet'.
+    # the visible cohort rather than 'not checked yet'. Then the EXTRA layers: posts from the
+    # person's declared site/newsletter feeds (strong key) and gated talks (one search each, counted
+    # against the daily cap; ROSTER_TALKS_ENRICH=0 turns talks off).
     get_pool = getattr(store, "_get_pool", None)
     if get_pool is not None:
         try:
-            from api.artifacts import scan_person_now
+            from api.artifacts import scan_person_extras, scan_person_now
             pool = await get_pool()
+            talks_on = os.environ.get("ROSTER_TALKS_ENRICH", "1") == "1"
             for r in out_rows:
                 if not (r.get("artifacts") or {}).get("scanned"):
                     await scan_person_now(pool, r["entity_id"], timeout=8.0)
+                want_talks = talks_on and used_today < cap
+                got = await scan_person_extras(pool, r["entity_id"], r.get("_facets") or [], r,
+                                               talks=want_talks, search=search, timeout=15.0)
+                if want_talks and got.get("talks") is not None:
+                    used_today += 1
         except Exception as e:  # noqa: BLE001 — best-effort
             _log.info("cohort artifact scan skipped: %s", e)
+    for r in out_rows:
+        r.pop("_facets", None)
     await attach_artifacts(store, out_rows)
     # HEADLINE ↔ BRIEF fit: what the person says they do vs what the brief asks for (one batch call)
     heads = [(r["linkedin"].get("headline") or "") for r in out_rows]

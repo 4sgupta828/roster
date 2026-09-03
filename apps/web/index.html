@@ -8162,10 +8162,10 @@ async function openMapsList(){
     let done = "";
     if(fp && fp.total){
       done += (fp.items||[]).slice(0,6).map(it=>{
-        const meta = [it.venue, (it.date||"").slice(0,4), it.stat, it.role==="first_author"?"first author":(it.role==="member"?"member":"")].filter(Boolean).join(" · ");
+        const meta = [it.venue, (it.date||"").slice(0,4), it.stat, it.role==="first_author"?"first author":(it.role==="member"?"member":""), it.verify?"matched on name + employer — verify":""].filter(Boolean).join(" · ");
         return `<div class="er-art"><span class="er-art-k">${FP_LABEL[it.kind]||esc(it.kind)}</span>${it.url?`<a href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">${esc(it.title)} ↗</a>`:esc(it.title)}${meta?`<span class="er-art-m">${esc(meta)}</span>`:""}</div>`;
       }).join("");
-      if(fp.total > 6) done += `<div class="er-src">+${fp.total-6} more linked by identity key.</div>`;
+      if(fp.total > 6) done += `<div class="er-src">+${fp.total-6} more.</div>`;
       const affs = (fp.affiliations||[]);
       if(affs.length) done += `<div class="er-src" style="margin-top:.3rem;">Affiliations on published work: ${affs.slice(0,3).map(a=>{const y=a.years||[]; return esc(a.name)+(y.length?` (${y.length>1?y[0]+"–"+y[y.length-1]:y[0]})`:"");}).join("; ")}.</div>`;
     } else if(fp && (fp.scanned||[]).length){

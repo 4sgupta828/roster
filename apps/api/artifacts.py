@@ -174,7 +174,9 @@ def summarize_artifacts(rows: list[dict], scans: list[dict] | None = None) -> di
                       "date": str(a.get("date") or "")[:10] or None, "venue": a.get("venue") or "",
                       "role": a.get("role") or "",
                       "stat": (f"{d['citations']} citations" if d.get("citations") else
-                               f"{d['stars']}★" if d.get("stars") else "")})
+                               f"{d['stars']}★" if d.get("stars") else ""),
+                      # name+hint matches (talks) are shown as 'verify', never as proven
+                      "verify": (a.get("link_method") == "name_hint")})
     reported = {}
     for s in scans or []:
         reported[s["source"]] = int(s.get("n_total") or 0)
@@ -198,7 +200,8 @@ def apply_artifacts_to_packet(packet: dict, summary: dict | None) -> dict:
     per_key = packet.setdefault("per_key", {})
     fams = set(packet.get("families") or [])
     if cap_n:
-        fam = "openalex" if counts.get("paper") else "github"
+        fam = next((f for k, f in (("paper", "openalex"), ("repo", "github"), ("post", "site"),
+                                   ("talk", "youtube")) if counts.get(k)), "github")
         per_key["public_artifacts"] = {"type": "artifact_backed", "family": fam}
         fams.add(fam)
         packet["families"] = sorted(fams)
@@ -257,7 +260,7 @@ async def fetch_person_artifacts(pool, entity_ids: list[str]) -> dict[str, dict]
     await ensure_schema(pool)
     async with pool.acquire() as conn:
         arts = await conn.fetch(
-            """SELECT entity_id, kind, artifact_key, title, url, date, venue, role, detail
+            """SELECT entity_id, kind, artifact_key, title, url, date, venue, role, detail, link_method
                FROM rs_person_artifact WHERE entity_id = ANY($1)""", ids)
         scans = await conn.fetch(
             "SELECT entity_id, source, status, n_found, n_total FROM rs_artifact_scan WHERE entity_id = ANY($1)", ids)
@@ -447,3 +450,227 @@ def artifact_lines(summary: dict | None, *, limit: int = 8) -> list[str]:
         span = f"{yrs[0]}–{yrs[-1]}" if len(yrs) > 1 else (str(yrs[0]) if yrs else "undated")
         lines.append(f"  - affiliation on published work: {a['name']} ({span}, {a['n']} works)")
     return lines
+
+
+# --------------------------------------------------------------------------- #
+# SELF-PUBLISHED WRITING (declared site / Medium / Substack / dev.to feeds)     #
+# --------------------------------------------------------------------------- #
+# The person DECLARED these links on their own profile — a strong identity key — and each feed
+# entry is a dated, linkable piece of their own writing (self-authored: an artifact, not a claim).
+_FEED_PATHS = ("/feed", "/rss.xml", "/atom.xml", "/index.xml", "/feed.xml", "/rss", "/blog/feed", "/blog/rss.xml")
+
+
+def feed_candidates(url: str) -> list[str]:
+    """Where a declared link's feed probably is: known platforms first, then autodiscovery paths."""
+    import re
+    from urllib.parse import urlparse
+    u = (url or "").strip()
+    if not u:
+        return []
+    if not u.startswith("http"):
+        u = "https://" + u
+    p = urlparse(u)
+    host, path = p.netloc.lower(), p.path.rstrip("/")
+    if "medium.com" in host:
+        m = re.search(r"/@([^/]+)", path)
+        if m:
+            return [f"https://medium.com/feed/@{m.group(1)}"]
+        if host != "medium.com" and host.endswith(".medium.com"):
+            return [f"https://{host}/feed"]
+        return [f"https://medium.com/feed{path}"] if path else []
+    if host.endswith("substack.com"):
+        return [f"https://{host}/feed"]
+    if host in ("dev.to", "www.dev.to"):
+        m = re.search(r"^/([^/]+)", path)
+        return [f"https://dev.to/feed/{m.group(1)}"] if m else []
+    if "youtube.com" in host or "twitter.com" in host or "x.com" == host or "linkedin.com" in host \
+            or "github.com" in host or "instagram.com" in host or "facebook.com" in host:
+        return []
+    base = f"{p.scheme or 'https'}://{host}"
+    return [base + path + fp for fp in _FEED_PATHS[:4]] + [base + fp for fp in _FEED_PATHS]
+
+
+def parse_feed(xml_text: str, *, limit: int = 15) -> list[dict]:
+    """RSS 2.0 / Atom → [{title, url, date}] (stdlib only). Bad XML → []."""
+    import re
+    import xml.etree.ElementTree as ET
+    from email.utils import parsedate_to_datetime
+    try:
+        root = ET.fromstring(xml_text.strip()[:2_000_000])
+    except ET.ParseError:
+        return []
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    out = []
+    def _date(s: str) -> str | None:
+        s = (s or "").strip()
+        if not s:
+            return None
+        try:
+            return parsedate_to_datetime(s).date().isoformat()
+        except Exception:  # noqa: BLE001
+            m = re.match(r"(\d{4}-\d{2}-\d{2})", s)
+            return m.group(1) if m else None
+    for it in root.iter("item"):                                   # RSS
+        title = (it.findtext("title") or "").strip()
+        link = (it.findtext("link") or "").strip()
+        if title and link.startswith("http"):
+            out.append({"title": title, "url": link, "date": _date(it.findtext("pubDate") or "")})
+    if not out:
+        for e in root.findall("a:entry", ns):                     # Atom
+            title = (e.findtext("a:title", default="", namespaces=ns) or "").strip()
+            link = ""
+            for l in e.findall("a:link", ns):
+                if l.get("rel", "alternate") == "alternate" and (l.get("href") or "").startswith("http"):
+                    link = l.get("href"); break
+            d = e.findtext("a:published", default="", namespaces=ns) or e.findtext("a:updated", default="", namespaces=ns)
+            if title and link:
+                out.append({"title": title, "url": link, "date": _date(d)})
+    return out[:limit]
+
+
+def fetch_site_posts(link: str, *, timeout: int = 12) -> tuple[list[dict], str]:
+    """Discover + read the feed behind a declared link → (posts, feed_url). HTTP only; first feed
+    that parses wins; a page with a <link rel=alternate> feed hint is followed once."""
+    import re
+    import urllib.request
+    hdr = {"User-Agent": "roster-artifacts/1.0 (+public feed reader)"}
+    tried = []
+    def _get(u):
+        req = urllib.request.Request(u, headers=hdr)
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read(2_000_000).decode("utf-8", "ignore"), r.headers.get("Content-Type", "")
+    for u in feed_candidates(link):
+        if len(tried) >= 5:
+            break
+        tried.append(u)
+        try:
+            body, ctype = _get(u)
+        except Exception:  # noqa: BLE001
+            continue
+        posts = parse_feed(body)
+        if posts:
+            return posts, u
+        if "html" in ctype.lower() or body.lstrip().startswith("<!"):
+            m = re.search(r'<link[^>]+type="application/(?:rss|atom)\+xml"[^>]+href="([^"]+)"', body, re.I) \
+                or re.search(r'<link[^>]+href="([^"]+)"[^>]+type="application/(?:rss|atom)\+xml"', body, re.I)
+            if m:
+                fu = m.group(1)
+                if fu.startswith("/"):
+                    from urllib.parse import urlparse
+                    p = urlparse(u); fu = f"{p.scheme}://{p.netloc}{fu}"
+                try:
+                    fb, _ = _get(fu)
+                    posts = parse_feed(fb)
+                    if posts:
+                        return posts, fu
+                except Exception:  # noqa: BLE001
+                    pass
+    return [], ""
+
+
+def site_post_artifact(post: dict, feed_url: str) -> dict | None:
+    from urllib.parse import urlparse
+    title, url = (post.get("title") or "").strip(), (post.get("url") or "").strip()
+    if not title or not url.startswith("http"):
+        return None
+    host = urlparse(url).netloc.lower().removeprefix("www.")
+    return {"kind": "post", "artifact_key": url[:300], "title": title[:300], "url": url[:500],
+            "date": post.get("date"), "venue": host[:120], "role": "author",
+            "detail": {"feed": feed_url[:300]}, "link_method": "declared_site", "confidence": 0.95,
+            "source_family": "site"}
+
+
+# --------------------------------------------------------------------------- #
+# TALKS & PRESENTATIONS (YouTube / Vimeo via search snippets — name + hint gated)#
+# --------------------------------------------------------------------------- #
+def talk_artifacts_from_results(row: dict, results: list[dict]) -> list[dict]:
+    """Search results → 'talk' artifacts ONLY when the full name appears in the title or snippet
+    AND a grounded hint (employer / past employer / role) appears too — the same gate as LinkedIn.
+    Stored with link_method 'name_hint' and lower confidence: shown as 'verify', never as proven."""
+    import re
+    from api.linkedin_resolve import hint_hits, hints_from_row
+    name = " ".join((row.get("name") or "").split())
+    if len(name.split()) < 2:
+        return []
+    nm = re.compile(r"\b" + r"\s+".join(re.escape(t) for t in name.split()) + r"\b", re.I)
+    hints = {k: v for k, v in hints_from_row(row).items() if k in ("company", "worked_at", "role")}
+    out = []
+    for r in results or []:
+        url = (r.get("url") or "").strip()
+        if not re.search(r"(youtube\.com/watch|youtu\.be/|vimeo\.com/\d+)", url):
+            continue
+        text = (r.get("title") or "") + " " + (r.get("snippet") or "")
+        if not nm.search(text):
+            continue
+        hits = hint_hits(hints, text)
+        if not hits:
+            continue
+        title = re.sub(r"\s*-\s*YouTube\s*$", "", (r.get("title") or "").strip())
+        out.append({"kind": "talk", "artifact_key": url[:300], "title": title[:300], "url": url[:500],
+                    "date": None, "venue": "YouTube" if "youtu" in url else "Vimeo", "role": "speaker",
+                    "detail": {"hits": hits, "snippet": (r.get("snippet") or "")[:240]},
+                    "link_method": "name_hint", "confidence": 0.6,
+                    "source_family": "youtube" if "youtu" in url else "vimeo"})
+    return out[:8]
+
+
+async def fetch_talks(row: dict, *, search=None) -> list[dict]:
+    """One search per person: '"<name>" <company> (site:youtube.com OR site:vimeo.com)'."""
+    from api.linkedin_resolve import hints_from_row, search_snippets
+    search = search or search_snippets
+    name = " ".join((row.get("name") or "").split())
+    if len(name.split()) < 2:
+        return []
+    co = (hints_from_row(row).get("company") or [""])[0]
+    q = f'"{name}" {co} (site:youtube.com OR site:vimeo.com) talk OR presentation OR conference'.replace("  ", " ")
+    res = await search(q)
+    return talk_artifacts_from_results(row, res)
+
+
+def declared_links(facet_rows: list[dict]) -> list[str]:
+    """The person's own declared writing links (site / medium / substack / dev.to) from facets."""
+    out = []
+    for f in facet_rows or []:
+        k = f.get("facet_key") or ""
+        if k in ("link_website", "link_medium", "link_substack", "link_devto"):
+            v = (f.get("display_value") or f.get("value_norm") or "").strip()
+            if v and v not in out:
+                out.append(v)
+    return out[:3]
+
+
+async def scan_person_extras(pool, entity_id: str, facet_rows: list[dict], row: dict | None = None, *,
+                             talks: bool = True, search=None, timeout: float = 20.0) -> dict:
+    """ON-DEMAND extra layers for one person: posts from declared feeds ('site' source) and gated
+    talks ('talks' source). Each source is scanned once (rs_artifact_scan). Returns counts."""
+    import asyncio
+    out = {"posts": 0, "talks": 0}
+    try:
+        await ensure_schema(pool)
+        async with pool.acquire() as conn:
+            done = {r["source"] for r in await conn.fetch(
+                "SELECT source FROM rs_artifact_scan WHERE entity_id = $1", entity_id)}
+        if "site" not in done:
+            arts = []
+            links = declared_links(facet_rows)
+            for link in links:
+                try:
+                    posts, feed = await asyncio.wait_for(asyncio.to_thread(fetch_site_posts, link), timeout)
+                except Exception:  # noqa: BLE001
+                    posts, feed = [], ""
+                arts += [a for a in (site_post_artifact(p, feed) for p in posts) if a]
+            async with pool.acquire() as conn:
+                await write_person_artifacts(conn, entity_id, "site", arts, len(arts),
+                                             status="done" if links else "skipped")
+            out["posts"] = len(arts)
+        if talks and row is not None and "talks" not in done:
+            try:
+                arts = await asyncio.wait_for(fetch_talks(row, search=search), timeout)
+            except Exception:  # noqa: BLE001
+                arts = []
+            async with pool.acquire() as conn:
+                await write_person_artifacts(conn, entity_id, "talks", arts, len(arts))
+            out["talks"] = len(arts)
+    except Exception as e:  # noqa: BLE001
+        _log.info("scan_person_extras(%s) skipped: %s", entity_id, e)
+    return out

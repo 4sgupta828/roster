@@ -35,10 +35,11 @@ sys.path.insert(0, _HERE)                                            # sibling: 
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "apps"))     # api.artifacts parsers
 
 from ingest_people import _gh_get, _throttle  # noqa: E402
-from api.artifacts import (_DDL, fetch_openalex_works, github_org_artifact,  # noqa: E402
-                           openalex_work_artifact, select_repos, write_person_artifacts)
+from api.artifacts import (_DDL, declared_links, fetch_openalex_works, fetch_site_posts,  # noqa: E402
+                           github_org_artifact, openalex_work_artifact, select_repos,
+                           site_post_artifact, write_person_artifacts)
 
-_PREFIX = {"openalex": "openalex:", "github": "github:"}
+_PREFIX = {"openalex": "openalex:", "github": "github:", "site": "%"}   # site: any person with a declared link
 
 
 # ---- GitHub ----
@@ -66,6 +67,17 @@ async def candidates(conn, source: str, *, limit: int, refresh: bool) -> list[st
     """People to scan for `source`: saved-map members first, then newest-ingested; unscanned only
     (unless --refresh)."""
     skip = "" if refresh else "AND s.entity_id IS NULL"
+    if source == "site":
+        # people who DECLARED a writing link on their own profile (site / medium / substack / dev.to)
+        rows = await conn.fetch(
+            f"""WITH pri AS (SELECT DISTINCT (x->>'entity_id') AS entity_id FROM rs_map, jsonb_array_elements(rows) x)
+                SELECT DISTINCT f.entity_id, (pri.entity_id IS NULL) AS np
+                FROM roster_entity_facet f
+                LEFT JOIN rs_artifact_scan s ON s.entity_id = f.entity_id AND s.source = 'site'
+                LEFT JOIN pri ON pri.entity_id = f.entity_id
+                WHERE f.facet_key IN ('link_website','link_medium','link_substack','link_devto') {skip}
+                ORDER BY np LIMIT $1""", int(limit))
+        return [r["entity_id"] for r in rows]
     rows = await conn.fetch(
         f"""WITH pri AS (SELECT DISTINCT (x->>'entity_id') AS entity_id
                          FROM rs_map, jsonb_array_elements(rows) x)
@@ -90,6 +102,14 @@ async def run_source(conn, source: str, ids: list[str], *, dry: bool, token: str
                 works, total = fetch_openalex_works(key)
                 arts = [a for a in (openalex_work_artifact(w, key) for w in works) if a]
                 time.sleep(0.11)                                   # ≤10 req/s (polite-pool ceiling)
+            elif source == "site":
+                frows = await conn.fetch(
+                    "SELECT facet_key, display_value, facet_value_norm AS value_norm FROM roster_entity_facet WHERE entity_id = $1", eid)
+                arts, total = [], 0
+                for link in declared_links([dict(f) for f in frows]):
+                    posts, feed = fetch_site_posts(link)
+                    arts += [a for a in (site_post_artifact(p, feed) for p in posts) if a]
+                    total += len(posts)
             else:
                 repos, orgs, total = gh_person(key, token=token)
                 arts = repos + orgs
@@ -123,7 +143,7 @@ async def run_source(conn, source: str, ids: list[str], *, dry: bool, token: str
 
 async def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", choices=("openalex", "github", "all"), default="all")
+    ap.add_argument("--source", choices=("openalex", "github", "site", "all"), default="all")
     ap.add_argument("--limit", type=int, default=200, help="people per source this run")
     ap.add_argument("--ids", default="", help="comma-separated entity ids (targeted validation)")
     ap.add_argument("--dry", action="store_true", help="fetch + print only; no writes")
@@ -134,7 +154,7 @@ async def main() -> None:
     if not dsn:
         print("ROSTER_CORPUS_DSN not set", file=sys.stderr); sys.exit(2)
     token = os.environ.get("ROSTER_GITHUB_TOKEN", "")
-    sources = ["openalex", "github"] if args.source == "all" else [args.source]
+    sources = ["openalex", "github", "site"] if args.source == "all" else [args.source]
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute(_DDL)
@@ -142,7 +162,7 @@ async def main() -> None:
             if source == "github" and not token:
                 print("ROSTER_GITHUB_TOKEN not set — skipping github", file=sys.stderr); continue
             if args.ids:
-                ids = [i.strip() for i in args.ids.split(",") if i.strip().startswith(_PREFIX[source])]
+                ids = [i.strip() for i in args.ids.split(",") if source == "site" or i.strip().startswith(_PREFIX[source])]
             else:
                 ids = await candidates(conn, source, limit=args.limit, refresh=args.refresh)
             if not ids:
