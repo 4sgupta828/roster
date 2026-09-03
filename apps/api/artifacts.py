@@ -324,10 +324,12 @@ async def attach_artifacts(store, rows: list[dict]) -> None:
                         merged["newest"] = other.get("newest")
                     merged["items"] = (merged.get("items") or []) + [{**it, "via": l["id"]} for it in (other.get("items") or [])]
                     merged["affiliations"] = (merged.get("affiliations") or []) + (other.get("affiliations") or [])
-                if merged is not None:
-                    merged["linked"] = [{"id": l["id"], "method": l["method"], "confidence": l["confidence"],
-                                         "employer": (l.get("evidence") or {}).get("employer", "")} for l in ls]
-                    found[eid] = merged
+                if merged is None:
+                    merged = dict(base)            # linked, but the other identity holds no artifacts yet
+                merged["linked"] = [{"id": l["id"], "method": l["method"], "confidence": l["confidence"],
+                                     "employer": (l.get("evidence") or {}).get("employer", ""),
+                                     "scanned": bool((found.get(l["id"]) or {}).get("scanned"))} for l in ls]
+                found[eid] = merged
         except Exception as e:  # noqa: BLE001 — artifacts are additive; the map must still render
             _log.warning("attach_artifacts failed: %s", e)
     for r in rows:
@@ -433,6 +435,21 @@ async def write_person_artifacts(conn, eid: str, source: str, arts: list[dict], 
                VALUES ($1,$2,$3,$4,$5, now())
                ON CONFLICT (entity_id, source) DO UPDATE SET status=EXCLUDED.status, n_found=EXCLUDED.n_found,
                  n_total=EXCLUDED.n_total, scanned_at=now()""", eid, source, status, len(arts), int(n_total))
+
+
+async def scan_linked_identities(pool, entity_id: str, *, timeout: float = 12.0) -> int:
+    """On demand: scan the identities LINKED to this person (their papers/repos show on this card)."""
+    try:
+        from api.identity_links import links_for
+        ls = (await links_for(pool, [entity_id])).get(entity_id) or []
+        n = 0
+        for l in ls[:3]:
+            if await scan_person_now(pool, l["id"], timeout=timeout):
+                n += 1
+        return n
+    except Exception as e:  # noqa: BLE001
+        _log.info("scan_linked_identities(%s) skipped: %s", entity_id, e)
+        return 0
 
 
 async def scan_person_now(pool, entity_id: str, *, timeout: float = 12.0) -> bool:

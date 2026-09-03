@@ -409,9 +409,11 @@ async def enrich_cohort(store, entity_ids: list[str], brief: str, *, tenant_id: 
             from api.artifacts import scan_person_extras, scan_person_now
             pool = await get_pool()
             talks_on = os.environ.get("ROSTER_TALKS_ENRICH", "1") == "1"
+            from api.artifacts import scan_linked_identities
             for r in out_rows:
                 if not (r.get("artifacts") or {}).get("scanned"):
                     await scan_person_now(pool, r["entity_id"], timeout=8.0)
+                await scan_linked_identities(pool, r["entity_id"], timeout=8.0)
                 want_talks = talks_on and used_today < cap
                 got = await scan_person_extras(pool, r["entity_id"], r.get("_facets") or [], r,
                                                talks=want_talks, search=search, timeout=15.0)

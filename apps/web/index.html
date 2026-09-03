@@ -8200,7 +8200,7 @@ async function openMapsList(){
     // ---- 4. WHAT THEY'VE DONE (public work + their own words) ----
     let done = "";
     if(fp && (fp.linked||[]).length){
-      done += `<div class="er-src" style="margin-bottom:.3rem;">🔗 Linked identit${fp.linked.length===1?"y":"ies"}: ${fp.linked.map(l=>`<code>${esc(l.id)}</code> (${esc(l.method)}${l.employer?" · "+esc(String(l.employer).replace(/_/g," ")):""})`).join(", ")} — same name and the same employer on both profiles, and the name is unique enough to link. Work from linked identities is included below.</div>`;
+      done += `<div class="er-src" style="margin-bottom:.3rem;">🔗 Linked identit${fp.linked.length===1?"y":"ies"}: ${fp.linked.map(l=>`<code>${esc(l.id)}</code> (${esc(l.method)}${l.employer?" · "+esc(String(l.employer).replace(/_/g," ")):""}${l.scanned===false?" · not scanned yet":""})`).join(", ")} — same name and the same employer on both profiles, and the name is unique enough to link. Work from linked identities is included below.</div>`;
     }
     if(fp && fp.total){
       // grouped by KIND — papers, talks, posts, patents, repos, orgs — each with its links and its
