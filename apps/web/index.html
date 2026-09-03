@@ -548,15 +548,12 @@
   .ppl-tag-topic{background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);font-weight:600;}
   .ppl-scopebar{border-left-color:var(--person)!important;}
   .ev-filterbar{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;}
-  .evfilters{position:relative;margin:.35rem auto 0;max-width:var(--wrapw,880px);padding:0 .2rem;font-size:.78rem;color:var(--muted);}
-  .evfilters>summary{list-style:none;display:inline-flex;align-items:center;gap:.3rem;cursor:pointer;min-height:36px;padding:.2rem .6rem;border-radius:999px;border:1px solid transparent;}
-  .evfilters>summary::-webkit-details-marker{display:none;}
-  .evfilters>summary::after{content:"▾";opacity:.6;}
-  .evfilters>summary:hover{border-color:var(--hair);background:var(--panel);}
-  .evfilters.active>summary{color:var(--gold);font-weight:600;}
-  .evf-pop{position:absolute;z-index:20;margin-top:.2rem;background:var(--panel);border:1px solid var(--hair);border-radius:10px;padding:.5rem .7rem;box-shadow:0 8px 24px rgba(0,0,0,.08);display:flex;flex-direction:column;gap:.15rem;min-width:200px;}
-  .evf-opt{display:flex;align-items:center;gap:.45rem;min-height:36px;font-size:.84rem;color:var(--ink);cursor:pointer;}
-  .evf-reset{min-height:32px;padding:.15rem .3rem;border:0;background:none;color:var(--gold);font-size:.76rem;cursor:pointer;text-decoration:underline;text-align:left;}
+  .evfilters{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:.4rem auto 0;max-width:var(--wrapw,880px);padding:0 .2rem;font-size:.76rem;color:var(--muted);}
+  .evf-lbl{font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;margin-right:.25rem;opacity:.8;}
+  #evfilters .ev-filter{min-height:32px;padding:.2rem .65rem;border:1px dashed var(--hair);border-radius:999px;background:transparent;color:var(--muted);font-size:.74rem;cursor:pointer;}
+  #evfilters .ev-filter:hover{border-style:solid;color:var(--ink);}
+  #evfilters .ev-filter.on{border:1px solid var(--gold);background:rgba(var(--gold-rgb),.1);color:var(--gold-strong);font-weight:600;}
+  #evfilters .ev-filter.on::before{content:"✓ ";}
   .ev-filter{min-height:36px;padding:.25rem .7rem;border:1px solid var(--hair);border-radius:999px;background:var(--panel);color:var(--ink);font-size:.76rem;cursor:pointer;}
   .ev-filter.on{background:var(--gold);color:var(--on-accent);border-color:var(--gold);font-weight:600;}
   .ppl-scope{display:inline-block;margin-left:.3rem;min-height:40px;padding:.3rem .7rem;border:1px solid var(--person);border-radius:999px;background:none;color:var(--person);font-size:.76rem;font-weight:600;cursor:pointer;}
@@ -1720,10 +1717,9 @@
   </form>
   <!-- Talent Map PRE-SEARCH evidence filter: which kinds of linked public work a person must have.
        All on = no restriction; deselect to require at least one of the remaining kinds. -->
-  <details id="evfilters" class="evfilters" hidden>
-    <summary class="evf-sum" title="Only people with at least one of the selected kinds of linked public work. All selected = everyone."><span id="evfsummary">Evidence: any</span></summary>
-    <div class="evf-pop"><span id="evfchips"></span><button type="button" class="evf-reset" id="evfreset" hidden title="Select all kinds again">reset</button></div>
-  </details>
+  <div id="evfilters" class="evfilters" hidden title="Tap a kind to require it — people must have at least one of the selected kinds of linked public work. Nothing selected = everyone.">
+    <span class="evf-lbl">Must have</span><span id="evfchips"></span>
+  </div>
 
   <section id="out" aria-live="polite">
   </section>
@@ -2238,17 +2234,15 @@ let PEOPLE_CTX = null;          // People-tab conversation: accumulated facet fi
 let JOBS_CTX = null;            // Jobs-tab conversation: accumulated job query — follow-ups NARROW it
 let PENDING_PERSON = null;      // People-tab person lookup awaiting disambiguation — the next utterance adds context
 const EV_ALL = ["repo","paper","post","talk","patent"];
-let EVIDENCE_KINDS = new Set(EV_ALL); // Talent Map PRE-search evidence filter: all on = no restriction; a subset restricts
+let EVIDENCE_KINDS = new Set();      // Talent Map PRE-search "must have": empty = everyone; selected kinds are required (any of)
 const EV_LABEL = {repo:"repos", paper:"papers", post:"blog posts", talk:"talks", patent:"patents"};
-function evFilterActive(){ return EV_ALL.some(k => !EVIDENCE_KINDS.has(k)) && EVIDENCE_KINDS.size > 0; }
+function evFilterActive(){ return EVIDENCE_KINDS.size > 0; }
 function renderEvFilters(){
   const box = document.getElementById("evfchips"), wrap = document.getElementById("evfilters"), rs = document.getElementById("evfreset");
   if(!box || !wrap) return;
   wrap.hidden = (SEARCH_MODE !== "people");
-  box.innerHTML = EV_ALL.map(k => `<label class="evf-opt"><input type="checkbox" class="ev-filter" data-kind="${k}" ${EVIDENCE_KINDS.has(k)?"checked":""}/> ${EV_LABEL[k]}</label>`).join("");
-  if(rs) rs.hidden = !evFilterActive();
-  const sum = document.getElementById("evfsummary");
-  if(sum){ sum.textContent = evFilterActive() ? ("Evidence: " + EV_ALL.filter(k=>EVIDENCE_KINDS.has(k)).map(k=>EV_LABEL[k]).join(", ")) : "Evidence: any"; wrap.classList.toggle("active", evFilterActive()); }
+  box.innerHTML = EV_ALL.map(k => `<button type="button" class="ev-filter${EVIDENCE_KINDS.has(k)?" on":""}" data-kind="${k}" aria-pressed="${EVIDENCE_KINDS.has(k)}" title="${EVIDENCE_KINDS.has(k)?"Required — tap to drop":"Tap to require linked "+EV_LABEL[k]}">${EV_LABEL[k]}</button>`).join("");
+  wrap.classList.toggle("active", evFilterActive());
 }
 let TAB_THREADS = {};           // per-tab CONVERSATION state: People and Q&A each keep their OWN thread —
 //                                 a Q&A question must never append onto a People search's thread (the
@@ -2801,7 +2795,7 @@ function peopleRowsMarkup(data){
   // EVIDENCE FILTER chips: only people with linked public work of a kind. Server-side re-run of the
   // brief (it also pulls in people who hold that work but were outside the first cohort).
   const evf = cb.evidence_filter || null;
-  const evFilterBar = (isEnum && evf) ? `<div class="ppl-cov ev-filterbar">🔎 Evidence filter: only people with linked ${esc((evf.kinds||[]).map(k=>EV_LABEL[k]||k).join(" or "))} — ${evf.kept} kept, ${evf.dropped} without. <span class="ppl-fc" style="text-transform:none;">Change it in the Evidence row under the search box.</span></div>` : "";
+  const evFilterBar = (isEnum && evf) ? `<div class="ppl-cov ev-filterbar">🔎 Must have linked ${esc((evf.kinds||[]).map(k=>EV_LABEL[k]||k).join(" or "))} — ${evf.kept} kept, ${evf.dropped} without. <span class="ppl-fc" style="text-transform:none;">Change it under the search box.</span></div>` : "";
   const scopeLine = scopeChip(cb.geo_scope);
   // EVIDENCE distribution (spec coverage panel): how many rows by headline evidence state.
   const evGroups = cb.evidence_groups||[];
@@ -6370,7 +6364,7 @@ function newConversation(){
   THREAD = {session_id:null, turns:[]};
   MODE_VIEWS = {}; TAB_THREADS = {};   // "＋ New search" wipes every tab's remembered result/thread
   window.ACTIVE_MAP = null;            // …and leaves any saved-map view
-  PEOPLE_CTX = null; JOBS_CTX = null; PENDING_PERSON = null; EVIDENCE_KINDS = new Set(EV_ALL); renderEvFilters();  // …and both tabs' refinement conversations start fresh
+  PEOPLE_CTX = null; JOBS_CTX = null; PENDING_PERSON = null; EVIDENCE_KINDS = new Set(); renderEvFilters();  // …and both tabs' refinement conversations start fresh
   GUIDED_REFINED = false;
   document.body.classList.remove("chatting"); out.style.paddingBottom = "";   // back to landing layout
   out.innerHTML = "";
@@ -8326,14 +8320,11 @@ document.addEventListener("click", e => {
   const rr = e.target.closest && e.target.closest(".ppl-rerank");
   if(rr){ e.preventDefault(); rerankShown(rr.dataset.pid); return; }
   const ef = e.target.closest && e.target.closest("#evfilters .ev-filter");
-  if(ef){ toggleEvidenceFilter(ef.dataset.kind); return; }        // checkbox: no preventDefault
-  const rs = e.target.closest && e.target.closest("#evfreset");
-  if(rs){ e.preventDefault(); EVIDENCE_KINDS = new Set(EV_ALL); renderEvFilters(); }
+  if(ef){ e.preventDefault(); toggleEvidenceFilter(ef.dataset.kind); return; }
 });
-// PRE-search: toggling changes what the NEXT search requires; nothing re-runs by itself
+// PRE-search "must have": toggling changes what the NEXT search requires; nothing re-runs by itself
 function toggleEvidenceFilter(kind){
-  if(EVIDENCE_KINDS.has(kind)){ if(EVIDENCE_KINDS.size > 1) EVIDENCE_KINDS.delete(kind); }   // never empty
-  else EVIDENCE_KINDS.add(kind);
+  if(EVIDENCE_KINDS.has(kind)) EVIDENCE_KINDS.delete(kind); else EVIDENCE_KINDS.add(kind);
   renderEvFilters();
 }
 // ---- LOCAL SCOPE (where the user is → default metro; expandable) -------------------------------
