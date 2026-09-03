@@ -4530,11 +4530,17 @@ async function loadSharedSession(id){
     if(isPanelRow(row)){ openPanelSession(row); window.scrollTo({top:0}); return; }   // panel permalink → panel view
     CURRENT_Q = row.question;
     const thread = row.thread || [];
+    // A permalink opens in the TAB that made it: a Talent Map search (kind 'people_population') in
+    // Talent Map, a job search in Jobs, a question in Q&A — never a people search inside Q&A.
+    const t0 = thread[0] || {};
+    const kind = t0.kind || ((Array.isArray(t0.jobs) && t0.jobs.length) ? "jobs" : (Array.isArray(t0.people_rows) && t0.people_rows.length) ? "people_population" : "qa");
+    const tab = kind === "jobs" ? "jobs" : (kind === "people_population" ? "people" : "qa");
     if(CONV_ENABLED && thread.length){          // resume the shared conversation (continuable)
-      if(typeof setSearchMode === "function") setSearchMode("qa");   // switch FIRST (parks other tabs)
+      if(typeof setSearchMode === "function") setSearchMode(tab);   // switch FIRST (parks other tabs)
       THREAD = {session_id:id, turns:thread.slice()};
+      TAB_THREADS[tab] = THREAD;
       q.value=""; q.style.height="auto"; q.setAttribute("placeholder","");
-      renderThread(); loadSuggestions();
+      renderThread(); if(tab === "qa") loadSuggestions();
     } else {
       q.value = row.question; autoGrow();
       render(row, out);
