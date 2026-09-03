@@ -1441,6 +1441,7 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
     rows: list[dict] = []
     raw: list[dict] = []
     searched_web = ""                                   # the all-hints web query, when one ran
+    namesakes = 0                                       # same-named people that fit none of the hints
     try:
         if _ENTITY_ID_RE.match(name):                       # a picked candidate (entity id) → direct
             raw = await store.people_by_ids([name], tenant_id=tenant_id)
@@ -1521,6 +1522,11 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
                         out["person_lookup"]["web_hits"] = _idn.get("web_hits") or []
                         return out
                     resolution, rows, res2 = "resolved", [_idn], "resolved"
+                if resolution not in ("resolved", "ambiguous"):
+                    # NOBODY fits the hints — index, keyed sources, or the open web. Say so; do not
+                    # list namesakes that match none of them (the "lots of options, all wrong" trap)
+                    namesakes = len(merged)
+                    resolution, rows, res2, rows2, web_rows = "none", [], "none", [], []
             if res2 == "resolved" and rows2 and rows2[0].get("web") and resolution != "resolved":
                 eid = rows2[0]["entity_id"]
                 if await ingest_identity(store, eid, name_hint=name):
@@ -1573,8 +1579,9 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
         r.pop("_facets", None)
     clarify = _clarify_text(display_name, rows, resolution)
     if resolution == "none" and searched_web:
+        _ns = f" {namesakes} {display_name} namesake{'s' if namesakes != 1 else ''} were found but match none of these hints." if namesakes else ""
         clarify = (f"No public page mentions “{display_name}” together with {', '.join(searched_web.split()[1:])} — "
-                   f"and no GitHub, OpenAlex or LinkedIn profile fits. Not evidence of absence: try another "
+                   f"and no GitHub, OpenAlex or LinkedIn profile fits.{_ns} Not evidence of absence: try another "
                    f"detail (employer, school, city) or paste a profile URL.")
     if resolution == "ambiguous" and any(r.get("web") for r in rows):
         from api.person_discovery import clarify_web
