@@ -92,7 +92,15 @@ machinery for workflows no user has asked for yet. Point by point:
 - Store the contract with the map: `rs_map.brief_contract jsonb` (new column, additive).
 - Eval: gold cases for hard/soft labeling and the assumption line.
 
-### Phase 2 — Review + hiring-manager calibration (P0 review vocabulary + P1)
+### Phase 2 — Review + hiring-manager calibration (P0 review vocabulary + P1) — SHIPPED 2026-09-03
+Status: 2a (vocabulary, tags, named reviewers, revision 0) and 2b (revise from feedback) are live from
+the branch. 2b as built: `apps/api/calibration.py` maps tags → contract edits in code; the revised
+search runs on a FIXED contract (`fixed_facets`: no compile, no refinement parse, no company guard —
+the reviewers' edits are final); exclusions / company exclusions / demoted values apply in
+`answer_people_population`; the diff is code-computed; the LLM phrases ONE line about the list only
+(temperature 0, numeric guard, code fallback) — an earlier two-line version inverted an edit, so the
+brief edits are shown verbatim. `POST /maps/{id}/revise` (`preview:true` is free). Verified in prod:
+revision 1 and 2 on a test map, gold eval 27/27.
 - Review vocabulary → `unreviewed | shortlist | maybe | needs more evidence | not relevant`
   (old values migrated in read: `shortlisted→shortlist`, `reviewed→maybe`).
 - Review control back on the card (compact select in the card footer when a map is active or
