@@ -555,6 +555,9 @@
   .ppl-card.person-card .ev-inline, .ppl-card.person-card .ev-inline *{cursor:auto;}
   .ppl-card.person-card .ev-inline a, .ppl-card.person-card .ev-inline button, .ppl-card.person-card .ev-inline select, .ppl-card.person-card .ev-inline summary{cursor:pointer;}
   .ev-hint{font-size:.7rem;color:var(--muted);margin-left:.35rem;}
+  details.ppl-meta > summary{list-style:none;cursor:pointer;}
+  details.ppl-meta > summary::-webkit-details-marker{display:none;}
+  details.ppl-meta[open] > summary .ppl-fc{opacity:.6;}
   .ev-inline .er-chips{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.25rem;}
   .ev-inline .er-chip{display:inline-block;font-size:.7rem;line-height:1.3;padding:.12rem .45rem;border:1px solid var(--hair);border-radius:999px;color:var(--ink);background:var(--panel2);text-decoration:none;}
   .ev-inline a.er-chip{border-color:rgba(var(--gold-rgb),.5);color:var(--gold-strong);}
@@ -2857,6 +2860,19 @@ function peopleRowsMarkup(data){
   const evDist = evGroups.length
     ? `<div class="ppl-cov ev-dist">◈ Evidence: ${evGroups.map(g=>`<span class="ev-pill ${({corroborated:"ev-strong",structured:"ev-strong","artifact-backed":"ev-strong","employer-stated":"ev-stated","self-stated":"ev-self","mixed evidence":"ev-mixed","needs evidence":"ev-gap"}[g.label]||"ev-self")}">${esc(g.label)} ${g.count}</span>`).join(" ")} <span class="ppl-fc" style="text-transform:none;">— self-stated is labeled, never shown as verified</span></div>`
     : "";
+  // META, COMPRESSED: one line with the numbers that matter; the full statements fold under "details"
+  const _topicM = /^(\d+) of these people mention ([^()]+?) \(/.exec(cb.population_statement||"");
+  const _idxM = /\(([\d,]+) people from/.exec(cb.population_statement||"");
+  const metaBits = [];
+  if(_topicM) metaBits.push(`<b>${_topicM[1]}</b> mention ${esc(_topicM[2].trim())}`);
+  if(_idxM) metaBits.push(`${_idxM[1]} indexed · not exhaustive`);
+  if(evGroups.length) metaBits.push("evidence: " + evGroups.slice(0,3).map(g=>`${g.count} ${esc(g.label)}`).join(", "));
+  if(fpc && fpc.people) metaBits.push(`<b>${fpc.with_artifacts}</b> of ${fpc.people} with linked work`);
+  if(evf) metaBits.push(`must have ${esc((evf.kinds||[]).map(k=>EV_LABEL[k]||k).join("/"))}: ${evf.kept} kept`);
+  const metaFull = `${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evFilterBar}${evDist}${fpLine}${rankLine}`;
+  const metaBlock = (isEnum && rows.length)
+    ? `${scopeLine}<details class="ppl-meta"><summary class="ppl-cov ppl-meta-s">◔ ${metaBits.join(" · ") || "Coverage & ranking"} <span class="ppl-fc" style="text-transform:none;">· details ▾</span></summary>${metaFull}</details>`
+    : `${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${scopeLine}`;
   // MAP BAR (Phase 3): save this result as a durable Talent Map, or — when viewing a saved map —
   // its title, notes, share link and CSV export.
   const mapBar = (isEnum && rows.length && SEARCH_MODE === "people" && typeof talentMapBar === "function") ? talentMapBar() : "";
@@ -2878,7 +2894,7 @@ function peopleRowsMarkup(data){
       + `<div class="ppl-cov" style="border-left-color:var(--gap);">◔ ${esc(lk.clarify||"")} Searched Roster's index, GitHub, OpenAlex, LinkedIn snippets${lk.searched_web?` and the open web for ${esc(lk.searched_web)}`:""}. ${qaBtn}</div>`;
   }
   const head = isEnum
-    ? `<div class="ppl-head">${pagedMode && pagesN>1?`${page===0?`Top <b>${paged.length}</b> most relevant`:`People <b>${from}–${to}</b> by relevance`} <span class="ppl-fc" style="text-transform:none;">· of ${rows.length} matched in the index · page ${page+1} of ${pagesN}</span>`:`<b>${rows.length}</b> ${rows.length===1?"person":"people"} found`}${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evFilterBar}${scopeLine}${evDist}${fpLine}${rankLine}<div class="ppl-enrich" data-pid="${esc(data._pid)}"></div>`
+    ? `<div class="ppl-head">${pagedMode && pagesN>1?`${page===0?`Top <b>${paged.length}</b> most relevant`:`People <b>${from}–${to}</b> by relevance`} <span class="ppl-fc" style="text-transform:none;">· of ${rows.length} matched in the index · page ${page+1} of ${pagesN}</span>`:`<b>${rows.length}</b> ${rows.length===1?"person":"people"} found`}${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${metaBlock}<div class="ppl-enrich" data-pid="${esc(data._pid)}"></div>`
     : (lkHead || `<div class="ppl-head">Profile</div>`);   // single-person profile card (no enumeration coverage)
   // ambiguous lookup: each candidate card gets a PICK control (sends its entity id back as the choice)
   const pickCards = (lk && lk.resolution === "ambiguous")
@@ -8872,7 +8888,7 @@ function enrichSummary(rows, pid, quota){
   const withHead = rows.filter(p => p.linkedin && p.linkedin.headline).length;
   const fits = rows.filter(p => p.linkedin && typeof p.linkedin.headline_fit === "number").map(p=>p.linkedin.headline_fit);
   const strong = fits.filter(f => f >= 0.5).length;
-  return `<div class="ppl-cov" style="border-left-color:var(--gold);">⌕ LinkedIn snippets read for the ${rows.length} shown: <b>${withHead}</b> with a headline (${st.resolved} newly resolved, ${st.already} on file), ${st.ambiguous} ambiguous (several same-named — none guessed), ${st.none} not found${st.other?`, ${st.other} unavailable`:""}. <button type="button" class="ppl-rerank" data-pid="${esc(pid)}" title="Reorder the people shown by relevance, headline fit and evidence depth — code-computed, reasons under each card">⇅ Re-rank shown by evidence</button>${quota&&quota.cap?` <span class="ppl-fc" style="text-transform:none;">· snippet quota ${quota.used_today}/${quota.cap} today</span>`:""}</div>`;
+  return `<div class="ppl-cov" style="border-left-color:var(--gold);">⌕ LinkedIn read for the ${rows.length} shown: <b>${withHead}</b> with a headline. <button type="button" class="ppl-rerank" data-pid="${esc(pid)}" title="Reorder the people shown by relevance and evidence depth — code-computed">⇅ Re-rank by evidence</button>${quota&&quota.cap?` <span class="ppl-fc" style="text-transform:none;">· quota ${quota.used_today}/${quota.cap}</span>`:""}</div>`;
 }
 function rerankShown(pid){
   const data = (window.PEOPLE_RENDERS||{})[pid]; if(!data) return;
