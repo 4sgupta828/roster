@@ -1106,6 +1106,7 @@ class ResearchIn(BaseModel):
     #                                       merged so follow-ups narrow the same search (None = fresh)
     prior_person: str = ""                # People-tab PERSON LOOKUP conversation: the name the previous
     #                                       turn asked to disambiguate — this utterance adds context
+    prior_context: str = ""               #   …and the hints given so far (they accumulate across turns)
 
 
 class FocusIn(BaseModel):
@@ -3559,6 +3560,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 store=store, llm=build_llm(mode=resolve_mode()), scope_country=scope_country,
                 prior_facets=body.refine_facets, assume_people=assume_people,
                 prior_person=(body.prior_person or "").strip(),
+                prior_context=(body.prior_context or "").strip()[:300],
                 scope_metro=((body.metro or "").strip().lower() if people_geo_scope_enabled() else ""),
                 scope_state=((body.state or "").strip().lower() if people_geo_scope_enabled() else ""),
                 evidence_kinds=list(body.evidence_kinds or []))

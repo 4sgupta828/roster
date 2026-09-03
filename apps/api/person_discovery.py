@@ -254,3 +254,108 @@ def clarify_web(name: str, rows: list[dict]) -> str:
     srcs = sorted({r.get("source_label") or "" for r in rows if r.get("source_label")})
     return (f"Which {name}? Not in Roster's index yet — {len(rows)} possible match{'es' if len(rows) != 1 else ''} "
             f"found on {', '.join(srcs)}. Pick one to bring them in, or add a company, school or location.")
+
+
+# --------------------------------------------------------------------------- #
+# OPEN-WEB FOOTPRINT with ALL the hints — when no keyed source has the person   #
+# --------------------------------------------------------------------------- #
+_HINT_STOP = {"the", "one", "who", "works", "worked", "work", "from", "with", "and", "for", "that", "this",
+              "guy", "person", "at", "in", "of", "is", "was", "a", "an", "his", "her", "their", "based",
+              "located", "company", "school", "studied", "went", "he", "she", "they", "also", "now",
+              "currently", "previously", "formerly", "engineer", "researcher", "manager"}
+_URL_RE = re.compile(r"https?://[^\s]+|(?:www\.)?[a-z0-9-]+\.(?:com|io|dev|net|org|ai|edu)\b[^\s]*", re.I)
+
+
+def hint_tokens(ctx: str) -> list[str]:
+    toks = re.findall(r"[a-z0-9][a-z0-9.+\-]{1,}", (ctx or "").lower())
+    out = []
+    for t in toks:
+        if t in _HINT_STOP or len(t) < 3 or t in out:
+            continue
+        out.append(t)
+    return out[:8]
+
+
+def _name_in(text: str, name: str) -> bool:
+    toks = name.split()
+    if len(toks) < 2:
+        return False
+    return re.search(r"\b" + re.escape(toks[0]) + r"\b[\w.\-' ]{0,30}?\b" + re.escape(toks[-1]) + r"\b", text, re.I) is not None
+
+
+def footprint_from_results(name: str, ctx: str, results: list[dict]) -> dict | None:
+    """Pages that mention the FULL NAME together with the hints → one web-footprint candidate:
+    the pages are its evidence (linked), the hints the pages confirm become its facets. None when
+    no page carries the name with at least one hint."""
+    toks = hint_tokens(ctx)
+    if not toks:
+        return None
+    pages = []
+    for r in results or []:
+        text = (r.get("title") or "") + " " + (r.get("snippet") or "")
+        if not _name_in(text, name):
+            continue
+        low = text.lower()
+        hits = [t for t in toks if t in low]
+        if not hits:
+            continue
+        pages.append({"url": r.get("url") or "", "title": (r.get("title") or "")[:160],
+                      "snippet": (r.get("snippet") or "")[:240], "hits": hits})
+    if not pages:
+        return None
+    pages.sort(key=lambda p: -len(p["hits"]))
+    confirmed = []
+    for p in pages:
+        for h in p["hits"]:
+            if h not in confirmed:
+                confirmed.append(h)
+    from urllib.parse import urlparse
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") + "-" + re.sub(r"[^a-z0-9]+", "", "".join(confirmed[:2]))[:24]
+    eid = "web:" + slug
+    doc = pages[0]["url"]
+    # facets: only what a page CONFIRMS (a hint present next to the name), never the bare hint
+    facets = [("title", pages[0]["snippet"] or pages[0]["title"]), ("web_confirmed", ", ".join(confirmed))]
+    links = []
+    for p in pages[:5]:
+        host = urlparse(p["url"]).netloc.lower().removeprefix("www.")
+        if p["url"] and not any(l["url"] == p["url"] for l in links):
+            links.append({"kind": host[:30], "url": p["url"]})
+    row = _row(eid, name, facets, doc, links, pages[0]["snippet"] or pages[0]["title"], "the open web")
+    row["web_pages"] = pages[:5]
+    row["web_hits"] = confirmed
+    row["blurb"] = f"Public pages mention {name} with {', '.join(confirmed)}: “{pages[0]['title']}”"
+    return row
+
+
+async def web_footprint(name: str, ctx: str, *, search=None) -> dict | None:
+    """One general web search with ALL the hints — '"<name>" cisco bangalore' — no site filter."""
+    from api.linkedin_resolve import search_snippets
+    search = search or search_snippets
+    toks = hint_tokens(ctx)
+    if not toks:
+        return None
+    q = f'"{name}" ' + " ".join(toks[:6])
+    try:
+        res = await asyncio.wait_for(search(q), 20)
+    except Exception as e:  # noqa: BLE001
+        _log.info("web footprint search failed: %s", e)
+        return None
+    return footprint_from_results(name, ctx, res or [])
+
+
+def url_hint(ctx: str) -> str:
+    m = _URL_RE.search(ctx or "")
+    return m.group(0) if m else ""
+
+
+def identity_from_url(url: str) -> str:
+    """A pasted profile URL is the strongest hint of all: github → github:login, linkedin →
+    linkedin:slug; anything else → '' (handled as a web page)."""
+    u = (url or "").strip()
+    m = re.search(r"github\.com/([A-Za-z0-9-]+)/?$", u)
+    if m:
+        return "github:" + m.group(1)
+    m = re.search(r"linkedin\.com/in/([^/?#\s]+)", u, re.I)
+    if m:
+        return "linkedin:" + m.group(1).lower()
+    return ""

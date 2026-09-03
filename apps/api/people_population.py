@@ -1263,7 +1263,7 @@ def build_person_profile_card(name: str, context: str = "") -> dict:
             "links": links, "citation": None}
 
 
-_ENTITY_ID_RE = re.compile(r"^(github|openalex|theorg|npi|yc|sec|ef|aifund|sosv|pear|person):\S+$", re.I)
+_ENTITY_ID_RE = re.compile(r"^(github|openalex|theorg|npi|yc|sec|ef|aifund|sosv|pear|person|linkedin|web):\S+$", re.I)
 # a PICKED candidate as the UI submits it: "<name> — <distinguisher> [<entity id>]" (readable turn label)
 _PICK_RE = re.compile(r"\[((?:github|openalex|theorg|npi|yc|sec|ef|aifund|sosv|pear|person):[^\]\s]+)\]\s*$", re.I)
 
@@ -1363,10 +1363,11 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
     ctx = (ctx or "").strip()
     rows: list[dict] = []
     raw: list[dict] = []
+    searched_web = ""                                   # the all-hints web query, when one ran
     try:
         if _ENTITY_ID_RE.match(name):                       # a picked candidate (entity id) → direct
             raw = await store.people_by_ids([name], tenant_id=tenant_id)
-            if not raw and name.split(":", 1)[0] in ("github", "openalex", "linkedin"):
+            if not raw and name.split(":", 1)[0] in ("github", "openalex", "linkedin"):   # web:* is minted before re-lookup
                 # picked from the OPEN WEB: bring that identity into the index first
                 from api.person_discovery import ingest_identity
                 nm_hint = (label.split(" — ", 1)[0].strip() if label else "")
@@ -1391,7 +1392,14 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
         # NOT IN THE INDEX (or the hint fits nobody we hold): go FIND the person on the open web —
         # GitHub, OpenAlex, LinkedIn snippets — and resolve or ask, never hand off
         try:
-            from api.person_discovery import discover_candidates, ingest_identity
+            from api.person_discovery import (_mint, discover_candidates, hint_tokens, identity_from_url,
+                                              ingest_identity, url_hint, web_footprint)
+            # A PASTED PROFILE URL is the strongest hint of all: github.com/x / linkedin.com/in/x →
+            # that identity directly, no guessing
+            _u = url_hint(ctx)
+            _ueid = identity_from_url(_u) if _u else ""
+            if _ueid and await ingest_identity(store, _ueid, name_hint=name):
+                return await lookup_person(store, _ueid, "", tenant_id=tenant_id, label=f"{name} — [{_ueid}]")
             web_rows = await discover_candidates(name, ctx)
             held = {r["entity_id"] for r in rows}
             merged = rows + [r for r in web_rows if r["entity_id"] not in held]
@@ -1399,12 +1407,32 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
             if force_discovery and not ctx:
                 res2 = "ambiguous" if len(merged) > 1 else res2   # 'show others': always the list
                 rows2 = merged if len(merged) > 1 else rows2
-            if res2 == "resolved" and rows2 and rows2[0].get("web"):
+            # ALL THE HINTS, ONE WEB SEARCH: when no keyed source (GitHub / OpenAlex / LinkedIn)
+            # matches the hints, search the open web for the name TOGETHER with every hint the user
+            # gave ("Mukul Gupta" cisco bangalore) — pages that mention both become the person's
+            # evidence; only the hints a page confirms become facets
+            _toks = hint_tokens(ctx)
+            _keyed_hit = res2 == "resolved" or (res2 == "ambiguous" and _toks and any(
+                any(t in _row_text(r) for t in _toks) for r in rows2))
+            if _toks and not _keyed_hit:
+                fp = await web_footprint(name, ctx)
+                searched_web = f'"{name}" ' + " ".join(_toks[:6])
+                if fp:
+                    if await _mint(await store._get_pool(), fp["entity_id"], fp):
+                        out = await lookup_person(store, fp["entity_id"], "", tenant_id=tenant_id,
+                                                  label=f"{name} — [{fp['entity_id']}]")
+                        out["person_lookup"]["searched_web"] = searched_web
+                        out["person_lookup"]["web_pages"] = fp.get("web_pages") or []
+                        out["person_lookup"]["web_hits"] = fp.get("web_hits") or []
+                        return out
+                    resolution, rows = "resolved", [fp]
+                    res2 = "resolved"
+            if res2 == "resolved" and rows2 and rows2[0].get("web") and resolution != "resolved":
                 eid = rows2[0]["entity_id"]
                 if await ingest_identity(store, eid, name_hint=name):
                     return await lookup_person(store, eid, "", tenant_id=tenant_id, label=f"{name} — [{eid}]")
                 resolution, rows = "resolved", rows2          # found, not mintable right now: show it
-            elif res2 == "resolved":
+            elif res2 == "resolved" and resolution != "resolved":
                 resolution, rows = res2, rows2
             elif res2 == "ambiguous" and len(rows2) > len(rows):
                 # candidates that carry something to tell them apart first (employer / place /
@@ -1450,6 +1478,10 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
         r["distinguisher"] = _distinguisher(r) + (" · found on " + r["source_label"] if r.get("web") and r.get("source_label") else "")
         r.pop("_facets", None)
     clarify = _clarify_text(display_name, rows, resolution)
+    if resolution == "none" and searched_web:
+        clarify = (f"No public page mentions “{display_name}” together with {', '.join(searched_web.split()[1:])} — "
+                   f"and no GitHub, OpenAlex or LinkedIn profile fits. Not evidence of absence: try another "
+                   f"detail (employer, school, city) or paste a profile URL.")
     if resolution == "ambiguous" and any(r.get("web") for r in rows):
         from api.person_discovery import clarify_web
         n_idx = sum(1 for r in rows if not r.get("web"))
@@ -1463,7 +1495,7 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
             "person_card": build_person_profile_card(display_name, ctx),
             "people_rows": rows,
             "person_lookup": {"resolution": resolution, "name": display_name, "context": ctx,
-                              "clarify": clarify,
+                              "clarify": clarify, "searched_web": searched_web,
                               "candidates": [{"entity_id": r["entity_id"], "name": r["name"],
                                               "label": r["distinguisher"]} for r in rows]}}
 
@@ -1688,7 +1720,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                                    scope_country: str = "",
                                    prior_facets: dict | None = None,
                                    assume_people: bool = False,
-                                   prior_person: str = "",
+                                   prior_person: str = "", prior_context: str = "",
                                    scope_metro: str = "", scope_state: str = "",
                                    evidence_kinds: list[str] | None = None) -> dict:
     """Answer a people-enumeration question from the grounded people index. Always returns a structured
@@ -1728,8 +1760,13 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         f2, p2, c2 = await parse_people_facets(question, llm)
         if p2 and p2.strip().lower() != prior_person.strip().lower():
             return await lookup_person(store, p2, c2, tenant_id=tenant_id)
-        return await lookup_person(store, prior_person, " ".join(x for x in [_q, c2] if x),
-                                   tenant_id=tenant_id)
+        # HINTS ACCUMULATE across turns: "the one at Cisco" then "in Bangalore" → cisco + bangalore
+        _ctx_parts, _seen_ctx = [], set()
+        for x in [prior_context, _q, c2]:
+            for w in (x or "").split():
+                if w.lower() not in _seen_ctx:
+                    _seen_ctx.add(w.lower()); _ctx_parts.append(w)
+        return await lookup_person(store, prior_person, " ".join(_ctx_parts), tenant_id=tenant_id)
     if _prior:
         # REFINEMENT turn: the model applies the utterance to the RUNNING filter — narrow, expand,
         # remove, or replace, following the user's lead (Rule 18) — and returns the full new filter.
