@@ -148,7 +148,8 @@
   .matchresume{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;padding:.6rem .7rem;border:1px solid var(--hair);border-radius:10px;background:var(--panel2);margin:.4rem 0 .2rem;}
   /* Find jobs — stepped layout */
   .msub{font-size:.84rem;color:var(--muted);margin:.35rem 0 .9rem;line-height:1.45;}
-  #matchmodal section.mstep{display:block;flex-direction:initial;align-items:initial;gap:0;}
+  #matchmodal section.mstep,#jdmodal section.mstep{display:block;flex-direction:initial;align-items:initial;gap:0;}
+  #jdmodal .msub{text-align:left;}
   .mstep{display:block;border:1px solid var(--hair);border-radius:12px;background:var(--panel);padding:.85rem 1rem 1rem;margin:.7rem 0;text-align:left;}   /* a global section{display:flex;align-items:center} rule centred everything */
   #matchmodal .msub{text-align:left;}
   .mstep-h{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;font-weight:700;font-size:.98rem;margin-bottom:.35rem;}
@@ -2005,24 +2006,44 @@
 <!-- Recruiter reverse-match: a job description → ranked candidate people -->
 <div class="acctpage" id="jdmodal" hidden aria-label="Find candidates">
   <div class="acctwrap" style="max-width:760px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:.6rem;">
       <h2 style="margin:0;">Find candidates for a role</h2>
       <button type="button" class="histbtn" id="jdclose">← Back</button>
     </div>
-    <p style="font-size:.8rem;color:var(--muted);margin:.3rem 0;">Paste a job description <b>or a link to it</b> — we rank people whose grounded profile best fits it. Country follows your top-right selector.</p>
-    <input id="jdUrl" type="url" style="width:100%;font-size:.86rem;margin-bottom:.4rem;" placeholder="Link to the JD (Greenhouse/Lever/company careers URL) — optional" />
-    <textarea id="jdText" rows="6" style="width:100%;font-size:.9rem;" placeholder="…or paste the full job description here — title, responsibilities, required skills"></textarea>
-    <span class="mlabel">Seniority (pick any)</span>
-    <div class="sentogs" id="jdSenBox"></div>
-    <span class="mlabel">Locations</span>
-    <div class="chipbox" id="jdLocBox"><input id="jdLoc" type="text" placeholder="Add a metro, press Enter"/></div>
-    <label id="jdSrcCoRow" hidden style="display:flex;align-items:center;gap:.45rem;margin:.5rem 0 .2rem;font-size:.82rem;color:var(--muted);cursor:pointer;">
-      <input type="checkbox" id="jdAllowSrcCo" style="width:auto;margin:0;" />
-      Include people currently at the hiring company <span style="opacity:.7;">(off = don’t poach from the client)</span>
-    </label>
-    <div style="margin:.6rem 0;"><button type="button" class="idgo" id="jdGo" style="width:100%;padding:.55rem;">🧲 Find matching candidates</button></div>
-    <div id="jdnote" style="font-size:.78rem;color:var(--muted);"></div>
-    <div id="jdresults" style="margin-top:.4rem;"></div>
+    <p class="msub">Three steps: the role, who you're looking for, then ranked candidates from Roster's grounded people index. Location follows the top-right scope.</p>
+
+    <section class="mstep">
+      <div class="mstep-h"><span class="mstep-n">1</span> The role</div>
+      <span class="mlabel">Job description</span>
+      <textarea id="jdText" rows="7" style="width:100%;font-size:.9rem;" placeholder="Paste the full job description — title, responsibilities, required skills"></textarea>
+      <span class="mlabel">…or a link to it <span class="mhint">Greenhouse, Lever or company careers URL — we read it for you</span></span>
+      <input id="jdUrl" type="url" style="width:100%;font-size:.86rem;" placeholder="https://…" />
+    </section>
+
+    <section class="mstep">
+      <div class="mstep-h"><span class="mstep-n">2</span> Who you're looking for</div>
+      <div class="mgrid">
+        <div>
+          <span class="mlabel">Seniority <span class="mhint">pick any</span></span>
+          <div class="sentogs" id="jdSenBox"></div>
+        </div>
+        <div>
+          <span class="mlabel">Locations <span class="mhint">leave empty to use your scope</span></span>
+          <div class="chipbox" id="jdLocBox"><input id="jdLoc" type="text" placeholder="Add a metro, press Enter"/></div>
+        </div>
+      </div>
+      <label id="jdSrcCoRow" hidden class="mcheck" style="margin-top:.6rem;color:var(--muted);cursor:pointer;">
+        <input type="checkbox" id="jdAllowSrcCo" style="width:auto;margin:0;" />
+        Include people currently at the hiring company <span style="opacity:.7;">(off = don’t poach from the client)</span>
+      </label>
+    </section>
+
+    <section class="mstep">
+      <div class="mstep-h"><span class="mstep-n">3</span> Candidates</div>
+      <button type="button" class="idgo mgo" id="jdGo">🧲 Find matching candidates</button>
+      <div id="jdnote" style="font-size:.8rem;color:var(--muted);margin-top:.5rem;"></div>
+      <div id="jdresults" style="margin-top:.5rem;"></div>
+    </section>
   </div>
 </div>
 <!-- Reach out: draft a message → hand off to whatever channel the person shared (no auto-send) -->
@@ -7608,7 +7629,7 @@ function openJD(){ $("#jdmodal").hidden=false; $("#jdresults").innerHTML=""; $("
 async function runJDMatch(){
   const jd = ($("#jdText").value||"").trim();
   const url = ($("#jdUrl").value||"").trim();
-  if(jd.length < 20 && !url){ $("#jdnote").textContent = "Paste a job description, or a link to it."; return; }
+  if(jd.length < 20 && !url){ $("#jdnote").textContent = "Step 1: paste a job description, or a link to it."; return; }
   $("#jdnote").textContent = (url && jd.length<20) ? "Fetching the JD from the link…" : "Finding matching candidates…";
   $("#jdresults").innerHTML = "";
   const prefs = { job_description: jd, job_url: url, seniorities: Array.from(JD_SENS), locations: JD_LOCS.slice(),
