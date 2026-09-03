@@ -137,14 +137,6 @@ def structured_answers() -> bool:
     return os.environ.get("ROSTER_STRUCTURED_ANSWERS", "").lower() in ("1", "true", "yes")
 
 
-def clinical_synthesis() -> bool:
-    """Flag (default OFF, Rule 20): when ON (and structured answers are ON), the medical vertical's
-    SHARPER clinical-synthesis directive shapes the answer — scope-up-front, registry=protocol-not-
-    efficacy, surrogate≠clinical endpoints, preserve specific figures, no citation stacking, no vague
-    hype. Same adaptive section set — provenance unchanged. OFF → the base answer_format, byte-identical."""
-    return os.environ.get("ROSTER_CLINICAL_SYNTHESIS", "").lower() in ("1", "true", "yes")
-
-
 def vision_enabled() -> bool:
     """Flag (default OFF, Rule 20): when ON, uploaded image/PDF/DICOM attachments are
     described by the vision pre-step and used as CONTEXT for the grounded research. The
@@ -335,13 +327,6 @@ def effort_scale_enabled() -> bool:
 EFFORT_STOPS = [1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5]
 
 
-def patient_mode_enabled() -> bool:
-    """Flag (default OFF, Rule 20): when ON, a request may choose audience='patient' to get a
-    patient-facing answer (same evidence + gates, a plain-language compose directive). OFF → audience
-    is forced 'clinician' and the toggle/echo are hidden (byte-identical to today)."""
-    return os.environ.get("ROSTER_PATIENT_MODE", "").lower() in ("1", "true", "yes")
-
-
 def answer_charts_enabled() -> bool:
     """Flag (default OFF, Rule 20): when ON, append the vertical's chart guidance so compose may emit a
     grounded bar chart (each bar validated against its cited finding in code; ungrounded → dropped).
@@ -504,45 +489,11 @@ def integrative_enabled() -> bool:
 
 def accounts_enabled() -> bool:
     """Flag (default OFF, Rule 20 — adoption P0): when ON, users register a real account
-    (`POST /auth/register`, free verified-clinician tier via structural NPI lookup) and every answer
+    (`POST /auth/register`) and every answer
     carries a feedback affordance (`POST /feedback`) keyed to the W1–W9 warrant taxonomy — the
     accumulating ground-truth signal. OFF → endpoints 404 and the FE keeps the localStorage-only
     identity gate (byte-identical)."""
     return os.environ.get("ROSTER_ACCOUNTS", "").lower() in ("1", "true", "yes")
-
-
-def triage_enabled() -> bool:
-    """Flag (default OFF, Rule 20): when ON, a "Guided" intake mode runs a short clarifying conversation
-    (`POST /triage/step`) that converges on a crisp question and recommends a route (Quick Q&A vs
-    Specialist Panel). One small LLM call per turn, hard-capped; it never answers or advises — only
-    narrows + routes. OFF → the endpoint 404s and the FE shows only the two answer modes."""
-    return os.environ.get("ROSTER_TRIAGE", "").lower() in ("1", "true", "yes")
-
-
-# The clarifying-turn cap (structural convergence guarantee — code owns structure, the LLM owns meaning):
-# after this many assistant questions, the next turn is FORCED to route. Keeps intake from interrogating.
-TRIAGE_MAX_ASK = int(os.environ.get("ROSTER_TRIAGE_MAX_ASK", "2"))
-
-
-def intake_v2_enabled() -> bool:
-    """Flag (default OFF, Rule 20): Guided Intake v2 — /triage/step uses the vertical's v2 directive +
-    the TriageTurnV2 schema (register choice fact/case, structured case_facts, clinical-register
-    refined_question + retrieval_terms) with a per-REGISTER ask backstop. OFF → v1, byte-identical."""
-    return os.environ.get("ROSTER_INTAKE_V2", "").lower() in ("1", "true", "yes")
-
-
-# Under v2 the ask cap is a per-register BACKSTOP (the prompt owns convergence; code owns the ceiling):
-# "fact" keeps the v1 cap; "case" (a described patient/situation) gets room for a structured intake.
-TRIAGE_MAX_ASK_CASE = int(os.environ.get("ROSTER_TRIAGE_MAX_ASK_CASE", "8"))
-
-
-def triage_ask_cap(v2: bool, register: str) -> int:
-    """The forced-convergence ask cap for this turn. v1 → always TRIAGE_MAX_ASK. Under v2 the register
-    (echoed by the LAST assistant turn, posted back by the FE) selects the backstop — absent/unknown
-    defaults to the CASE cap so a lost echo never truncates a structured intake."""
-    if not v2:
-        return TRIAGE_MAX_ASK
-    return TRIAGE_MAX_ASK if register == "fact" else TRIAGE_MAX_ASK_CASE
 
 
 def evidence_fitness_enabled() -> bool:
@@ -1017,12 +968,13 @@ def followup_clarify_enabled() -> bool:
     return os.environ.get("ROSTER_FOLLOWUP_CLARIFY", "").lower() in ("1", "true", "yes")
 
 
+_DEFAULT_AUDIENCE = "clinician"   # the kernel contract's default audience key (roster_kernel.contract) — never user-visible
+
+
 def _resolve_audience(audience: str | None) -> str:
-    """The audience actually used: 'patient' only when the flag is on AND explicitly requested;
-    everything else → 'clinician' (the default, byte-identical path)."""
-    if patient_mode_enabled() and (audience or "").lower() == "patient":
-        return "patient"
-    return "clinician"
+    """Roster serves ONE audience; the request's value is ignored (the inherited patient/clinician
+    switch is gone — the kernel still keys its compose directive by this default)."""
+    return _DEFAULT_AUDIENCE
 
 
 def conversation_enabled() -> bool:
@@ -1167,25 +1119,12 @@ class RefineIn(BaseModel):
     question: str
 
 
-class TriageIn(BaseModel):
-    # The running intake transcript, oldest-first: [{role: "user"|"assistant", text}]. The FE holds it
-    # (stateless server) and appends each turn. The last item is the user's latest message.
-    transcript: list[dict] = []
-    tenant_id: str = "demo"
-    # v2: the LAST assistant turn's echoed register, posted back by the FE. Trusted ONLY for ask-cap
-    # selection (never passed to the model); absent under v2 → the case cap applies (fail-open).
-    register: str = ""
-    # The USER's explicit "wrap up & search now" — forces this turn to route (works under v1 too).
-    wrap_up: bool = False
-
-
 class RegisterIn(BaseModel):
     email: str
     password: str = ""              # >=12 chars (enforced server-side); '' = legacy token-only register
     name: str = ""                  # optional; defaults to the email local-part when blank
     profession: str = ""            # self-declared (Recruiter / Hiring manager / Founder / Engineer / Job seeker / …)
     country: str = ""
-    npi: str = ""                   # optional (US) — structurally verified against the CMS registry
     disclaimer_ack: bool = False    # the attestation from the identity gate
 
 
@@ -1424,10 +1363,6 @@ class TopicsIn(BaseModel):
     answer: str = ""
 
 
-class PatientFlagIn(BaseModel):
-    real_patient: bool = True
-
-
 class Citation(BaseModel):
     text: str
     quote: str
@@ -1575,8 +1510,6 @@ def build_default_service() -> ResearchService:
         and structured_answers()
     if structured_answers():
         answer_format = manifest.answer_format
-        if clinical_synthesis():
-            answer_format = getattr(manifest, "clinical_answer_format", None) or manifest.answer_format
         if _golden:
             answer_format = manifest.golden_answer_directive
     else:
@@ -1625,12 +1558,7 @@ def build_default_service() -> ResearchService:
     # for compose (not the first-come 30). Both are provenance-safe (span+entail gates unchanged).
     evidence_select = os.environ.get("ROSTER_EVIDENCE_SELECT", "").lower() in ("1", "true", "yes")
     atom_cap = int(os.environ.get("ROSTER_ATOM_CAP", "6000" if evidence_select else "1600"))
-    # Patient directive (per-request by audience). Reasoning Read (flag): append the PATIENT-facing
-    # reasoning directive so patient answers get the same purpose→factors→judgment→confidence arc in
-    # plain language (same structured fields + code validation as the clinician path).
-    patient_directive = manifest.patient_answer_format if patient_mode_enabled() else None
-    if patient_directive and reasoning_read_enabled() and getattr(manifest, "patient_reasoning_format", None):
-        patient_directive = patient_directive + "\n\n" + manifest.patient_reasoning_format
+    patient_directive = None      # single audience: no per-request alternate compose directive
     # Cross-family judge (flag, default OFF — Rule 20). When ON *and* a key is present, wire a
     # DIFFERENT-family (OpenAI) model as derive_judge_llm — this activates the cross-family grounding
     # gate and makes derive's validity judge cross-family. OFF or no key → None (today's behavior:
@@ -1748,9 +1676,6 @@ def build_default_service() -> ResearchService:
         panel_decision_addendum=getattr(manifest, "panel_decision_addendum", None),
         sources=sources, gating=manifest.gating_policy, persona_prompt=persona,
         answer_format=answer_format,
-        # Patient directive resolved INDEPENDENTLY of structured_answers/clinical_synthesis — the
-        # patient view selects it per-request by audience, so it must be available even when the
-        # clinician structured-answer flags are off (else patient mode would silently no-op).
         patient_answer_format=patient_directive,
         vision_prompt=vision_prompt, report_prompt=report_prompt,
         layman_prompt=manifest.layman_prompt, gap_prompt=gap_prompt,
@@ -1946,7 +1871,7 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
     # Flags the admin panel can flip LIVE (DB override wins; empty → env default). Only flags whose
     # gating is fully REQUEST-time belong here — accounts_enabled stays env-only (it gates store
     # construction at boot). New product settings land in this dict going forward.
-    _LIVE_FLAGS = {"duel_enabled": duel_enabled, "triage_enabled": triage_enabled,
+    _LIVE_FLAGS = {"duel_enabled": duel_enabled,
                    "ask_panel_enabled": ask_panel_enabled, "integrative_enabled": integrative_enabled,
                    "reasoned_default_enabled": reasoned_default_enabled}
 
@@ -2041,7 +1966,6 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             app.state.service = build_default_service()
         svc = app.state.service
         live_panel = await _flag_live("ask_panel_enabled")
-        live_triage = await _flag_live("triage_enabled")
         live_duel = await _flag_live("duel_enabled")
         ui = getattr(svc, "ui", None)
         from api.video import video_enabled
@@ -2055,7 +1979,6 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             "console": console,
             "video_enabled": video_enabled(),
             "structured_answers": structured_answers(),
-            "clinical_synthesis": clinical_synthesis() and structured_answers(),
             "evidence_select": bool(getattr(svc, "evidence_select", False)),
             "vision_enabled": vision_enabled(),
             "layman_enabled": bool(getattr(svc, "layman_prompt", None)),
@@ -2069,13 +1992,11 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             "visual_augment_enabled": visual_augment_enabled() and bool(getattr(svc, "visuals_prompt", None)),
             "visual_auto_enabled": (visual_auto_enabled() and visual_augment_enabled()
                                     and bool(getattr(svc, "visuals_prompt", None))),
-            "voice_intake_enabled": voice_intake_enabled() and live_triage,
-            "voice_tts_neural": (voice_intake_enabled() and live_triage
-                                 and bool(os.environ.get("OPENAI_API_KEY"))),
+            "voice_intake_enabled": False,        # guided intake (inherited) is retired
+            "voice_tts_neural": False,
             "stream_enabled": stream_enabled(),
             "effort_scale_enabled": effort_scale_enabled(),
             "effort_stops": EFFORT_STOPS if effort_scale_enabled() else [],
-            "patient_mode_enabled": patient_mode_enabled(),
             "answer_focus_enabled": answer_focus_enabled(),
             "followup_clarify_enabled": followup_clarify_enabled(),
             "answer_visuals_enabled": answer_visuals_enabled(),
@@ -2100,7 +2021,7 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
                 for s in getattr(svc, "panel_specialists", ())] if live_panel else []),
             "panel_examples": (list(getattr(svc, "panel_examples", ())) if live_panel else []),
             "refine_enabled": refine_enabled() and bool(getattr(svc, "refine_prompt", None)),
-            "triage_enabled": live_triage and bool(getattr(svc, "triage_prompt", None)),
+            "triage_enabled": False,
             "pulse_enabled": pulse_enabled() and bool(os.environ.get("ROSTER_CORPUS_DSN")),
             "graph_enabled": graph_enabled() and bool(os.environ.get("ROSTER_CORPUS_DSN")),
             "graph_expand": graph_expand_mode(),
@@ -4105,7 +4026,6 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         history = body.history if conversation_enabled() else None
         # Effort is HONORED only when the flag is on; otherwise forced to 1.0 (byte-identical no-op).
         effort = body.effort if effort_scale_enabled() else 1.0
-        # Audience is HONORED only when the flag is on; otherwise forced 'clinician' (byte-identical).
         audience = _resolve_audience(body.audience)
         if on_event is not None and effort > 1.0:
             await on_event({"type": "effort", "effort": effort})
@@ -4242,8 +4162,6 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     "visual_observation": res.visual_observation, "attachments": previews}
             if effort_scale_enabled():
                 turn["effort"] = res.effort    # per-turn badge on the session (JSONB, no migration)
-            if patient_mode_enabled():
-                turn["audience"] = audience    # per-turn audience tag (only under the flag)
             if answer_charts_enabled() and getattr(res, "charts", None):
                 turn["charts"] = res.charts    # persist grounded charts so a reopened session shows them
             if reasoning_read_enabled():
@@ -4333,7 +4251,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             retried_empty=res.retried_empty, visual_observation=res.visual_observation,
             attachment_notes=attach_notes,
             effort=res.effort if effort_scale_enabled() else None,
-            audience=audience if patient_mode_enabled() else None,
+            audience=None,
             resolved_question=(res.resolved_question or None) if answer_focus_enabled() else None,
             derived_from_prior=bool(getattr(res, "derived_from_prior", False)),
             charts=(getattr(res, "charts", []) or []) if answer_charts_enabled() else [],
@@ -4634,40 +4552,6 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         except Exception:                  # provider error → fail open (answer the original)
             return {"refinements": []}
         return {"refinements": opts}
-
-    @app.post("/triage/step")
-    async def triage_step(body: TriageIn) -> dict:
-        """Guided-intake / triage: one clarifying turn. Given the running transcript, return either the
-        next clarifying question (status="ask") or a crisp refined question + recommended route
-        (status="qa"|"panel", via `recommended_mode`) when ready. Stateless — the FE holds the transcript.
-        404 when the flag/vertical is off. Never answers the medical question; only narrows + routes.
-
-        Convergence is code-guaranteed: once the assistant has already asked TRIAGE_MAX_ASK questions
-        (per-register backstop under ROSTER_INTAKE_V2: fact=TRIAGE_MAX_ASK, case=TRIAGE_MAX_ASK_CASE),
-        this turn is FORCED to route (the LLM still owns whether/what to ask below that cap — Rule 18).
-        `wrap_up` (the user's explicit "search now") forces a route on any turn."""
-        if not await _flag_live("triage_enabled"):
-            raise HTTPException(status_code=404, detail="triage mode is not enabled")
-        if app.state.service is None:
-            app.state.service = build_default_service()
-        svc = app.state.service
-        if not getattr(svc, "triage_prompt", None):
-            raise HTTPException(status_code=404, detail="triage mode is not enabled")
-        transcript = [t for t in (body.transcript or []) if isinstance(t, dict) and (t.get("text") or "").strip()]
-        if not transcript:
-            raise HTTPException(status_code=400, detail="transcript is empty")
-        v2 = intake_v2_enabled()
-        asked = sum(1 for t in transcript if (t.get("role") or "") == "assistant")
-        force_ready = bool(body.wrap_up) or asked >= triage_ask_cap(v2, (body.register or "").strip().lower())
-        try:
-            return await svc.triage(transcript=transcript, force_ready=force_ready, v2=v2)
-        except CassetteMiss:
-            # replay mode → route the last user message straight to Q&A (never dead-end)
-            last = next((t["text"] for t in reversed(transcript) if t.get("role") == "user"), "")
-            return {"status": "ready", "recommended_mode": "qa", "refined_question": last,
-                    "understood_problem": last, "message": "Searching that now.", "safety": "ok"}
-        except Exception as e:   # noqa: BLE001 — never dead-end the user
-            raise HTTPException(status_code=502, detail=f"triage error: {e}") from e
 
     @app.post("/corpus/gap-plan")
     async def corpus_gap_plan(body: GapPlanIn) -> dict:
@@ -5423,15 +5307,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                 detail="an account with that email already exists — please sign in")
         from api.accounts import hash_password
         pw_hash, pw_salt = hash_password(body.password)
-        npi_ok = False
-        if body.npi.strip():
-            from api.accounts import verify_npi
-            npi_ok = await verify_npi(body.npi)
         try:
             user, token = await store.register(
                 email=body.email, name=name, profession=body.profession[:80],
-                country=body.country[:40], npi=body.npi.strip()[:16], npi_verified=npi_ok,
-                disclaimer_ack=body.disclaimer_ack, pw_hash=pw_hash, pw_salt=pw_salt)
+                country=body.country[:40], disclaimer_ack=body.disclaimer_ack, pw_hash=pw_hash, pw_salt=pw_salt)
         except Exception as e:
             raise HTTPException(status_code=502, detail=f"registration failed: {e}") from e
         return {"user": user, "token": token}
@@ -6436,12 +6315,11 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     async def list_sessions(tenant_id: str = "demo", limit: int = 100, q: str = "",
                             audience: str = "", kind: str = "") -> dict:
         """Recent saved Q&A for this vertical + tenant (history), optional search `q`, an optional
-        `kind` filter ('panel'|'research') for the Past-Sessions tabs, and — when the patient-mode
-        flag is on — an optional audience filter ('clinician'|'patient')."""
+        `kind` filter ('panel'|'research') for the Past-Sessions tabs. (`audience` is accepted and ignored.)"""
         store = _store()
         if store is None:
             return {"sessions": []}
-        aud = audience if (patient_mode_enabled() and audience in ("clinician", "patient")) else None
+        aud = None
         knd = kind if kind in ("panel", "research", "crossview") else None
         try:
             return {"sessions": await store.list(tenant_id=tenant_id, limit=min(limit, 300),
@@ -6485,16 +6363,6 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         if not await store.soft_delete(session_id):
             raise HTTPException(status_code=404, detail="session not found")
         return {"deleted": True}
-
-    @app.post("/sessions/{session_id}/patient-flag")
-    async def session_patient_flag(session_id: str, body: PatientFlagIn) -> dict:
-        """Mark/unmark a session as a REAL-WORLD PATIENT case (orange ◉ in the session list)."""
-        store = _store()
-        if store is None:
-            raise HTTPException(status_code=404, detail="no session store")
-        if not await store.set_real_patient(session_id, body.real_patient):
-            raise HTTPException(status_code=404, detail="session not found")
-        return {"id": session_id, "real_patient": body.real_patient}
 
     @app.get("/admin/coverage")
     async def admin_coverage() -> dict:

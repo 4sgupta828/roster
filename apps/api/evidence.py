@@ -59,7 +59,7 @@ FAMILY_LABELS = {
     "github": "the person's own GitHub profile",
     "openalex": "OpenAlex scholarly registry (derived from published works)",
     "yc": "Y Combinator company directory",
-    "npi": "NPI clinician registry",
+    "npi": "NPI registry (US licensed-provider directory)",
     "sec": "SEC EDGAR filings",
     "theorg": "TheOrg company org-chart page",
     "aifund": "AI Fund portfolio page",

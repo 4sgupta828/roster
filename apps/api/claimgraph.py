@@ -1642,7 +1642,7 @@ class ClaimGraphStore:
         exactly what has been ingested."""
         pool = await self._get_pool()
         SRC = [("GitHub engineers", "github:%"), ("OpenAlex researchers", "openalex:%"),
-               ("NPI clinicians", "npi:%"), ("YC founders", "yc:%"), ("SEC execs", "sec:%"),
+               ("NPI registry", "npi:%"), ("YC founders", "yc:%"), ("SEC execs", "sec:%"),
                ("The Org (business)", "theorg:%"), ("AI Fund founders", "aifund:%"),
                ("Entrepreneur First", "ef:%"), ("Pear VC", "pear:%"), ("SOSV", "sosv:%")]
         DIMS = ["role", "seniority", "function", "skill", "industry", "stage", "accelerator",

@@ -1,7 +1,7 @@
 """Accounts + feedback persistence (adoption P0) — app-level, kernel-free, same Postgres as sessions.
 
 Two tables, one store:
-  - roster_user: registered users (verified-clinician free tier). Registration is upsert-on-email and
+  - roster_user: registered users. Registration is upsert-on-email and
     issues a bearer token (sha256 stored, raw returned ONCE). NPI verification (US) is a structural
     lookup against the public CMS registry — a computable fact, not a semantic judgment (Rule 18).
   - roster_feedback: per-answer user feedback keyed to the SAME W1–W9 warrant taxonomy the eval and
@@ -141,7 +141,6 @@ ALTER TABLE roster_candidate_profile ADD COLUMN IF NOT EXISTS parsed_at TIMESTAM
 
 _MAX_TOKENS_PER_USER = 10   # prune oldest beyond this (a lost device's token eventually ages out)
 
-_NPI_API = "https://npiregistry.cms.hhs.gov/api/?version=2.1&number="
 
 
 def _hash(token: str) -> str:
@@ -168,28 +167,6 @@ def verify_password(password: str, pw_hash_hex: str, pw_salt_hex: str) -> bool:
         salt = b"\x00" * 16
     dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _PBKDF2_ITER)
     return _hmac.compare_digest(dk.hex(), pw_hash_hex or "")
-
-
-async def verify_npi(npi: str) -> bool:
-    """Structural verification against the public CMS NPI registry: the number exists AND is an
-    individual provider (NPI-1). A registry lookup is a computable fact (Rule 18). Fail-safe:
-    any error/timeout → False (registration still succeeds, just unverified — retryable later)."""
-    npi = (npi or "").strip()
-    if not (npi.isdigit() and len(npi) == 10):
-        return False
-
-    def _fetch() -> bool:
-        with urllib.request.urlopen(_NPI_API + urllib.parse.quote(npi), timeout=6) as r:
-            data = json.loads(r.read().decode())
-        for res in data.get("results") or []:
-            if str(res.get("number")) == npi and res.get("enumeration_type") == "NPI-1":
-                return True
-        return False
-
-    try:
-        return await asyncio.to_thread(_fetch)
-    except Exception:   # noqa: BLE001 — verification is best-effort, never blocks registration
-        return False
 
 
 class AccountStore:
