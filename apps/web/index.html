@@ -2812,7 +2812,7 @@ function peopleRowsMarkup(data){
     const liH = (p.linkedin && p.linkedin.headline) || (attr("linkedin_headline").display || "");
     const liFit = p.linkedin && typeof p.linkedin.headline_fit === "number" ? Math.round(p.linkedin.headline_fit*100) : null;
     const liLine = liH ? `<span class="ppl-li" title="The person's own LinkedIn headline, quoted from a search-engine snippet (self-stated)">in “${esc(liH)}”${liFit!==null?` <span class="ppl-lifit">${liFit>=50?"fits the brief well":liFit>=30?"partly fits the brief":"does not obviously fit the brief"}</span>`:""}</span>`
-      : (p.linkedin && p.linkedin.status && p.linkedin.status!=="resolved" && p.linkedin.status!=="already" ? `<span class="ppl-li ppl-li-none">in ${p.linkedin.status==="ambiguous"?"several same-named profiles — none confirmed":p.linkedin.status==="quota"?"snippet quota reached today":p.linkedin.status==="unavailable"?"search leg unavailable":"no same-named profile in snippets"}</span>` : "");
+      : "";   // no headline → nothing on the card (a 'not found / ambiguous' line is noise; the panel's Unconfirmed line covers it)
     return `<div class="ppl-card person-card" data-ref="${esc(ref)}" title="Click for the evidence behind this card">${acts}${avatar}
       <span class="ppl-body">
         ${nameHtml}
