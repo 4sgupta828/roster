@@ -1354,7 +1354,13 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
             elif res2 == "resolved":
                 resolution, rows = res2, rows2
             elif res2 == "ambiguous" and len(rows2) > len(rows):
-                resolution, rows = "ambiguous", rows2
+                # candidates that carry something to tell them apart first (employer / place /
+                # headline); bare profiles last; capped so the question stays answerable
+                def _info(r):
+                    return sum(1 for a in r.get("attributes") or [] if a.get("key") in ("company", "metro", "title", "country") and a.get("display"))
+                rows2 = sorted(rows2, key=lambda r: (0 if not r.get("web") else 1, -_info(r)))
+                resolution, rows = "ambiguous", rows2[:12]
+                web_rows = rows2
         except Exception as e:  # noqa: BLE001 — discovery is additive; the honest 'none' remains
             _log.info("open-web discovery skipped for %s: %s", name, e)
     if resolution == "resolved":
@@ -1394,9 +1400,12 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
     if resolution == "ambiguous" and any(r.get("web") for r in rows):
         from api.person_discovery import clarify_web
         n_idx = sum(1 for r in rows if not r.get("web"))
-        clarify = (clarify_web(display_name, [r for r in rows if r.get("web")]) if not n_idx else
-                   f"Which {display_name}? {n_idx} in Roster's index plus {len(rows) - n_idx} found on the open web. "
+        n_web_all = sum(1 for r in web_rows if r.get("web")) or (len(rows) - n_idx)
+        clarify = (clarify_web(display_name, [r for r in web_rows if r.get("web")] or [r for r in rows if r.get("web")]) if not n_idx else
+                   f"Which {display_name}? {n_idx} in Roster's index plus {n_web_all} found on the open web. "
                    f"Pick one, or add a company, school or location.")
+        if n_web_all > len([r for r in rows if r.get("web")]):
+            clarify += f" Showing the {len(rows)} most distinguishable of {n_web_all + n_idx}."
     return {"kind": "person", "not_people_query": False,
             "person_card": build_person_profile_card(display_name, ctx),
             "people_rows": rows,
