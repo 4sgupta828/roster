@@ -550,9 +550,9 @@
   .ev-filterbar{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;}
   .evfilters{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:.4rem auto 0;max-width:var(--wrapw,880px);padding:0 .2rem;font-size:.76rem;color:var(--muted);}
   .evfilters[hidden]{display:none!important;}   /* the flex rule must not defeat the hidden attribute (Jobs / Q&A) */
-  .evf-lbl{font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;margin-right:.25rem;opacity:.8;}
-  #evfilters .ev-filter{min-height:32px;padding:.2rem .65rem;border:1px dashed var(--hair);border-radius:999px;background:transparent;color:var(--muted);font-size:.74rem;cursor:pointer;}
-  #evfilters .ev-filter:hover{border-style:solid;color:var(--ink);}
+  .evf-lbl{font-family:var(--mono);font-size:.64rem;letter-spacing:.08em;text-transform:uppercase;margin-right:.35rem;padding:.3rem .6rem;border-radius:6px;background:var(--gold);color:var(--on-accent);font-weight:700;}
+  #evfilters .ev-filter{min-height:32px;padding:.2rem .65rem;border:1.5px solid var(--gold);border-radius:999px;background:transparent;color:var(--ink);font-size:.74rem;font-weight:500;cursor:pointer;}
+  #evfilters .ev-filter:hover{background:rgba(var(--gold-rgb),.12);}
   #evfilters .ev-filter.on{border:1px solid var(--gold);background:rgba(var(--gold-rgb),.1);color:var(--gold-strong);font-weight:600;}
   #evfilters .ev-filter.on::before{content:"✓ ";}
   .ev-filter{min-height:36px;padding:.25rem .7rem;border:1px solid var(--hair);border-radius:999px;background:var(--panel);color:var(--ink);font-size:.76rem;cursor:pointer;}
