@@ -79,6 +79,37 @@ class R2Named:
     def get(self, key: str) -> bytes:
         return self._c().get_object(Bucket=self._bucket, Key=key)["Body"].read()
 
+    def delete(self, keys: list[str]) -> int:
+        n = 0
+        for i in range(0, len(keys), 1000):
+            chunk = keys[i:i + 1000]
+            self._c().delete_objects(Bucket=self._bucket,
+                                     Delete={"Objects": [{"Key": k} for k in chunk], "Quiet": True})
+            n += len(chunk)
+        return n
+
+
+def backup_dates(store) -> list[str]:
+    """Backup dates present in R2 (those with a MANIFEST.json), oldest first."""
+    days = sorted({k.split("/")[1] for k in store.list("backups/") if k.endswith("/MANIFEST.json")})
+    return days
+
+
+def prune_backups(store, *, keep: int = 2, dry: bool = False) -> dict:
+    """RETENTION: keep the newest `keep` COMPLETE backups (a date with a MANIFEST.json), delete the
+    older dates. A date without a manifest is an unfinished/failed run and is left alone unless it
+    is older than every kept complete backup. Called after a clean run; also usable by hand."""
+    complete = backup_dates(store)
+    keep_days = set(complete[-keep:]) if keep > 0 else set()
+    all_days = sorted({k.split("/")[1] for k in store.list("backups/") if k.count("/") >= 2})
+    oldest_kept = min(keep_days) if keep_days else ""
+    victims = [d for d in all_days if d not in keep_days and (d in complete or (oldest_kept and d < oldest_kept))]
+    deleted = {}
+    for d in victims:
+        keys = store.list(f"backups/{d}/")
+        deleted[d] = len(keys) if dry else store.delete(keys)
+    return {"kept": sorted(keep_days), "deleted": deleted, "dry": dry}
+
 
 async def _dumpable_cols(conn, table: str) -> list[str]:
     """Columns of `table` safe to dump — EXCLUDING vector/tsvector columns (embeddings + full-text
@@ -147,4 +178,114 @@ async def run_backup(dsn: str, store) -> dict:
     manifest["finished_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
     store.put(f"{base}/MANIFEST.json", json.dumps(manifest, indent=1).encode(),
               content_type="application/json")
+    # RETENTION: a clean run makes older backups obsolete — keep ROSTER_BACKUP_KEEP (default 2)
+    if not manifest["errors"]:
+        try:
+            import os
+            manifest["pruned"] = prune_backups(store, keep=int(os.environ.get("ROSTER_BACKUP_KEEP", "2") or 2))
+        except Exception as e:   # noqa: BLE001 — retention never fails a backup
+            manifest["pruned"] = {"error": str(e)[:200]}
     return manifest
+
+
+# --------------------------------------------------------------------------- #
+# RESTORE — the recreate path (scripts/restore_from_backup.py). Never runs on its own.        #
+# --------------------------------------------------------------------------- #
+RESTORE_ORDER = CRITICAL_TABLES + _STREAM_TABLES     # dependency-friendly: users → sessions → index
+
+
+def _pg_cast(udt: str) -> str:
+    """Parameter cast for a column's udt_name so JSON-typed values (strings for timestamps, dates,
+    jsonb; lists for arrays) land in the right Postgres type. Array udts are '_text' etc."""
+    if udt.startswith("_"):
+        return udt[1:] + "[]"
+    return udt
+
+
+def insert_sql(table: str, cols: list[str], udts: dict[str, str]) -> str:
+    """Idempotent row insert: ON CONFLICT DO NOTHING (any unique violation = the row is already
+    there), so a restore can be re-run or applied over a partially-restored table safely."""
+    collist = ", ".join(f'"{c}"' for c in cols)
+    params = ", ".join(f"${i + 1}::{_pg_cast(udts.get(c, 'text'))}" for i, c in enumerate(cols))
+    return f'INSERT INTO {table} ({collist}) VALUES ({params}) ON CONFLICT DO NOTHING'
+
+
+def coerce_value(v, udt: str):
+    """JSON → parameter: jsonb/json columns take their JSON TEXT (asyncpg encodes jsonb as text);
+    dict/list values for other columns are re-serialized; everything else passes through as text."""
+    if udt in ("jsonb", "json"):
+        return v if isinstance(v, str) or v is None else json.dumps(v)
+    if udt.startswith("_"):                    # array column: a JSON list already
+        return v
+    if isinstance(v, (dict, list)):
+        return json.dumps(v)
+    return v
+
+
+async def table_udts(conn, table: str) -> dict[str, str]:
+    rows = await conn.fetch(
+        "SELECT column_name, udt_name FROM information_schema.columns WHERE table_name = $1", table)
+    return {r["column_name"]: r["udt_name"] for r in rows}
+
+
+async def restore_table(conn, store, base: str, table: str, *, live: bool, batch: int = 2000) -> dict:
+    """Load every part of `table` from `backups/<date>/` into Postgres (schema must already exist —
+    the app creates it at startup). Dry by default: counts rows without writing. Columns absent
+    from the live table are dropped from the insert (schema drift tolerated, reported)."""
+    keys = sorted(k for k in store.list(f"{base}/{table}") if k.endswith(".jsonl.gz")
+                  and (k.endswith(f"/{table}.jsonl.gz") or f"/{table}-part" in k))
+    if not keys:
+        return {"table": table, "status": "absent in backup"}
+    udts = await table_udts(conn, table)
+    if not udts:
+        return {"table": table, "status": "table missing in target — create the schema first", "parts": len(keys)}
+    rows_seen = rows_in = 0
+    dropped_cols: set[str] = set()
+    sql = None
+    cols: list[str] = []
+    for k in keys:
+        lines = gzip.decompress(store.get(k)).decode().split("\n")
+        buf = []
+        for ln in lines:
+            if not ln.strip():
+                continue
+            rec = json.loads(ln)
+            rows_seen += 1
+            if not cols:
+                cols = [c for c in rec.keys() if c in udts]
+                dropped_cols |= {c for c in rec.keys() if c not in udts}
+                sql = insert_sql(table, cols, udts)
+            buf.append([coerce_value(rec.get(c), udts[c]) for c in cols])
+            if live and len(buf) >= batch:
+                await conn.executemany(sql, buf); rows_in += len(buf); buf = []
+        if live and buf:
+            await conn.executemany(sql, buf); rows_in += len(buf)
+    return {"table": table, "status": "restored" if live else "dry", "parts": len(keys),
+            "rows_in_backup": rows_seen, "rows_written": rows_in if live else 0,
+            "dropped_columns": sorted(dropped_cols)}
+
+
+async def run_restore(dsn: str, store, *, date: str = "", tables: list[str] | None = None,
+                      live: bool = False) -> dict:
+    """Restore a dated backup (default: the newest complete one). Dry by default. Idempotent."""
+    import asyncpg
+    days = backup_dates(store)
+    if not days:
+        return {"error": "no complete backup (MANIFEST.json) in R2"}
+    day = date or days[-1]
+    if day not in days:
+        return {"error": f"no complete backup for {day}; have {days}"}
+    base = f"backups/{day}"
+    manifest = json.loads(store.get(f"{base}/MANIFEST.json").decode())
+    want = [t for t in RESTORE_ORDER if not tables or t in tables]
+    conn = await asyncpg.connect(dsn)
+    out = {"date": day, "live": live, "manifest_finished_at": manifest.get("finished_at"), "tables": []}
+    try:
+        for t in want:
+            try:
+                out["tables"].append(await restore_table(conn, store, base, t, live=live))
+            except Exception as e:   # noqa: BLE001 — one table never aborts the restore; it is reported
+                out["tables"].append({"table": t, "status": f"error: {str(e)[:200]}"})
+    finally:
+        await conn.close()
+    return out
