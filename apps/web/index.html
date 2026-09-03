@@ -548,6 +548,13 @@
   .ppl-lifit{font-family:var(--mono);font-size:.64rem;color:var(--muted);margin-left:.3rem;}
   .ppl-tag-topic{background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);font-weight:600;}
   .ppl-scopebar{border-left-color:var(--person)!important;}
+  .ev-inline{margin-top:.55rem;padding:.6rem .8rem .7rem;border:1px solid var(--hair);border-left:3px solid var(--gold);border-radius:8px;background:var(--panel);cursor:default;font-size:.84rem;line-height:1.45;}
+  .ev-inline .er-sec:first-child{margin-top:.1rem;}
+  .ppl-card.person-card{cursor:pointer;}
+  .ppl-card.person-card:hover{border-color:var(--gold);}
+  .ppl-card.person-card .ev-inline, .ppl-card.person-card .ev-inline *{cursor:auto;}
+  .ppl-card.person-card .ev-inline a, .ppl-card.person-card .ev-inline button, .ppl-card.person-card .ev-inline select, .ppl-card.person-card .ev-inline summary{cursor:pointer;}
+  .ev-hint{font-size:.7rem;color:var(--muted);margin-left:.35rem;}
   .job-card{cursor:pointer;}
   .job-card:hover{border-color:var(--gold);}
   .job-card .js-summary{cursor:default;}
@@ -575,23 +582,23 @@
   .ppl-more:hover,.ppl-rerank:hover{background:rgba(var(--gold-rgb),.08);}
   /* public FOOTPRINT strip: artifacts linked by identity key (papers · repos · orgs · newest year) */
   .ppl-fp{display:block;font-family:var(--mono);font-size:.66rem;color:var(--muted);margin-top:.25rem;letter-spacing:.02em;line-height:1.5;}
-  #evrail .er-rank{display:block;margin-top:.35rem;font-size:.82rem;color:var(--ink);}
-  #evrail .er-head{margin:.2rem 0 .4rem;}
-  #evrail .er-list{margin:.2rem 0 0 1.05rem;padding:0;font-size:.88rem;line-height:1.5;}
-  #evrail .er-list li{margin:.15rem 0;}
-  #evrail .er-unknown li{color:var(--gap);}
-  #evrail .er-claim{padding:.4rem 0;border-top:1px solid var(--hair);}
-  #evrail .er-claim .er-v{font-size:.9rem;}
-  #evrail details.er-bio,#evrail details.er-facts{margin-top:.6rem;}
-  #evrail details summary{cursor:pointer;font-size:.8rem;color:var(--gold);min-height:40px;line-height:40px;}
-  #evrail .er-li{display:inline-block;min-height:40px;margin:.15rem 0;padding:.3rem .7rem;border:1px dashed var(--gold);border-radius:999px;background:none;color:var(--gold);font-size:.78rem;font-weight:600;cursor:pointer;}
-  #evrail .er-li:disabled{opacity:.6;cursor:wait;}
-  #evrail .er-kind{margin:.55rem 0 .1rem;}
-  #evrail .er-kind-h{font-family:var(--mono);font-size:.66rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink);font-weight:700;}
-  #evrail .er-art{font-size:.8rem;line-height:1.4;padding:.32rem 0;border-top:1px solid var(--hair);}
-  #evrail .er-art a{color:var(--gold);text-decoration:none;}
-  #evrail .er-art-k{font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-right:.3rem;}
-  #evrail .er-art-m{display:block;font-size:.72rem;color:var(--muted);}
+  .ev-inline .er-rank{display:block;margin-top:.35rem;font-size:.82rem;color:var(--ink);}
+  .ev-inline .er-head{margin:.2rem 0 .4rem;}
+  .ev-inline .er-list{margin:.2rem 0 0 1.05rem;padding:0;font-size:.88rem;line-height:1.5;}
+  .ev-inline .er-list li{margin:.15rem 0;}
+  .ev-inline .er-unknown li{color:var(--gap);}
+  .ev-inline .er-claim{padding:.4rem 0;border-top:1px solid var(--hair);}
+  .ev-inline .er-claim .er-v{font-size:.9rem;}
+  .ev-inline details.er-bio,.ev-inline details.er-facts{margin-top:.6rem;}
+  .ev-inline details summary{cursor:pointer;font-size:.8rem;color:var(--gold);min-height:40px;line-height:40px;}
+  .ev-inline .er-li{display:inline-block;min-height:40px;margin:.15rem 0;padding:.3rem .7rem;border:1px dashed var(--gold);border-radius:999px;background:none;color:var(--gold);font-size:.78rem;font-weight:600;cursor:pointer;}
+  .ev-inline .er-li:disabled{opacity:.6;cursor:wait;}
+  .ev-inline .er-kind{margin:.55rem 0 .1rem;}
+  .ev-inline .er-kind-h{font-family:var(--mono);font-size:.66rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink);font-weight:700;}
+  .ev-inline .er-art{font-size:.8rem;line-height:1.4;padding:.32rem 0;border-top:1px solid var(--hair);}
+  .ev-inline .er-art a{color:var(--gold);text-decoration:none;}
+  .ev-inline .er-art-k{font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-right:.3rem;}
+  .ev-inline .er-art-m{display:block;font-size:.72rem;color:var(--muted);}
   /* SAVED MAPS (Phase 3): the map bar above a Talent Map result + the header entry point. */
   #mapsbtn{display:none;} body.logged-in #mapsbtn{display:inline-block;}
   .mapbar{display:flex;flex-wrap:wrap;gap:.45rem;align-items:center;margin:.55rem 0 .8rem;padding:.55rem .7rem;border:1px solid var(--hair);border-radius:10px;background:var(--panel2);}
@@ -606,19 +613,19 @@
   #evrail{position:fixed;top:0;right:0;height:100vh;width:min(420px,100vw);background:var(--panel);border-left:1px solid var(--hair);
     box-shadow:-12px 0 32px -18px rgba(0,0,0,.35);z-index:1250;overflow-y:auto;padding:1rem 1.1rem 2rem;transform:translateX(100%);transition:transform .2s ease;}
   #evrail.on{transform:translateX(0);}
-  #evrail .er-x{position:absolute;top:.6rem;right:.7rem;width:40px;height:40px;border:0;background:var(--panel2);border-radius:999px;cursor:pointer;font-size:1.1rem;color:var(--ink);}
-  #evrail h3{font-family:var(--serif);font-size:1.15rem;margin:.2rem 2.6rem .1rem 0;line-height:1.25;}
-  #evrail .er-sub{font-size:.82rem;color:var(--muted);margin-bottom:.8rem;}
-  #evrail .er-sec{font-family:var(--mono);font-size:.62rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:1rem 0 .35rem;}
-  #evrail .er-why{font-size:.9rem;line-height:1.5;}
-  #evrail .er-row{display:grid;grid-template-columns:1fr auto;gap:.35rem .6rem;align-items:start;padding:.42rem 0;border-top:1px solid var(--hair);font-size:.84rem;}
-  #evrail .er-k{font-family:var(--mono);font-size:.64rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}
-  #evrail .er-v{color:var(--ink);font-weight:560;}
-  #evrail .er-src{grid-column:1/-1;font-size:.74rem;color:var(--muted);}
-  #evrail .er-src a{color:var(--gold);text-decoration:none;}
-  #evrail .er-gap{font-size:.82rem;color:var(--gap);}
-  #evrail .er-links a{display:inline-block;margin:.15rem .4rem .15rem 0;font-size:.8rem;color:var(--gold);text-decoration:none;min-height:40px;line-height:40px;}
-  #evrail .er-note{font-size:.76rem;color:var(--muted);margin-top:.9rem;line-height:1.45;}
+  .ev-inline .er-x{position:absolute;top:.6rem;right:.7rem;width:40px;height:40px;border:0;background:var(--panel2);border-radius:999px;cursor:pointer;font-size:1.1rem;color:var(--ink);}
+  .ev-inline h3{font-family:var(--serif);font-size:1.15rem;margin:.2rem 2.6rem .1rem 0;line-height:1.25;}
+  .ev-inline .er-sub{font-size:.82rem;color:var(--muted);margin-bottom:.8rem;}
+  .ev-inline .er-sec{font-family:var(--mono);font-size:.62rem;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:1rem 0 .35rem;}
+  .ev-inline .er-why{font-size:.9rem;line-height:1.5;}
+  .ev-inline .er-row{display:grid;grid-template-columns:1fr auto;gap:.35rem .6rem;align-items:start;padding:.42rem 0;border-top:1px solid var(--hair);font-size:.84rem;}
+  .ev-inline .er-k{font-family:var(--mono);font-size:.64rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;}
+  .ev-inline .er-v{color:var(--ink);font-weight:560;}
+  .ev-inline .er-src{grid-column:1/-1;font-size:.74rem;color:var(--muted);}
+  .ev-inline .er-src a{color:var(--gold);text-decoration:none;}
+  .ev-inline .er-gap{font-size:.82rem;color:var(--gap);}
+  .ev-inline .er-links a{display:inline-block;margin:.15rem .4rem .15rem 0;font-size:.8rem;color:var(--gold);text-decoration:none;min-height:40px;line-height:40px;}
+  .ev-inline .er-note{font-size:.76rem;color:var(--muted);margin-top:.9rem;line-height:1.45;}
   @media (max-width:560px){
     #evrail{top:auto;bottom:0;height:min(78vh,100vh);width:100vw;border-left:0;border-top:1px solid var(--hair);border-radius:14px 14px 0 0;
       transform:translateY(100%);box-shadow:0 -12px 32px -18px rgba(0,0,0,.35);}
@@ -2775,12 +2782,12 @@ function peopleRowsMarkup(data){
     const evLabel = {corroborated:"corroborated",structured:"structured record",artifact_backed:"artifact-backed",employer_stated:"employer-stated",self_stated:"self-stated",mixed:"mixed evidence",gap:"needs evidence"};
     const evClass = {corroborated:"ev-strong",structured:"ev-strong",artifact_backed:"ev-strong",employer_stated:"ev-stated",self_stated:"ev-self",mixed:"ev-mixed",gap:"ev-gap"};
     const evPill = (ev.strength?`<span class="ev-pill ${evClass[ev.strength]||"ev-self"}" title="Evidence type — code-derived from the source; self-stated is never shown as verified">${evLabel[ev.strength]||ev.strength}</span>`:"")
-      + `<button type="button" class="ev-inspect" data-ref="${esc(p.entity_id||p.name||"")}" title="Why surfaced, evidence ladder, sources, gaps">Inspect evidence ›</button>`;
+      + `<span class="ev-hint" title="Click the card for the evidence behind it">▾ evidence</span>`;
     // PUBLIC FOOTPRINT strip (evidence-model-v2): artifacts linked to this person by an identity key
     // (OpenAlex author id / GitHub login) — dated, linkable work. Absent when none or not yet scanned.
     const fp = p.artifacts||null;
     const fpStrip = (fp && fp.total)
-      ? `<span class="ppl-fp" title="Public artifacts linked by identity key — dated, linkable evidence (see Inspect evidence)">◆ ${Object.entries(fp.counts||{}).map(([k,n])=>`${FP_LABEL[k]||esc(k)} ${n}`).join(" · ")}${fp.newest?` · newest ${esc(String(fp.newest).slice(0,4))}`:""}</span>`
+      ? `<span class="ppl-fp" title="Public artifacts linked by identity key — dated, linkable evidence (click the card)">◆ ${Object.entries(fp.counts||{}).map(([k,n])=>`${FP_LABEL[k]||esc(k)} ${n}`).join(" · ")}${fp.newest?` · newest ${esc(String(fp.newest).slice(0,4))}`:""}</span>`
       : "";
     // Name links to a real profile: the citation URL if it is one, else the person's best public
     // link (LinkedIn/X/GitHub, server-ordered). Never a bare provenance tag. Plain text if neither.
@@ -2857,7 +2864,7 @@ function peopleRowsMarkup(data){
   if(lk && lk.resolution === "resolved"){
     const viaWeb = lk.searched_web ? ` · searched the web for ${esc(lk.searched_web)}${(lk.web_hits||[]).length?` — pages confirm: ${esc((lk.web_hits||[]).join(", "))}`:""}` : "";
     lkHead = `<div class="ppl-head">Profile — <b>${esc(lk.name)}</b> <span class="ppl-fc" style="text-transform:none;">${lk.searched_web?"found on the open web":"resolved from Roster's index"}${lk.context?` · context: ${esc(lk.context)}`:""}${viaWeb}</span></div>`
-      + `<div class="ppl-cov">◔ Everything the index holds on this person: grounded facets, public links, and linked artifacts (scanned on demand). Not a claim of completeness — “Inspect evidence” shows types and gaps. ${qaBtn} <button type="button" class="ppl-qa ppl-others" data-name="${esc(lk.name)}" title="Search GitHub, OpenAlex and LinkedIn for other people with this name">Not them? Show others with this name</button></div>`;
+      + `<div class="ppl-cov">◔ Everything the index holds on this person: grounded facets, public links, and linked artifacts (scanned on demand). Not a claim of completeness — click the card for evidence types and gaps. ${qaBtn} <button type="button" class="ppl-qa ppl-others" data-name="${esc(lk.name)}" title="Search GitHub, OpenAlex and LinkedIn for other people with this name">Not them? Show others with this name</button></div>`;
   } else if(lk && lk.resolution === "ambiguous"){
     lkHead = `<div class="ppl-head">Which ${esc(lk.name)}?</div>`
       + `<div class="ppl-cov" style="border-left-color:var(--gold);">❓ ${esc(lk.clarify||"")} <span class="ppl-fc" style="text-transform:none;">Type the hint in the box below, or pick a card.</span></div>`;
@@ -8763,7 +8770,7 @@ function enrichSummary(rows, pid, quota){
   const withHead = rows.filter(p => p.linkedin && p.linkedin.headline).length;
   const fits = rows.filter(p => p.linkedin && typeof p.linkedin.headline_fit === "number").map(p=>p.linkedin.headline_fit);
   const strong = fits.filter(f => f >= 0.5).length;
-  return `<div class="ppl-cov" style="border-left-color:var(--gold);">⌕ LinkedIn snippets read for the ${rows.length} shown: <b>${withHead}</b> with a headline (${st.resolved} newly resolved, ${st.already} on file), ${st.ambiguous} ambiguous (several same-named — none guessed), ${st.none} not found${st.other?`, ${st.other} unavailable`:""}.${fits.length?` The headline fits the brief well for <b>${strong}</b> of ${fits.length}.`:""} <button type="button" class="ppl-rerank" data-pid="${esc(pid)}" title="Reorder the people shown by relevance, headline fit and evidence depth — code-computed, reasons in Inspect evidence">⇅ Re-rank shown by evidence</button>${quota&&quota.cap?` <span class="ppl-fc" style="text-transform:none;">· snippet quota ${quota.used_today}/${quota.cap} today</span>`:""}</div>`;
+  return `<div class="ppl-cov" style="border-left-color:var(--gold);">⌕ LinkedIn snippets read for the ${rows.length} shown: <b>${withHead}</b> with a headline (${st.resolved} newly resolved, ${st.already} on file), ${st.ambiguous} ambiguous (several same-named — none guessed), ${st.none} not found${st.other?`, ${st.other} unavailable`:""}.${fits.length?` The headline fits the brief well for <b>${strong}</b> of ${fits.length}.`:""} <button type="button" class="ppl-rerank" data-pid="${esc(pid)}" title="Reorder the people shown by relevance, headline fit and evidence depth — code-computed, reasons under each card">⇅ Re-rank shown by evidence</button>${quota&&quota.cap?` <span class="ppl-fc" style="text-transform:none;">· snippet quota ${quota.used_today}/${quota.cap} today</span>`:""}</div>`;
 }
 function rerankShown(pid){
   const data = (window.PEOPLE_RENDERS||{})[pid]; if(!data) return;
