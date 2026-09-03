@@ -3,6 +3,7 @@
 Status: DRAFT for review.
 Date: 2026-09-02.
 Scope: product positioning, broad product architecture, information architecture, interaction model, and UI design direction for the first recruiting/talent-intelligence wedge.
+Companion workflow spec: `docs/specs/recruiter-workflows.md`.
 
 ## Goal
 
