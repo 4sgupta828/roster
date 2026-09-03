@@ -148,8 +148,8 @@
   .matchresume{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;padding:.6rem .7rem;border:1px solid var(--hair);border-radius:10px;background:var(--panel2);margin:.4rem 0 .2rem;}
   /* Find jobs — stepped layout */
   .msub{font-size:.84rem;color:var(--muted);margin:.35rem 0 .9rem;line-height:1.45;}
-  #matchmodal section.mstep,#jdmodal section.mstep{display:block;flex-direction:initial;align-items:initial;gap:0;}
-  #jdmodal .msub{text-align:left;}
+  #matchmodal section.mstep,#jdmodal section.mstep,#applyassist section.mstep{display:block;flex-direction:initial;align-items:initial;gap:0;}
+  #jdmodal .msub,#applyassist .msub{text-align:left;}
   .mstep{display:block;border:1px solid var(--hair);border-radius:12px;background:var(--panel);padding:.85rem 1rem 1rem;margin:.7rem 0;text-align:left;}   /* a global section{display:flex;align-items:center} rule centred everything */
   #matchmodal .msub{text-align:left;}
   .mstep-h{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;font-weight:700;font-size:.98rem;margin-bottom:.35rem;}
@@ -1945,16 +1945,26 @@
 <!-- Apply Assistant: grounded JD × résumé fit table + how-to-apply + cover letter -->
 <div class="acctpage" id="applyassist" hidden aria-label="Apply Assistant">
   <div class="acctwrap" style="max-width:860px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:.6rem;">
       <h2 style="margin:0;">🎯 Apply Assistant</h2>
       <button type="button" class="histbtn" id="aaClose">← Back</button>
     </div>
-    <p style="font-size:.82rem;color:var(--muted);margin:.35rem 0 .6rem;">Paste a job link or its description — I’ll map exactly how you fit, what to lead with, honest gaps, and how to apply best, grounded in your résumé. Nothing fabricated. You can then draft a cover letter, with your approval.</p>
-    <input id="aaUrl" type="url" style="width:100%;font-size:.86rem;margin-bottom:.4rem;" placeholder="Job link (Greenhouse/Lever/Ashby/company careers URL)" />
-    <textarea id="aaText" rows="4" style="width:100%;font-size:.9rem;" placeholder="…or paste the full job description"></textarea>
-    <div style="margin:.6rem 0;"><button type="button" class="idgo" id="aaGo" style="width:100%;padding:.55rem;">🎯 Analyze my fit</button></div>
-    <div id="aaNote" style="font-size:.8rem;color:var(--muted);"></div>
-    <div id="aaResults" style="margin-top:.6rem;"></div>
+    <p class="msub">Two steps: the job, then your fit — how you match, what to lead with, honest gaps, and how to apply, grounded in your saved résumé. Nothing is fabricated; a cover letter is drafted only with your approval.</p>
+
+    <section class="mstep">
+      <div class="mstep-h"><span class="mstep-n">1</span> The job</div>
+      <span class="mlabel">Job link <span class="mhint">Greenhouse, Lever, Ashby or company careers URL — we read the posting for you</span></span>
+      <input id="aaUrl" type="url" style="width:100%;font-size:.86rem;" placeholder="https://…" />
+      <span class="mlabel">…or the job description</span>
+      <textarea id="aaText" rows="6" style="width:100%;font-size:.9rem;" placeholder="Paste the full job description"></textarea>
+    </section>
+
+    <section class="mstep">
+      <div class="mstep-h"><span class="mstep-n">2</span> Your fit</div>
+      <button type="button" class="idgo mgo" id="aaGo">🎯 Analyze my fit</button>
+      <div id="aaNote" style="font-size:.8rem;color:var(--muted);margin-top:.5rem;"></div>
+      <div id="aaResults" style="margin-top:.6rem;"></div>
+    </section>
   </div>
 </div>
 <!-- Match jobs to résumé: on-demand, preference-ranked -->
@@ -7523,7 +7533,7 @@ function openApplyAssist(url){
 }
 async function runApplyAnalysis(){
   const url = ($("#aaUrl").value||"").trim(), text = ($("#aaText").value||"").trim();
-  if(!url && text.length < 40){ $("#aaNote").textContent = "Paste a job link or its description."; return; }
+  if(!url && text.length < 40){ $("#aaNote").textContent = "Step 1: paste a job link or its description."; return; }
   $("#aaNote").textContent = url && text.length<40 ? "Reading the job posting…" : "Analyzing your fit…";
   $("#aaResults").innerHTML = "";
   try{
