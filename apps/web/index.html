@@ -146,6 +146,23 @@
   .sentog{cursor:pointer;background:var(--panel2);border:1px solid var(--hair);border-radius:999px;padding:.32rem .8rem;font-size:.82rem;user-select:none;}
   .sentog.on{background:var(--gold);color:var(--on-accent);border-color:var(--gold);}
   .matchresume{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;padding:.6rem .7rem;border:1px solid var(--hair);border-radius:10px;background:var(--panel2);margin:.4rem 0 .2rem;}
+  /* Find jobs — stepped layout */
+  .msub{font-size:.84rem;color:var(--muted);margin:.35rem 0 .9rem;line-height:1.45;}
+  .mstep{border:1px solid var(--hair);border-radius:12px;background:var(--panel);padding:.85rem 1rem 1rem;margin:.7rem 0;}
+  .mstep-h{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;font-weight:700;font-size:.98rem;margin-bottom:.35rem;}
+  .mstep-n{display:inline-flex;align-items:center;justify-content:center;width:1.5rem;height:1.5rem;border-radius:999px;background:var(--gold);color:var(--on-accent);font-size:.78rem;font-weight:700;}
+  .mfine{margin-left:auto;font-size:.78rem;}
+  .mgrid{display:grid;grid-template-columns:1fr 1fr;gap:.9rem 1.2rem;}
+  .mlabel .mhint,.mmore .mhint{font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);margin-left:.35rem;}
+  .mcheck{display:inline-flex;align-items:center;gap:.35rem;font-size:.86rem;min-height:40px;}
+  .mchecks{display:flex;gap:1.1rem;flex-wrap:wrap;}
+  .mmore{margin-top:.6rem;border-top:1px dashed var(--hair);padding-top:.4rem;}
+  .mmore>summary{cursor:pointer;font-size:.86rem;font-weight:600;color:var(--gold);min-height:40px;line-height:40px;}
+  .mfile{position:relative;display:inline-flex;align-items:center;min-height:40px;padding:.45rem .9rem;border:1px solid var(--gold);border-radius:999px;color:var(--gold);font-size:.84rem;font-weight:600;cursor:pointer;overflow:hidden;background:var(--panel);}
+  .mfile input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+  .mgo{width:100%;padding:.7rem;font-size:1rem;background:var(--gold);color:var(--on-accent);border:0;border-radius:11px;font-weight:700;cursor:pointer;min-height:44px;}
+  .mstep-go{position:relative;}
+  @media (max-width:560px){ .mgrid{grid-template-columns:1fr;} .mfine{margin-left:0;} .mstep{padding:.75rem .8rem .9rem;} }
   .newbtn{color:var(--gold);border-color:rgba(var(--gold-rgb),.5);}
   .newbtn:hover{color:var(--on-accent);background:var(--gold);border-color:var(--gold);}
 
@@ -1923,39 +1940,64 @@
 <!-- Match jobs to résumé: on-demand, preference-ranked -->
 <div class="acctpage" id="matchmodal" hidden aria-label="Find jobs">
   <div class="acctwrap" style="max-width:760px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:.6rem;">
       <h2 style="margin:0;">Match jobs to your résumé</h2>
       <button type="button" class="histbtn" id="matchclose">← Back</button>
     </div>
-    <p style="font-size:.8rem;color:var(--muted);margin:.3rem 0;">Drop in your résumé and we rank open roles by fit — weighted by your preferences. Country follows your top-right selector.</p>
-    <div class="matchresume">
-      <span style="font-size:1.3rem;">📄</span>
-      <div style="flex:1;min-width:120px;"><div id="matchresumestatus" style="font-size:.85rem;font-weight:600;">Checking your résumé…</div>
-        <div style="font-size:.74rem;color:var(--muted);">PDF, DOCX, or TXT — parsed with docling.</div></div>
-      <input type="file" id="matchfile" accept=".pdf,.doc,.docx,.txt" style="font-size:.8rem;max-width:210px;"/>
-    </div>
-    <span class="mlabel">Locations</span>
-    <div class="chipbox" id="mLocBox"><input id="mLoc" type="text" placeholder="Add a city, press Enter"/></div>
-    <span class="mlabel">Roles</span>
-    <select id="mRoleSel" style="width:100%;font-size:.86rem;margin-bottom:.35rem;"><option value="">Pick a role…</option></select>
-    <div class="chipbox" id="mRoleBox"><input id="mRole" type="text" placeholder="…or type a custom role, press Enter"/></div>
-    <span class="mlabel">Never show me</span>
-    <input id="mExclude" type="text" placeholder="Title words to exclude, comma-separated (e.g. sales, manager, intern)" style="width:100%;font-size:.86rem;margin-bottom:.35rem;"/>
-    <span class="mlabel">Seniority (pick any)</span>
-    <div class="sentogs" id="mSenBox"></div>
-    <span class="mlabel">Company &amp; more</span>
-    <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:center;margin:.15rem 0 .3rem;font-size:.83rem;">
-      <label><input type="checkbox" id="mRemote"/> Remote</label>
-      <label><input type="checkbox" id="mF500"/> Fortune 500</label>
-      <label><input type="checkbox" id="mPublic"/> Public</label>
-      <label><input type="checkbox" id="mStartup"/> Startup</label>
-      <label style="display:inline-flex;align-items:center;gap:.3rem;">Min salary <input id="mSal" type="number" placeholder="optional" style="width:90px;"/></label>
-    </div>
-    <button type="button" class="histbtn" id="mFineTune" hidden style="margin:.2rem 0 .4rem;font-size:.82rem;">✨ Fine tune config — let a recruiter AI read your résumé &amp; optimize</button>
-    <div id="mBrief" style="margin:.2rem 0;"></div>
-    <div style="margin:.5rem 0;"><button type="button" class="idgo" id="mGo" style="width:100%;padding:.55rem;">🎯 Find matching jobs</button></div>
-    <div id="matchnote" style="font-size:.78rem;color:var(--muted);"></div>
-    <div id="matchresults" style="margin-top:.4rem;"></div>
+    <p class="msub">Three steps: your résumé, what you're looking for, then ranked open roles. Location follows the top-right scope.</p>
+
+    <section class="mstep">
+      <div class="mstep-h"><span class="mstep-n">1</span> Your résumé</div>
+      <div class="matchresume">
+        <span style="font-size:1.5rem;">📄</span>
+        <div style="flex:1;min-width:160px;">
+          <div id="matchresumestatus" style="font-size:.9rem;font-weight:600;">Checking your résumé…</div>
+          <div style="font-size:.74rem;color:var(--muted);">PDF, DOCX or TXT. We read it once and remember it.</div>
+        </div>
+        <label class="mfile"><input type="file" id="matchfile" accept=".pdf,.doc,.docx,.txt"/>⬆ Upload résumé</label>
+      </div>
+    </section>
+
+    <section class="mstep">
+      <div class="mstep-h"><span class="mstep-n">2</span> What you're looking for
+        <button type="button" class="histbtn mfine" id="mFineTune" hidden title="A recruiter AI reads your résumé and fills these in for you">✨ Let AI fill this from my résumé</button>
+      </div>
+      <div class="mgrid">
+        <div>
+          <span class="mlabel">Roles</span>
+          <select id="mRoleSel" style="width:100%;font-size:.88rem;margin-bottom:.35rem;"><option value="">Pick a role…</option></select>
+          <div class="chipbox" id="mRoleBox"><input id="mRole" type="text" placeholder="…or type a role, press Enter"/></div>
+        </div>
+        <div>
+          <span class="mlabel">Locations</span>
+          <div class="chipbox" id="mLocBox"><input id="mLoc" type="text" placeholder="Add a city, press Enter"/></div>
+          <label class="mcheck" style="margin-top:.45rem;"><input type="checkbox" id="mRemote"/> Include remote roles</label>
+        </div>
+      </div>
+      <span class="mlabel">Seniority <span class="mhint">pick any</span></span>
+      <div class="sentogs" id="mSenBox"></div>
+      <details class="mmore">
+        <summary>More filters <span class="mhint">never-show words · company type · minimum salary</span></summary>
+        <span class="mlabel">Never show me</span>
+        <input id="mExclude" type="text" placeholder="Title words to exclude, comma-separated (e.g. sales, manager, intern)" style="width:100%;font-size:.86rem;margin-bottom:.35rem;"/>
+        <span class="mlabel">Company type</span>
+        <div class="mchecks">
+          <label class="mcheck"><input type="checkbox" id="mF500"/> Fortune 500</label>
+          <label class="mcheck"><input type="checkbox" id="mPublic"/> Public</label>
+          <label class="mcheck"><input type="checkbox" id="mStartup"/> Startup</label>
+        </div>
+        <span class="mlabel">Minimum salary</span>
+        <input id="mSal" type="number" placeholder="optional, e.g. 180000" style="width:180px;font-size:.86rem;"/>
+      </details>
+      <div id="mBrief" style="margin:.5rem 0 0;"></div>
+    </section>
+
+    <section class="mstep mstep-go">
+      <div class="mstep-h"><span class="mstep-n">3</span> Your matches</div>
+      <button type="button" class="idgo mgo" id="mGo">🎯 Find matching jobs</button>
+      <div id="matchnote" style="font-size:.8rem;color:var(--muted);margin-top:.5rem;"></div>
+      <div id="matchresults" style="margin-top:.5rem;"></div>
+    </section>
   </div>
 </div>
 <!-- Recruiter reverse-match: a job description → ranked candidate people -->
@@ -7289,7 +7331,7 @@ async function matchUploadResume(file){
     await fetch("/me/profile/parse-resume",{method:"POST",headers:authHeaders()});
     for(let i=0;i<24;i++){ await new Promise(r=>setTimeout(r,2500));
       const d = await (await fetch("/me/profile/parse-resume",{headers:authHeaders()})).json();
-      if(d.status==="done"){ $("#matchresumestatus").textContent="Résumé ready — "+file.name; applyMatchDefaults(d.profile||{}); $("#matchnote").textContent="Defaults set — adjust and Find matches."; return; }
+      if(d.status==="done"){ $("#matchresumestatus").textContent="Résumé ready — "+file.name; applyMatchDefaults(d.profile||{}); $("#matchnote").textContent="Résumé read — step 2 is pre-filled; adjust anything, then Find matching jobs."; return; }
       if(d.status==="failed"){ $("#matchresumestatus").textContent="Couldn't read that résumé — try another file."; return; }
     }
     $("#matchresumestatus").textContent="Still reading — press Find matches in a moment.";
@@ -7304,9 +7346,9 @@ async function openMatch(){
   try{ parsed = (await (await fetch("/me/profile/parse-resume", {headers: authHeaders()})).json()).profile || {}; }catch(e){}
   const profile = {...parsed, ...(prof.profile||{})};
   const hasResume = !!prof.resume;
-  $("#matchresumestatus").textContent = hasResume ? ("Résumé on file"+(prof.resume&&prof.resume.name?" — "+prof.resume.name:"")) : "No résumé yet — upload one to the right →";
-  if(hasResume || Object.keys(profile).length>=3){ applyMatchDefaults(profile); $("#matchnote").textContent="Adjust your preferences, then Find matches."; }
-  else { $("#matchnote").textContent="Upload your résumé above to get matches."; }
+  $("#matchresumestatus").textContent = hasResume ? ("Résumé on file"+(prof.resume&&prof.resume.name?" — "+prof.resume.name:"")) : "No résumé yet — upload one to get started";
+  if(hasResume || Object.keys(profile).length>=3){ applyMatchDefaults(profile); $("#matchnote").textContent="Step 2 is pre-filled from your résumé — adjust anything, then Find matching jobs."; }
+  else { $("#matchnote").textContent="Upload your résumé in step 1 to get matches."; }
   // REMEMBERED config wins over the heuristic defaults (locations/roles/seniority/company & more).
   try{
     const cfg = (await (await fetch("/me/match-jobs/config", {headers: authHeaders()})).json()).config;
