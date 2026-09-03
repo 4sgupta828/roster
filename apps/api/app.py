@@ -1183,7 +1183,7 @@ class RegisterIn(BaseModel):
     email: str
     password: str = ""              # >=12 chars (enforced server-side); '' = legacy token-only register
     name: str = ""                  # optional; defaults to the email local-part when blank
-    profession: str = ""            # self-declared (Physician / NP-PA / Pharmacist / Student / …)
+    profession: str = ""            # self-declared (Recruiter / Hiring manager / Founder / Engineer / Job seeker / …)
     country: str = ""
     npi: str = ""                   # optional (US) — structurally verified against the CMS registry
     disclaimer_ack: bool = False    # the attestation from the identity gate

@@ -1691,7 +1691,7 @@
   </div>
   <form id="ask">
     <div class="field">
-      <textarea id="q" rows="1" placeholder="e.g. What treatments are being studied for type 2 diabetes?"
+      <textarea id="q" rows="1" placeholder="Talent Map brief — e.g. senior infra engineers with vector DB evidence"
                 aria-label="Research question"></textarea>
       <button class="attach" id="camera" type="button" hidden aria-label="Take a photo">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -1873,10 +1873,10 @@
       <a href="#" id="idswitch" style="color:var(--accent,#6a5acd);text-decoration:none;">Already have an account? Sign in</a>
     </div>
     <div class="idextra" id="idextra" hidden>
-      <select id="idprof" aria-label="Profession">
-        <option value="">Profession…</option>
-        <option>Physician</option><option>Resident / Fellow</option><option>NP / PA</option>
-        <option>Pharmacist</option><option>Nurse</option><option>Medical student</option>
+      <select id="idprof" aria-label="I am a">
+        <option value="">I am a…</option>
+        <option>Recruiter</option><option>Hiring manager</option><option>Founder</option>
+        <option>Engineer / IC</option><option>Job seeker</option><option>Investor</option>
         <option>Researcher</option><option>Other</option>
       </select>
       <div class="idrow">
@@ -1884,9 +1884,8 @@
           <option value="US">United States</option><option value="IN">India</option>
           <option value="">Other</option>
         </select>
-        <input id="idnpi" type="text" placeholder="NPI (US — optional)" inputmode="numeric" />
       </div>
-      <div class="idhint">Optional — helps tailor answers to your role.</div>
+      <div class="idhint">Optional — helps tailor results to how you use Roster.</div>
     </div>
     <div class="iderr" id="iderr"></div>
     <div class="iddisc" id="iddisc" hidden></div>
@@ -2572,7 +2571,7 @@ async function runQA(question){
   const out = $("#out");
   const introCopy = window.QA_ROUTER_ENABLED
     ? "💬 Roster Q&A — grounded answers about people, companies, jobs, and connections."
-    : "💬 Asking Eigen — grounded answer over the companies/markets/tech corpus.";
+    : "💬 Roster research — grounded answer over the companies/markets/tech corpus.";
   const setStatus = (msg)=>{ if(out){ out.hidden = false;
     out.innerHTML = `<div class="ppl-wrap"><div class="ppl-cov">${introCopy}</div><div class="status" style="margin-top:.6rem;">${esc(msg)}</div></div>`; } };
   setStatus("Thinking…");
@@ -2676,7 +2675,7 @@ function qaMarkup(d, question){
   const grounded = d.grounded
     ? `<span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">✓ grounded</span>`
     : `<span class="ppl-tag">model read — not corpus-verified</span>`;
-  const via = (d.source === "roster") ? "Roster" : "Eigen";
+  const via = (d.source === "roster") ? "Roster index" : "Roster research";
   const head = `<div class="ppl-head"><b>Q&amp;A</b> ${grounded} <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.10);">via ${via}</span></div>`;
   const citesBlock = cards ? `<details class="qa-cites" style="margin-top:.9rem;"><summary class="plain-h" style="cursor:pointer;margin-bottom:.3rem;">Backing evidence (${claims.length})</summary><div style="display:flex;flex-direction:column;gap:.6rem;">${cards}</div></details>` : "";
   const gapsBlock = gaps ? `<div class="ppl-cov" style="margin-top:.7rem;"><b>Coverage gaps</b><ul style="margin:.3rem 0 0;padding-left:1.1rem;">${gaps}</ul></div>` : "";
@@ -7025,7 +7024,8 @@ $("#idgo").addEventListener("click", async ()=>{
     $("#iderr").textContent = "";
     try{
       const url = (AUTH_MODE === "login") ? "/auth/login" : "/auth/register";
-      const body = (AUTH_MODE === "login") ? {email, password} : {email, password, name};
+      const body = (AUTH_MODE === "login") ? {email, password}
+        : {email, password, name, profession: (($("#idprof")||{}).value||""), country: (($("#idcountry")||{}).value||"")};
       const r = await fetch(url, {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(body)});
       if(!r.ok){
         let msg = (AUTH_MODE === "login") ? "Incorrect email or password." : "Could not create account.";
@@ -8374,7 +8374,7 @@ async function openMapsList(){
   const EV_CLASS = {corroborated:"ev-strong",structured:"ev-strong",artifact_backed:"ev-strong",employer_stated:"ev-stated",self_stated:"ev-self",mixed:"ev-mixed",gap:"ev-gap"};
   const FP_LABEL = window.FP_LABEL;   // artifact-kind labels shared with the cards
   const FAMILY = {github:"the person's own GitHub profile (self-stated)",openalex:"OpenAlex scholarly registry — derived from published works",
-    yc:"Y Combinator company directory",npi:"NPI clinician registry",sec:"SEC EDGAR filings",theorg:"TheOrg org-chart page (employer-stated)",
+    yc:"Y Combinator company directory",npi:"NPI registry (US licensed-provider directory)",sec:"SEC EDGAR filings",theorg:"TheOrg org-chart page (employer-stated)",
     aifund:"AI Fund portfolio page",ef:"Entrepreneur First company page",pear:"Pear VC portfolio page",sosv:"SOSV portfolio page"};
   const REVIEW = ["unreviewed","shortlisted","needs more evidence","reviewed"];   // human decision support — never a verdict
   // INLINE evidence panel (replaces the side rail): opens under the card on click, folds on a second
@@ -8390,7 +8390,7 @@ async function openMapsList(){
   function pill(t){ return `<span class="ev-pill ${EV_CLASS[t]||"ev-self"}">${esc(EV_LABEL[t]||t||"")}</span>`; }
   // Plain-language source phrasing (who says so) — the reader never sees a provenance tag.
   const SAYS = {github:"self-described on GitHub", linkedin:"self-described on LinkedIn (from a search snippet)",
-    openalex:"derived from published work (OpenAlex)", yc:"listed by Y Combinator", npi:"NPI clinician registry",
+    openalex:"derived from published work (OpenAlex)", yc:"listed by Y Combinator", npi:"NPI registry (US licensed-provider directory)",
     sec:"SEC filings", theorg:"company org chart (TheOrg)", aifund:"AI Fund portfolio page",
     ef:"Entrepreneur First page", pear:"Pear VC portfolio page", sosv:"SOSV portfolio page"};
   const HEADLINE = {corroborated:["Confirmed by independent sources","ev-strong"], structured:["Registry-listed","ev-strong"],
