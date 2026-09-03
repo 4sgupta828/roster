@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-"""Cross-source IDENTITY LINKER (worker leg): github ↔ openalex/theorg/yc/sec by name + shared
-employer, unique-name guarded. Idempotent; prints what it linked. `--dry` writes nothing."""
+"""Cross-source IDENTITY LINKER (worker leg): github ↔ openalex/theorg/yc/sec, and openalex ↔ openalex
+(author-id splits), by name + shared employer, unique-name guarded. Idempotent; prints what it linked. `--dry` writes nothing."""
 from __future__ import annotations
 
 import argparse
@@ -21,7 +21,8 @@ async def main() -> None:
     conn = await asyncpg.connect(os.environ["ROSTER_CORPUS_DSN"])
     try:
         for src in ("github", "openalex"):
-            others = ("openalex", "theorg", "yc", "sec") if src == "github" else ("theorg", "yc", "sec")
+            # openalex ↔ openalex: SAME-SOURCE SPLITS (several author ids for one person, same employer)
+            others = ("openalex", "theorg", "yc", "sec") if src == "github" else ("openalex", "theorg", "yc", "sec")
             res = await find_and_write_links(conn, src=src, others=others, max_dupes=args.max_dupes, dry=args.dry)
             print(f"{src}: candidates {res['candidates']} → linked {res['linked']} (rejected {res['rejected']})"
                   f"{' [dry]' if args.dry else ''}; e.g. {res['sample'][:3]}", flush=True)

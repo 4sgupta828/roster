@@ -47,7 +47,8 @@ dupes AS (SELECT nm, src, count(*) AS n FROM names GROUP BY nm, src)
 SELECT g.entity_id AS a_id, o.entity_id AS b_id, g.name AS name, fg.facet_value_norm AS employer,
        da.n AS n_a, db.n AS n_b
 FROM names g
-JOIN names o ON o.nm = g.nm AND o.src <> g.src AND o.src = ANY($2)
+JOIN names o ON o.nm = g.nm AND o.src = ANY($2)
+     AND ((o.src <> g.src) OR (o.src = g.src AND o.entity_id > g.entity_id))
 JOIN roster_entity_facet fg ON fg.entity_id = g.entity_id AND fg.facet_key IN ('company','worked_at')
 JOIN roster_entity_facet fo ON fo.entity_id = o.entity_id AND fo.facet_key IN ('company','worked_at')
      AND fo.facet_value_norm = fg.facet_value_norm
@@ -75,18 +76,23 @@ async def ensure_schema(conn) -> None:
 
 async def find_and_write_links(conn, *, src: str = "github", others: tuple[str, ...] = ("openalex", "theorg", "yc", "sec"),
                                max_dupes: int = 3, dry: bool = False) -> dict:
-    """Link `src` identities to same-person identities in `others` by name + shared employer."""
+    """Link `src` identities to same-person identities in `others` by name + shared employer.
+    `others` may include `src` itself: SAME-SOURCE SPLITS (OpenAlex mints several author ids for one
+    person — three 'Jack Lindsey' ids all affiliated with Anthropic) link the same way, method
+    'name+employer:split', so one card shows instead of three."""
     await ensure_schema(conn)
     rows = [dict(r) for r in await conn.fetch(_PAIR_SQL, src, list(others))]
     kept = [r for r in rows if acceptable(r, max_dupes=max_dupes)]
     if not dry:
         for r in kept:
+            same = r["a_id"].split(":", 1)[0] == r["b_id"].split(":", 1)[0]
             await conn.execute(
                 """INSERT INTO rs_person_link (a_id, b_id, method, confidence, evidence)
-                   VALUES ($1, $2, 'name+employer', 0.7, $3::jsonb)
+                   VALUES ($1, $2, $4, 0.7, $3::jsonb)
                    ON CONFLICT (a_id, b_id) DO NOTHING""",
                 r["a_id"], r["b_id"], json.dumps({"name": r["name"], "employer": r["employer"],
-                                                  "same_name_count": [r["n_a"], r["n_b"]]}))
+                                                  "same_name_count": [r["n_a"], r["n_b"]]}),
+                "name+employer:split" if same else "name+employer")
     return {"candidates": len(rows), "linked": len(kept), "rejected": len(rows) - len(kept),
             "sample": [(r["a_id"], r["b_id"], r["employer"]) for r in kept[:5]]}
 
