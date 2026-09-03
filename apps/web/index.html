@@ -6808,7 +6808,7 @@ function initIdentity(){
     $("#idmodal").hidden = false; setTimeout(()=>$("#idname").focus(), 60);
   }
 }
-// AUTH: register (create account w/ password) vs login (returning user). Password >=12 is enforced
+// AUTH: register (create account w/ password) vs login (returning user). Any non-empty password; a name is required
 // server-side too; the FE check is just a fast affordance. authHeaders() attaches the bearer token.
 let AUTH_MODE = "register";
 function authHeaders(){ return (USER && USER.token) ? {"X-Roster-Token": USER.token} : {}; }

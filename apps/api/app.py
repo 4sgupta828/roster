@@ -2667,14 +2667,24 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 if people_geo_scope_enabled():
                     from api.people_population import (apply_job_scope, embed_query as _eq,
                                                        semantic_enabled as _sem, widen_jobs_locally)
-                    if not _cos:
+                    if _cos:
+                        # the named company's roles LEAD (all of them, local first); the related roles
+                        # from the semantic legs follow under the normal local scope
+                        _n_lead = int(res.get("company_rows") or 0)
+                        _lead_rows, _rest = res["jobs"][:_n_lead], res["jobs"][_n_lead:]
+                        _lead_rows, _ = apply_job_scope(_lead_rows, metro=(body.metro or ""), state=(body.state or ""),
+                                                        country=(body.country or "us"), query_company=True)
+                        _rest, res["geo_scope"] = apply_job_scope(
+                            _rest, metro=(body.metro or ""), state=(body.state or ""),
+                            country=(body.country or "us"), query_location=(_q.get("location") or ""))
+                        res["jobs"] = _lead_rows + _rest
+                    else:
                         res["jobs"] = await widen_jobs_locally(
                             store, res.get("jobs") or [], qvec=(_eq(body.question) if _sem() else None),
                             country=(body.country or "us"), metro=(body.metro or ""), state=(body.state or ""))
-                    res["jobs"], res["geo_scope"] = apply_job_scope(
-                        res.get("jobs") or [], metro=(body.metro or ""), state=(body.state or ""),
-                        country=(body.country or "us"), query_location=(_q.get("location") or ""),
-                        query_company=bool(_cos))
+                        res["jobs"], res["geo_scope"] = apply_job_scope(
+                            res.get("jobs") or [], metro=(body.metro or ""), state=(body.state or ""),
+                            country=(body.country or "us"), query_location=(_q.get("location") or ""))
                 res["count"] = len(res.get("jobs", []))
                 res["agentic"] = True
                 res["query"] = _q if _cos else {}
