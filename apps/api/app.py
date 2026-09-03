@@ -1095,6 +1095,7 @@ class ResearchIn(BaseModel):
     mode: str = ""                        # analytical lens, e.g. "acquirer" (M&A); "" = default investor lens
     company: str = ""                     # single-company DILIGENCE subject (name / entity_id); used only by /research/diligence
     country: str = ""                     # people geo-scope from the top-right selector (default 'us' when the flag is on)
+    evidence_kinds: list[str] = []        # Talent Map evidence filter: only people with linked paper/repo/post/talk/patent
     metro: str = ""                       # LOCAL scope: the user's metro (e.g. 'bay_area') — clearly-elsewhere dropped,
     state: str = ""                       #   unknown kept, confirmed-local lead; or a US state code; query-named places win
     surface: str = ""                     # which UI tab asked: "people" | "jobs" | "qa" | "" — People/Jobs are
@@ -3559,7 +3560,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 prior_facets=body.refine_facets, assume_people=assume_people,
                 prior_person=(body.prior_person or "").strip(),
                 scope_metro=((body.metro or "").strip().lower() if people_geo_scope_enabled() else ""),
-                scope_state=((body.state or "").strip().lower() if people_geo_scope_enabled() else ""))
+                scope_state=((body.state or "").strip().lower() if people_geo_scope_enabled() else ""),
+                evidence_kinds=list(body.evidence_kinds or []))
             if res.get("kind") == "person":
                 if fallthrough:
                     return None, res      # router: grounded dossier, never only the static card

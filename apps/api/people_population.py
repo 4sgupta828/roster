@@ -1588,7 +1588,8 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                                    prior_facets: dict | None = None,
                                    assume_people: bool = False,
                                    prior_person: str = "",
-                                   scope_metro: str = "", scope_state: str = "") -> dict:
+                                   scope_metro: str = "", scope_state: str = "",
+                                   evidence_kinds: list[str] | None = None) -> dict:
     """Answer a people-enumeration question from the grounded people index. Always returns a structured
     result (never raises to the route): a compiled facet filter, grounded rows, and honest coverage.
 
@@ -1665,6 +1666,10 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     _local_state = (scope_state or "").strip().lower() if not _query_named_place else ""
     _local = bool(_local_metro or _local_state)
     _local_dropped = 0
+    _EV_KINDS_OK = {"paper", "repo", "post", "talk", "patent", "org", "any"}
+    _ev_kinds = [str(k).lower() for k in (evidence_kinds or []) if str(k).lower() in _EV_KINDS_OK]
+    if "any" in _ev_kinds:
+        _ev_kinds = ["paper", "repo", "post", "talk", "patent"]
 
     _worked_at_union_used = False
 
@@ -1739,6 +1744,19 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                     cand_ids += extra
             except Exception as ex:  # noqa: BLE001 — anchoring is additive
                 _log.info("topic anchor skipped: %s", ex)
+        if _ev_kinds:
+            # EVIDENCE-FILTER RECALL: people who HOLD the requested kind of public work join the cohort
+            # (scored on the same scale) — the filter is meant to find them, not just hide others
+            try:
+                ev_ids = await store.people_with_artifacts(_ev_kinds)
+                ev_extra = [i for i in ev_ids if i not in sf_sim]
+                if ev_extra:
+                    top_ev = await store.semantic_people(qvec, candidate_ids=ev_extra, cap=300)
+                    if top_ev:
+                        sf_sim.update(await store.similarity_for(qvec, top_ev))
+                        cand_ids += top_ev
+            except Exception as ex:  # noqa: BLE001 — additive
+                _log.info("evidence recall skipped: %s", ex)
         if _local:
             # LOCAL RECALL: the global top-N is drawn before the scope applies, so confirmed-local people
             # are rare in it (7 of 200 in a Bay Area test). Add the best-matching people we can PLACE
@@ -1771,6 +1789,9 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             ranked.append(r)
         ranked.sort(key=lambda r: -r["_sf"])
         rows = ranked[:200]
+        if _ev_kinds:
+            _evset = set(ev_ids) if "ev_ids" in dir() else set()
+            rows += [r for r in ranked[200:] if r["entity_id"] in _evset][:300]
         if _local:
             # keep every confirmed-local candidate through the cut (they may sit below the global top-N)
             _loc_set = {r["entity_id"] for r in ranked[200:]
@@ -1941,6 +1962,19 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             return (v or "").strip().lower().replace(" ", "_")
         people_rows = ([p for p in people_rows if _primary_role(p) in _want_roles]
                        + [p for p in people_rows if _primary_role(p) not in _want_roles])
+
+    # EVIDENCE FILTER (the top chips): keep only people holding the requested kind(s) of linked
+    # public work. Applied after artifacts attach so counts are real; unscanned people cannot pass
+    # (they hold no linked work yet) — the coverage line says so.
+    if _ev_kinds and people_rows:
+        _before = len(people_rows)
+        people_rows = [p for p in people_rows
+                       if any(int(((p.get("artifacts") or {}).get("counts") or {}).get(k) or 0) > 0 for k in _ev_kinds)]
+        coverage["evidence_filter"] = {"kinds": _ev_kinds, "kept": len(people_rows), "dropped": _before - len(people_rows)}
+        _lab = " or ".join(_ev_kinds)
+        coverage["population_statement"] = (
+            f"Showing only people with linked {_lab} ({len(people_rows)} of {_before} in this cohort; people "
+            f"whose public work has not been scanned yet cannot appear here). " + coverage.get("population_statement", ""))
 
     # LOCAL-SCOPE partition: people we can PLACE in the user's metro/state lead; unknown-location
     # rows follow (kept for recall). Then the topic partition, so subject-mentioning locals lead.

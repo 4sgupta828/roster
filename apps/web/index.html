@@ -547,6 +547,9 @@
   .ppl-lifit{font-family:var(--mono);font-size:.64rem;color:var(--muted);margin-left:.3rem;}
   .ppl-tag-topic{background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);font-weight:600;}
   .ppl-scopebar{border-left-color:var(--person)!important;}
+  .ev-filterbar{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;}
+  .ev-filter{min-height:36px;padding:.25rem .7rem;border:1px solid var(--hair);border-radius:999px;background:var(--panel);color:var(--ink);font-size:.76rem;cursor:pointer;}
+  .ev-filter.on{background:var(--gold);color:var(--on-accent);border-color:var(--gold);font-weight:600;}
   .ppl-scope{display:inline-block;margin-left:.3rem;min-height:40px;padding:.3rem .7rem;border:1px solid var(--person);border-radius:999px;background:none;color:var(--person);font-size:.76rem;font-weight:600;cursor:pointer;}
   details.jobs-related{margin-top:1rem;} details.jobs-related>summary{cursor:pointer;font-size:.84rem;color:var(--gold);min-height:40px;line-height:40px;}
   .ppl-pager{display:flex;align-items:center;justify-content:center;gap:.6rem;flex-wrap:wrap;margin:.7rem 0 .3rem;scroll-margin-top:72px;}
@@ -2217,6 +2220,7 @@ const PJ_COPY = {
 let PEOPLE_CTX = null;          // People-tab conversation: accumulated facet filter — follow-ups NARROW it
 let JOBS_CTX = null;            // Jobs-tab conversation: accumulated job query — follow-ups NARROW it
 let PENDING_PERSON = null;      // People-tab person lookup awaiting disambiguation — the next utterance adds context
+let EVIDENCE_KINDS = new Set(); // Talent Map evidence filter (repo/paper/post/talk/patent) — re-runs the brief server-side
 let TAB_THREADS = {};           // per-tab CONVERSATION state: People and Q&A each keep their OWN thread —
 //                                 a Q&A question must never append onto a People search's thread (the
 //                                 cross-tab mixing that made questions/answers 'disappear')
@@ -2764,6 +2768,13 @@ function peopleRowsMarkup(data){
     ? `<div class="ppl-cov ev-dist">◆ Public footprint: <b>${fpc.with_artifacts}</b> of ${fpc.people} people have linked artifacts${Object.keys(fpc.kinds||{}).length?` (${Object.entries(fpc.kinds).map(([k,n])=>`${FP_LABEL[k]||esc(k)} ${n}`).join(" · ")})`:""}${fpc.unscanned?` <span class="ppl-fc" style="text-transform:none;">— ${fpc.unscanned} not yet scanned: unknown, not absent</span>`:""}</div>`
     : "";
   const rankLine = cb.ranking ? `<div class="ppl-cov ev-dist">⇅ Ranked by ${esc(cb.ranking)}.</div>` : "";
+  // EVIDENCE FILTER chips: only people with linked public work of a kind. Server-side re-run of the
+  // brief (it also pulls in people who hold that work but were outside the first cohort).
+  const EVK = [["repo","repos"],["paper","papers"],["post","blog posts"],["talk","talks"],["patent","patents"],["any","any public work"]];
+  const active = new Set([...(cb.evidence_filter && cb.evidence_filter.kinds || [])]);
+  const anyOn = active.size && EVK.filter(([k])=>k!=="any").every(([k])=>active.has(k));
+  const evChips = EVK.map(([k,l])=>`<button type="button" class="ev-filter${(k==="any"?anyOn:active.has(k))?" on":""}" data-kind="${k}" title="${k==="any"?"People with any linked public work":"Only people with linked "+l}">${esc(l)}</button>`).join("");
+  const evFilterBar = isEnum ? `<div class="ppl-cov ev-filterbar">🔎 Show only people with: ${evChips}${cb.evidence_filter?` <span class="ppl-fc" style="text-transform:none;">· ${cb.evidence_filter.kept} kept, ${cb.evidence_filter.dropped} without</span>`:""}</div>` : "";
   const scopeLine = scopeChip(cb.geo_scope);
   // EVIDENCE distribution (spec coverage panel): how many rows by headline evidence state.
   const evGroups = cb.evidence_groups||[];
@@ -2790,7 +2801,7 @@ function peopleRowsMarkup(data){
       + `<div class="ppl-cov" style="border-left-color:var(--gap);">◔ ${esc(lk.clarify||"")} ${qaBtn}</div>`;
   }
   const head = isEnum
-    ? `<div class="ppl-head">${pagedMode && pagesN>1?`${page===0?`Top <b>${paged.length}</b> most relevant`:`People <b>${from}–${to}</b> by relevance`} <span class="ppl-fc" style="text-transform:none;">· of ${rows.length} matched in the index · page ${page+1} of ${pagesN}</span>`:`<b>${rows.length}</b> ${rows.length===1?"person":"people"} found`}${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${scopeLine}${evDist}${fpLine}${rankLine}<div class="ppl-enrich" data-pid="${esc(data._pid)}"></div>`
+    ? `<div class="ppl-head">${pagedMode && pagesN>1?`${page===0?`Top <b>${paged.length}</b> most relevant`:`People <b>${from}–${to}</b> by relevance`} <span class="ppl-fc" style="text-transform:none;">· of ${rows.length} matched in the index · page ${page+1} of ${pagesN}</span>`:`<b>${rows.length}</b> ${rows.length===1?"person":"people"} found`}${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evFilterBar}${scopeLine}${evDist}${fpLine}${rankLine}<div class="ppl-enrich" data-pid="${esc(data._pid)}"></div>`
     : (lkHead || `<div class="ppl-head">Profile</div>`);   // single-person profile card (no enumeration coverage)
   // ambiguous lookup: each candidate card gets a PICK control (sends its entity id back as the choice)
   const pickCards = (lk && lk.resolution === "ambiguous")
@@ -5794,6 +5805,7 @@ async function askQuestion(question, opts){
   if(SEARCH_MODE === "people" && PEOPLE_CTX) payload.refine_facets = PEOPLE_CTX;
   // Person-lookup conversation: "which <name>?" was asked — this utterance is context for that name.
   if(SEARCH_MODE === "people" && PENDING_PERSON) payload.prior_person = PENDING_PERSON;
+  if(SEARCH_MODE === "people" && EVIDENCE_KINDS.size) payload.evidence_kinds = [...EVIDENCE_KINDS];
   if(EFFORT_ENABLED && EFFORT > 1) payload.effort = EFFORT;
   if(ATTACHMENTS.length) payload.attachments = ATTACHMENTS.slice();
   if(PENDING_INTAKE_TRANSCRIPT && PENDING_INTAKE_TRANSCRIPT.length && !THREAD.turns.length){
@@ -6331,7 +6343,7 @@ function newConversation(){
   THREAD = {session_id:null, turns:[]};
   MODE_VIEWS = {}; TAB_THREADS = {};   // "＋ New search" wipes every tab's remembered result/thread
   window.ACTIVE_MAP = null;            // …and leaves any saved-map view
-  PEOPLE_CTX = null; JOBS_CTX = null; PENDING_PERSON = null;  // …and both tabs' refinement conversations start fresh
+  PEOPLE_CTX = null; JOBS_CTX = null; PENDING_PERSON = null; EVIDENCE_KINDS = new Set();  // …and both tabs' refinement conversations start fresh
   GUIDED_REFINED = false;
   document.body.classList.remove("chatting"); out.style.paddingBottom = "";   // back to landing layout
   out.innerHTML = "";
@@ -8272,8 +8284,17 @@ document.addEventListener("click", e => {
   const jpg = e.target.closest && e.target.closest(".jobs-page");
   if(jpg){ e.preventDefault(); if(!jpg.disabled) gotoJobsPage(jpg.dataset.jpid, parseInt(jpg.dataset.page||"0",10)); return; }
   const rr = e.target.closest && e.target.closest(".ppl-rerank");
-  if(rr){ e.preventDefault(); rerankShown(rr.dataset.pid); }
+  if(rr){ e.preventDefault(); rerankShown(rr.dataset.pid); return; }
+  const ef = e.target.closest && e.target.closest(".ev-filter");
+  if(ef){ e.preventDefault(); toggleEvidenceFilter(ef.dataset.kind); }
 });
+function toggleEvidenceFilter(kind){
+  const ALL = ["repo","paper","post","talk","patent"];
+  if(kind === "any"){ const on = ALL.every(k=>EVIDENCE_KINDS.has(k)); EVIDENCE_KINDS = new Set(on ? [] : ALL); }
+  else { if(EVIDENCE_KINDS.has(kind)) EVIDENCE_KINDS.delete(kind); else EVIDENCE_KINDS.add(kind); }
+  const last = (THREAD && THREAD.turns && THREAD.turns.length) ? THREAD.turns[THREAD.turns.length-1].question : "";
+  if(last) submitAs("people", last);
+}
 // ---- LOCAL SCOPE (where the user is → default metro; expandable) -------------------------------
 window.ROSTER_GEO = window.ROSTER_GEO || null;   // the config block may run before this line
 async function initLocalScope(sel, applySel){

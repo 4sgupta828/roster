@@ -1715,6 +1715,21 @@ class ClaimGraphStore:
                 f"LIMIT ${len(args)}", *args)
         return [r["entity_id"] for r in rows]
 
+    async def people_with_artifacts(self, kinds: list[str], *, limit: int = 4000) -> list[str]:
+        """Entity ids holding at least one linked artifact of any of `kinds` (paper/repo/post/talk/
+        patent/org) — the recall path for the evidence filter."""
+        ks = [str(k) for k in (kinds or []) if str(k)]
+        if not ks:
+            return []
+        pool = await self._get_pool()
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT DISTINCT entity_id FROM rs_person_artifact WHERE kind = ANY($1) LIMIT $2", ks, int(limit))
+        except Exception:
+            return []
+        return [r["entity_id"] for r in rows]
+
     async def people_by_text(self, terms: list[str], *, tenant_id: str = "demo", limit: int = 300) -> list[str]:
         """Entity ids whose facet DISPLAY text (bio/title, skills, function, industry, role, company)
         mentions any of `terms` (ILIKE). The topic-anchor recall path for sparse subjects."""
