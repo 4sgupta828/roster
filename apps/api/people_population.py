@@ -1308,7 +1308,11 @@ def _clarify_text(name: str, rows: list[dict], resolution: str) -> str:
     return ""
 
 
-async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "demo", label: str = "") -> dict:
+_OTHERS_RE = re.compile(r"^(.*?)\s*\[others\]\s*$", re.I)
+
+
+async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "demo", label: str = "",
+                        force_discovery: bool = False) -> dict:
     """PERSON LOOKUP in People mode: bring up everything the index holds on a named person, on
     demand — or ask which one. kind='person' payload with `resolution` ∈ resolved|ambiguous|none,
     the matching rows (full cards with evidence packets + linked artifacts; the resolved person gets
@@ -1337,7 +1341,7 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
     resolution, rows = resolve_candidates(rows, ctx)
     web_rows: list[dict] = []
     if (os.environ.get("ROSTER_WEB_DISCOVERY", "1") == "1" and not _ENTITY_ID_RE.match(name)
-            and (resolution == "none" or (resolution == "ambiguous" and ctx))):
+            and (force_discovery or resolution == "none" or (resolution == "ambiguous" and ctx))):
         # NOT IN THE INDEX (or the hint fits nobody we hold): go FIND the person on the open web —
         # GitHub, OpenAlex, LinkedIn snippets — and resolve or ask, never hand off
         try:
@@ -1346,6 +1350,9 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
             held = {r["entity_id"] for r in rows}
             merged = rows + [r for r in web_rows if r["entity_id"] not in held]
             res2, rows2 = resolve_candidates(merged, ctx)
+            if force_discovery and not ctx:
+                res2 = "ambiguous" if len(merged) > 1 else res2   # 'show others': always the list
+                rows2 = merged if len(merged) > 1 else rows2
             if res2 == "resolved" and rows2 and rows2[0].get("web"):
                 eid = rows2[0]["entity_id"]
                 if await ingest_identity(store, eid, name_hint=name):
@@ -1660,6 +1667,10 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         _prior = {k: v[:6] for k, v in _prior.items() if v}
     topic_terms: list[str] = []
     _q = (question or "").strip()
+    _others = _OTHERS_RE.match(_q)
+    if _others and not _prior:
+        # "Not them? show other people with this name" — the index match PLUS open-web candidates
+        return await lookup_person(store, _others.group(1).strip(), "", tenant_id=tenant_id, force_discovery=True)
     _picked = picked_entity_id(_q)
     if _picked:
         # a PICKED candidate from a clarifying question (entity id) — no compile, direct lookup

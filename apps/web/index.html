@@ -2825,7 +2825,7 @@ function peopleRowsMarkup(data){
   let lkHead = "";
   if(lk && lk.resolution === "resolved"){
     lkHead = `<div class="ppl-head">Profile — <b>${esc(lk.name)}</b> <span class="ppl-fc" style="text-transform:none;">resolved from Roster's index${lk.context?` · context: ${esc(lk.context)}`:""}</span></div>`
-      + `<div class="ppl-cov">◔ Everything the index holds on this person: grounded facets, public links, and linked artifacts (scanned on demand). Not a claim of completeness — “Inspect evidence” shows types and gaps. ${qaBtn}</div>`;
+      + `<div class="ppl-cov">◔ Everything the index holds on this person: grounded facets, public links, and linked artifacts (scanned on demand). Not a claim of completeness — “Inspect evidence” shows types and gaps. ${qaBtn} <button type="button" class="ppl-qa ppl-others" data-name="${esc(lk.name)}" title="Search GitHub, OpenAlex and LinkedIn for other people with this name">Not them? Show others with this name</button></div>`;
   } else if(lk && lk.resolution === "ambiguous"){
     lkHead = `<div class="ppl-head">Which ${esc(lk.name)}?</div>`
       + `<div class="ppl-cov" style="border-left-color:var(--gold);">❓ ${esc(lk.clarify||"")} <span class="ppl-fc" style="text-transform:none;">Type the hint in the box below, or pick a card.</span></div>`;
@@ -8323,7 +8323,9 @@ function submitAs(mode, text){
 document.addEventListener("click", e => {
   const pk = e.target.closest && e.target.closest(".ppl-pickbtn");
   if(pk){ e.preventDefault(); submitAs("people", pk.dataset.pick || ""); return; }
-  const qa = e.target.closest && e.target.closest(".ppl-qa");
+  const ot = e.target.closest && e.target.closest(".ppl-others");
+  if(ot){ e.preventDefault(); submitAs("people", (ot.dataset.name || "") + " [others]"); return; }
+  const qa = e.target.closest && e.target.closest(".ppl-qa:not(.ppl-others)");
   if(qa){ e.preventDefault(); submitAs("qa", qa.dataset.q || ""); return; }
   const pg = e.target.closest && e.target.closest(".ppl-page");
   if(pg){ e.preventDefault(); if(!pg.disabled) gotoPeoplePage(pg.dataset.pid, parseInt(pg.dataset.page||"0",10)); return; }
