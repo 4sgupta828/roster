@@ -31,3 +31,15 @@ def test_collapse_linked_one_card_per_person_never_by_name_alone():
     assert [a["display"] for a in kept["attributes"]] == ["Cisco", "researcher"]   # deduped case-insensitively
     assert kept["blurb"] == "Researcher at Cisco"
     assert collapse_linked(rows, {}) is rows
+
+
+def test_same_source_splits_link_when_all_namesakes_share_one_employer():
+    from api.identity_links import acceptable
+    split = {"a_id": "openalex:A1", "b_id": "openalex:A2", "name": "Simon Kornblith", "employer": "anthropic",
+             "n_a": 11, "n_b": 11, "emp_a": 1, "emp_b": 1}
+    assert acceptable(split)                                         # 11 ids, one employer → one person
+    common = dict(split, emp_a=6, emp_b=6)                           # 11 ids across 6 employers → namesakes
+    assert not acceptable(common)
+    cross = dict(split, b_id="github:simon", n_b=1, emp_b=1)         # cross-source keeps the ≤3 guard
+    assert not acceptable(cross)
+    assert acceptable(dict(cross, n_a=3))

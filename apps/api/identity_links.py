@@ -43,9 +43,13 @@ WITH names AS (
     SELECT lower(name) AS nm, split_part(entity_id, ':', 1) AS src, entity_id, name
     FROM rs_entity WHERE kind = 'person' AND status = 'active' AND name ~ '\\s'
 ),
-dupes AS (SELECT nm, src, count(*) AS n FROM names GROUP BY nm, src)
+dupes AS (SELECT n.nm, n.src, count(*) AS n,
+                 count(DISTINCT fc.facet_value_norm) AS n_employers
+          FROM names n
+          LEFT JOIN roster_entity_facet fc ON fc.entity_id = n.entity_id AND fc.facet_key = 'company'
+          GROUP BY n.nm, n.src)
 SELECT g.entity_id AS a_id, o.entity_id AS b_id, g.name AS name, fg.facet_value_norm AS employer,
-       da.n AS n_a, db.n AS n_b
+       da.n AS n_a, db.n AS n_b, da.n_employers AS emp_a, db.n_employers AS emp_b
 FROM names g
 JOIN names o ON o.nm = g.nm AND o.src = ANY($2)
      AND ((o.src <> g.src) OR (o.src = g.src AND o.entity_id > g.entity_id))
@@ -56,16 +60,23 @@ JOIN dupes da ON da.nm = g.nm AND da.src = g.src
 JOIN dupes db ON db.nm = o.nm AND db.src = o.src
 LEFT JOIN rs_person_link l ON (l.a_id = g.entity_id AND l.b_id = o.entity_id)
 WHERE g.src = $1 AND length(fg.facet_value_norm) >= 4 AND l.a_id IS NULL
-GROUP BY 1, 2, 3, 4, 5, 6
+GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
 """
 
 
 def acceptable(row: dict, *, max_dupes: int = 3) -> bool:
-    """CODE-OWNED acceptance: a unique-enough name on both sides and a non-generic shared employer."""
+    """CODE-OWNED acceptance: a unique-enough name on both sides and a non-generic shared employer.
+    'Unique enough' = at most `max_dupes` same-named identities per source — OR, for a SAME-SOURCE
+    split, every namesake in that source carries the ONE same employer (eleven 'Simon Kornblith'
+    OpenAlex ids, all Anthropic, are one person; a common name spans many employers and stays apart)."""
     emp = (row.get("employer") or "").strip().lower()
     if not emp or emp in _GENERIC_EMPLOYERS or len(emp) < 4:
         return False
-    if int(row.get("n_a") or 99) > max_dupes or int(row.get("n_b") or 99) > max_dupes:
+    same_source = (row.get("a_id") or "").split(":", 1)[0] == (row.get("b_id") or "").split(":", 1)[0]
+    def _unique(n, n_emp):
+        n = int(n or 99)
+        return n <= max_dupes or (same_source and int(n_emp or 99) == 1)
+    if not (_unique(row.get("n_a"), row.get("emp_a")) and _unique(row.get("n_b"), row.get("emp_b"))):
         return False
     return len((row.get("name") or "").split()) >= 2
 
