@@ -160,3 +160,23 @@ rs_dossier           (map_id, entity_id, brief_snapshot, sections, evidence_refs
 - P3: every dossier sentence carries a ref that resolves; stale flips when evidence changes.
 - P4: every draft line has a ref; the "not enough evidence" state triggers on bare profiles.
 - P5: refresh reports cost before running and a non-empty delta object after.
+
+## 7. External review (Gemini 3 Pro, 2026-09-03) and what changed
+
+Adopted before merge:
+1. **Data model** — `rs_map_review` primary key is now `(map_id, entity_id, reviewer_key)` via an
+   idempotent migration in the store's ensure hook; the `entity##reviewer_key` namespace is gone.
+2. **Guest writes secured** — a guest registers a name on the private link
+   (`POST /maps/{id}/reviewer`) and receives a server-signed HMAC token bound to (map, key, name);
+   review writes require it — the read-only share token never authorizes a write. ≤10 reviewers per
+   map, in-process rate limits on registration and writes.
+3. **Vocabulary migration** — a one-time SQL update (`shortlisted→shortlist`, `reviewed→maybe`);
+   the read-path map stays as a fallback only.
+4. **Input sanitization** — reviewer name and note are stripped of control characters and angle
+   brackets at the API boundary (output stays escaped).
+
+Deferred with reasons:
+5. **Card DOM nesting** — the review control is inline-only and click-isolated; restructuring the
+   three card templates from spans to divs is a UI pass for P2b, not a merge blocker.
+6. Gemini's product note that hiring managers may prefer free text over tags: the note field ships
+   alongside the tags; tag adoption is a success metric to watch, not a design change yet.
