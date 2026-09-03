@@ -1308,7 +1308,7 @@ def _clarify_text(name: str, rows: list[dict], resolution: str) -> str:
     return ""
 
 
-async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "demo") -> dict:
+async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "demo", label: str = "") -> dict:
     """PERSON LOOKUP in People mode: bring up everything the index holds on a named person, on
     demand — or ask which one. kind='person' payload with `resolution` ∈ resolved|ambiguous|none,
     the matching rows (full cards with evidence packets + linked artifacts; the resolved person gets
@@ -1318,9 +1318,16 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
     name = " ".join((name or "").split())
     ctx = (ctx or "").strip()
     rows: list[dict] = []
+    raw: list[dict] = []
     try:
         if _ENTITY_ID_RE.match(name):                       # a picked candidate (entity id) → direct
             raw = await store.people_by_ids([name], tenant_id=tenant_id)
+            if not raw and name.split(":", 1)[0] in ("github", "openalex", "linkedin"):
+                # picked from the OPEN WEB: bring that identity into the index first
+                from api.person_discovery import ingest_identity
+                nm_hint = (label.split(" — ", 1)[0].strip() if label else "")
+                if await ingest_identity(store, name, name_hint=nm_hint):
+                    raw = await store.people_by_ids([name], tenant_id=tenant_id)
         else:
             raw = await store.people_by_name(name, tenant_id=tenant_id, limit=12)
         rows = [_person_row_from_facets(r) for r in raw]
@@ -1328,6 +1335,28 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
         _log.warning("lookup_person(%s) index read failed: %s", name, e)
         rows = []
     resolution, rows = resolve_candidates(rows, ctx)
+    web_rows: list[dict] = []
+    if (os.environ.get("ROSTER_WEB_DISCOVERY", "1") == "1" and not _ENTITY_ID_RE.match(name)
+            and (resolution == "none" or (resolution == "ambiguous" and ctx))):
+        # NOT IN THE INDEX (or the hint fits nobody we hold): go FIND the person on the open web —
+        # GitHub, OpenAlex, LinkedIn snippets — and resolve or ask, never hand off
+        try:
+            from api.person_discovery import discover_candidates, ingest_identity
+            web_rows = await discover_candidates(name, ctx)
+            held = {r["entity_id"] for r in rows}
+            merged = rows + [r for r in web_rows if r["entity_id"] not in held]
+            res2, rows2 = resolve_candidates(merged, ctx)
+            if res2 == "resolved" and rows2 and rows2[0].get("web"):
+                eid = rows2[0]["entity_id"]
+                if await ingest_identity(store, eid, name_hint=name):
+                    return await lookup_person(store, eid, "", tenant_id=tenant_id, label=f"{name} — [{eid}]")
+                resolution, rows = "resolved", rows2          # found, not mintable right now: show it
+            elif res2 == "resolved":
+                resolution, rows = res2, rows2
+            elif res2 == "ambiguous" and len(rows2) > len(rows):
+                resolution, rows = "ambiguous", rows2
+        except Exception as e:  # noqa: BLE001 — discovery is additive; the honest 'none' remains
+            _log.info("open-web discovery skipped for %s: %s", name, e)
     if resolution == "resolved":
         try:
             from api.artifacts import scan_person_extras
@@ -1359,12 +1388,20 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
     display_name = rows[0]["name"] if (resolution == "resolved" and rows) else (
         name if not _ENTITY_ID_RE.match(name) else (rows[0]["name"] if rows else name))
     for r in rows:
-        r["distinguisher"] = _distinguisher(r)
+        r["distinguisher"] = _distinguisher(r) + (" · found on " + r["source_label"] if r.get("web") and r.get("source_label") else "")
+        r.pop("_facets", None)
+    clarify = _clarify_text(display_name, rows, resolution)
+    if resolution == "ambiguous" and any(r.get("web") for r in rows):
+        from api.person_discovery import clarify_web
+        n_idx = sum(1 for r in rows if not r.get("web"))
+        clarify = (clarify_web(display_name, [r for r in rows if r.get("web")]) if not n_idx else
+                   f"Which {display_name}? {n_idx} in Roster's index plus {len(rows) - n_idx} found on the open web. "
+                   f"Pick one, or add a company, school or location.")
     return {"kind": "person", "not_people_query": False,
             "person_card": build_person_profile_card(display_name, ctx),
             "people_rows": rows,
             "person_lookup": {"resolution": resolution, "name": display_name, "context": ctx,
-                              "clarify": _clarify_text(display_name, rows, resolution),
+                              "clarify": clarify,
                               "candidates": [{"entity_id": r["entity_id"], "name": r["name"],
                                               "label": r["distinguisher"]} for r in rows]}}
 
@@ -1617,7 +1654,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     _picked = picked_entity_id(_q)
     if _picked:
         # a PICKED candidate from a clarifying question (entity id) — no compile, direct lookup
-        return await lookup_person(store, _picked, "", tenant_id=tenant_id)
+        return await lookup_person(store, _picked, "", tenant_id=tenant_id, label=_q)
     if prior_person and not _prior:
         # PERSON-LOOKUP CONVERSATION: the previous turn asked "which <name>?" (or found none). This
         # utterance is disambiguating CONTEXT for that name ("the one at Anthropic", "IIT Delhi")

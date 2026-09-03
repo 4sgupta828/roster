@@ -2724,7 +2724,8 @@ function peopleRowsMarkup(data){
     const attr = k => (p.attributes||[]).find(a=>a.key===k) || {};
     const senD = attr("seniority").display||"";                       // skip bare 'Mid'/'Junior' — reads as a fake title
     const title = (attr("title").display || attr("role").display || (/^(mid|junior|entry)/i.test(senD)?"":senD) || "");
-    const tags = (p.topic_hit ? `<span class="ppl-tag ppl-tag-topic" title="This person's grounded profile text mentions the brief's subject">mentions ${esc(p.topic_hit)}</span>` : "")
+    const tags = (p.web ? `<span class="ppl-tag ppl-tag-topic" title="Found on the open web — not in Roster's index yet; pick to bring them in">found on ${esc(p.source_label||"the web")}</span>` : "")
+      + (p.topic_hit ? `<span class="ppl-tag ppl-tag-topic" title="This person's grounded profile text mentions the brief's subject">mentions ${esc(p.topic_hit)}</span>` : "")
       + (p.attributes||[]).filter(a=>a.key==="function"||a.key==="metro")
       .map(a=>`<span class="ppl-tag">${esc(a.display)}</span>`).join("");
     const avatar = av
@@ -2829,8 +2830,8 @@ function peopleRowsMarkup(data){
     lkHead = `<div class="ppl-head">Which ${esc(lk.name)}?</div>`
       + `<div class="ppl-cov" style="border-left-color:var(--gold);">❓ ${esc(lk.clarify||"")} <span class="ppl-fc" style="text-transform:none;">Type the hint in the box below, or pick a card.</span></div>`;
   } else if(lk){
-    lkHead = `<div class="ppl-head">Not indexed — <b>${esc(lk.name)}</b></div>`
-      + `<div class="ppl-cov" style="border-left-color:var(--gap);">◔ ${esc(lk.clarify||"")} ${qaBtn}</div>`;
+    lkHead = `<div class="ppl-head">Not found yet — <b>${esc(lk.name)}</b></div>`
+      + `<div class="ppl-cov" style="border-left-color:var(--gap);">◔ ${esc(lk.clarify||"")} Searched Roster's index, GitHub, OpenAlex and LinkedIn snippets. ${qaBtn}</div>`;
   }
   const head = isEnum
     ? `<div class="ppl-head">${pagedMode && pagesN>1?`${page===0?`Top <b>${paged.length}</b> most relevant`:`People <b>${from}–${to}</b> by relevance`} <span class="ppl-fc" style="text-transform:none;">· of ${rows.length} matched in the index · page ${page+1} of ${pagesN}</span>`:`<b>${rows.length}</b> ${rows.length===1?"person":"people"} found`}${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${cov?`<div class="ppl-cov">◔ ${cov}</div>`:""}${evFilterBar}${scopeLine}${evDist}${fpLine}${rankLine}<div class="ppl-enrich" data-pid="${esc(data._pid)}"></div>`
