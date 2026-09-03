@@ -1244,8 +1244,12 @@ class MapPatchIn(BaseModel):
 
 class MapReviewIn(BaseModel):
     entity_id: str
-    state: str = "unreviewed"         # unreviewed | shortlisted | needs more evidence | reviewed
+    state: str = "unreviewed"         # unreviewed | shortlist | maybe | needs more evidence | not relevant
     note: str | None = None
+    tags: list[str] | None = None     # feedback tags (maps.FEEDBACK_TAGS) — calibrate the NEXT map, never the evidence
+    share_token: str = ""             # a NAMED REVIEWER on the private link (no account): token + their key/name
+    reviewer_key: str = ""
+    reviewer_name: str = ""
 
 
 class SettingIn(BaseModel):
@@ -5527,12 +5531,16 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     @app.post("/maps/{map_id}/review")
     async def map_review(map_id: str, body: MapReviewIn,
                          x_roster_token: str = Header(default="")) -> dict:
+        """A human review of one row: state + feedback tags + note. The owner (signed in) writes the
+        row's headline review; a named reviewer on the private link writes their own alongside."""
         ms = _require_maps()
-        _, user = await _require_user(x_roster_token)
-        ok = await ms.review(map_id, owner_id=user["id"], entity_id=body.entity_id,
-                             state=body.state, note=body.note)
+        user = await _optional_user(x_roster_token)
+        ok = await ms.review(map_id, owner_id=(user or {}).get("id"), entity_id=body.entity_id,
+                             state=body.state, note=body.note, tags=body.tags,
+                             share_token=(body.share_token or None), reviewer_key=body.reviewer_key[:64],
+                             reviewer_name=body.reviewer_name[:80])
         if not ok:
-            raise HTTPException(status_code=400, detail="invalid review or not your map")
+            raise HTTPException(status_code=400, detail="invalid review, or neither the owner nor a named reviewer on the link")
         return {"ok": True}
 
     @app.get("/maps/{map_id}/export.csv")

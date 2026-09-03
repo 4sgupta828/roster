@@ -555,6 +555,15 @@
   .ppl-card.person-card .ev-inline, .ppl-card.person-card .ev-inline *{cursor:auto;}
   .ppl-card.person-card .ev-inline a, .ppl-card.person-card .ev-inline button, .ppl-card.person-card .ev-inline select, .ppl-card.person-card .ev-inline summary{cursor:pointer;}
   .ev-hint{font-size:.7rem;color:var(--muted);margin-left:.35rem;}
+  .rv-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin-top:.4rem;font-size:.74rem;}
+  .rv-state{min-height:32px;font-size:.76rem;padding:.15rem .4rem;border:1px solid var(--gold);border-radius:6px;background:var(--panel);color:var(--gold-strong);font-weight:600;}
+  .rv-fb summary{cursor:pointer;color:var(--muted);font-size:.74rem;list-style:none;padding:.2rem .4rem;border:1px dashed var(--hair);border-radius:999px;}
+  .rv-fb summary::-webkit-details-marker{display:none;}
+  .rv-tags{display:flex;flex-wrap:wrap;gap:.25rem;margin:.35rem 0;}
+  .rv-tag{font:inherit;font-size:.7rem;padding:.15rem .5rem;border:1px solid var(--hair);border-radius:999px;background:var(--panel2);color:var(--ink);cursor:pointer;min-height:28px;}
+  .rv-tag.on{border-color:var(--gold);background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);font-weight:600;}
+  .rv-note{width:100%;font-size:.76rem;padding:.3rem .45rem;border:1px solid var(--hair);border-radius:6px;background:var(--panel);}
+  .rv-others{color:var(--muted);cursor:help;}
   .bc-strip{display:block;margin:.35rem 0 .2rem;font-size:.78rem;line-height:1.6;}
   .bc-grp{display:inline-flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:0 .7rem .25rem 0;}
   .bc-h{font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
@@ -2847,6 +2856,7 @@ function peopleRowsMarkup(data){
         ${evPill?`<span class="ppl-ev">${evPill}</span>`:""}
         ${fpStrip}
         ${linkBadges?`<span class="ppl-links">${linkBadges}</span>`:""}
+        ${typeof reviewControlMarkup==="function" ? reviewControlMarkup(ref) : ""}
         <span class="ev-inline-box" data-ref="${esc(ref)}"></span>
       </span></div>`;
   };
@@ -8268,8 +8278,11 @@ function talentMapBar(){
     const title = m.is_owner
       ? `<input class="mb-title" id="mapTitle" value="${esc(m.title||"")}" placeholder="Map title" onchange="saveMapMeta()">`
       : `<span class="mb-title">${esc(m.title||"Talent Map")}</span>`;
+    const nFb = (m.feedback||[]).filter(f => f.reviewer_key).length;
+    const reviewAs = m.is_owner ? "" : `<span class="mb-meta" style="flex-basis:auto;">Review as <input class="mb-title" id="reviewerName" style="max-width:180px;" placeholder="your name" value="${esc(reviewerName())}" onchange="setReviewerName(this.value); renderThread();"> <span class="ppl-fc" style="text-transform:none;">(no account needed — your review states and feedback save to this map under your name)</span></span>`;
     return `<div class="mapbar">${title}${share}<a class="mb-btn" href="${csvHref}" target="_blank" rel="noopener">⬇ Export CSV</a>
-      <span class="mb-meta">Saved Talent Map · ${m.n_rows||0} people · ${m.is_owner?"you own this map — review states and notes persist here":"shared read-only view"}${m.created_at?` · saved ${esc(String(m.created_at).slice(0,10))}`:""}</span>
+      <span class="mb-meta">Saved Talent Map · ${m.n_rows||0} people · ${m.is_owner?"you own this map — review states, feedback and notes persist here":"shared view"}${nFb?` · ${nFb} reviewer feedback item${nFb===1?"":"s"}`:""}${m.created_at?` · saved ${esc(String(m.created_at).slice(0,10))}`:""}</span>
+      ${reviewAs}
       ${m.is_owner?`<textarea class="mapnotes" id="mapNotes" placeholder="Map notes — context for whoever you share this with (persisted)" onchange="saveMapMeta()">${esc(m.notes||"")}</textarea>`:(m.notes?`<div class="mb-meta">Notes: ${esc(m.notes)}</div>`:"")}
     </div>`;
   }
@@ -8351,7 +8364,8 @@ async function loadMapView(id, token){
     }
     if(typeof setSearchMode === "function") setSearchMode("people");   // a talent map lives in the Talent Map tab
     window.ACTIVE_MAP = {id:m.id, map_type:"talent", title:m.title, notes:m.notes||"", share_path:m.share_path||"", token:(token||""),
-      is_owner:!!m.is_owner, reviews:(m.reviews||{}), n_rows:(m.rows||[]).length, created_at:m.created_at};
+      is_owner:!!m.is_owner, reviews:(m.reviews||{}), feedback:(m.feedback||[]), revisions:(m.revisions||[]), brief_contract:((m.coverage||{}).brief_contract||null),
+      n_rows:(m.rows||[]).length, created_at:m.created_at};
     THREAD = {session_id:null, turns:[{question:m.brief||m.title||"Talent Map", people_rows:(m.rows||[]), coverage_basis:(m.coverage||{}), grounded:true, claims:[], coverage_gaps:[]}]};
     TAB_THREADS.people = THREAD;
     renderThread(); window.scrollTo({top:0});
@@ -8363,11 +8377,58 @@ async function saveMapMeta(){
   m.title = title != null ? title : m.title; m.notes = notes != null ? notes : m.notes;
   try{ await fetch(`/maps/${encodeURIComponent(m.id)}`, {method:"PATCH", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({title:m.title, notes:m.notes})}); }catch(e){}
 }
-async function syncMapReview(ref, state){
-  const m = window.ACTIVE_MAP; if(!m || !m.is_owner) return;
-  m.reviews[ref] = {state};
-  try{ await fetch(`/maps/${encodeURIComponent(m.id)}/review`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({entity_id:ref, state})}); }catch(e){}
+// REVIEWER IDENTITY on a shared map: the owner reviews as themselves (signed in); anyone else on the
+// private link reviews under a NAME they type once (stored in this browser) — no account needed.
+const REVIEW_STATES = ["unreviewed","shortlist","maybe","needs more evidence","not relevant"];
+const FEEDBACK_TAGS = [["more_like_this","more like this"],["less_like_this","less like this"],["wrong_domain","wrong domain"],["wrong_seniority","wrong seniority"],["wrong_location","wrong location"],["wrong_company_target","wrong company target"],["evidence_too_weak","evidence too weak"],["needs_artifact_evidence","needs public work"],["self_stated_is_enough","self-stated is enough"],["private_company_talent","private-company talent"]];
+function reviewerKey(){ try{ let k = localStorage.getItem("roster_reviewer_key"); if(!k){ k = Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem("roster_reviewer_key", k); } return k; }catch(e){ return "anon"; } }
+function reviewerName(){ try{ return localStorage.getItem("roster_reviewer_name") || ""; }catch(e){ return ""; } }
+function setReviewerName(n){ try{ localStorage.setItem("roster_reviewer_name", (n||"").trim().slice(0,80)); }catch(e){} }
+function canReview(){ const m = window.ACTIVE_MAP; return !!(m && m.map_type !== "jobs" && (m.is_owner || (m.token && reviewerName()))); }
+function myReview(ref){
+  const m = window.ACTIVE_MAP; if(!m) return null;
+  if(m.is_owner) return (m.reviews||{})[ref] || null;
+  const k = reviewerKey();
+  return ((m.feedback||[]).find(f => f.entity_id === ref && f.reviewer_key === k)) || null;
 }
+async function syncMapReview(ref, state, tags, note){
+  const m = window.ACTIVE_MAP; if(!m || !canReview()) return;
+  const cur = myReview(ref) || {};
+  const body = {entity_id: ref, state: state || cur.state || "unreviewed"};
+  if(tags !== undefined) body.tags = tags;
+  if(note !== undefined) body.note = note;
+  if(!m.is_owner){ body.share_token = m.token; body.reviewer_key = reviewerKey(); body.reviewer_name = reviewerName(); }
+  const rec = {...cur, state: body.state, tags: (tags !== undefined ? tags : (cur.tags||[])), note: (note !== undefined ? note : (cur.note||"")), reviewer_key: m.is_owner ? "" : reviewerKey(), reviewer_name: m.is_owner ? "" : reviewerName(), entity_id: ref};
+  if(m.is_owner){ m.reviews = m.reviews || {}; m.reviews[ref] = rec; }
+  else { m.feedback = (m.feedback||[]).filter(f => !(f.entity_id === ref && f.reviewer_key === reviewerKey())).concat([rec]); }
+  try{ await fetch(`/maps/${encodeURIComponent(m.id)}/review`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(body)}); }catch(e){}
+}
+// the review control rendered in a person card's footer when a map is active and the viewer may review
+function reviewControlMarkup(ref){
+  if(!canReview()) return "";
+  const m = window.ACTIVE_MAP, cur = myReview(ref) || {};
+  const others = (m.feedback||[]).filter(f => f.entity_id === ref && !(m.is_owner ? false : f.reviewer_key === reviewerKey()) && (f.state !== "unreviewed" || (f.tags||[]).length));
+  const opts = REVIEW_STATES.map(st => `<option value="${esc(st)}"${st===(cur.state||"unreviewed")?" selected":""}>${esc(st)}</option>`).join("");
+  const tagBtns = FEEDBACK_TAGS.map(([k,l]) => `<button type="button" class="rv-tag${(cur.tags||[]).includes(k)?" on":""}" data-ref="${esc(ref)}" data-tag="${esc(k)}">${esc(l)}</button>`).join("");
+  return `<span class="rv-ctl" data-ref="${esc(ref)}">
+    <select class="rv-state" data-ref="${esc(ref)}" title="Your review of this row — decision support, never a verdict">${opts}</select>
+    <details class="rv-fb"><summary>feedback${(cur.tags||[]).length?` · ${cur.tags.length}`:""}</summary><div class="rv-tags">${tagBtns}</div>
+      <input class="rv-note" data-ref="${esc(ref)}" placeholder="note for the team (optional)" value="${esc(cur.note||"")}" /></div></details>
+    ${others.length?`<span class="rv-others" title="${esc(others.map(o=>`${o.reviewer_name||"owner"}: ${o.state}${(o.tags||[]).length?" · "+o.tags.join(", "):""}`).join("\n"))}">${others.length} other review${others.length===1?"":"s"}</span>`:""}
+  </span>`;
+}
+document.addEventListener("change", e => {
+  const sel = e.target.closest && e.target.closest(".rv-state"); if(sel){ syncMapReview(sel.dataset.ref, sel.value); return; }
+  const nt = e.target.closest && e.target.closest(".rv-note"); if(nt){ syncMapReview(nt.dataset.ref, undefined, undefined, nt.value); }
+});
+document.addEventListener("click", e => {
+  const b = e.target.closest && e.target.closest(".rv-tag"); if(!b) return;
+  e.preventDefault(); e.stopPropagation();
+  const cur = myReview(b.dataset.ref) || {}; const tags = new Set(cur.tags||[]);
+  if(tags.has(b.dataset.tag)) tags.delete(b.dataset.tag); else tags.add(b.dataset.tag);
+  b.classList.toggle("on"); syncMapReview(b.dataset.ref, undefined, [...tags]);
+  const sum = b.closest(".rv-fb") && b.closest(".rv-fb").querySelector("summary"); if(sum) sum.textContent = "feedback" + (tags.size ? " · " + tags.size : "");
+});
 function copyMapLink(){
   const m = window.ACTIVE_MAP; if(!m || !m.share_path) return;
   const url = location.origin + location.pathname + m.share_path;
@@ -8398,7 +8459,7 @@ async function openMapsList(){
   const FAMILY = {github:"the person's own GitHub profile (self-stated)",openalex:"OpenAlex scholarly registry — derived from published works",
     yc:"Y Combinator company directory",npi:"NPI registry (US licensed-provider directory)",sec:"SEC EDGAR filings",theorg:"TheOrg org-chart page (employer-stated)",
     aifund:"AI Fund portfolio page",ef:"Entrepreneur First company page",pear:"Pear VC portfolio page",sosv:"SOSV portfolio page"};
-  const REVIEW = ["unreviewed","shortlisted","needs more evidence","reviewed"];   // human decision support — never a verdict
+  const REVIEW = ["unreviewed","shortlist","maybe","needs more evidence","not relevant"];   // human decision support — never a verdict
   // INLINE evidence panel (replaces the side rail): opens under the card on click, folds on a second
   // click. The card already shows name, role/company blurb, LinkedIn headline, tags, evidence pill,
   // footprint counts and profile links — the panel shows only what the card does NOT: why surfaced,

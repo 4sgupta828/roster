@@ -35,6 +35,20 @@ CREATE TABLE IF NOT EXISTS rs_map (
     updated_at    timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ix_rs_map_owner ON rs_map (owner_id, created_at DESC);
+ALTER TABLE rs_map_review ADD COLUMN IF NOT EXISTS tags text[] NOT NULL DEFAULT '{}';
+ALTER TABLE rs_map_review ADD COLUMN IF NOT EXISTS reviewer_key text NOT NULL DEFAULT '';
+ALTER TABLE rs_map_review ADD COLUMN IF NOT EXISTS reviewer_name text NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS rs_map_revision (
+    map_id            text NOT NULL REFERENCES rs_map(id) ON DELETE CASCADE,
+    revision_id       int  NOT NULL,
+    reason            text NOT NULL DEFAULT 'initial',
+    brief_snapshot    text NOT NULL DEFAULT '',
+    filters_snapshot  jsonb NOT NULL DEFAULT '{}'::jsonb,
+    coverage_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
+    row_snapshot      jsonb NOT NULL DEFAULT '[]'::jsonb,
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (map_id, revision_id)
+);
 CREATE TABLE IF NOT EXISTS rs_map_review (
     map_id        text NOT NULL REFERENCES rs_map(id) ON DELETE CASCADE,
     entity_id     text NOT NULL,
@@ -45,7 +59,12 @@ CREATE TABLE IF NOT EXISTS rs_map_review (
 );
 """
 
-REVIEW_STATES = ("unreviewed", "shortlisted", "needs more evidence", "reviewed")
+REVIEW_STATES = ("unreviewed", "shortlist", "maybe", "needs more evidence", "not relevant")
+_LEGACY_STATE = {"shortlisted": "shortlist", "reviewed": "maybe"}     # older rows read as the new vocabulary
+FEEDBACK_TAGS = ("more_like_this", "less_like_this", "wrong_domain", "wrong_seniority", "wrong_location",
+                 "wrong_company_target", "evidence_too_weak", "needs_artifact_evidence",
+                 "self_stated_is_enough", "private_company_talent")
+REVISION_REASONS = ("initial", "hiring_manager_feedback", "manual_filter_change", "evidence_refresh", "corpus_expansion")
 _MAX_ROWS = 400
 
 
@@ -87,6 +106,11 @@ class MapStore:
                 mid, tenant_id, self._vertical, map_type, title, (brief or "").strip()[:2000],
                 json.dumps(filters or {}), json.dumps(coverage or {}), json.dumps(rows),
                 owner_id, token)
+            await conn.execute(
+                """INSERT INTO rs_map_revision (map_id, revision_id, reason, brief_snapshot, filters_snapshot,
+                                                coverage_snapshot, row_snapshot)
+                   VALUES ($1, 0, 'initial', $2, $3::jsonb, $4::jsonb, $5::jsonb)""",
+                mid, (brief or "").strip()[:2000], json.dumps(filters or {}), json.dumps(coverage or {}), json.dumps(rows))
         return {"id": mid, "share_token": token, "title": title, "rows": len(rows)}
 
     async def get(self, map_id: str, *, owner_id: str | None = None,
@@ -102,13 +126,23 @@ class MapStore:
                     (share_token and secrets.compare_digest(share_token, r["share_token"]))):
                 return None
             reviews = await conn.fetch(
-                "SELECT entity_id, state, note, updated_at FROM rs_map_review WHERE map_id = $1", map_id)
+                "SELECT entity_id, state, note, tags, reviewer_key, reviewer_name, updated_at FROM rs_map_review WHERE map_id = $1", map_id)
+            revs = await conn.fetch(
+                "SELECT revision_id, reason, created_at FROM rs_map_revision WHERE map_id = $1 ORDER BY revision_id", map_id)
         d = dict(r)
         for k in ("filters", "coverage", "rows"):
             v = d.get(k)
             d[k] = json.loads(v) if isinstance(v, str) else (v or ({} if k != "rows" else []))
-        d["reviews"] = {x["entity_id"]: {"state": x["state"], "note": x["note"],
-                                         "updated_at": str(x["updated_at"])} for x in reviews}
+        d["reviews"] = {}
+        d["feedback"] = []                       # every reviewer's row-level feedback (tags + note), by entity
+        for x in reviews:
+            st = _LEGACY_STATE.get(x["state"], x["state"])
+            rec = {"state": st, "note": x["note"], "tags": list(x["tags"] or []), "reviewer_key": x["reviewer_key"] or "",
+                   "reviewer_name": x["reviewer_name"] or "", "updated_at": str(x["updated_at"])}
+            if not x["reviewer_key"]:            # the owner's own review is the row's headline state
+                d["reviews"][x["entity_id"]] = rec
+            d["feedback"].append({"entity_id": x["entity_id"].split("##", 1)[0], **rec})
+        d["revisions"] = [{"revision_id": r["revision_id"], "reason": r["reason"], "created_at": str(r["created_at"])} for r in revs]
         d["is_owner"] = bool(owner_id and r["owner_id"] == owner_id)
         d["created_at"] = str(d["created_at"]); d["updated_at"] = str(d["updated_at"])
         if not d["is_owner"]:
@@ -141,26 +175,43 @@ class MapStore:
                 (notes[:8000] if notes is not None else None))
         return res.endswith("1")
 
-    async def review(self, map_id: str, *, owner_id: str, entity_id: str, state: str,
-                     note: str | None = None) -> bool:
-        """Owner-only: set a row's HUMAN review state + note (never a verdict — no 'reject')."""
+    async def review(self, map_id: str, *, owner_id: str | None, entity_id: str, state: str,
+                     note: str | None = None, tags: list[str] | None = None,
+                     share_token: str | None = None, reviewer_key: str = "", reviewer_name: str = "") -> bool:
+        """Set a row's HUMAN review state, feedback tags and note (never a verdict — no 'reject').
+        The OWNER writes the row's headline review (reviewer_key ''); a NAMED REVIEWER on the private
+        link (share token + their own key/name) writes their own row alongside — reviewers never
+        overwrite each other. Feedback edits the next map's contract, never the evidence."""
         await self._ensure()
+        state = _LEGACY_STATE.get(state, state)
         if state not in REVIEW_STATES:
             return False
+        tags_given = tags is not None
+        tags = [t for t in (tags or []) if t in FEEDBACK_TAGS][:6]
         pool = await self._get_pool()
         async with pool.acquire() as conn:
-            own = await conn.fetchval("SELECT 1 FROM rs_map WHERE id = $1 AND owner_id = $2",
-                                      map_id, owner_id)
-            if not own:
+            r = await conn.fetchrow("SELECT owner_id, share_token FROM rs_map WHERE id = $1", map_id)
+            if r is None:
                 return False
+            is_owner = bool(owner_id and r["owner_id"] == owner_id)
+            via_link = bool(share_token and secrets.compare_digest(share_token, r["share_token"]) and reviewer_key)
+            if not (is_owner or via_link):
+                return False
+            rkey = "" if is_owner else reviewer_key[:64]
+            rname = ("" if is_owner else (reviewer_name or "reviewer")[:80])
+            # one row per (map, entity, reviewer) — the table's PK is (map, entity) for the owner's row;
+            # reviewer rows key on reviewer_key inside entity_id's namespace to stay additive
+            eid = entity_id if is_owner else f"{entity_id}##{rkey}"
             await conn.execute(
-                """INSERT INTO rs_map_review (map_id, entity_id, state, note)
-                   VALUES ($1,$2,$3,$4)
+                """INSERT INTO rs_map_review (map_id, entity_id, state, note, tags, reviewer_key, reviewer_name)
+                   VALUES ($1,$2,$3,$4,$5::text[],$6,$7)
                    ON CONFLICT (map_id, entity_id) DO UPDATE SET
                      state = EXCLUDED.state,
-                     note = CASE WHEN $5 THEN EXCLUDED.note ELSE rs_map_review.note END,
+                     note = CASE WHEN $8 THEN EXCLUDED.note ELSE rs_map_review.note END,
+                     tags = CASE WHEN $9 THEN EXCLUDED.tags ELSE rs_map_review.tags END,
+                     reviewer_name = EXCLUDED.reviewer_name,
                      updated_at = now()""",
-                map_id, entity_id, state, (note or "")[:2000], note is not None)
+                map_id, eid, state, (note or "")[:2000], tags, rkey, rname, note is not None, tags_given)
             await conn.execute("UPDATE rs_map SET updated_at = now() WHERE id = $1", map_id)
         return True
 

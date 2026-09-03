@@ -2336,6 +2336,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     # COMPANY GUARD (code-owned): a company the question names gates the cohort even when the
     # compiler dropped it — unless this is a single-person lookup ("Mukul Gupta at Cisco")
     guard_added: list[str] = []
+    _orig_facets = dict(facets or {})              # the compiler's read, before guard / relaxation edits
     if not (not facets and person):
         facets = await company_guard(question, facets, store)
         guard_added = list(facets.get("_company_guard") or [])
@@ -2888,8 +2889,10 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         _soft_all = [k for k in ("role", "function", "skill", "seniority", "industry", "stage", "accelerator") if facets.get(k)]
         if not semantic_first:                       # facet-gated run: the non-identity facets DID gate
             _hard_keys += [k for k in _soft_all if k not in (relaxed_from or []) and k not in _thin_soft]
+        _contract_facets = {**_orig_facets, **facets}   # relaxed keys keep their original values under "prefer"
+        _soft_all = [k for k in ("role", "function", "skill", "seniority", "industry", "stage", "accelerator") if _contract_facets.get(k)]
         coverage["brief_contract"] = brief_contract_for(
-            question, facets, hard_keys=_hard_keys, soft_keys=_soft_all, guard_added=guard_added,
+            question, _contract_facets, hard_keys=_hard_keys, soft_keys=_soft_all, guard_added=guard_added,
             relaxed_from=relaxed_from, semantic_first=semantic_first, ev_kinds=_ev_kinds,
             scope=(coverage.get("geo_scope") or {}), topic_terms=topic_terms)
         coverage["ranking"] = ("how closely each profile's wording matches your brief first; among "
