@@ -215,3 +215,11 @@ def test_build_job_summary_returns_the_verified_read():
         async def complete(self, **kw):
             return _Empty()
     assert loop.run_until_complete(build_job_summary(jd, _LLM2())) is None      # nothing read → None, never cached
+
+
+def test_source_company_exclusion_matches_whole_words_in_the_raw_company():
+    from api.people_population import _co_matches
+    assert _co_matches("netflix", {"netflix"})
+    assert _co_matches("netflixnetflixuilinkedin", {"netflix"}, raw="Netflix @NetflixUI @LinkedIn")   # whole token
+    assert not _co_matches("metabase", {"meta"}, raw="Metabase")                                      # never a prefix
+    assert not _co_matches("", {"netflix"}, raw="")

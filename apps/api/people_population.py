@@ -1212,16 +1212,19 @@ def _norm_co(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
 
-def _co_matches(candidate_norm: str, excl: set[str]) -> bool:
-    """True if a candidate's normalized company EXACTLY equals any excluded company (after norm).
-    Exact-only on purpose: company norms strip legal suffixes to a clean short name, and the LLM
-    supplies real aliases, so equality covers the true variants WITHOUT prefix false-positives
-    (a 'meta' exclusion must not drop someone at 'metabase'). A miss under-excludes — never
-    wrongly hides a valid candidate. The <3-char guard blocks a stray tiny token."""
+def _co_matches(candidate_norm: str, excl: set[str], raw: str = "") -> bool:
+    """True if a candidate's normalized company EXACTLY equals any excluded company (after norm),
+    OR the raw company string carries it as a whole WORD ("Netflix @NetflixUI @LinkedIn" → netflix).
+    Whole tokens only, never prefixes: a 'meta' exclusion must not drop someone at 'metabase'.
+    A miss under-excludes — never wrongly hides a valid candidate. The <3-char guard blocks a stray
+    tiny token."""
     ck = candidate_norm
     if not ck:
         return False
-    return any(len(e) >= 3 and ck == e for e in excl)
+    if any(len(e) >= 3 and ck == e for e in excl):
+        return True
+    toks = {t for t in re.split(r"[^a-z0-9]+", (raw or "").lower()) if t}
+    return any(len(e) >= 3 and e in toks for e in excl)
 
 
 async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
@@ -1302,7 +1305,7 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
         # Hide people at the hiring company — check ALL of the person's company facets (a profile can
         # carry more than one), not just the first, so a current employer listed after a prior one is
         # still caught. Still exact-match per alias, so no false positives.
-        if excl and any(_co_matches(_norm_co(f["value_norm"]), excl)
+        if excl and any(_co_matches(_norm_co(f["value_norm"]), excl, raw=str(f.get("display_value") or f.get("value_norm") or ""))
                         for f in facets if f["facet_key"] == "company"):
             excluded_n += 1
             continue
