@@ -3053,6 +3053,9 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (roster JD fetch)", "Accept": "application/json"})
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 return r.read(2_000_000).decode("utf-8", "ignore")
+        except urllib.error.HTTPError as e:
+            from api.ats_posting import NOT_FOUND
+            return NOT_FOUND if e.code == 404 else ""
         except Exception:   # noqa: BLE001
             return ""
 
@@ -3080,9 +3083,11 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         # 0) ATS PUBLIC JSON APIs first — Greenhouse / Lever / Ashby postings (and the company career
         #    pages that EMBED them, e.g. pinterestcareers.com/jobs/?gh_jid=…) are JavaScript-rendered:
         #    a raw HTML fetch sees only chrome. The posting APIs return the full description.
-        from api.ats_posting import ats_posting_text
+        from api.ats_posting import CLOSED, ats_posting_text
         try:
             t = ats_posting_text(u, get=lambda url: _http_get_public(url))
+            if t == CLOSED:
+                return CLOSED
             if len(t) >= 300:
                 return t[:12000]
         except Exception:   # noqa: BLE001 — fall through to the page fetch
@@ -3155,6 +3160,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             if hit:
                 return {"summary": hit, "cached": True, "job_url": url}
         jd = await asyncio.to_thread(_fetch_jd_text, url)
+        from api.ats_posting import CLOSED
+        if jd == CLOSED:
+            return {"summary": None, "closed": True, "job_url": url,
+                    "note": "This posting is no longer on the company's board — it looks closed or filled."}
         if len(jd) < 300:
             raise HTTPException(status_code=400, detail="Couldn't read that posting — open the apply link directly.")
         summ = await build_job_summary(jd, build_llm(mode=resolve_mode()), title=body.title, company=body.company)
@@ -5800,6 +5809,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         jd = (body.job_description or "").strip()
         if not jd and body.job_url:
             jd = await asyncio.to_thread(_fetch_jd_text, body.job_url)
+            from api.ats_posting import CLOSED
+            if jd == CLOSED:
+                raise HTTPException(status_code=400,
+                    detail="This posting is no longer on the company's board (closed or filled) — pick another role.")
             if len(jd) < 40:
                 raise HTTPException(status_code=400,
                     detail="Couldn't read that job link — paste the description text instead.")

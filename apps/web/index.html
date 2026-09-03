@@ -7618,6 +7618,7 @@ async function summarizeJob(ref){
     const r = await fetch("/jobs/summarize", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({job_url: j.url, title: j.title||"", company: j.company||""})});
     if(!r.ok){ const e = await r.json().catch(()=>({})); set(`<div class="sethint" style="margin-top:.4rem;">${esc(e.detail || "Couldn't read that posting — open the apply link.")}</div>`); return; }
     const d = await r.json();
+    if(d.closed || !d.summary){ set(`<div class="ppl-cov" style="margin-top:.4rem;border-left-color:var(--gap);">⊘ ${esc(d.note || "This posting looks closed.")}</div>`); return; }
     window.JOB_SUMMARIES[j.url] = d.summary;
     set(jobSummaryMarkup(d.summary, j, {ref, assist:true, cached: !!d.cached}));
   }catch(e){ set(`<div class="sethint" style="margin-top:.4rem;">Summary failed — open the apply link.</div>`); }

@@ -40,8 +40,13 @@ def greenhouse_token_candidates(url: str) -> list[str]:
     return out[:5]
 
 
+CLOSED = "__CLOSED__"          # the board exists but this posting is gone (removed / filled)
+NOT_FOUND = "__HTTP_404__"     # getter sentinel for a 404 (distinguishes 'gone' from 'unreachable')
+
+
 def ats_posting_text(url: str, get) -> str:
-    """Full posting text via the ATS public API, or '' when the link is not an ATS posting we know."""
+    """Full posting text via the ATS public API; '' when the link is not an ATS posting we know;
+    CLOSED when the board answers but the posting is gone (a stale index row — say so)."""
     p = urlparse(url)
     host = (p.netloc or "").lower()
     seg = [x for x in (p.path or "").split("/") if x]
@@ -52,8 +57,26 @@ def ats_posting_text(url: str, get) -> str:
     if host.endswith("greenhouse.io") and len(seg) >= 3 and seg[1] == "jobs":
         token, gh_id = seg[0], seg[2]
     if gh_id and gh_id.isdigit():
-        for tok in ([token] if token else greenhouse_token_candidates(url)):
+        cands = [token] if token else greenhouse_token_candidates(url)
+        if not token:
+            # the embedding page names its board: greenhouse.io/embed/job_board/js?for=<token>,
+            # boards.greenhouse.io/<token>, or a gh_src/for= parameter — read it once
+            page = get(url) or ""
+            for m in re.finditer(r"greenhouse\.io/(?:embed/job_board(?:/js)?\?for=|)([A-Za-z0-9_-]{3,})", page):
+                t = m.group(1).lower()
+                if t not in ("embed", "v1", "boards", "js") and t not in cands:
+                    cands.insert(0, t)
+            for m in re.finditer(r"[?&]for=([A-Za-z0-9_-]{3,})", page):
+                t = m.group(1).lower()
+                if t not in cands:
+                    cands.insert(0, t)
+        for tok in cands[:6]:
             body = get(f"https://boards-api.greenhouse.io/v1/boards/{tok}/jobs/{gh_id}")
+            if body == NOT_FOUND:
+                board = get(f"https://boards-api.greenhouse.io/v1/boards/{tok}")
+                if board and board != NOT_FOUND:
+                    return CLOSED                     # right board, posting gone
+                continue
             if not body:
                 continue
             try:
@@ -68,6 +91,8 @@ def ats_posting_text(url: str, get) -> str:
     # --- Lever: jobs.lever.co/<co>/<uuid>
     if host.endswith("lever.co") and len(seg) >= 2:
         body = get(f"https://api.lever.co/v0/postings/{seg[0]}/{seg[1]}")
+        if body == NOT_FOUND:
+            return CLOSED
         if body:
             try:
                 d = json.loads(body)
@@ -88,7 +113,10 @@ def ats_posting_text(url: str, get) -> str:
                 d = json.loads(body)
             except Exception:   # noqa: BLE001
                 d = None
-            for j in ((d or {}).get("jobs") or []) if isinstance(d, dict) else []:
+            jobs = ((d or {}).get("jobs") or []) if isinstance(d, dict) else []
+            if isinstance(d, dict) and jobs and not any(str(j.get("id")) == seg[1] or (j.get("jobUrl") or "").rstrip("/").endswith(seg[1]) for j in jobs):
+                return CLOSED                         # the board lists jobs, this one is not among them
+            for j in jobs:
                 if str(j.get("id")) == seg[1] or (j.get("jobUrl") or "").rstrip("/").endswith(seg[1]):
                     comp = ((j.get("compensation") or {}).get("compensationTierSummary") or "")
                     head = " · ".join(x for x in [j.get("title") or "", j.get("location") or "", j.get("employmentType") or "",

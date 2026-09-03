@@ -31,3 +31,20 @@ def test_ats_posting_text_reads_greenhouse_lever_ashby():
     ab = ats_posting_text("https://jobs.ashbyhq.com/acme/j1", get)
     assert "ML Engineer · Remote · Remote · compensation $180K – $220K" in ab and "Train models" in ab
     assert ats_posting_text("https://example.com/careers/123", get) == ""
+
+
+def test_closed_posting_is_reported_not_guessed():
+    from api.ats_posting import CLOSED, NOT_FOUND
+    def get(u):
+        if u.endswith("/jobs/8015529"):
+            return NOT_FOUND
+        if u.endswith("/boards/pinterest"):
+            return json.dumps({"name": "Pinterest"})
+        if "api.lever.co" in u:
+            return NOT_FOUND
+        if "api.ashbyhq.com" in u:
+            return json.dumps({"jobs": [{"id": "other", "title": "x"}]})
+        return ""
+    assert ats_posting_text("https://www.pinterestcareers.com/jobs/?gh_jid=8015529", get) == CLOSED
+    assert ats_posting_text("https://jobs.lever.co/acme/gone", get) == CLOSED
+    assert ats_posting_text("https://jobs.ashbyhq.com/acme/gone", get) == CLOSED
