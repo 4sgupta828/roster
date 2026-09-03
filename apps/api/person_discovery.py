@@ -410,3 +410,78 @@ def identity_from_url(url: str) -> str:
     if m:
         return "linkedin:" + m.group(1).lower()
     return ""
+
+
+# --------------------------------------------------------------------------- #
+# COMPANY GAP — a named company with few indexed people: find its people on the open web     #
+# --------------------------------------------------------------------------- #
+def rows_from_linkedin_company(company: str, results: list[dict]) -> list[dict]:
+    """LinkedIn profile snippets for a COMPANY search → candidate rows. A result counts only when
+    the company name appears in the headline/snippet next to a person's name (the same hint gate as
+    single-person resolution) — 'X at <Company>' in their own words, self-stated evidence."""
+    from api.linkedin_resolve import parse_title
+    co = " ".join((company or "").replace("_", " ").split())
+    co_l = co.lower()
+    out, seen = [], set()
+    for r in results or []:
+        url = (r.get("url") or "").strip()
+        m = re.match(r"https?://([a-z]{2,3}\.)?linkedin\.com/in/([^/?#\s]+)", url, re.I)
+        if not m:
+            continue
+        rname, headline = parse_title(r.get("title") or "")
+        if len(rname.split()) < 2 or len(rname) > 60:
+            continue
+        text = (headline + " " + (r.get("snippet") or "")).lower()
+        if co_l not in text:
+            continue
+        slug = m.group(2).lower()
+        if slug in seen:
+            continue
+        seen.add(slug)
+        role = re.sub(r"\s+(at|@)\s+.*$", "", headline, flags=re.I).strip() if headline else ""
+        facets = [("company", co), ("title", headline[:160]), ("role", role[:80] if 0 < len(role) < 60 else "")]
+        row = _row("linkedin:" + slug, rname, facets, url, [{"kind": "linkedin", "url": url}],
+                   (headline or f"At {co}") + " — " + (r.get("snippet") or "")[:160], "LinkedIn")
+        row["blurb"] = row["blurb"].strip(" —")
+        out.append(row)
+    return out
+
+
+def company_gap_queries(company: str, terms: list[str]) -> list[str]:
+    """Two searches per gap company: the role/topic terms at the company, and the company alone."""
+    co = " ".join((company or "").replace("_", " ").split())
+    t = " ".join(str(x).replace("_", " ") for x in (terms or [])[:3] if str(x).strip())
+    qs = [f'site:linkedin.com/in "{co}" {t}'.strip(), f'site:linkedin.com/in "{co}" engineer OR researcher OR lead']
+    return [q for i, q in enumerate(qs) if q and (i == 0 or q != qs[0])][:2]
+
+
+async def discover_company_people(store, company: str, terms: list[str], *, search=None, limit: int = 20,
+                                  mint: bool = True) -> list[dict]:
+    """COMPANY GAP leg: run the two searches, gate each hit on the company name, mint the found
+    profiles as linkedin:<slug> identities (so the gap heals — the next search finds them in the
+    index and links can attach), and return the card rows. Never raises."""
+    from api.linkedin_resolve import search_snippets
+    search = search or search_snippets
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for q in company_gap_queries(company, terms):
+        try:
+            res = await asyncio.wait_for(search(q, max_results=20), 20)
+        except Exception as e:  # noqa: BLE001
+            _log.info("company gap search failed (%s): %s", q, e)
+            continue
+        for r in rows_from_linkedin_company(company, res or []):
+            if r["entity_id"] in seen:
+                continue
+            seen.add(r["entity_id"]); rows.append(r)
+        if len(rows) >= limit:
+            break
+    rows = rows[:limit]
+    if mint and rows and store is not None:
+        try:
+            pool = await store._get_pool()
+            for r in rows:
+                await _mint(pool, r["entity_id"], r)
+        except Exception as e:  # noqa: BLE001 — discovery is additive; unminted rows still show
+            _log.info("company gap mint skipped: %s", e)
+    return rows

@@ -130,3 +130,26 @@ def test_openalex_rows_say_published_author_not_researcher_at():
                            {"key": "function", "display": "Computer Science"}])
     assert blurb.startswith("Published author · Anthropic") and "not stated" not in blurb
     assert "Researcher" not in blurb
+
+
+def test_company_gap_rows_need_company_in_headline_and_two_queries():
+    import asyncio
+    from api.person_discovery import company_gap_queries, discover_company_people, rows_from_linkedin_company
+    res = [{"url": "https://www.linkedin.com/in/jane-doe-1/", "title": "Jane Doe - Staff Engineer at Perplexity | LinkedIn", "snippet": "San Francisco"},
+           {"url": "https://www.linkedin.com/in/john-roe/", "title": "John Roe - Engineer at Acme | LinkedIn", "snippet": "no company match"},
+           {"url": "https://www.linkedin.com/company/perplexity", "title": "Perplexity | LinkedIn", "snippet": "company page"},
+           {"url": "https://in.linkedin.com/in/jane-doe-1/", "title": "Jane Doe - Staff Engineer at Perplexity | LinkedIn", "snippet": "dup slug"}]
+    rows = rows_from_linkedin_company("Perplexity", res)
+    assert [r["entity_id"] for r in rows] == ["linkedin:jane-doe-1"]
+    r = rows[0]
+    assert r["web"] and r["source_label"] == "LinkedIn"
+    assert next(f["display_value"] for f in r["_facets"] if f["facet_key"] == "company") == "Perplexity"
+    assert next(f["display_value"] for f in r["_facets"] if f["facet_key"] == "role") == "Staff Engineer"
+    qs = company_gap_queries("perplexity_ai", ["ml_engineer", "infrastructure"])
+    assert qs[0] == 'site:linkedin.com/in "perplexity ai" ml engineer infrastructure' and len(qs) == 2
+    calls = []
+    async def _search(q, max_results=10):
+        calls.append(q); return res
+    loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
+    out = loop.run_until_complete(discover_company_people(None, "Perplexity", ["engineer"], search=_search, mint=False))
+    assert [r["entity_id"] for r in out] == ["linkedin:jane-doe-1"] and len(calls) == 2

@@ -2474,6 +2474,42 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                 f"— the rows below are the closest matches by wording, NOT {_t0} specialists. This is "
                 f"an index coverage gap. " + coverage.get("population_statement", ""))
 
+    # COMPANY GAP (open-web discovery): a NAMED company with fewer than ROSTER_COMPANY_GAP_MIN
+    # (10) indexed people in this cohort gets two LinkedIn-snippet searches; profiles whose headline
+    # names the company join the map as 'found on LinkedIn' rows (self-stated, snippet-grounded) and
+    # are minted so the gap heals. Max 3 gap companies per query. Off with ROSTER_COMPANY_GAP_DISCOVERY=0.
+    _gap_min = int(os.environ.get("ROSTER_COMPANY_GAP_MIN", "10") or 10)
+    _named_cos = [c for c in (facets.get("company") or []) if str(c).strip()]
+    if _named_cos and os.environ.get("ROSTER_COMPANY_GAP_DISCOVERY", "1") == "1":
+        _have_ids = {p["entity_id"] for p in people_rows}
+        _per_co_n = {}
+        for c in _named_cos:
+            cn = _norm_co(c)
+            _per_co_n[c] = sum(1 for p in people_rows if any(
+                _norm_co(a.get("display") or "") == cn for a in p["attributes"] if a.get("key") == "company"))
+        _gaps = [c for c in _named_cos if _per_co_n[c] < _gap_min][:3]
+        if _gaps:
+            from api.person_discovery import discover_company_people
+            _terms = list(facets.get("role") or []) + list(facets.get("function") or []) + list(facets.get("skill") or [])
+            _found: dict[str, int] = {}
+            for c in _gaps:
+                try:
+                    _web = await discover_company_people(store, c, _terms)
+                except Exception as e:  # noqa: BLE001
+                    _log.info("company gap discovery skipped for %s: %s", c, e)
+                    _web = []
+                _new = [r for r in _web if r["entity_id"] not in _have_ids]
+                for r in _new:
+                    r["rank_read"] = {"score": 0.0, "band": 0, "relevance": 0.0, "within": 0.0, "reasons": ["found on LinkedIn for this company (self-stated headline)"]}
+                    _have_ids.add(r["entity_id"])
+                people_rows += _new
+                _found[c] = len(_new)
+            if any(_found.values()):
+                coverage["web_discovery"] = {"companies": _found, "min_indexed": _gap_min}
+                coverage["population_statement"] = (coverage.get("population_statement", "") + " " +
+                    "; ".join(f"{n} {c.replace('_', ' ')} profile{'s' if n != 1 else ''} found on LinkedIn (the index held only "
+                              f"{_per_co_n[c]}) — self-stated headlines, shown last" for c, n in _found.items() if n) + ".").strip()
+
     # TALENT CLUSTERS: a query naming SEVERAL companies ("top infra talent at Anthropic and
     # OpenAI") is a STAFFING COMPARISON — group the results per company, each cluster with its
     # code-computed composition (headcount in index, seniority mix, function mix). Numbers come
