@@ -73,6 +73,17 @@ def run_checks(case: dict, d: dict) -> list[str]:
             n = sum(1 for r in rows if any(t in row_text(r) for t in terms))
             if not rows or n / len(rows) < share:
                 fails.append(f"role_share {terms}: {n}/{len(rows)} < {share}")
+        elif k == "mentions_share_top":
+            rx, top, share = v
+            head = rows[:top]
+            n = sum(1 for r in head if re.search(rx, row_text(r)))
+            if not head or n / len(head) < share:
+                fails.append(f"mentions_share_top{top} /{rx}/: {n}/{len(head)} < {share}")
+        elif k == "no_duplicate_ids":
+            ids = [str(r.get("entity_id") or "") for r in rows]
+            dup = {i for i in ids if ids.count(i) > 1}
+            if dup:
+                fails.append(f"duplicate entity ids: {sorted(dup)[:4]}")
         elif k == "no_duplicate_names":
             names = [str(r.get("name") or "").lower() for r in rows]
             dup = {n for n in names if names.count(n) > 1}

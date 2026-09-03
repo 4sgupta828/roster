@@ -447,13 +447,20 @@ async def profile_from_url(url: str, *, search=search_snippets) -> dict:
     if "/in/" not in path:
         return {}
     want = path.lower().split("/in/", 1)[1].split("/")[0]
-    results = await search(f"site:{path}")
-    for r in results or []:
-        u = (r.get("url") or "").lower()
-        if "/in/" not in u or u.split("/in/", 1)[1].split("/")[0].rstrip("/") != want:
-            continue
-        rname, headline = parse_title(r.get("title") or "")
-        if rname:
-            return {"name": rname, "headline": headline, "snippet": (r.get("snippet") or "")[:400],
-                    "url": "https://www.linkedin.com/in/" + want}
+    slug_words = " ".join(w for w in re.split(r"[-_]+", want) if w and not w.isdigit())
+    # two query forms, in order: the exact path, then the slug's words + linkedin (search engines
+    # sometimes miss a site:path query for a profile they do index) — accept only an exact-path hit
+    for q in (f"site:{path}", f"{slug_words} linkedin", f"site:linkedin.com/in/{want}"):
+        try:
+            results = await search(q)
+        except Exception:  # noqa: BLE001
+            results = []
+        for r in results or []:
+            u = (r.get("url") or "").lower()
+            if "/in/" not in u or u.split("/in/", 1)[1].split("/")[0].rstrip("/") != want:
+                continue
+            rname, headline = parse_title(r.get("title") or "")
+            if rname:
+                return {"name": rname, "headline": headline, "snippet": (r.get("snippet") or "")[:400],
+                        "url": "https://www.linkedin.com/in/" + want}
     return {}

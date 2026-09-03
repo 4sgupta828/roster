@@ -1261,6 +1261,7 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
                     cand_ids += top_local
         except Exception as ex:  # noqa: BLE001 — additive
             _log.info("candidate local recall skipped: %s", ex)
+    cand_ids = list(dict.fromkeys(cand_ids))          # local recall / widening can repeat an id
     rows = await store.people_by_ids(cand_ids)
     want_sens = {str(s).lower() for s in (prefs.get("seniorities") or []) if str(s).strip()}
     want_country = (prefs.get("country") or "").lower()
@@ -1383,7 +1384,9 @@ async def company_guard(question: str, facets: dict, store) -> dict:
     mentions = company_names_in(question)
     if not mentions or store is None or not hasattr(store, "companies_known"):
         return facets
-    have = {_norm_co(c) for c in (facets.get("company") or [])}
+    if re.search(r"\b(worked|previously|formerly|used to work|ex-|alumni|alums)\b", question or "", re.I):
+        return facets                       # past-employer intent → the compiler's worked_at is the right key
+    have = {_norm_co(c) for c in (facets.get("company") or [])} | {_norm_co(c) for c in (facets.get("worked_at") or [])}
     keys = sorted({k for cands in mentions for k in cands})
     try:
         known = await store.companies_known(keys)
@@ -2420,6 +2423,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                         cand_ids += top_local
             except Exception as ex:  # noqa: BLE001 — local recall is additive
                 _log.info("local recall skipped: %s", ex)
+        cand_ids = list(dict.fromkeys(cand_ids))      # topic anchor / local recall can repeat an id → twin cards
         cand = await store.people_by_ids(cand_ids, tenant_id=tenant_id)
         want_country = set(facets.get("country") or [])
         boost = {k: set(v) for k, v in facets.items() if k != "country"}     # soft-boost facets
@@ -2515,6 +2519,22 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         if len(best_rows) > len(rows):
             rows, relaxed_from, facets = best_rows, best_from, best_kept
 
+    # THIN COMPANY COHORT: "engineers at Perplexity" gated on role=engineer keeps 5 of the 25 people
+    # the index holds at Perplexity. When a NAMED company yields fewer than 10 rows, the company
+    # stays the gate and role/function/skill become ranking signals: everyone at the company,
+    # role-matching people first. Honest note via relaxed_from.
+    _soft_keys = [k for k in ("role", "function", "skill", "seniority") if facets.get(k)]
+    if facets.get("company") and _soft_keys and len(rows) < 10:
+        _wide = await _enum_recall({k: v for k, v in facets.items() if k not in _soft_keys}, cap=200)
+        if len(_wide) > len(rows):
+            _want = {k: {str(x).lower().replace(" ", "_") for x in facets[k]} for k in _soft_keys}
+            def _soft_hit(r):
+                return any(str(f["value_norm"]).lower() in _want.get(f["facet_key"], set()) for f in r["facets"])
+            _hits = [r for r in _wide if _soft_hit(r)]
+            _hit_ids = {r["entity_id"] for r in _hits}
+            rows = _hits + [r for r in _wide if r["entity_id"] not in _hit_ids]
+            relaxed_from = list(dict.fromkeys(relaxed_from + _soft_keys))
+            facets = {k: v for k, v in facets.items() if k not in _soft_keys}
     coverage = _coverage_basis(facets, stats, len(rows))
     if _worked_at_union_used:
         coverage["population_statement"] = (coverage.get("population_statement", "") +
@@ -2551,6 +2571,8 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             "attributes": attrs, "links": links, "citation": cite,
             "evidence": evidence_packet(r["facets"], r["entity_id"])})
 
+    _seen_ids: set = set()
+    people_rows = [p for p in people_rows if not (p["entity_id"] in _seen_ids or _seen_ids.add(p["entity_id"]))]
     if semantic_first:                            # surface the relevance score on each card (like JD-match)
         for p in people_rows:
             s = sf_sim.get(p["entity_id"])
