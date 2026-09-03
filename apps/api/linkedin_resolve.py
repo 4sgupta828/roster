@@ -116,19 +116,38 @@ def hints_from_row(row: dict) -> dict[str, list[str]]:
     return out
 
 
+SEARCH_STATUS: dict = {"unavailable": "", "since": 0.0}   # "quota" when the search provider refuses (402)
+
+
+def search_unavailable() -> str:
+    """'' when the search leg works; 'quota' when the provider reported a usage limit in the last
+    hour — callers say so instead of reporting 'not found' (absence of search ≠ absence of a person)."""
+    import time
+    if SEARCH_STATUS["unavailable"] and time.time() - SEARCH_STATUS["since"] < 3600:
+        return SEARCH_STATUS["unavailable"]
+    return ""
+
+
 async def search_snippets(query: str, *, max_results: int = 10) -> list[dict]:
     """Search-engine results (url/title/snippet) — NO page fetches. Keyless DuckDuckGo HTML leg
     (works from the prod datacenter, verified); Brave when BRAVE_API_KEY is set."""
     import asyncio
     import os
+    import time
     try:
         if os.environ.get("BRAVE_API_KEY"):
             from roster_kernel.providers.brave_web import BraveWebSearch
             res = await BraveWebSearch().search(query, max_results=max_results, open_web=True)
+            SEARCH_STATUS["unavailable"] = ""
             return [{"url": r.url, "title": r.title, "snippet": r.snippet or ""} for r in res]
         return await asyncio.to_thread(_ddg_get, query, max_results)
     except Exception as e:  # noqa: BLE001 — the leg is best-effort
-        _log.info("linkedin snippet search failed: %s", e)
+        msg = str(e)
+        if "402" in msg or "USAGE_LIMIT" in msg or "Usage limit" in msg or "429" in msg:
+            SEARCH_STATUS.update({"unavailable": "quota", "since": time.time()})
+            _log.warning("search provider refused (quota/rate): %s", msg[:160])
+        else:
+            _log.info("linkedin snippet search failed: %s", e)
         return []
 
 

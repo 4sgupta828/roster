@@ -1169,3 +1169,10 @@ def test_company_guard_keeps_a_named_company_in_the_filter():
     assert f3["company"] == ["jane_street"]                                      # longest KNOWN n-gram
     f4 = loop.run_until_complete(company_guard("engineers at Nonexistent Corp", {"role": ["engineer"]}, _S()))
     assert "company" not in f4                                                    # never invents a company
+
+
+def test_topic_terms_fall_back_to_non_canonical_role_words():
+    from api.people_population import topic_terms_for
+    assert topic_terms_for({"role": ["chip_design_engineer"], "country": ["us"]}, None) == ["chip design"]
+    assert topic_terms_for({"role": ["software_engineer"], "skill": ["vector_search"]}, None) == ["vector search"]
+    assert topic_terms_for({"role": ["ml_engineer"]}, ["given"]) == ["given"]          # the compiler's terms win

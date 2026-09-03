@@ -2685,6 +2685,11 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     prof = {"name": slug_name, "headline": "", "snippet": extra, "url": _li_m.group(0)}
                     matched_on = "pasted"
                 else:
+                    from api.linkedin_resolve import search_unavailable
+                    if search_unavailable():
+                        return {"jobs": [], "count": 0, "query": {}, "stats": await store.jobs_stats(),
+                                "note": "Roster's web-search quota is exhausted right now, so the profile could not be looked up. "
+                                        "Paste your headline after the link, or upload a résumé under Find jobs."}
                     return {"jobs": [], "count": 0, "query": {}, "stats": await store.jobs_stats(),
                             "note": f"That LinkedIn profile isn't visible to search engines (private, or not indexed), and Roster never "
                                     f"reads linkedin.com directly — so there is nothing to match on yet. Two ways in: paste your headline "
@@ -5568,6 +5573,12 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             return await all_person_artifacts(await cstore._get_pool(), entity_id.strip())
         except Exception as e:   # noqa: BLE001
             raise HTTPException(status_code=502, detail=f"artifacts unavailable: {e}") from e
+
+    @app.get("/search/status")
+    async def search_status() -> dict:
+        """Is the web-search leg (LinkedIn snippets, discovery, talks) available right now?"""
+        from api.linkedin_resolve import search_unavailable
+        return {"unavailable": search_unavailable() or None}
 
     @app.post("/people/enrich")
     async def people_enrich(body: EnrichIn, x_roster_token: str = Header(default="")) -> dict:

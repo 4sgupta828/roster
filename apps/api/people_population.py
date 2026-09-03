@@ -1454,6 +1454,18 @@ def topic_terms_for(facets: dict, llm_terms: list[str] | None) -> list[str]:
     if terms:
         return terms[:6]
     out: list[str] = []
+    # a NON-CANONICAL role ("chip_design_engineer", "vector_search_engineer") is a SUBJECT the
+    # compiler filed under role — it matches no stored role value, so anchor on its words instead
+    try:
+        from roster_vertical.people_facets import _ROLE as _CANON
+    except Exception:  # noqa: BLE001
+        _CANON = ()
+    for v in (facets or {}).get("role") or []:
+        rv = str(v).strip().lower()
+        if rv and rv not in _CANON:
+            t = re.sub(r"_(engineers?|developers?|specialists?|experts?|leads?|managers?)$", "", rv).replace("_", " ").strip()
+            if len(t) >= 3 and t not in out and t not in ("software", "backend", "frontend", "data", "ml"):
+                out.append(t)
     for v in (facets or {}).get("skill") or []:
         t = str(v).replace("_", " ").strip().lower()
         if len(t) >= 3 and t not in out:
