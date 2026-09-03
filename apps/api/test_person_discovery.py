@@ -112,3 +112,21 @@ def test_lookup_uses_all_hints_web_search_when_keyed_sources_miss(monkeypatch):
     out2 = loop.run_until_complete(pp.lookup_person(store, "Mukul Gupta", "the one at Cisco in Bangalore"))
     assert out2["person_lookup"]["resolution"] == "none"
     assert "cisco, bangalore" in out2["person_lookup"]["clarify"]
+
+
+def test_openalex_rows_say_published_author_not_researcher_at():
+    from api.person_discovery import rows_from_openalex
+    from api.people_population import _person_blurb
+    rows = rows_from_openalex([{"id": "https://openalex.org/A1", "display_name": "Kushal Thakkar", "works_count": 1,
+                                "cited_by_count": 3, "last_known_institutions": [{"display_name": "Anthropic", "country_code": "US"}],
+                                "topics": [{"display_name": "Computer Science"}]}])
+    r = rows[0]
+    role = next(f for f in r["_facets"] if f["facet_key"] == "role")
+    assert role["display_value"] == "Published author" and role["value_norm"] == "researcher"   # search key kept
+    assert not any(f["facet_key"] == "seniority" for f in r["_facets"])
+    assert r["blurb"].startswith("Published author affiliated with Anthropic (role not stated by the source)")
+    assert "Researcher at" not in r["blurb"]
+    blurb = _person_blurb([{"key": "role", "display": "Published author"}, {"key": "company", "display": "Anthropic"},
+                           {"key": "function", "display": "Computer Science"}])
+    assert blurb.startswith("Published author affiliated with Anthropic (role not stated by the source)")
+    assert "Researcher" not in blurb

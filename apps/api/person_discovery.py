@@ -77,10 +77,14 @@ def _norm(v: str) -> str:
     return re.sub(r"\s+", "_", (v or "").strip().lower())
 
 
+_NORM_ALIAS = {("role", "published author"): "researcher"}   # search key stays; the label tells the truth
+
+
 def _row(eid: str, name: str, facets: list[tuple[str, str]], doc: str, links: list[dict], blurb: str,
          source_label: str) -> dict:
     from api.evidence import evidence_packet
-    frows = [{"facet_key": k, "value_norm": _norm(v), "display_value": v, "document_id": doc, "block_id": ""}
+    frows = [{"facet_key": k, "value_norm": _NORM_ALIAS.get((k, v.lower()), _norm(v)), "display_value": v,
+              "document_id": doc, "block_id": ""}
              for k, v in facets if v]
     attrs = [{"key": f["facet_key"], "display": f["display_value"], "document_id": doc, "block_id": ""} for f in frows]
     return {"entity_id": eid, "name": name, "blurb": blurb, "attributes": attrs, "links": links,
@@ -117,10 +121,13 @@ def rows_from_openalex(authors: list[dict]) -> list[dict]:
         insts = [i.get("display_name") or "" for i in (a.get("last_known_institutions") or [])]
         country = next((i.get("country_code") or "" for i in (a.get("last_known_institutions") or []) if i.get("country_code")), "")
         topics = [t.get("display_name") or "" for t in (a.get("topics") or [])[:3]]
-        facets = [("company", insts[0] if insts else ""), ("role", "Researcher"), ("country", country.lower()),
+        # OpenAlex evidences AUTHORSHIP under an affiliation — never a job title. The role facet keeps
+        # the 'researcher' key (how "researchers in X" searches find these people) but DISPLAYS what
+        # the source actually shows: a published author. No seniority is inferred from citations.
+        facets = [("company", insts[0] if insts else ""), ("role", "Published author"), ("country", country.lower()),
                   ("title", ", ".join(t for t in topics if t)[:120]), ("link_orcid", a.get("orcid") or "")]
         links = ([{"kind": "orcid", "url": a["orcid"]}] if a.get("orcid") else [])
-        blurb = " — ".join(x for x in [f"Researcher at {insts[0]}" if insts else "Researcher",
+        blurb = " — ".join(x for x in [f"Published author affiliated with {insts[0]} (role not stated by the source)" if insts else "Published author",
                                         f"{a.get('works_count', 0)} works, {a.get('cited_by_count', 0)} citations",
                                         ", ".join(t for t in topics if t)] if x)
         out.append(_row("openalex:" + aid, nm, facets, f"https://openalex.org/{aid}", links, blurb, "OpenAlex"))

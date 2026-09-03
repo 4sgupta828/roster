@@ -1713,7 +1713,12 @@ def _person_blurb(attrs: list[dict]) -> str:
                     "ic", "individual_contributor", ""}
     sen_disp = "" if sen.lower().replace(" ", "_").replace("-", "_") in _GENERIC_SEN else sen
     headline = " ".join(dict.fromkeys(x for x in [sen_disp, role] if x))    # dedupe "Founder Founder"
-    if headline and comp:
+    if role.strip().lower() == "published author":
+        # AUTHORSHIP evidence (OpenAlex): the source shows papers under an affiliation, not a job —
+        # say exactly that; never "Researcher at X" (a software engineer who co-authored one paper
+        # under Anthropic's affiliation is not "a researcher at Anthropic")
+        segs.append(f"Published author affiliated with {comp} (role not stated by the source)" if comp else "Published author")
+    elif headline and comp:
         segs.append(f"{headline} at {comp}")
     elif headline:
         segs.append(headline)
