@@ -2657,27 +2657,34 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     _q = {"company": [], "title_keywords": [], "location": ""}
                 _cos = [c for c in (_q.get("company") or []) if str(c).strip()]
                 if _cos:
-                    _lead = []
+                    # COMPANY-NAMED search: the answer is THAT company's indexed roles, narrowed by the
+                    # title keywords when they leave anything; everything else the semantic legs found
+                    # is 'related roles at other companies' — returned separately, never counted as
+                    # the company's (session 1d1cdd7c: '33 open roles at tubi', 30 of them elsewhere).
+                    _all_co = []
                     for _co in _cos[:3]:
-                        _lead += await store.search_jobs(company=[_co], cap=120)   # list: ANY($1)
-                    _seen = {(j.get("company"), j.get("title"), j.get("location")) for j in _lead}
-                    res["jobs"] = _lead + [j for j in (res.get("jobs") or [])
-                                           if (j.get("company"), j.get("title"), j.get("location")) not in _seen]
+                        _all_co += await store.search_jobs(company=[_co], cap=200)   # list: ANY($1)
+                    _kw = [str(k).strip().lower() for k in (_q.get("title_keywords") or []) if str(k).strip()]
+                    _lead = [j for j in _all_co if any(k in (j.get("title") or "").lower() for k in _kw)] if _kw else _all_co
+                    if _kw and not _lead:
+                        _lead = _all_co                      # keywords matched nothing: show the company's roles
+                    _seen = {(j.get("company"), j.get("title"), j.get("location")) for j in _all_co}
+                    res["related_jobs"] = [j for j in (res.get("jobs") or [])
+                                           if (j.get("company"), j.get("title"), j.get("location")) not in _seen][:60]
+                    res["jobs"] = _lead
                     res["company_rows"] = len(_lead)
+                    res["company_indexed"] = len(_all_co)
                 if people_geo_scope_enabled():
                     from api.people_population import (apply_job_scope, embed_query as _eq,
                                                        semantic_enabled as _sem, widen_jobs_locally)
                     if _cos:
-                        # the named company's roles LEAD (all of them, local first); the related roles
-                        # from the semantic legs follow under the normal local scope
-                        _n_lead = int(res.get("company_rows") or 0)
-                        _lead_rows, _rest = res["jobs"][:_n_lead], res["jobs"][_n_lead:]
-                        _lead_rows, _ = apply_job_scope(_lead_rows, metro=(body.metro or ""), state=(body.state or ""),
-                                                        country=(body.country or "us"), query_company=True)
-                        _rest, res["geo_scope"] = apply_job_scope(
-                            _rest, metro=(body.metro or ""), state=(body.state or ""),
+                        # the company's roles: all of them, local first (never scoped away); the related
+                        # roles at other companies get the normal local scope
+                        res["jobs"], _ = apply_job_scope(res["jobs"], metro=(body.metro or ""), state=(body.state or ""),
+                                                         country=(body.country or "us"), query_company=True)
+                        res["related_jobs"], res["geo_scope"] = apply_job_scope(
+                            res.get("related_jobs") or [], metro=(body.metro or ""), state=(body.state or ""),
                             country=(body.country or "us"), query_location=(_q.get("location") or ""))
-                        res["jobs"] = _lead_rows + _rest
                     else:
                         res["jobs"] = await widen_jobs_locally(
                             store, res.get("jobs") or [], qvec=(_eq(body.question) if _sem() else None),
@@ -2688,9 +2695,15 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 res["count"] = len(res.get("jobs", []))
                 res["agentic"] = True
                 res["query"] = _q if _cos else {}
-                if _cos and not res.get("company_rows"):
-                    res["note"] = (f"No open roles from {', '.join(_cos)} in Roster's job index yet — a coverage "
-                                   f"gap, not proof of no hiring. Related roles from other companies follow.")
+                if _cos:
+                    _nm = ", ".join(_cos)
+                    res["note"] = (f"{res.get('company_indexed', 0)} role{'s' if res.get('company_indexed', 0) != 1 else ''} "
+                                   f"from {_nm} in Roster's job index"
+                                   + (f" — {len(res['jobs'])} match the brief" if _kw and res.get("company_rows") != res.get("company_indexed") else "")
+                                   + ". Coverage is what the company's public board exposes, not proof of "
+                                     "how much they hire." if res.get("company_indexed") else
+                                   f"No open roles from {_nm} in Roster's job index yet — a coverage gap, "
+                                   f"not proof of no hiring.")
                 res["stats"] = await store.jobs_stats()
                 res["session_id"] = await _save_job_session(res.get("jobs") or [], res["query"])
                 return res

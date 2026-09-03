@@ -528,6 +528,7 @@
   .ppl-tag-topic{background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);font-weight:600;}
   .ppl-scopebar{border-left-color:var(--person)!important;}
   .ppl-scope{display:inline-block;margin-left:.3rem;min-height:40px;padding:.3rem .7rem;border:1px solid var(--person);border-radius:999px;background:none;color:var(--person);font-size:.76rem;font-weight:600;cursor:pointer;}
+  details.jobs-related{margin-top:1rem;} details.jobs-related>summary{cursor:pointer;font-size:.84rem;color:var(--gold);min-height:40px;line-height:40px;}
   .ppl-pager{display:flex;align-items:center;justify-content:center;gap:.6rem;flex-wrap:wrap;margin:.7rem 0 .3rem;scroll-margin-top:72px;}
   .ppl-page{min-height:40px;padding:.45rem 1rem;border:1px solid var(--gold);border-radius:999px;background:none;color:var(--gold);font-size:.82rem;font-weight:600;cursor:pointer;}
   .ppl-page:disabled{opacity:.4;cursor:default;}
@@ -2400,6 +2401,7 @@ async function runJobs(question){
     if(d.session_id && !THREAD.session_id) THREAD.session_id = d.session_id;   // the shareable link, like people
     THREAD.turns.push({question, kind: "jobs", jobs: d.jobs||[], query: d.query||{},
                        stats: d.stats||{}, semantic: d.semantic, geo_scope: d.geo_scope||null,
+                       related_jobs: d.related_jobs||[], company_indexed: d.company_indexed,
                        agentic: !!d.agentic, intent: d.intent||"", query_angles: d.query_angles||[],
                        redirect_to_qa: !!d.redirect_to_qa, note: d.note||"", answer: ""});
     renderThread();
@@ -2584,10 +2586,17 @@ function jobsMarkup(d){
   const intentHtml = (d.agentic && (d.intent||angleChips)) ? `<div class="ppl-cov" style="border-left-color:var(--gold);background:rgba(var(--gold-rgb),.06);"><b>⚡ Smart search</b>${d.intent?` — ${esc(d.intent)}`:""}${angleChips}</div>` : "";
   const head = `<div class="ppl-head"><b>${jobs.length}</b> open role${jobs.length===1?"":"s"}${at}${jpagesN>1?` <span class="ppl-fc" style="text-transform:none;">· showing ${jfrom}–${jto} · page ${jpage+1} of ${jpagesN}</span>`:""}${d.agentic?` <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">⚡ smart search</span>`:""}</div>`
     + intentHtml
+    + (d.note && (q.company||[]).length ? `<div class="ppl-cov">◔ ${esc(d.note)}</div>` : "")
     + scopeChip(d.geo_scope)
     + (st.jobs ? `<div class="ppl-cov">◔ Aggregated from public ATS boards — ${st.jobs} jobs across ${st.companies||0} companies indexed. Each links to the company's apply page.</div>`
                : `<div class="ppl-cov">◔ Aggregated from public ATS boards — each card links to the company's apply page.</div>`);
-  return `<div class="ppl-wrap" data-jpid="${esc(d._jpid)}">${head}${jpage>0?jpager:""}<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.</div>'}</div>${jpager}</div>`;
+  // RELATED roles at OTHER companies (a company-named search): folded, clearly labeled, never
+  // counted as the company's.
+  const rel = Array.isArray(d.related_jobs) ? d.related_jobs : [];
+  const relHtml = rel.length
+    ? `<details class="jobs-related"><summary>Related roles at other companies (${rel.length}) — similar titles from the semantic search, not ${esc((q.company||[]).join(", ").replace(/_/g," ")||"this company")}</summary>${jobsMarkup({jobs: rel, query: {}, stats: {}, _jpid: d._jpid + "r", _jpage: d._rpage||0})}</details>`
+    : "";
+  return `<div class="ppl-wrap" data-jpid="${esc(d._jpid)}">${head}${jpage>0?jpager:""}<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">' + esc(d.note || "No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.") + '</div>'}</div>${jpager}${relHtml}</div>`;
 }
 function peopleRowsMarkup(data){
   const rows = data.people_rows||[];
