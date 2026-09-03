@@ -2722,7 +2722,7 @@ function jobsMarkup(d){
       <span class="ppl-name">${esc(j.title)}${pct}</span>
       <span class="ppl-blurb">${co}${j.source?` · via ${esc(j.source)}`:""}${jr}</span>
       ${loc||dept?`<span class="ppl-tags">${loc}${dept}</span>`:""}
-      ${apply?`<span class="ppl-links">${apply}</span>`:""}<span class="js-sumbox" data-ref="${esc(String(jref))}"></span></span></div>`;
+      ${apply?`<span class="ppl-links">${apply}</span>`:""}<span class="js-sumbox" data-ref="${esc(String(jref))}">${typeof openSummaryMarkup==="function"?openSummaryMarkup(jref, j):""}</span></span></div>`;
   }).join("");
   const at = (q.company&&q.company.length)?` at ${esc(q.company.join(", ").replace(/_/g," "))}`:"";
   const angleChips = (d.query_angles&&d.query_angles.length>1) ? `<div style="margin-top:.4rem;display:flex;flex-wrap:wrap;gap:.3rem;">${d.query_angles.map(a=>`<span class="ppl-tag">${esc(a)}</span>`).join("")}</div>` : "";
@@ -7571,7 +7571,7 @@ function renderMatchResults(d){
       <span class="ppl-name">${esc(j.title)} <span style="color:var(--gold);font-weight:700;font-size:.78rem;">${j.match_pct}% match</span></span>
       <span class="ppl-blurb">${co}${j.location?` · ${esc(j.location)}`:""}${reasons}</span>
       ${tags?`<span class="ppl-tags">${tags}</span>`:""}
-      ${apply?`<span class="ppl-links">${assist}${apply}</span>`:""}<span class="js-sumbox" data-ref="${esc(String(jref))}"></span></span></div>`;
+      ${apply?`<span class="ppl-links">${assist}${apply}</span>`:""}<span class="js-sumbox" data-ref="${esc(String(jref))}">${typeof openSummaryMarkup==="function"?openSummaryMarkup(jref, j):""}</span></span></div>`;
   }).join("");
 }
 $("#matchclose") && $("#matchclose").addEventListener("click", ()=>{ $("#matchmodal").hidden = true; });
@@ -7616,6 +7616,11 @@ function applyWithAssistant(ref){
 }
 // ===== ✨ Job summary: AI reads the posting so the job seeker doesn't have to =====
 window.JOB_SUMMARIES = window.JOB_SUMMARIES || {};      // url → summary (this page load)
+window.OPEN_JOB_SUMS = window.OPEN_JOB_SUMS || new Set();  // refs whose summary is open — survives repaints
+function openSummaryMarkup(ref, j){
+  const sm = (j && j.url) ? window.JOB_SUMMARIES[j.url] : null;
+  return (window.OPEN_JOB_SUMS.has(String(ref)) && sm) ? jobSummaryMarkup(sm, j, {ref, assist:true}) : "";
+}
 function jobSummaryMarkup(sm, j, opts){
   opts = opts || {};
   const ns = "<span style=\"color:var(--muted)\">not stated</span>";
@@ -7634,7 +7639,8 @@ function jobSummaryMarkup(sm, j, opts){
 function toggleJobSummary(ref){
   const boxes = document.querySelectorAll(`.js-sumbox[data-ref="${CSS.escape(String(ref))}"]`);
   if(!boxes.length) return;
-  if(boxes[0].innerHTML.trim()){ boxes.forEach(b => { b.innerHTML = ""; }); return; }   // second click folds it
+  if(boxes[0].innerHTML.trim()){ boxes.forEach(b => { b.innerHTML = ""; }); window.OPEN_JOB_SUMS.delete(String(ref)); return; }   // second click folds it
+  window.OPEN_JOB_SUMS.add(String(ref));
   summarizeJob(ref);
 }
 async function summarizeJob(ref){
@@ -8568,7 +8574,7 @@ async function openMapsList(){
     if(hits.length) fitBits.push(`matches ${hits.map(esc).join(", ")}`);
     if(rrs.length) fitBits.push(rrs.map(esc).join(" · "));
     el.innerHTML = `<div class="ev-inline">
-      <div class="er-head" style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;"><span class="ev-pill ${hl[1]}">${esc(hl[0])}</span>${fitBits.length?`<span class="er-src" style="font-size:.78rem;">Fit: ${fitBits.join(" · ")}</span>`:""}</div>
+      <div class="er-head"><span class="ev-pill ${hl[1]}">${esc(hl[0])}</span></div>
       ${rows.join("")}
       ${work?`<div class="er-sec">Public work</div>${work}`:(fp && (fp.scanned||[]).length ? `<div class="er-sec">Public work</div><div class="er-gap">None found linked to this person.</div>` : "")}
       ${status.length?`<div class="er-sec">Visible status</div><ul class="er-list">${status.map(x=>`<li>${x}</li>`).join("")}</ul>`:""}
