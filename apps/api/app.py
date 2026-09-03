@@ -3044,6 +3044,18 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             return False
         return True
 
+    def _http_get_public(url: str, timeout: int = 12) -> str:
+        """GET a PUBLIC URL (same SSRF gate as the JD fetch) → text; '' on any failure."""
+        import urllib.request
+        if not _url_is_public(url):
+            return ""
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (roster JD fetch)", "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read(2_000_000).decode("utf-8", "ignore")
+        except Exception:   # noqa: BLE001
+            return ""
+
     def _fetch_jd_text(url: str) -> str:
         """Fetch a JD page and strip it to text. SSRF-guarded: http(s) only, and the resolved host must
         be PUBLIC — re-validated on EVERY redirect hop (a public URL can't 302 to localhost/metadata).
@@ -3058,6 +3070,23 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 if not _url_is_public(newurl):
                     return None   # block the redirect (urllib raises → caught below → "")
                 return super().redirect_request(req, fp, code, msg, headers, newurl)
+        import json as _json
+        import html as _html
+        def _strip(s):
+            s = _html.unescape(s or "")
+            s = _re.sub(r"(?s)<[^>]+>", " ", s)
+            s = _re.sub(r"&(?:#\d+|#x[0-9a-f]+|[a-z]+);", " ", s, flags=_re.I)
+            return _re.sub(r"\s+", " ", s).strip()
+        # 0) ATS PUBLIC JSON APIs first — Greenhouse / Lever / Ashby postings (and the company career
+        #    pages that EMBED them, e.g. pinterestcareers.com/jobs/?gh_jid=…) are JavaScript-rendered:
+        #    a raw HTML fetch sees only chrome. The posting APIs return the full description.
+        from api.ats_posting import ats_posting_text
+        try:
+            t = ats_posting_text(u, get=lambda url: _http_get_public(url))
+            if len(t) >= 300:
+                return t[:12000]
+        except Exception:   # noqa: BLE001 — fall through to the page fetch
+            pass
         try:
             opener = urllib.request.build_opener(_GuardedRedirect)
             req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0 (roster JD fetch)"})
@@ -3065,11 +3094,6 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 raw = r.read(2_000_000).decode("utf-8", "ignore")
         except Exception:
             return ""
-        import json as _json
-        def _strip(s):
-            s = _re.sub(r"(?s)<[^>]+>", " ", s or "")
-            s = _re.sub(r"&(?:#\d+|#x[0-9a-f]+|[a-z]+);", " ", s, flags=_re.I)
-            return _re.sub(r"\s+", " ", s).strip()
         # 1) PREFER schema.org JobPosting ld+json — embedded by Ashby/Greenhouse/Lever & most career
         #    pages even when the visible page is JS-rendered (so a raw fetch would otherwise see nothing).
         for m in _re.finditer(r'(?is)<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', raw):
@@ -3131,7 +3155,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             if hit:
                 return {"summary": hit, "cached": True, "job_url": url}
         jd = await asyncio.to_thread(_fetch_jd_text, url)
-        if len(jd) < 80:
+        if len(jd) < 300:
             raise HTTPException(status_code=400, detail="Couldn't read that posting — open the apply link directly.")
         summ = await build_job_summary(jd, build_llm(mode=resolve_mode()), title=body.title, company=body.company)
         if not summ:

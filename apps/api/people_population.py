@@ -491,7 +491,9 @@ async def build_job_summary(jd_text: str, llm, *, title: str = "", company: str 
         d = comp.parsed.model_dump()
         d["title"] = d.get("title") or title
         d["company"] = d.get("company") or company
-        return verify_job_summary(d, jd)
+        out = verify_job_summary(d, jd)
+        if not (out.get("one_liner") or out.get("key_requirements")):
+            return None                     # the page held no posting to read (chrome only) — never cache that
     except Exception as e:   # noqa: BLE001
         _log.warning("build_job_summary failed: %s", e)
         return None
@@ -520,7 +522,9 @@ async def cached_job_summary(pool, url: str, *, max_age_days: int = 7) -> dict |
                 "AND fetched_at > now() - ($2::int * interval '1 day')", h, int(max_age_days))
         if row:
             d = row["summary"]
-            return json.loads(d) if isinstance(d, str) else dict(d)
+            d = json.loads(d) if isinstance(d, str) else dict(d)
+            if d.get("one_liner") or d.get("key_requirements"):
+                return d                      # an empty read is a miss, not a summary
     except Exception as e:   # noqa: BLE001
         _log.info("job summary cache read skipped: %s", e)
     return None
