@@ -110,7 +110,7 @@ def feedback_to_contract(brief: str, filters: dict, evidence_kinds: list[str], f
         edits.append("seniority no longer gates the map (reviewers flagged wrong levels) — it ranks instead")
     if not facets.get("company"):
         facets.pop("company", None)
-    question = brief.strip()
+    question = re.split(r"\s+[—-]+\s+prefer\s+", brief.strip(), maxsplit=1)[0]   # an earlier revision's tail never stacks
     if prefer:
         question = question + " — prefer " + ", ".join(dict.fromkeys(p.replace("_", " ") for p in prefer[:6]))
     return {"question": question, "refine_facets": facets, "evidence_kinds": ev, "exclude_ids": exclude_ids,

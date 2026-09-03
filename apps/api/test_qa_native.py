@@ -1246,3 +1246,33 @@ def test_fixed_facets_skip_the_compiler_and_apply_calibration(monkeypatch):
     names = [p["name"] for p in res["people_rows"]]
     assert names == ["Senior Person", "Mid Person"], names
     assert res["coverage_basis"]["calibration"] == {"excluded": 1, "demoted": 1, "avoid_terms": ["mid"]}
+
+
+def test_fixed_facets_topic_ignores_the_prefer_tail_and_asks_nothing(monkeypatch):
+    from api.people_population import answer_people_population
+
+    class _LLM:
+        async def complete(self, **kw):
+            raise AssertionError("no compile under fixed_facets")
+
+    class _Store:
+        async def people_index_stats(self, *, tenant_id):
+            return {"persons_indexed": 9, "source_documents": 3, "facet_coverage": {}}
+
+        async def enumerate_by_facets(self, facets, *, tenant_id, cap):
+            return [{"entity_id": "gh:a", "name": "A", "facets": [
+                {"facet_key": "role", "facet_value_norm": "ml_engineer", "value_norm": "ml_engineer",
+                 "display_value": "ML Engineer", "document_id": "d", "block_id": "b"},
+                {"facet_key": "company", "facet_value_norm": "stripe", "value_norm": "stripe",
+                 "display_value": "Stripe", "document_id": "d", "block_id": "b"}]}]
+
+    import asyncio
+    monkeypatch.delenv("ROSTER_SEMANTIC", raising=False)
+    monkeypatch.delenv("ROSTER_PEOPLE_SEMANTIC_FIRST", raising=False)
+    res = asyncio.get_event_loop().run_until_complete(answer_people_population(
+        question="senior fraud-detection engineers at Stripe — prefer software engineer, pytorch",
+        tenant_id="demo", store=_Store(), llm=_LLM(), fixed_facets={"role": ["ml_engineer"], "company": ["stripe"]}))
+    bc = res["coverage_basis"]["brief_contract"]
+    assert not any("prefer" in t or "pytorch" in t for t in bc["topic"]), bc["topic"]
+    assert bc["clarification"] is None
+    assert bc["assumptions"][0].startswith("filters fixed by this revision")

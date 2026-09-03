@@ -5597,6 +5597,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=400, detail="only talent maps revise from feedback")
         rows = [r for r in (m.get("rows") or []) if isinstance(r, dict)]
         rows_by_id = {str(r.get("entity_id") or ""): r for r in rows}
+        for eid, name in (m.get("row_names") or {}).items():      # reviewed people no longer on the map
+            rows_by_id.setdefault(eid, {"entity_id": eid, "name": name, "attributes": []})
         feedback = [f for f in (m.get("feedback") or [])
                     if (f.get("tags") or []) or f.get("state") in ("shortlist", "not relevant")]
         if not feedback:

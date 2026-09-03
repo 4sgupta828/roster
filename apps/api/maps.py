@@ -187,6 +187,18 @@ class MapStore:
             d["feedback"].append({"entity_id": x["entity_id"], **rec})
         d["revisions"] = [{"revision_id": r["revision_id"], "reason": r["reason"], "created_at": str(r["created_at"]),
                            "delta": (json.loads(r["delta"]) if isinstance(r["delta"], str) else (r["delta"] or {}))} for r in revs]
+        # names for reviewed people who left the map in a later revision (feedback outlives the row)
+        _present = {str(x.get("entity_id") or "") for x in d["rows"] if isinstance(x, dict)}
+        _missing = sorted({f["entity_id"] for f in d["feedback"] if f["entity_id"] not in _present})
+        d["row_names"] = {}
+        if _missing:
+            async with pool.acquire() as conn:
+                for x in await conn.fetch(
+                        """SELECT DISTINCT r->>'entity_id' AS eid, r->>'name' AS name
+                           FROM rs_map_revision, jsonb_array_elements(row_snapshot) r
+                           WHERE map_id = $1 AND r->>'entity_id' = ANY($2::text[])""", map_id, _missing):
+                    if x["eid"] and x["name"]:
+                        d["row_names"][x["eid"]] = x["name"]
         d["is_owner"] = bool(owner_id and r["owner_id"] == owner_id)
         d["created_at"] = str(d["created_at"]); d["updated_at"] = str(d["updated_at"])
         if not d["is_owner"]:

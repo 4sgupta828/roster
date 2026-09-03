@@ -2385,7 +2385,8 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         _fixed = {k: v for k, v in _fixed.items() if v}
     if _fixed is not None:
         facets, person, ctx = dict(_fixed), "", ""
-        topic_terms = expand_topic_terms(topic_terms_from_question(question, facets), question)
+        _core_q = re.split(r"\s+[—-]+\s+prefer\s+", question, maxsplit=1)[0]   # the brief without its preference tail
+        topic_terms = expand_topic_terms(topic_terms_from_question(_core_q, facets), _core_q)
     elif _prior:
         # REFINEMENT turn: the model applies the utterance to the RUNNING filter — narrow, expand,
         # remove, or replace, following the user's lead (Rule 18) — and returns the full new filter.
@@ -3006,6 +3007,13 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             question, _contract_facets, hard_keys=_hard_keys, soft_keys=_soft_all, guard_added=guard_added,
             relaxed_from=relaxed_from, semantic_first=semantic_first, ev_kinds=_ev_kinds,
             scope=(coverage.get("geo_scope") or {}), topic_terms=topic_terms)
+        if _fixed is not None:
+            # a REVISED map: the contract came from reviewer feedback — no clarifying question (the
+            # reviewers already answered it) and the assumption line says where the filters came from
+            _bc = coverage["brief_contract"]
+            _bc["clarification"] = None
+            _bc["assumptions"] = (["filters fixed by this revision (reviewer feedback) — the brief's wording only ranks"]
+                                  + [a for a in (_bc.get("assumptions") or []) if "seniority" not in a and "compiled" not in a])[:4]
         coverage["ranking"] = ("how closely each profile's wording matches your brief first; among "
                                "near-equal matches, the strength of public evidence (confirmed employer, "
                                "linked papers and repos, recent activity, LinkedIn headline fit) — the "
