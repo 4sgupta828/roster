@@ -864,6 +864,18 @@ async def extract_jd_company(jd_text: str, llm) -> list[str]:
         return []
 
 
+def dedupe_jobs(rows: list[dict]) -> list[dict]:
+    """One row per (company, title, location) — the same posting arrives via two sources and in
+    company-case variants ('pinterest'/'Pinterest'); order kept, first (best-ranked) wins."""
+    seen, out = set(), []
+    for j in rows or []:
+        k = (_norm_co(j.get("company") or ""), _norm_title(j.get("title") or ""), (j.get("location") or "").strip().lower())
+        if k in seen:
+            continue
+        seen.add(k); out.append(j)
+    return out
+
+
 JOB_MUST_KINDS = ("remote", "hybrid", "f500", "public", "startup", "senior", "leadership")
 JOB_MUST_LABELS = {"remote": "Remote", "hybrid": "Hybrid", "f500": "Fortune 500", "public": "Public company",
                    "startup": "Startup", "senior": "Senior+", "leadership": "Leadership"}
@@ -1431,7 +1443,7 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
         # GitHub, OpenAlex, LinkedIn snippets — and resolve or ask, never hand off
         try:
             from api.person_discovery import (_mint, discover_candidates, hint_tokens, identity_from_url,
-                                              ingest_identity, url_hint, web_footprint)
+                                              ingest_identity, url_hint, web_footprint, web_query)
             # A PASTED PROFILE URL is the strongest hint of all: github.com/x / linkedin.com/in/x →
             # that identity directly, no guessing
             _u = url_hint(ctx)
@@ -1447,24 +1459,41 @@ async def lookup_person(store, name: str, ctx: str = "", *, tenant_id: str = "de
                 rows2 = merged if len(merged) > 1 else rows2
             # ALL THE HINTS, ONE WEB SEARCH: when no keyed source (GitHub / OpenAlex / LinkedIn)
             # matches the hints, search the open web for the name TOGETHER with every hint the user
-            # gave ("Mukul Gupta" cisco bangalore) — pages that mention both become the person's
-            # evidence; only the hints a page confirms become facets
+            # gave ("Mukul Gupta" cisco bangalore). Profile pages confirming enough hints become
+            # distinct candidates (resolve or ask); other pages fold into one web identity whose
+            # facets are only the hints they confirm. A page confirming 1 of 2 hints is a namesake.
             _toks = hint_tokens(ctx)
             _keyed_hit = res2 == "resolved" or (res2 == "ambiguous" and _toks and any(
                 any(t in _row_text(r) for t in _toks) for r in rows2))
             if _toks and not _keyed_hit:
                 fp = await web_footprint(name, ctx)
-                searched_web = f'"{name}" ' + " ".join(_toks[:6])
-                if fp:
-                    if await _mint(await store._get_pool(), fp["entity_id"], fp):
-                        out = await lookup_person(store, fp["entity_id"], "", tenant_id=tenant_id,
-                                                  label=f"{name} — [{fp['entity_id']}]")
+                searched_web = web_query(name, ctx)
+                _held2 = {r["entity_id"] for r in merged}
+                _profs = [p for p in fp.get("profiles") or [] if p["entity_id"] not in _held2]
+                if _profs:
+                    res3, rows3 = resolve_candidates(merged + _profs, ctx)
+                    if res3 == "resolved" and rows3 and rows3[0].get("web"):
+                        eid = rows3[0]["entity_id"]
+                        if await ingest_identity(store, eid, name_hint=name):
+                            out = await lookup_person(store, eid, "", tenant_id=tenant_id, label=f"{name} — [{eid}]")
+                            out["person_lookup"]["searched_web"] = searched_web
+                            out["person_lookup"]["web_hits"] = rows3[0].get("hint_hits") or []
+                            return out
+                        resolution, rows, res2 = "resolved", rows3, "resolved"
+                    elif res3 == "ambiguous":
+                        _amb = [r for r in rows3 if r.get("web") and r.get("hint_hits")] or rows3
+                        resolution, rows, res2, rows2 = "ambiguous", _amb[:12], "ambiguous", _amb
+                        web_rows = _amb
+                if resolution not in ("resolved", "ambiguous") and fp.get("identity"):
+                    _idn = fp["identity"]
+                    if await _mint(await store._get_pool(), _idn["entity_id"], _idn):
+                        out = await lookup_person(store, _idn["entity_id"], "", tenant_id=tenant_id,
+                                                  label=f"{name} — [{_idn['entity_id']}]")
                         out["person_lookup"]["searched_web"] = searched_web
-                        out["person_lookup"]["web_pages"] = fp.get("web_pages") or []
-                        out["person_lookup"]["web_hits"] = fp.get("web_hits") or []
+                        out["person_lookup"]["web_pages"] = _idn.get("web_pages") or []
+                        out["person_lookup"]["web_hits"] = _idn.get("web_hits") or []
                         return out
-                    resolution, rows = "resolved", [fp]
-                    res2 = "resolved"
+                    resolution, rows, res2 = "resolved", [_idn], "resolved"
             if res2 == "resolved" and rows2 and rows2[0].get("web") and resolution != "resolved":
                 eid = rows2[0]["entity_id"]
                 if await ingest_identity(store, eid, name_hint=name):

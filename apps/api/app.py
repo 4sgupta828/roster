@@ -2696,8 +2696,22 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                             res.get("jobs") or [], metro=(body.metro or ""), state=(body.state or ""),
                             country=(body.country or "us"), query_location=(_q.get("location") or ""))
                 if body.job_must:
-                    from api.people_population import apply_job_must
-                    res["jobs"], res["must"] = await apply_job_must(store, res.get("jobs") or [], body.job_must)
+                    # MUST-HAVE needs a DEEP pool: the semantic legs return ~200 roles, of which only a
+                    # handful may be remote+F500 — widen with a deeper semantic slice (and the remote/
+                    # hybrid keyword slice when asked) before filtering, then dedupe twin rows
+                    from api.people_population import apply_job_must, dedupe_jobs, embed_query as _eq2, semantic_enabled as _sem2
+                    _pool = list(res.get("jobs") or [])
+                    if not _cos:
+                        _qv2 = _eq2(body.question) if _sem2() else None
+                        if _qv2:
+                            _pool += await store.semantic_jobs(_qv2, cap=1000)
+                        for _kw2 in [k for k in ("remote", "hybrid") if k in body.job_must]:
+                            _pool += await store.search_jobs(terms=[_kw2], location=_kw2, cap=400)
+                        _pool = dedupe_jobs(_pool)
+                        if people_geo_scope_enabled():
+                            _pool, _ = apply_job_scope(_pool, metro=(body.metro or ""), state=(body.state or ""),
+                                                       country=(body.country or "us"), query_location=(_q.get("location") or ""))
+                    res["jobs"], res["must"] = await apply_job_must(store, _pool, body.job_must)
                     if res.get("related_jobs"):
                         res["related_jobs"], _rm = await apply_job_must(store, res["related_jobs"], body.job_must)
                 res["count"] = len(res.get("jobs", []))
@@ -2763,8 +2777,19 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                         metro=(body.metro or ""), state=(body.state or ""),
                                         query_location=(q.get("location") or ""))   # an explicit location wins
         _must = None
+        from api.people_population import dedupe_jobs
+        rows = dedupe_jobs(rows)
         if body.job_must:
             from api.people_population import apply_job_must
+            if qvec:                                   # deep pool: must-haves are rare inside the top 200
+                rows = dedupe_jobs(rows + await store.semantic_jobs(qvec, company=(q.get("company") or None), cap=1000))
+            for _kw2 in [k for k in ("remote", "hybrid") if k in body.job_must]:
+                rows = dedupe_jobs(rows + await store.search_jobs(terms=(q.get("title_keywords") or []) or [_kw2],
+                                                                  company=q.get("company") or None, location=_kw2, cap=400))
+            if people_geo_scope_enabled():
+                rows, _ = apply_job_scope(rows, country=(body.country or "us").strip().lower(),
+                                          metro=(body.metro or ""), state=(body.state or ""),
+                                          query_location=(q.get("location") or ""))
             rows, _must = await apply_job_must(store, rows, body.job_must)
         rows = rows[:80]
         stats = await store.jobs_stats()

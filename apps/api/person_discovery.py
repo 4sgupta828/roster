@@ -283,26 +283,65 @@ def _name_in(text: str, name: str) -> bool:
     return re.search(r"\b" + re.escape(toks[0]) + r"\b[\w.\-' ]{0,30}?\b" + re.escape(toks[-1]) + r"\b", text, re.I) is not None
 
 
-def footprint_from_results(name: str, ctx: str, results: list[dict]) -> dict | None:
-    """Pages that mention the FULL NAME together with the hints → one web-footprint candidate:
-    the pages are its evidence (linked), the hints the pages confirm become its facets. None when
-    no page carries the name with at least one hint."""
+def required_hits(ctx: str) -> int:
+    """How many hints a page must CONFIRM next to the name: all of them when the user gave one or
+    two, at least two beyond that. One hint out of two ("bangalore" but not "cisco") is a namesake."""
+    return min(2, len(hint_tokens(ctx)))
+
+
+def _profile_id(url: str) -> str:
+    return identity_from_url(url)
+
+
+def footprint_from_results(name: str, ctx: str, results: list[dict]) -> dict:
+    """The all-hints web search, read two ways:
+      profiles — LinkedIn / GitHub profile pages whose title+snippet carry the full name AND enough
+                 hints: each is a DISTINCT candidate (a namesake list is a question, never a merge);
+      identity — the other pages (company, conference, news, university) that mention the full name
+                 with enough hints, folded into ONE 'web:<slug>' candidate whose facets are only the
+                 hints those pages confirm and whose links are the pages themselves.
+    Returns {"profiles": [...], "identity": row|None, "required": k}."""
     toks = hint_tokens(ctx)
+    need = required_hits(ctx)
+    out = {"profiles": [], "identity": None, "required": need}
     if not toks:
-        return None
-    pages = []
+        return out
+    from api.linkedin_resolve import name_matches, parse_title
+    pages, seen_prof = [], set()
     for r in results or []:
         text = (r.get("title") or "") + " " + (r.get("snippet") or "")
-        if not _name_in(text, name):
-            continue
         low = text.lower()
         hits = [t for t in toks if t in low]
-        if not hits:
+        url = (r.get("url") or "").strip()
+        pid = _profile_id(url)
+        if pid:
+            if len(hits) < need or pid in seen_prof:
+                continue
+            if pid.startswith("linkedin:"):
+                rname, headline = parse_title(r.get("title") or "")
+                if not name_matches(name, rname):
+                    continue
+                rows = rows_from_linkedin(name, [r])
+                if not rows:
+                    continue
+                row = rows[0]
+            else:                                              # github.com/<login>
+                if not _name_in(text, name):
+                    continue
+                row = _row(pid, name, [("title", (r.get("snippet") or "")[:120])], url,
+                           [{"kind": "github", "url": url}], (r.get("snippet") or "")[:160], "GitHub")
+            seen_prof.add(pid)
+            row["blurb"] = ((row.get("blurb") or "") + " — " + (r.get("snippet") or "")[:200]).strip(" —")
+            row["hint_hits"] = hits
+            out["profiles"].append(row)
             continue
-        pages.append({"url": r.get("url") or "", "title": (r.get("title") or "")[:160],
+        if not _name_in(text, name) or len(hits) < need:
+            continue
+        pages.append({"url": url, "title": (r.get("title") or "")[:160],
                       "snippet": (r.get("snippet") or "")[:240], "hits": hits})
+    out["profiles"].sort(key=lambda p: -len(p["hint_hits"]))
     if not pages:
-        return None
+        return out
     pages.sort(key=lambda p: -len(p["hits"]))
     confirmed = []
     for p in pages:
@@ -324,22 +363,27 @@ def footprint_from_results(name: str, ctx: str, results: list[dict]) -> dict | N
     row["web_pages"] = pages[:5]
     row["web_hits"] = confirmed
     row["blurb"] = f"Public pages mention {name} with {', '.join(confirmed)}: “{pages[0]['title']}”"
-    return row
+    out["identity"] = row
+    return out
 
 
-async def web_footprint(name: str, ctx: str, *, search=None) -> dict | None:
+def web_query(name: str, ctx: str) -> str:
+    toks = hint_tokens(ctx)
+    return (f'"{name}" ' + " ".join(toks[:6])) if toks else ""
+
+
+async def web_footprint(name: str, ctx: str, *, search=None) -> dict:
     """One general web search with ALL the hints — '"<name>" cisco bangalore' — no site filter."""
     from api.linkedin_resolve import search_snippets
     search = search or search_snippets
-    toks = hint_tokens(ctx)
-    if not toks:
-        return None
-    q = f'"{name}" ' + " ".join(toks[:6])
+    q = web_query(name, ctx)
+    if not q:
+        return {"profiles": [], "identity": None, "required": 0}
     try:
         res = await asyncio.wait_for(search(q), 20)
     except Exception as e:  # noqa: BLE001
         _log.info("web footprint search failed: %s", e)
-        return None
+        res = []
     return footprint_from_results(name, ctx, res or [])
 
 

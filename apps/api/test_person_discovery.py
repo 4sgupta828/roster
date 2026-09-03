@@ -44,18 +44,26 @@ def test_discovery_then_context_resolves_or_asks():
 
 
 def test_web_footprint_needs_name_plus_hint_and_url_identity():
-    from api.person_discovery import footprint_from_results, hint_tokens, identity_from_url, url_hint
+    from api.person_discovery import footprint_from_results, hint_tokens, identity_from_url, required_hits, url_hint
     assert hint_tokens("the one at Cisco in Bangalore") == ["cisco", "bangalore"]
+    assert required_hits("cisco") == 1 and required_hits("cisco bangalore") == 2 and required_hits("cisco bangalore iit delhi") == 2
     res = [{"title": "Mukul Gupta - Cisco Systems | Speaker at DevNet Bangalore", "url": "https://devnet.example.org/speakers/mg",
             "snippet": "Mukul Gupta leads the platform team at Cisco Bangalore."},
-           {"title": "Mukul Gupta | Infosys", "url": "https://other.org/x", "snippet": "an Infosys engineer"},   # no hint
-           {"title": "Cisco Bangalore office", "url": "https://cisco.com/bangalore", "snippet": "no name here"}]
+           {"title": "Mukul Gupta | Infosys", "url": "https://other.org/x", "snippet": "an Infosys engineer"},        # no hint
+           {"title": "Cisco Bangalore office", "url": "https://cisco.com/bangalore", "snippet": "no name here"},
+           {"title": "Mukul Gupta - Student - Bangalore University | LinkedIn", "url": "https://www.linkedin.com/in/mukul-gupta-1/",
+            "snippet": "Delhi · 257 connections"},                                                                    # 1 of 2 hints → namesake
+           {"title": "Mukul Gupta - Engineering Lead at Cisco | LinkedIn", "url": "https://in.linkedin.com/in/mukul-gupta-2/",
+            "snippet": "Bangalore Urban, Karnataka · Cisco"}]
     fp = footprint_from_results("Mukul Gupta", "the one at Cisco in Bangalore", res)
-    assert fp and fp["entity_id"].startswith("web:mukul-gupta") and fp["web"]
-    assert fp["web_hits"] == ["cisco", "bangalore"] and len(fp["web_pages"]) == 1
-    assert fp["links"][0]["url"] == "https://devnet.example.org/speakers/mg"
-    assert footprint_from_results("Mukul Gupta", "cisco", [res[1]]) is None          # hint never confirmed
-    assert footprint_from_results("Mukul Gupta", "", res) is None                    # no hints → no search
+    idn = fp["identity"]
+    assert idn and idn["entity_id"].startswith("web:mukul-gupta") and idn["web"]
+    assert idn["web_hits"] == ["cisco", "bangalore"] and len(idn["web_pages"]) == 1
+    assert idn["links"][0]["url"] == "https://devnet.example.org/speakers/mg"
+    assert [p["entity_id"] for p in fp["profiles"]] == ["linkedin:mukul-gupta-2"]        # the 1-of-2 profile is out
+    assert fp["profiles"][0]["hint_hits"] == ["cisco", "bangalore"] and "Bangalore" in fp["profiles"][0]["blurb"]
+    assert footprint_from_results("Mukul Gupta", "cisco", [res[1]])["identity"] is None   # hint never confirmed
+    assert footprint_from_results("Mukul Gupta", "", res) == {"profiles": [], "identity": None, "required": 0}
     assert identity_from_url("https://github.com/torvalds") == "github:torvalds"
     assert identity_from_url("https://www.linkedin.com/in/Mukul-G-123/") == "linkedin:mukul-g-123"
     assert identity_from_url("https://example.com/about") == ""
@@ -72,10 +80,10 @@ def test_lookup_uses_all_hints_web_search_when_keyed_sources_miss(monkeypatch):
     calls = {}
     async def _no_keyed(name, ctx="", **kw):
         return []
+    PAGES = [{"title": "Mukul Gupta - Cisco Bangalore", "url": "https://x.org/mg", "snippet": "Mukul Gupta, Cisco Bangalore platform lead"}]
     async def _fp(name, ctx, search=None):
         calls["q"] = (name, ctx)
-        return pd.footprint_from_results(name, ctx, [{"title": "Mukul Gupta - Cisco Bangalore", "url": "https://x.org/mg",
-                                                       "snippet": "Mukul Gupta, Cisco Bangalore platform lead"}])
+        return pd.footprint_from_results(name, ctx, PAGES)
     minted = {}
     async def _mint(pool, eid, row):
         minted[eid] = row
@@ -98,3 +106,8 @@ def test_lookup_uses_all_hints_web_search_when_keyed_sources_miss(monkeypatch):
     assert lk["resolution"] == "resolved" and lk["searched_web"] == '"Mukul Gupta" cisco bangalore'
     assert lk["web_hits"] == ["cisco", "bangalore"]
     assert out["people_rows"][0]["entity_id"].startswith("web:mukul-gupta")
+    # a namesake page confirming ONE of two hints resolves nothing — honest 'none' names the query
+    PAGES[:] = [{"title": "Mukul Gupta - Bangalore University", "url": "https://x.org/other", "snippet": "student, Delhi"}]
+    out2 = asyncio.run(pp.lookup_person(store, "Mukul Gupta", "the one at Cisco in Bangalore"))
+    assert out2["person_lookup"]["resolution"] == "none"
+    assert "cisco, bangalore" in out2["person_lookup"]["clarify"]
