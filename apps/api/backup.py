@@ -8,8 +8,8 @@ a total Postgres loss restores from R2 alone; raw artifacts in R2 remain the pro
 
 HOW: streamed in row chunks (rs_block ships as multiple ~50k-row parts so memory stays flat);
 replica-safe daily trigger rides the gap-processor idle path (same pattern as the weekly
-retraction sweep); manual trigger via POST /admin/backup/run. Restore:
-`scripts/restore_from_backup.py`.
+retraction sweep); manual trigger via POST /admin/backup/run; completion = `backups/<date>/MANIFEST.json` in R2
+(the status endpoint has no state store in roster).
 """
 from __future__ import annotations
 
@@ -20,9 +20,10 @@ import json
 # (table, order_col or None) — dumped fully; keep in DEPENDENCY-FRIENDLY restore order.
 CRITICAL_TABLES = (
     "roster_user", "roster_user_token", "roster_user_pref", "roster_feedback",
-    "roster_change_event", "roster_topic", "roster_topic_edge", "roster_edge_evidence",
-    "roster_watch", "roster_watch_seen", "roster_pulse_state",
     "roster_research_session", "roster_corpus_gap_queue",
+    "rs_map",                 # saved Talent Maps (review states + notes) — not re-derivable
+    "rs_linkedin_scan",       # LinkedIn snippet resolutions (daily-capped search spend)
+    "rs_ingest_checkpoint",   # people windows / job boards / kill switch — where the grind resumes
 )
 # LARGE tables streamed in flat-memory row parts. Columns are resolved dynamically and vector/tsvector
 # columns are EXCLUDED (embeddings + full-text indexes are recreatable by re-embedding/re-indexing):
@@ -31,7 +32,12 @@ CRITICAL_TABLES = (
 #   roster_entity_facet — the extracted people/company FACETS (title/role/skill/company/links/…)
 #   rs_job              — the jobs index (embedding excluded, recreatable)
 # With these, a total Postgres loss restores the people + jobs + corpus from R2 alone.
-_STREAM_TABLES = ("rs_block", "rs_entity", "roster_entity_facet", "rs_job")
+#   rs_person_artifact  — linked public artifacts per person (papers/repos/posts/talks)
+#   rs_artifact_scan    — per-source scan ledger (what has been scanned; drives resumable linking)
+#   rs_person_link      — cross-source identity links (one person across GitHub/OpenAlex/…) — not re-derivable
+#   rs_ats_probed       — job-board probe ledger (which ATS/company pairs were tried; resumable sweeps)
+_STREAM_TABLES = ("rs_block", "rs_entity", "roster_entity_facet", "rs_job",
+                  "rs_person_artifact", "rs_artifact_scan", "rs_person_link", "rs_ats_probed")
 _PART_ROWS = 50_000
 
 
