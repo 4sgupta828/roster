@@ -547,6 +547,8 @@
   .ppl-lifit{font-family:var(--mono);font-size:.64rem;color:var(--muted);margin-left:.3rem;}
   .ppl-tag-topic{background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);font-weight:600;}
   .ppl-scopebar{border-left-color:var(--person)!important;}
+  button.aa-apply{font:inherit;font-size:.7rem;cursor:pointer;border:1px solid var(--gold);color:var(--gold-strong);background:rgba(var(--gold-rgb),.08);font-weight:600;}
+  button.aa-apply:hover{background:rgba(var(--gold-rgb),.18);}
   .ev-filterbar{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;}
   .evfilters{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:.4rem auto 0;max-width:var(--wrapw,880px);padding:0 .2rem;font-size:.76rem;color:var(--muted);}
   .evfilters[hidden]{display:none!important;}   /* the flex rule must not defeat the hidden attribute (Jobs / Q&A) */
@@ -1950,6 +1952,7 @@
       <button type="button" class="histbtn" id="aaClose">← Back</button>
     </div>
     <p class="msub">Two steps: the job, then your fit — how you match, what to lead with, honest gaps, and how to apply, grounded in your saved résumé. Nothing is fabricated; a cover letter is drafted only with your approval.</p>
+    <div id="aaJobCtx" class="ppl-cov" hidden style="border-left-color:var(--gold);"></div>
 
     <section class="mstep">
       <div class="mstep-h"><span class="mstep-n">1</span> The job</div>
@@ -2689,8 +2692,9 @@ function jobsMarkup(d){
     const co = esc((j.company||"").replace(/_/g," "));
     const loc = j.location?`<span class="ppl-tag">${esc(j.location)}</span>`:"";
     const dept = j.department?`<span class="ppl-tag">${esc(j.department)}</span>`:"";
-    const apply = j.url?`<a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer">Apply ↗</a>`:"";
     const jref = j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||""));
+    window.JOBS_INDEX = window.JOBS_INDEX || {}; window.JOBS_INDEX[String(jref)] = j;
+    const apply = j.url?`<button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="Analyze your fit, then draft the application with the Apply Assistant">✨ Apply with assistant</button><a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer" title="Go straight to the company's apply page">Apply directly ↗</a>`:"";
     const jsave = `<div class="ppl-acts"><button type="button" class="rsave" data-kind="job" data-ref="${esc(String(jref))}" data-label="${esc(j.title||"")}" data-sub="${esc(((j.company||"").replace(/_/g," "))+(j.location?" · "+j.location:""))}" data-url="${esc(j.url||"")}" title="Save to a shortlist">☆</button></div>`;
     const pct = j.match_pct ? ` <span style="color:var(--gold);font-weight:700;font-size:.76rem;">${j.match_pct}% match</span>` : "";
     const jr = (j.reasons&&j.reasons.length) ? ` <span style="color:var(--muted);font-size:.74rem;">· ${j.reasons.map(esc).join(" · ")}</span>` : "";
@@ -7529,12 +7533,14 @@ function renderMatchResults(d){
     const reasons = (j.reasons||[]).length ? `<span style="color:var(--muted);font-size:.76rem;"> · ${(j.reasons||[]).map(esc).join(" · ")}</span>` : "";
     const jref = j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||""));
     const save = `<div class="ppl-acts"><button type="button" class="rsave" data-kind="job" data-ref="${esc(String(jref))}" data-label="${esc(j.title||"")}" data-sub="${esc(co+(j.location?" · "+j.location:""))}" data-url="${esc(j.url||"")}" title="Save to a shortlist">☆</button></div>`;
-    const apply = j.url?`<a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer">Apply ↗</a>`:"";
+    window.MATCH_JOBS = window.MATCH_JOBS || {}; window.MATCH_JOBS[String(jref)] = {...j, from: "match"};
+    const assist = j.url?`<button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="Analyze your fit for this role, then draft the application with the Apply Assistant">✨ Apply with assistant</button>`:"";
+    const apply = j.url?`<a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer" title="Go straight to the company's apply page">Apply directly ↗</a>`:"";
     return `<div class="ppl-card">${save}<span class="ppl-body">
       <span class="ppl-name">${esc(j.title)} <span style="color:var(--gold);font-weight:700;font-size:.78rem;">${j.match_pct}% match</span></span>
       <span class="ppl-blurb">${co}${j.location?` · ${esc(j.location)}`:""}${reasons}</span>
       ${tags?`<span class="ppl-tags">${tags}</span>`:""}
-      ${apply?`<span class="ppl-links">${apply}</span>`:""}</span></div>`;
+      ${apply?`<span class="ppl-links">${assist}${apply}</span>`:""}</span></div>`;
   }).join("");
 }
 $("#matchclose") && $("#matchclose").addEventListener("click", ()=>{ $("#matchmodal").hidden = true; });
@@ -7542,11 +7548,32 @@ $("#mGo") && $("#mGo").addEventListener("click", runMatch);
 $("#mFineTune") && $("#mFineTune").addEventListener("click", runFineTune);
 
 // ===== Apply Assistant: grounded JD × résumé fit table + how-to-apply + cover letter =====
-function openApplyAssist(url){
+let AA_FROM = "";   // where the assistant was opened from ("match" = Find jobs) so "Back" returns there
+function openApplyAssist(url, job){
   if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
   $("#applyassist").hidden = false;
+  AA_FROM = (job && job.from) || "";
+  if(AA_FROM === "match"){ $("#matchmodal").hidden = true; }
   if(url){ $("#aaUrl").value = url; }
   $("#aaResults").innerHTML = ""; $("#aaNote").textContent = "";
+  const ctx = $("#aaJobCtx");
+  if(ctx){
+    ctx.hidden = !(job && (job.title || job.company));
+    if(!ctx.hidden){
+      ctx.innerHTML = `<b>${esc(job.title||"")}</b>${job.company?` · ${esc((job.company||"").replace(/_/g," "))}`:""}${job.location?` · ${esc(job.location)}`:""}`
+        + (job.match_pct?` <span style="color:var(--gold);font-weight:700;">${job.match_pct}% match</span>`:"")
+        + (AA_FROM==="match"?` <a href="#" id="aaBackMatches" style="margin-left:.5rem;color:var(--gold);">← back to your matches</a>`:"");
+      const b = $("#aaBackMatches"); if(b) b.addEventListener("click", e=>{ e.preventDefault(); $("#applyassist").hidden = true; $("#matchmodal").hidden = false; });
+    }
+  }
+  $("#aaClose").textContent = AA_FROM==="match" ? "← Back to matches" : "← Back";
+  // ONE-CLICK from a match card: the job is known, so the fit analysis starts right away
+  if(url && job && job.autorun){ $("#aaText").value = ""; runApplyAnalysis(); }
+}
+function applyWithAssistant(ref){
+  const j = (window.MATCH_JOBS||{})[ref] || (window.JOBS_INDEX||{})[ref];
+  if(!j) return;
+  openApplyAssist(j.url||"", {...j, from: j.from||"", autorun: !!j.url});
 }
 async function runApplyAnalysis(){
   const url = ($("#aaUrl").value||"").trim(), text = ($("#aaText").value||"").trim();
@@ -7643,7 +7670,7 @@ async function runAaDoc(kind){                 // kind: 'cover-letter' | 'tailor
 function runCoverLetter(){ return runAaDoc("cover-letter"); }
 function runTailoredResume(){ return runAaDoc("tailored-resume"); }
 $("#applyhdr") && $("#applyhdr").addEventListener("click", ()=>openApplyAssist());
-$("#aaClose") && $("#aaClose").addEventListener("click", ()=>{ $("#applyassist").hidden = true; });
+$("#aaClose") && $("#aaClose").addEventListener("click", ()=>{ $("#applyassist").hidden = true; if(AA_FROM==="match"){ $("#matchmodal").hidden = false; } AA_FROM = ""; });
 $("#aaGo") && $("#aaGo").addEventListener("click", runApplyAnalysis);
 $("#matchbtn2") && $("#matchbtn2").addEventListener("click", ()=>{ $("#applymodal").hidden=true; openMatch(); });
 $("#mSenBox") && $("#mSenBox").addEventListener("click",(e)=>{ const t=e.target.closest(".sentog"); if(!t) return;
@@ -8351,6 +8378,8 @@ document.addEventListener("click", e => {
   if(rr){ e.preventDefault(); rerankShown(rr.dataset.pid); return; }
   const ef = e.target.closest && e.target.closest("#evfilters .ev-filter");
   if(ef){ e.preventDefault(); toggleEvidenceFilter(ef.dataset.kind); return; }
+  const aa = e.target.closest && e.target.closest(".aa-apply");
+  if(aa){ e.preventDefault(); applyWithAssistant(aa.dataset.ref); return; }
 });
 // PRE-search "must have": toggling changes what the NEXT search requires; nothing re-runs by itself
 function toggleEvidenceFilter(kind){
