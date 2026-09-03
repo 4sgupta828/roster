@@ -8594,7 +8594,6 @@ async function openMapsList(){
       ${rows.join("")}
       ${work?`<div class="er-sec">Public work</div>${work}`:(fp && (fp.scanned||[]).length ? `<div class="er-sec">Public work</div><div class="er-gap">None found linked to this person.</div>` : "")}
       ${status.length?`<div class="er-sec">Visible status</div><ul class="er-list">${status.map(x=>`<li>${x}</li>`).join("")}</ul>`:""}
-      ${unc.length?`<div class="er-src" style="margin-top:.5rem;">Unconfirmed: ${unc.join("; ")}.</div>`:""}
       <div class="er-li-out"></div>
     </div>`;
     const liB = el.querySelector(".er-li");
