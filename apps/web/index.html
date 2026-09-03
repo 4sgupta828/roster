@@ -632,6 +632,12 @@
   .mapbar .mb-btn{font-size:.78rem;font-weight:600;color:var(--gold);background:var(--panel);border:1px solid var(--hair);border-radius:999px;padding:.45rem .8rem;min-height:40px;cursor:pointer;text-decoration:none;white-space:nowrap;}
   .mapbar .mb-btn:hover{border-color:var(--gold);}
   .mapbar .mb-meta{flex-basis:100%;font-size:.74rem;color:var(--muted);}
+  .rev-box{flex-basis:100%;border:1px solid var(--hair);border-left:3px solid var(--gold);border-radius:8px;padding:.5rem .7rem;background:var(--panel);font-size:.82rem;color:var(--ink);}
+  .rev-h{font-weight:640;font-size:.84rem;margin-bottom:.25rem;}
+  .rev-sum{margin:.15rem 0 .3rem;line-height:1.45;}
+  .rev-meta{font-size:.74rem;color:var(--muted);margin-top:.15rem;overflow-wrap:anywhere;}
+  .rev-list,.rev-edits ul{margin:.2rem 0 .3rem 1.1rem;padding:0;line-height:1.45;}
+  .rev-edits summary{cursor:pointer;font-size:.76rem;color:var(--muted);min-height:28px;display:flex;align-items:center;}
   .mapnotes{width:100%;min-height:72px;font:inherit;font-size:.86rem;border:1px solid var(--hair);border-radius:8px;padding:.5rem .6rem;background:var(--panel);color:var(--ink);margin:.2rem 0 .8rem;}
   .maplist .mrow{display:block;padding:.6rem .2rem;border-top:1px solid var(--hair);text-decoration:none;color:inherit;}
   .maplist .mrow b{color:var(--gold);} .maplist .mrow small{display:block;color:var(--muted);font-size:.76rem;margin-top:.15rem;}
@@ -8283,15 +8289,70 @@ function talentMapBar(){
       ? `<input class="mb-title" id="mapTitle" value="${esc(m.title||"")}" placeholder="Map title" onchange="saveMapMeta()">`
       : `<span class="mb-title">${esc(m.title||"Talent Map")}</span>`;
     const nFb = (m.feedback||[]).filter(f => f.reviewer_key).length;
+    // feedback that CAN revise the brief: any tags, or an owner/reviewer shortlist / not-relevant call
+    const nAct = (m.feedback||[]).filter(f => (f.tags||[]).length || f.state === "shortlist" || f.state === "not relevant").length;
+    const revs = m.revisions || [];
+    const revN = revs.length ? revs[revs.length-1].revision_id : 0;
     const reviewAs = m.is_owner ? "" : `<span class="mb-meta" style="flex-basis:auto;">Review as <input class="mb-title" id="reviewerName" style="max-width:180px;" placeholder="your name" value="${esc(reviewerName())}" onchange="setReviewerName(this.value);"> <span class="ppl-fc" style="text-transform:none;">(no account needed — your review states and feedback save to this map under your name)</span></span>`;
-    return `<div class="mapbar">${title}${share}<a class="mb-btn" href="${csvHref}" target="_blank" rel="noopener">⬇ Export CSV</a>
-      <span class="mb-meta">Saved Talent Map · ${m.n_rows||0} people · ${m.is_owner?"you own this map — review states, feedback and notes persist here":"shared view"}${nFb?` · ${nFb} reviewer feedback item${nFb===1?"":"s"}`:""}${m.created_at?` · saved ${esc(String(m.created_at).slice(0,10))}`:""}</span>
+    const revise = (m.is_owner && nAct) ? `<button type="button" class="mb-btn" id="reviseBtn" onclick="reviseMapPreview()">↻ Revise from feedback (${nAct})</button>` : "";
+    return `<div class="mapbar">${title}${share}<a class="mb-btn" href="${csvHref}" target="_blank" rel="noopener">⬇ Export CSV</a>${revise}
+      <span class="mb-meta">Saved Talent Map${revN?` · revision ${revN}`:""} · ${m.n_rows||0} people · ${m.is_owner?"you own this map — review states, feedback and notes persist here":"shared view"}${nFb?` · ${nFb} reviewer feedback item${nFb===1?"":"s"}`:""}${m.created_at?` · saved ${esc(String(m.created_at).slice(0,10))}`:""}</span>
       ${reviewAs}
+      ${revisionsMarkup(m)}
+      <div id="reviseBox" hidden></div>
       ${m.is_owner?`<textarea class="mapnotes" id="mapNotes" placeholder="Map notes — context for whoever you share this with (persisted)" onchange="saveMapMeta()">${esc(m.notes||"")}</textarea>`:(m.notes?`<div class="mb-meta">Notes: ${esc(m.notes)}</div>`:"")}
     </div>`;
   }
   return `<div class="mapbar"><span class="mb-meta" style="flex-basis:auto;flex:1 1 200px;">Turn this result into a durable, shareable artifact.</span>
     <button type="button" class="mb-btn" onclick="saveTalentMap()">💾 Save as Talent Map</button></div>`;
+}
+// ---- MAP REVISIONS (recruiter-workflows P2b): the latest revision's "what changed" (two lines the
+// model phrased from a CODE-computed diff) + the plain-words edit log; older revisions listed compactly.
+function revisionsMarkup(m){
+  const revs = (m.revisions||[]).filter(r => r.revision_id > 0);
+  if(!revs.length) return "";
+  const last = revs[revs.length-1], d = last.delta || {};
+  const REASON = {hiring_manager_feedback:"from reviewer feedback", manual_filter_change:"filters changed", evidence_refresh:"evidence refreshed", corpus_expansion:"corpus grew"};
+  const names = k => (d[k]||[]).map(x => x.name).filter(Boolean).slice(0,6).map(esc).join(", ");
+  const lines = String(d.summary||"").split("\n").filter(Boolean).map(esc).join("<br>");
+  return `<div class="rev-box">
+    <div class="rev-h">What changed since revision ${last.revision_id-1} <span class="ppl-fc" style="text-transform:none;">(revision ${last.revision_id}, ${esc(REASON[last.reason]||last.reason)}${last.created_at?`, ${esc(String(last.created_at).slice(0,10))}`:""})</span></div>
+    ${lines?`<div class="rev-sum">${lines}</div>`:""}
+    <div class="rev-meta">${d.n_added||0} new${names("added")?` (${names("added")}${(d.n_added||0)>6?", …":""})`:""} · ${d.n_removed||0} dropped${names("removed")?` (${names("removed")}${(d.n_removed||0)>6?", …":""})`:""} · ${d.n_moved||0} moved 10+ places</div>
+    ${(d.edits||[]).length?`<details class="rev-edits"><summary>Brief edits applied (${d.edits.length})</summary><ul>${d.edits.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></details>`:""}
+    ${revs.length>1?`<div class="rev-meta">Earlier: ${revs.slice(0,-1).reverse().map(r=>`rev ${r.revision_id} (${esc(REASON[r.reason]||r.reason)})`).join(" · ")}</div>`:""}
+  </div>`;
+}
+// PREVIEW first (free — no search runs): the code-owned edits the feedback implies; the owner confirms.
+async function reviseMapPreview(){
+  const m = window.ACTIVE_MAP; if(!m || !m.is_owner) return;
+  const box = $("#reviseBox"); if(!box) return;
+  box.hidden = false; box.innerHTML = `<div class="status">Reading the feedback…</div>`;
+  try{
+    const r = await fetch(`/maps/${encodeURIComponent(m.id)}/revise`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({preview:true})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ box.innerHTML = `<div class="pitem-empty">${esc(d.detail||"Couldn't read the feedback.")}</div>`; return; }
+    const c = d.contract || {};
+    if(!(c.edits||[]).length){ box.innerHTML = `<div class="pitem-empty">The feedback so far implies no change to the brief — tags like "wrong seniority", "wrong domain", "more like this" or "needs public work" drive a revision.</div>`; return; }
+    box.innerHTML = `<div class="rev-box">
+      <div class="rev-h">Revision ${c.next_revision} would change the brief like this <span class="ppl-fc" style="text-transform:none;">(from ${c.n_feedback} feedback item${c.n_feedback===1?"":"s"}; code-owned edits, no model judgment)</span></div>
+      <ul class="rev-list">${c.edits.map(e=>`<li>${esc(e)}</li>`).join("")}</ul>
+      <div class="rev-meta">Brief: <em>${esc(c.question||m.title||"")}</em></div>
+      <div class="rev-meta">Running it costs one search (one model compile). The current list is kept as revision ${Math.max(0,c.next_revision-1)}.</div>
+      <div style="display:flex;gap:.45rem;flex-wrap:wrap;margin-top:.4rem;"><button type="button" class="mb-btn" onclick="reviseMapRun()">↻ Run revision ${c.next_revision}</button><button type="button" class="mb-btn" style="color:var(--muted);" onclick="$('#reviseBox').hidden=true;">Cancel</button></div>
+    </div>`;
+  }catch(e){ box.innerHTML = `<div class="pitem-empty">Couldn't read the feedback — ${esc(e.message||e)}</div>`; }
+}
+async function reviseMapRun(){
+  const m = window.ACTIVE_MAP; if(!m || !m.is_owner) return;
+  const box = $("#reviseBox"); if(box){ box.hidden = false; box.innerHTML = `<div class="status">Revising the map from the feedback… (one search)</div>`; }
+  const b = $("#reviseBtn"); if(b) b.disabled = true;
+  try{
+    const r = await fetch(`/maps/${encodeURIComponent(m.id)}/revise`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ if(box) box.innerHTML = `<div class="pitem-empty">${esc(d.detail||"Couldn't revise the map.")}</div>`; if(b) b.disabled = false; return; }
+    await loadMapView(m.id, m.token || "");           // the saved map now IS the revision; reload it whole
+  }catch(e){ if(box) box.innerHTML = `<div class="pitem-empty">Couldn't revise the map — ${esc(e.message||e)}</div>`; if(b) b.disabled = false; }
 }
 // ---- JOB MAPS: the same durable artifact for a job search — snapshot of the roles (with any
 // summaries already read), notes, private link, CSV. Saved with map_type 'jobs'.

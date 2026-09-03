@@ -581,10 +581,12 @@ def test_primary_role_leads_the_ranking(monkeypatch):
                              output_tokens=5)
 
     def _person(eid, name, roles):
+        # every row carries the named company (the COMPANY INVARIANT drops rows that do not)
         return {"entity_id": eid, "name": name, "facets": [
             {"facet_key": "role", "facet_value_norm": r, "value_norm": r,
              "display_value": r.replace("_", " ").title(), "document_id": "d", "block_id": "b"}
-            for r in roles]}
+            for r in roles] + [{"facet_key": "company", "facet_value_norm": "google", "value_norm": "google",
+                                "display_value": "Google", "document_id": "d", "block_id": "b"}]}
 
     class _Store:
         async def people_index_stats(self, *, tenant_id):

@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS rs_map_revision (
     created_at        timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (map_id, revision_id)
 );
+ALTER TABLE rs_map_revision ADD COLUMN IF NOT EXISTS delta jsonb NOT NULL DEFAULT '{}'::jsonb;
 CREATE TABLE IF NOT EXISTS rs_map_review (
     map_id        text NOT NULL REFERENCES rs_map(id) ON DELETE CASCADE,
     entity_id     text NOT NULL,
@@ -170,7 +171,7 @@ class MapStore:
             reviews = await conn.fetch(
                 "SELECT entity_id, state, note, tags, reviewer_key, reviewer_name, updated_at FROM rs_map_review WHERE map_id = $1", map_id)
             revs = await conn.fetch(
-                "SELECT revision_id, reason, created_at FROM rs_map_revision WHERE map_id = $1 ORDER BY revision_id", map_id)
+                "SELECT revision_id, reason, delta, created_at FROM rs_map_revision WHERE map_id = $1 ORDER BY revision_id", map_id)
         d = dict(r)
         for k in ("filters", "coverage", "rows"):
             v = d.get(k)
@@ -184,7 +185,8 @@ class MapStore:
             if not x["reviewer_key"]:            # the owner's own review is the row's headline state
                 d["reviews"][x["entity_id"]] = rec
             d["feedback"].append({"entity_id": x["entity_id"], **rec})
-        d["revisions"] = [{"revision_id": r["revision_id"], "reason": r["reason"], "created_at": str(r["created_at"])} for r in revs]
+        d["revisions"] = [{"revision_id": r["revision_id"], "reason": r["reason"], "created_at": str(r["created_at"]),
+                           "delta": (json.loads(r["delta"]) if isinstance(r["delta"], str) else (r["delta"] or {}))} for r in revs]
         d["is_owner"] = bool(owner_id and r["owner_id"] == owner_id)
         d["created_at"] = str(d["created_at"]); d["updated_at"] = str(d["updated_at"])
         if not d["is_owner"]:
@@ -216,6 +218,35 @@ class MapStore:
                 (title.strip()[:160] if title is not None else None),
                 (notes[:8000] if notes is not None else None))
         return res.endswith("1")
+
+    async def add_revision(self, map_id: str, *, owner_id: str, reason: str, brief: str, filters: dict | None,
+                           coverage: dict | None, rows: list[dict], delta: dict | None = None) -> int | None:
+        """A NEW REVISION of the map (owner only): the map's live brief/filters/coverage/rows move to the
+        revised search's output; the previous state stays in its own revision row. `delta` is the
+        code-computed diff + the plain-words edit log + the two-line summary. Returns the revision id."""
+        await self._ensure()
+        if reason not in REVISION_REASONS:
+            reason = "manual_filter_change"
+        rows = list(rows or [])[:_MAX_ROWS]
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            r = await conn.fetchrow("SELECT owner_id FROM rs_map WHERE id = $1", map_id)
+            if r is None or not (owner_id and r["owner_id"] == owner_id):
+                return None
+            async with conn.transaction():
+                nxt = int(await conn.fetchval(
+                    "SELECT COALESCE(MAX(revision_id), -1) + 1 FROM rs_map_revision WHERE map_id = $1", map_id) or 0)
+                await conn.execute(
+                    """INSERT INTO rs_map_revision (map_id, revision_id, reason, brief_snapshot, filters_snapshot,
+                                                    coverage_snapshot, row_snapshot, delta)
+                       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb)""",
+                    map_id, nxt, reason, (brief or "").strip()[:2000], json.dumps(filters or {}),
+                    json.dumps(coverage or {}), json.dumps(rows), json.dumps(delta or {}))
+                await conn.execute(
+                    """UPDATE rs_map SET brief = $2, filters = $3::jsonb, coverage = $4::jsonb, rows = $5::jsonb,
+                                         updated_at = now() WHERE id = $1""",
+                    map_id, (brief or "").strip()[:2000], json.dumps(filters or {}), json.dumps(coverage or {}), json.dumps(rows))
+        return nxt
 
     async def register_reviewer(self, map_id: str, *, share_token: str, name: str) -> dict | None:
         """A guest on the private link becomes a NAMED REVIEWER: returns {reviewer_key, reviewer_name,

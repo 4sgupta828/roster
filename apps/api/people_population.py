@@ -2324,7 +2324,10 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                                    assume_people: bool = False,
                                    prior_person: str = "", prior_context: str = "",
                                    scope_metro: str = "", scope_state: str = "",
-                                   evidence_kinds: list[str] | None = None) -> dict:
+                                   evidence_kinds: list[str] | None = None,
+                                   exclude_ids: list[str] | None = None,
+                                   exclude_companies: list[str] | None = None,
+                                   avoid_terms: list[str] | None = None) -> dict:
     """Answer a people-enumeration question from the grounded people index. Always returns a structured
     result (never raises to the route): a compiled facet filter, grounded rows, and honest coverage.
 
@@ -2700,6 +2703,33 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         people_rows = [p for p in people_rows if _carries(p)]
         if _before_co != len(people_rows):
             coverage["company_gate_dropped"] = _before_co - len(people_rows)
+    # CALIBRATION (recruiter-workflows P2b, code-owned): reviewer feedback edits the CONTRACT of the next
+    # map — rows a reviewer marked "less like this"/"not relevant" leave; rows at a company marked the
+    # wrong target leave; rows carrying a demoted value (a wrong level, a wrong domain) are flagged so
+    # the final order sends them to the back. Never a model's judgment, never the evidence.
+    _ex_ids = {str(x) for x in (exclude_ids or []) if x}
+    _ex_cos = {_norm_co(c) for c in (exclude_companies or []) if _norm_co(c)}
+    _avoid = {re.sub(r"[^a-z0-9]+", "_", str(t).lower()).strip("_") for t in (avoid_terms or []) if str(t).strip()}
+    if _ex_ids or _ex_cos or _avoid:
+        _before_cal = len(people_rows)
+
+        def _at_excluded(p):
+            for a in p.get("attributes") or []:
+                if a.get("key") in ("company", "worked_at"):
+                    n = _norm_co(a.get("display") or "")
+                    if n and any(c == n or (len(c) >= 4 and c in n) for c in _ex_cos):
+                        return True
+            return False
+        people_rows = [p for p in people_rows if p["entity_id"] not in _ex_ids and not (_ex_cos and _at_excluded(p))]
+        _n_demoted = 0
+        for p in people_rows:
+            vals = {re.sub(r"[^a-z0-9]+", "_", str(a.get("display") or "").lower()).strip("_")
+                    for a in (p.get("attributes") or []) if a.get("key") in ("role", "function", "skill", "seniority", "metro")}
+            if vals & _avoid:
+                p["calibration_demoted"] = True
+                _n_demoted += 1
+        coverage["calibration"] = {"excluded": _before_cal - len(people_rows), "demoted": _n_demoted,
+                                   "avoid_terms": sorted(_avoid)[:12]}
     if semantic_first:                            # surface the relevance score on each card (like JD-match)
         for p in people_rows:
             s = sf_sim.get(p["entity_id"])
@@ -2937,6 +2967,11 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         grounded = False
 
     # EVIDENCE DISTRIBUTION (spec: coverage is a first-class surface) — how many rows per headline
+    # CALIBRATION DEMOTION (last partition, stable): rows carrying a reviewer-demoted value go to the
+    # back, each group keeping its order — they remain visible (feedback edits rank, never evidence).
+    if people_rows and any(p.get("calibration_demoted") for p in people_rows):
+        people_rows = ([p for p in people_rows if not p.get("calibration_demoted")]
+                       + [p for p in people_rows if p.get("calibration_demoted")])
     # evidence state, counted by code from the per-row packets (rows are fully built here).
     if people_rows:
         # PUBLIC ARTIFACTS (evidence-model-v2 step 1) were attached before ranking; count the

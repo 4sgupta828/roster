@@ -1257,6 +1257,12 @@ class MapReviewerIn(BaseModel):
     name: str = Field(default="", max_length=80)
 
 
+class MapReviseIn(BaseModel):
+    tenant_id: str = "demo"
+    preview: bool = False             # True → only the code-owned contract edits (free; no search runs)
+    country: str | None = None        # geo scope for the revised run (defaults to the map's saved scope)
+
+
 class SettingIn(BaseModel):
     key: str
     value: str = ""     # "on" | "off" | "" (empty = follow the env default)
@@ -5574,6 +5580,64 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         if not ok:
             raise HTTPException(status_code=400, detail="invalid review, or neither the owner nor a registered reviewer")
         return {"ok": True}
+
+    @app.post("/maps/{map_id}/revise")
+    async def map_revise(map_id: str, body: MapReviseIn, x_roster_token: str = Header(default="")) -> dict:
+        """HIRING-MANAGER CALIBRATION (recruiter-workflows P2b): the owner turns the reviewers' tags into a
+        revised map. CODE maps tags → contract edits (never a model), the revised search runs, the diff
+        is computed in code, an LLM phrases two lines from that diff only, and the result is saved as a
+        new revision (reason `hiring_manager_feedback`). `preview` returns the edits without running."""
+        from api.calibration import diff_rows, feedback_to_contract, phrase_delta
+        ms = _require_maps()
+        _, user = await _require_user(x_roster_token)
+        m = await ms.get(map_id, owner_id=user["id"])
+        if m is None or not m.get("is_owner"):
+            raise HTTPException(status_code=404, detail="map not found")
+        if (m.get("map_type") or "talent") == "jobs":
+            raise HTTPException(status_code=400, detail="only talent maps revise from feedback")
+        rows = [r for r in (m.get("rows") or []) if isinstance(r, dict)]
+        rows_by_id = {str(r.get("entity_id") or ""): r for r in rows}
+        feedback = [f for f in (m.get("feedback") or [])
+                    if (f.get("tags") or []) or f.get("state") in ("shortlist", "not relevant")]
+        if not feedback:
+            raise HTTPException(status_code=400, detail="no feedback yet — reviewers mark rows with tags or shortlist / not relevant first")
+        cov = m.get("coverage") or {}
+        ev_kinds = list(((cov.get("evidence_filter") or {}).get("kinds")) or [])
+        contract = feedback_to_contract(m.get("brief") or "", m.get("filters") or {}, ev_kinds, feedback, rows_by_id)
+        contract["n_feedback"] = len(feedback)
+        contract["next_revision"] = len(m.get("revisions") or [])
+        if body.preview:
+            return {"preview": True, "contract": contract}
+        if not contract["edits"]:
+            raise HTTPException(status_code=400, detail="the feedback so far implies no change to the brief")
+        store = _claim_store_cached()
+        if store is None:
+            raise HTTPException(status_code=503, detail="the people index is unavailable right now — please retry")
+        from api.people_population import answer_people_population
+        gs = cov.get("geo_scope") or {}
+        geo_on = people_geo_scope_enabled()
+        res = await answer_people_population(
+            question=contract["question"], tenant_id=body.tenant_id, store=store, llm=build_llm(mode=resolve_mode()),
+            scope_country=((body.country or "us").strip().lower() if geo_on else ""),
+            prior_facets=(contract["refine_facets"] or None), assume_people=True,
+            scope_metro=((gs.get("metro") or "").strip().lower() if geo_on else ""),
+            scope_state=((gs.get("state") or "").strip().lower() if geo_on else ""),
+            evidence_kinds=contract["evidence_kinds"], exclude_ids=contract["exclude_ids"],
+            exclude_companies=contract["exclude_companies"], avoid_terms=contract["avoid_terms"])
+        new_rows = [r for r in (res.get("people_rows") or []) if isinstance(r, dict)]
+        new_cov = res.get("coverage_basis") or {}
+        delta = diff_rows(rows, new_rows)
+        summary = await phrase_delta(build_llm(mode=resolve_mode()), delta, contract["edits"])
+        delta_rec = {**delta, "edits": contract["edits"], "summary": summary,
+                     "contract": {k: contract[k] for k in ("question", "refine_facets", "evidence_kinds", "exclude_ids",
+                                                           "exclude_companies", "avoid_terms")}}
+        rev = await ms.add_revision(map_id, owner_id=user["id"], reason="hiring_manager_feedback",
+                                    brief=contract["question"], filters=(new_cov.get("query_facets") or contract["refine_facets"]),
+                                    coverage=new_cov, rows=new_rows, delta=delta_rec)
+        if rev is None:
+            raise HTTPException(status_code=404, detail="map not found")
+        return {"revision_id": rev, "summary": summary, "delta": delta_rec, "rows": new_rows,
+                "coverage_basis": new_cov, "brief": contract["question"]}
 
     @app.get("/maps/{map_id}/export.csv")
     async def map_export_csv(map_id: str, t: str = "", x_roster_token: str = Header(default="")):
