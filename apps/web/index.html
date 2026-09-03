@@ -2287,7 +2287,9 @@ async function loadConfig(){
           window.ROSTER_SCOPE = v; window.ROSTER_COUNTRY = v.startsWith("metro:")||v.startsWith("state:") ? "us" : v;
           try{ localStorage.setItem("roster_scope", v); localStorage.setItem("roster_country", window.ROSTER_COUNTRY); }catch(e){} };
         // only a choice the USER makes is remembered as explicit; the detected metro stays the default otherwise
-        sel.addEventListener("change", () => { try{ localStorage.setItem("roster_scope_explicit", "1"); }catch(e){} applySel(); });
+        // only a REAL user interaction (isTrusted) marks the choice explicit — a synthetic change event
+        // (scripts, automation) must never silently pin a scope
+        sel.addEventListener("change", (ev) => { if(ev.isTrusted){ try{ localStorage.setItem("roster_scope_explicit", "1"); }catch(e){} } applySel(); });
         initLocalScope(sel, applySel);
       }
     }
@@ -2587,14 +2589,14 @@ function jobsMarkup(d){
   const head = `<div class="ppl-head"><b>${jobs.length}</b> open role${jobs.length===1?"":"s"}${at}${jpagesN>1?` <span class="ppl-fc" style="text-transform:none;">· showing ${jfrom}–${jto} · page ${jpage+1} of ${jpagesN}</span>`:""}${d.agentic?` <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">⚡ smart search</span>`:""}</div>`
     + intentHtml
     + (d.note && (q.company||[]).length ? `<div class="ppl-cov">◔ ${esc(d.note)}</div>` : "")
-    + scopeChip(d.geo_scope)
+    + ((q.company||[]).length ? "" : scopeChip(d.geo_scope))   // a company search: the scope only shapes the RELATED list
     + (st.jobs ? `<div class="ppl-cov">◔ Aggregated from public ATS boards — ${st.jobs} jobs across ${st.companies||0} companies indexed. Each links to the company's apply page.</div>`
                : `<div class="ppl-cov">◔ Aggregated from public ATS boards — each card links to the company's apply page.</div>`);
   // RELATED roles at OTHER companies (a company-named search): folded, clearly labeled, never
   // counted as the company's.
   const rel = Array.isArray(d.related_jobs) ? d.related_jobs : [];
   const relHtml = rel.length
-    ? `<details class="jobs-related"><summary>Related roles at other companies (${rel.length}) — similar titles from the semantic search, not ${esc((q.company||[]).join(", ").replace(/_/g," ")||"this company")}</summary>${jobsMarkup({jobs: rel, query: {}, stats: {}, _jpid: d._jpid + "r", _jpage: d._rpage||0})}</details>`
+    ? `<details class="jobs-related"><summary>Related roles at other companies (${rel.length}) — similar titles from the semantic search, not ${esc((q.company||[]).join(", ").replace(/_/g," ")||"this company")}</summary>${jobsMarkup({jobs: rel, query: {}, stats: {}, geo_scope: d.geo_scope, _jpid: d._jpid + "r", _jpage: d._rpage||0})}</details>`
     : "";
   return `<div class="ppl-wrap" data-jpid="${esc(d._jpid)}">${head}${jpage>0?jpager:""}<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">' + esc(d.note || "No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.") + '</div>'}</div>${jpager}${relHtml}</div>`;
 }
@@ -8266,6 +8268,7 @@ function geoPayload(){
 }
 function setScopeAndRerun(value){
   const sel = document.getElementById("countrysel"); if(!sel) return;
+  try{ localStorage.setItem("roster_scope_explicit", "1"); }catch(e){}
   if(!sel.querySelector(`option[value="${CSS.escape(value)}"]`)){ const o = document.createElement("option"); o.value = value; o.textContent = value; sel.appendChild(o); }
   sel.value = value; sel.dispatchEvent(new Event("change"));
   const last = (THREAD && THREAD.turns && THREAD.turns.length) ? THREAD.turns[THREAD.turns.length-1].question : "";
@@ -8291,6 +8294,7 @@ document.addEventListener("click", e => {
 });
 function setScopeOnly(value){
   const sel = document.getElementById("countrysel"); if(!sel) return;
+  try{ localStorage.setItem("roster_scope_explicit", "1"); }catch(e){}   // the user clicked an expand button
   if(!sel.querySelector(`option[value="${CSS.escape(value)}"]`)){ const o = document.createElement("option"); o.value = value; o.textContent = value; sel.appendChild(o); }
   sel.value = value; sel.dispatchEvent(new Event("change"));
 }
