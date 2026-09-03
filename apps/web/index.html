@@ -2802,7 +2802,7 @@ function peopleRowsMarkup(data){
     const liFit = p.linkedin && typeof p.linkedin.headline_fit === "number" ? Math.round(p.linkedin.headline_fit*100) : null;
     const liLine = liH ? `<span class="ppl-li" title="The person's own LinkedIn headline, quoted from a search-engine snippet (self-stated)">in “${esc(liH)}”${liFit!==null?` <span class="ppl-lifit">${liFit>=50?"fits the brief well":liFit>=30?"partly fits the brief":"does not obviously fit the brief"}</span>`:""}</span>`
       : (p.linkedin && p.linkedin.status && p.linkedin.status!=="resolved" && p.linkedin.status!=="already" ? `<span class="ppl-li ppl-li-none">in ${p.linkedin.status==="ambiguous"?"several same-named profiles — none confirmed":p.linkedin.status==="quota"?"snippet quota reached today":p.linkedin.status==="unavailable"?"search leg unavailable":"no same-named profile in snippets"}</span>` : "");
-    return `<div class="ppl-card" data-ref="${esc(ref)}">${acts}${avatar}
+    return `<div class="ppl-card person-card" data-ref="${esc(ref)}" title="Click for the evidence behind this card">${acts}${avatar}
       <span class="ppl-body">
         ${nameHtml}
         ${p.blurb?`<span class="ppl-blurb">${esc(p.blurb)}</span>`:(title?`<span class="ppl-title">${esc(title)}</span>`:"")}
@@ -2811,6 +2811,7 @@ function peopleRowsMarkup(data){
         ${evPill?`<span class="ppl-ev">${evPill}</span>`:""}
         ${fpStrip}
         ${linkBadges?`<span class="ppl-links">${linkBadges}</span>`:""}
+        <span class="ev-inline-box" data-ref="${esc(ref)}"></span>
       </span></div>`;
   };
   // PAGING: the 20 most relevant first, then 10 more per click (the whole ranked cohort stays in
@@ -8336,16 +8337,13 @@ async function openMapsList(){
     yc:"Y Combinator company directory",npi:"NPI clinician registry",sec:"SEC EDGAR filings",theorg:"TheOrg org-chart page (employer-stated)",
     aifund:"AI Fund portfolio page",ef:"Entrepreneur First company page",pear:"Pear VC portfolio page",sosv:"SOSV portfolio page"};
   const REVIEW = ["unreviewed","shortlisted","needs more evidence","reviewed"];   // human decision support — never a verdict
-  let rail = null;
-  function ensure(){
-    if(rail) return rail;
-    rail = document.createElement("aside"); rail.id = "evrail"; rail.setAttribute("aria-label","Evidence inspector");
-    document.body.appendChild(rail);
-    rail.addEventListener("click", e => { if(e.target.closest(".er-x")) close(); });
-    document.addEventListener("keydown", e => { if(e.key === "Escape") close(); });
-    return rail;
-  }
-  function close(){ if(rail){ rail.classList.remove("on"); rail.setAttribute("aria-hidden","true"); } }
+  // INLINE evidence panel (replaces the side rail): opens under the card on click, folds on a second
+  // click. The card already shows name, role/company blurb, LinkedIn headline, tags, evidence pill,
+  // footprint counts and profile links — the panel shows only what the card does NOT: why surfaced,
+  // how sure, the claims with WHO says so, the actual public work, the gaps, the review.
+  function boxFor(ref){ return document.querySelector(`.ev-inline-box[data-ref="${CSS.escape(String(ref))}"]`); }
+  function close(ref){ const b = ref ? boxFor(ref) : null; if(b) b.innerHTML = ""; }
+  function toggle(ref){ const b = boxFor(ref); if(!b) return; if(b.innerHTML.trim()){ b.innerHTML = ""; return; } open(ref); }
   function reviewKey(ref){ return "roster_review_" + ref; }
   function getReview(ref){ try{ return localStorage.getItem(reviewKey(ref)) || "unreviewed"; }catch(e){ return "unreviewed"; } }
   function setReview(ref, v){ try{ localStorage.setItem(reviewKey(ref), v); }catch(e){} }
@@ -8394,10 +8392,9 @@ async function openMapsList(){
       const w = p.match_pct >= 60 ? "strong" : p.match_pct >= 45 ? "moderate" : "weak";
       m.push(`<li>Wording match to your brief: <b>${w}</b> <span class="ppl-fc" style="text-transform:none;">(${p.match_pct}% — how closely this profile's own words resemble the brief; a search signal, not a fit verdict)</span>.</li>`);
     }
-    if(liHead){
-      const fit = lis && typeof lis.headline_fit === "number" ? lis.headline_fit : null;
-      const fw = fit === null ? "" : fit >= 0.5 ? " — <b>fits the brief well</b>" : fit >= 0.3 ? " — partly fits the brief" : " — does not obviously fit the brief";
-      m.push(`<li>Their LinkedIn headline: “${esc(liHead)}”${fw}.</li>`);
+    if(liHead && lis && typeof lis.headline_fit === "number"){
+      const fit = lis.headline_fit;
+      m.push(`<li>Their LinkedIn headline ${fit >= 0.5 ? "<b>fits the brief well</b>" : fit >= 0.3 ? "partly fits the brief" : "does not obviously fit the brief"}.</li>`);
     }
     if(Array.isArray(p.reasons) && p.reasons.length) m.push(`<li>${p.reasons.map(esc).join(", ")}.</li>`);
     const rrs = (rr && rr.reasons || []).filter(x => !/^relevance \d+%/.test(x) && !/^LinkedIn headline fits/.test(x));
@@ -8476,29 +8473,29 @@ async function openMapsList(){
     // ---- 6. LINKS / REVIEW / ALL FACTS ----
     const hasLi = (p.links||[]).some(l=>(l.kind||"")==="linkedin");
     const liBtn = (!hasLi && p.entity_id && !/^search:/.test(p.entity_id)) ? `<button type="button" class="er-li" data-ref="${esc(p.entity_id)}" title="Find this person's LinkedIn from search-engine snippets — a confident name + employer match only; never a guess">Find LinkedIn ⌕</button>` : "";
-    const links = (p.links||[]).filter(l=>/^https?:\/\//i.test(l.url||"")).map(l=>`<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(l.kind==="x"?"𝕏":l.kind)} ↗</a>`).join("")
-      + (rec.github ? `<a href="${esc(rec.github)}" target="_blank" rel="noopener noreferrer">github ↗</a>` : "");
-    const facts = attrs.filter(a=>a.display && !/^link_/.test(a.key||"") && a.key !== "title").map(a => {
+
+    const SHOWN = new Set(["title","company","role","seniority","worked_at","metro","state","country","function","linkedin_headline","linkedin_company","web_confirmed"]);
+    const factRows = attrs.filter(a=>a.display && !/^link_/.test(a.key||"") && !SHOWN.has(a.key));
+    const factsN = factRows.length;
+    const facts = factRows.map(a => {
       const link = a.document_id && /^https?:\/\//i.test(a.document_id) ? ` · <a href="${esc(a.document_id)}" target="_blank" rel="noopener noreferrer">source ↗</a>` : "";
       return `<div class="er-row"><div><div class="er-k">${esc(String(a.key||"").replace(/_/g," "))}</div><div class="er-v">${esc(a.display)}</div></div><div>${pill(typeOf(a.key))}</div><div class="er-src">${esc(says(a.key))}${link}</div></div>`;
     }).join("");
     const mapRev = (window.ACTIVE_MAP && ACTIVE_MAP.reviews && ACTIVE_MAP.reviews[ref]) || null;
     const cur = (mapRev && mapRev.state) || getReview(ref);   // a saved map's review state wins over device memory
     const review = `<select class="er-review" style="min-height:40px;font-size:.85rem;">${REVIEW.map(r=>`<option value="${esc(r)}"${r===cur?" selected":""}>${esc(r)}</option>`).join("")}</select>`;
-    const el = ensure();
-    el.innerHTML = `<button type="button" class="er-x" aria-label="Close">✕</button>
-      <h3>${esc(p.name||"")}</h3>
-      <div class="er-sub">${esc([role, co].filter(Boolean).join(" · ") || "—")}${loc?` · ${esc(loc)}`:""}</div>
-      <div class="er-head"><span class="ev-pill ${hl[1]}">${esc(hl[0])}</span></div>
-      <div class="er-sec">Match to your brief</div><ul class="er-list">${m.join("")}</ul>
-      <div class="er-sec">How sure can you be</div><div class="er-why">${sure.join(" ")}</div>
-      ${(roleEmp||where)?`<div class="er-sec">The claims that matter</div>${roleEmp}${where}`:""}
+    const el = boxFor(ref); if(!el) return;
+    const hasBrief = Object.keys(brief).some(k => (brief[k]||[]).length) || p.match_pct || (rr && rr.reasons && rr.reasons.length);
+    el.innerHTML = `<div class="ev-inline">
+      <div class="er-head" style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;"><span class="ev-pill ${hl[1]}">${esc(hl[0])}</span><span class="er-why" style="font-size:.84rem;">${sure.join(" ")}</span></div>
+      ${hasBrief?`<div class="er-sec">Why this person</div><ul class="er-list">${m.join("")}</ul>`:""}
+      ${(roleEmp||where)?`<div class="er-sec">The claims that matter — and who says so</div>${roleEmp}${where}`:""}
       <div class="er-sec">What they've done</div>${done}
       ${unknown.length?`<div class="er-sec">What we don't know</div><ul class="er-list er-unknown">${unknown.map(u=>`<li>${u}</li>`).join("")}</ul>`:""}
-      ${(links||liBtn)?`<div class="er-sec">Links</div><div class="er-links">${links}${liBtn}</div><div class="er-li-out"></div>`:""}
-      <div class="er-sec">Your review</div>${review}
-      ${facts?`<details class="er-facts"><summary>All recorded facts (${attrs.filter(a=>a.display && !/^link_/.test(a.key||"") && a.key!=="title").length}) — each with who says so</summary>${facts}</details>`:""}
-      <div class="er-note">Every label comes from where a fact was found — never from a model's opinion. Self-described claims count for inclusion, never as verification.</div>`;
+      <div class="er-sec">Your review</div><div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;">${review}${liBtn}</div><div class="er-li-out"></div>
+      ${facts?`<details class="er-facts"><summary>Other recorded facts (${factsN}) — each with who says so</summary>${facts}</details>`:""}
+      <div class="er-note">Every label comes from where a fact was found — never from a model's opinion. Self-described claims count for inclusion, never as verification.</div>
+    </div>`;
     const liB = el.querySelector(".er-li");
     if(liB) liB.addEventListener("click", async () => {
       const out = el.querySelector(".er-li-out");
@@ -8513,7 +8510,7 @@ async function openMapsList(){
         if(d.status === "resolved" && d.match){
           rec.row = d.row || rec.row; rec.links = (rec.row && rec.row.links) || rec.links;
           open(ref);                                   // re-render with the new self-stated link + headline
-          const o = ensure().querySelector(".er-li-out");
+          const o = (boxFor(ref)||el).querySelector(".er-li-out");
           if(o) o.innerHTML = `<div class="er-src">Resolved from a search-engine snippet: “${esc(d.match.headline||"")}” — matched on ${esc(Object.entries(d.match.hits||{}).map(([k,v])=>k.replace(/_/g," ")+": "+v.join(", ")).join("; "))}. Self-stated; never read from linkedin.com.</div>`;
         } else if(d.status === "already"){
           out.innerHTML = `<div class="er-src">A LinkedIn link is already on file.</div>`;
@@ -8532,13 +8529,16 @@ async function openMapsList(){
       setReview(ref, e.target.value);
       if(typeof syncMapReview === "function") syncMapReview(ref, e.target.value);   // persists on the saved map (owner)
     });
-    el.classList.add("on"); el.setAttribute("aria-hidden","false"); el.scrollTop = 0;
   }
   document.addEventListener("click", e => {
     const b = e.target.closest && e.target.closest(".ev-inspect");
-    if(b){ e.preventDefault(); open(b.dataset.ref); }
+    if(b){ e.preventDefault(); toggle(b.dataset.ref); return; }
+    const card = e.target.closest && e.target.closest(".ppl-card.person-card");
+    if(card && !e.target.closest("a, button, input, select, textarea, details, summary, .ev-inline")){
+      e.preventDefault(); toggle(card.dataset.ref);
+    }
   });
-  window.openEvidenceRail = open; window.closeEvidenceRail = close;
+  window.openEvidenceRail = open; window.closeEvidenceRail = close; window.toggleEvidence = toggle;
 })();
 // ---- person lookup hand-offs: pick a same-named candidate (sends its entity id back as the choice in
 // the People conversation) or open a web-grounded dossier for the name in Q&A.
