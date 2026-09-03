@@ -1489,6 +1489,27 @@ _TOPIC_DROP = {"engineer", "engineers", "developer", "developers", "people", "pe
                "on", "to", "is", "are", "have", "has", "that", "this", "some", "any", "all", "about", "roles", "role"}
 
 
+_TOPIC_GENERIC_WORDS = {"design", "engineering", "systems", "system", "platform", "platforms", "development", "software",
+                        "data", "research", "science", "learning", "search", "infrastructure", "infra", "technology",
+                        "applications", "application", "services", "service", "products", "product", "solutions", "tools"}
+
+
+def expand_topic_terms(terms: list[str]) -> list[str]:
+    """A multi-word subject also anchors on its DISTINCTIVE words: "chip design" → + "chip",
+    "vector search" → + "vector" — the phrase matches few profiles verbatim while the distinctive
+    word reaches the ones that say it differently ("chip architect", "vector databases"). Generic
+    words ("design", "search", "systems") never anchor alone."""
+    out: list[str] = []
+    for t in terms or []:
+        t = str(t).strip().lower()
+        if t and t not in out:
+            out.append(t)
+        for w in t.split():
+            if len(w) >= 4 and w not in _TOPIC_GENERIC_WORDS and w not in _TOPIC_DROP and w not in out:
+                out.append(w)
+    return out[:8]
+
+
 def topic_terms_from_question(question: str, facets: dict | None = None) -> list[str]:
     """LAST-RESORT subject terms straight from the brief's words: strip role/seniority/glue words and
     any named company or place, keep the remaining 1–3 content words as one phrase ("chip design
@@ -2357,7 +2378,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             facets = {**_prior, **f2} if f2 else {}
     else:
         facets, person, ctx, topic_terms = await parse_people_facets_full(question, llm)
-        topic_terms = topic_terms_for(facets, topic_terms) or topic_terms_from_question(question, facets)
+        topic_terms = expand_topic_terms(topic_terms_for(facets, topic_terms) or topic_terms_from_question(question, facets))
     # COMPANY GUARD (code-owned): a company the question names gates the cohort even when the
     # compiler dropped it — unless this is a single-person lookup ("Mukul Gupta at Cisco")
     guard_added: list[str] = []

@@ -1197,3 +1197,10 @@ def test_topic_terms_from_question_strips_roles_and_named_entities():
     assert topic_terms_from_question("chip design engineers at Nvidia", {"company": ["nvidia"]}) == ["chip design"]
     assert topic_terms_from_question("software engineers with vector search experience", {}) == ["vector search"]
     assert topic_terms_from_question("senior engineers at Stripe", {"company": ["stripe"]}) == []
+
+
+def test_expand_topic_terms_adds_distinctive_words_only():
+    from api.people_population import expand_topic_terms
+    assert expand_topic_terms(["chip design"]) == ["chip design", "chip"]
+    assert expand_topic_terms(["vector search", "embeddings"]) == ["vector search", "vector", "embeddings"]
+    assert expand_topic_terms(["data platform"]) == ["data platform"]         # both words generic → phrase only
