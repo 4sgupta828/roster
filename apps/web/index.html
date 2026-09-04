@@ -593,10 +593,16 @@
   .evfilters{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:.4rem auto 0;max-width:var(--wrapw,880px);padding:0 .2rem;font-size:.76rem;color:var(--muted);}
   .evfilters[hidden]{display:none!important;}   /* the flex rule must not defeat the hidden attribute (Jobs / Q&A) */
   .evf-lbl{font-family:var(--mono);font-size:.64rem;letter-spacing:.08em;text-transform:uppercase;margin-right:.35rem;padding:.3rem .6rem;border-radius:6px;background:var(--gold);color:var(--on-accent);font-weight:700;}
-  #evfilters .lvwrap{margin-left:.6rem;display:inline-flex;align-items:center;gap:.35rem;text-transform:none;letter-spacing:0;font-size:.74rem;}
-  #evfilters .lvsel{min-height:32px;font:inherit;font-size:.74rem;border:1.5px solid var(--gold);border-radius:999px;background:transparent;color:var(--ink);padding:.15rem .5rem;}
-  #evfilters .lvspan{min-height:32px;font:inherit;font-size:.72rem;letter-spacing:.08em;border:1px dashed var(--hair);border-radius:999px;background:transparent;color:var(--muted);padding:.1rem .55rem;cursor:pointer;}
-  #evfilters .lvspan span{letter-spacing:0;margin-left:.15rem;}
+  #evfilters .lvwrap{margin-left:auto;display:inline-flex;align-items:center;gap:.4rem;font-size:.74rem;color:var(--muted);}
+  #evfilters .lvlbl{font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+  #evfilters .lvsel{min-height:32px;font:inherit;font-size:.74rem;border:1px solid var(--hair);border-radius:999px;background:var(--panel);color:var(--ink);padding:.15rem 1.4rem .15rem .6rem;appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 13px) 55%,calc(100% - 9px) 55%;background-size:4px 4px,4px 4px;background-repeat:no-repeat;cursor:pointer;}
+  #evfilters .lvsel:hover{border-color:var(--gold);}
+  #evfilters .lvseg{display:inline-flex;border:1px solid var(--hair);border-radius:999px;overflow:hidden;background:var(--panel);}
+  #evfilters .lvsegb{font:inherit;font-size:.7rem;padding:.2rem .55rem;min-height:30px;border:0;background:transparent;color:var(--muted);cursor:pointer;}
+  #evfilters .lvsegb + .lvsegb{border-left:1px solid var(--hair);}
+  #evfilters .lvsegb:hover{color:var(--ink);}
+  #evfilters .lvsegb.on{background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);font-weight:600;}
+  @media (max-width:560px){ #evfilters .lvwrap{margin-left:0;flex-basis:100%;} }
   #evfilters .ev-filter{min-height:32px;padding:.2rem .65rem;border:1.5px solid var(--gold);border-radius:999px;background:transparent;color:var(--ink);font-size:.74rem;font-weight:500;cursor:pointer;}
   #evfilters .ev-filter:hover{background:rgba(var(--gold-rgb),.12);}
   #evfilters .ev-filter.on{border:1px solid var(--gold);background:rgba(var(--gold-rgb),.1);color:var(--gold-strong);font-weight:600;}
@@ -2336,10 +2342,10 @@ const JOB_MUST_LABEL = {remote:"Remote", hybrid:"Hybrid", f500:"Fortune 500", pu
 let LEVEL = "", LEVEL_SPAN = 1;
 const LEVEL_ALL = ["junior","mid","senior","staff","exec"];
 const LEVEL_LABEL = {junior:"Junior", mid:"Mid", senior:"Senior", staff:"Staff+", exec:"Manager / Exec"};
-const SPAN_HINT = ["exactly", "and nearby levels", "and a wide band"];
+const SPAN_HINT = ["exactly", "nearby too", "wide"];
 function levelSelect(){
-  const width = LEVEL ? `<button type="button" class="lvspan" title="How wide a band around ${LEVEL_LABEL[LEVEL]} ranks up — tap to change" onclick="LEVEL_SPAN=(LEVEL_SPAN+1)%3; renderEvFilters();">${["·","· ·","· · ·"][LEVEL_SPAN]} <span>${SPAN_HINT[LEVEL_SPAN]}</span></button>` : "";
-  return `<label class="evf-lbl lvwrap" title="Ranks results around a level — nothing is dropped (levels aren't calibrated across companies)">Center around <select id="levelsel" class="lvsel" onchange="LEVEL=this.value; renderEvFilters();"><option value=""${LEVEL?"":" selected"}>any level</option>${LEVEL_ALL.map(k=>`<option value="${k}"${LEVEL===k?" selected":""}>${LEVEL_LABEL[k]}</option>`).join("")}</select></label>${width}`;
+  const seg = LEVEL ? `<span class="lvseg" role="group" aria-label="how wide a band around the level ranks up">${SPAN_HINT.map((h,i)=>`<button type="button" class="lvsegb${LEVEL_SPAN===i?" on":""}" onclick="LEVEL_SPAN=${i}; renderEvFilters();" title="${["only this level ranks up","this level and the ones next to it rank up","a wide band of levels ranks up"][i]}">${h}</button>`).join("")}</span>` : "";
+  return `<span class="lvwrap"><span class="lvlbl">Center around</span><select id="levelsel" class="lvsel" title="Ranks results around a level — nothing is dropped (levels aren't calibrated across companies)" onchange="LEVEL=this.value; renderEvFilters();"><option value=""${LEVEL?"":" selected"}>any level</option>${LEVEL_ALL.map(k=>`<option value="${k}"${LEVEL===k?" selected":""}>${LEVEL_LABEL[k]}</option>`).join("")}</select>${seg}</span>`;
 }
 function evFilterActive(){ return EVIDENCE_KINDS.size > 0; }
 function renderEvFilters(){
