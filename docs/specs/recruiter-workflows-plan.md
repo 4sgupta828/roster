@@ -183,7 +183,20 @@ in place via the same `POST /maps/{id}/revise` (jobs branch: the profile is the 
 file, else the brief text; saved summaries travel with the rows) with the same revision box.
 Q&A bias-to-cards reaffirmed: résumé → roles answers with job cards; the written fit analysis only on
 an explicit ask ("analyze the fit", "why", "how well").
-Still open from the panel: ingest posting BODIES into the job index (the ranking root cause — titles
+Shipped 2026-09-04 (owner: "do #2 and #3"): (a) POSTING BODIES — Greenhouse / Ashby / Lever return
+the description in the same board call; `rs_job.body` (6k-char cap), `rs_job.skills` (lexicon,
+code-owned), body-aware embeddings; `scripts/ingest_jobs.py --bodies N` is the resumable backfill
+(checkpoint `error = 'body_done: n'`), worker knob `ROSTER_BULK_BODY_BACKFILL=40` boards/cycle
+(≈2,310 boards, ~126k postings, ≈$1 of embeddings total); résumé matching adds a skills-overlap
+bonus with the reason shown. (b) INTRO PATH on job cards — `/me/connections` (the user's own
+LinkedIn export, private, deletable; Account card) + `/me/intro` (connections at the company +
+`hiring_managers_at`: public managers at the company ranked by discipline match then evidence,
+non-hiring 'manager' titles excluded); draft notes via the composer; Roster never sends.
+(c) EXPLICIT LEVEL filter chips (Junior / Mid / Senior / Staff+ / Manager-Exec) on Talent Map and
+Jobs: stated levels outside the selection leave; unstated titles fold ("an unmarked title is not a
+level"); people with no stated level are counted out; the strip shows level as Must.
+Camera / photo capture retired from the intake.
+Still open: the eval layer (invariants + relevance judge + traps, run twice); (the ranking root cause — titles
 only today; needs a cost projection), a level tag with an explicit "unstated" state + filter chips,
 and the landing re-shuffle (only after intake proves out).
 
