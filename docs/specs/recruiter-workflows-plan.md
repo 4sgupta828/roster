@@ -101,6 +101,16 @@ the reviewers' edits are final); exclusions / company exclusions / demoted value
 (temperature 0, numeric guard, code fallback) — an earlier two-line version inverted an edit, so the
 brief edits are shown verbatim. `POST /maps/{id}/revise` (`preview:true` is free). Verified in prod:
 revision 1 and 2 on a test map, gold eval 27/27.
+
+Feedback control (revised 2026-09-04 after owner review: "too opinionated and general"): ONE control per
+card — 👍 / 👎 — and the reasons are the CARD'S OWN FACTS. After 👎 the card asks "Which part is off?"
+and shows its level / role / function / top skills / location / company as chips (plus "evidence too
+weak"); after 👍 it asks "More of what?" with the same facts. A tap stores `avoid:<key>=<value>` or
+`prefer:<key>=<value>` (same `tags text[]` column; the legacy category tags stay valid) and maps
+one-to-one onto a contract edit. The review state is derived from the taps (server + FE), never asked.
+Map-wide preferences (require linked work / self-stated is enough) are NOT per-card feedback: the
+"Must have" evidence chips at the top of the map own them; "evidence too weak" tapped on ≥2 rows turns
+the requirement on for the next revision.
 - Review vocabulary → `unreviewed | shortlist | maybe | needs more evidence | not relevant`
   (old values migrated in read: `shortlisted→shortlist`, `reviewed→maybe`).
 - Review control back on the card (compact select in the card footer when a map is active or
