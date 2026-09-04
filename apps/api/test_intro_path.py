@@ -1,5 +1,11 @@
 """Intro path (job card): the user's own LinkedIn export + a PUBLIC hiring-manager map per company."""
 import asyncio
+
+
+def _run(coro):
+    """Run a coroutine on a fresh loop that STAYS current (asyncio.run() would leave later tests loop-less)."""
+    loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
 import importlib.util
 import pathlib
 
@@ -22,11 +28,11 @@ def test_hiring_managers_rank_discipline_match_then_evidence():
                 {"entity_id": "d", "name": "Di", "facets": [_facet("company", "stripe"), _facet("title", "Head of Platform Engineering", "Head of Platform Engineering")]},
             ]
 
-    res = asyncio.run(hiring_managers_at(_Store(), tenant_id="demo", company="Stripe", title="Senior Backend Engineer", department="Infrastructure"))
+    res = _run(hiring_managers_at(_Store(), tenant_id="demo", company="Stripe", title="Senior Backend Engineer", department="Infrastructure"))
     names = [m["name"] for m in res["managers"]]
     assert "Cy" not in names                                   # an IC is not a hiring manager
     assert names[:2] and set(names[:2]) == {"Ann", "Di"}      # infra / platform leads first
-    assert "Bo" in names                                      # a marketing director still listed, after the discipline matches
+    assert "Bo" not in names                                  # a marketing director does not hire for an infra opening
     assert res["n_at_company"] == 4 and "backend / infra" in res["discipline"]
     assert any("leads backend / infra" in w for w in res["managers"][0]["why"])
 

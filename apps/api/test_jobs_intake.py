@@ -1,6 +1,13 @@
 """Job-seeker intake (tester feedback 2026-09-04): a self-description / attached résumé is a PROFILE,
 never a free-text query; stated seniority ranks the agentic search; titles without a level are unknown."""
+import asyncio
 import base64
+
+
+def _run(coro):
+    """Run a coroutine on a fresh loop that STAYS current (asyncio.run() would leave later tests loop-less)."""
+    loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
 
 from api.media import attachment_texts
 from api.people_population import (_title_level, is_self_description, wanted_levels, years_to_levels)
@@ -38,7 +45,6 @@ def test_attachment_texts_reads_text_files_and_skips_images():
 
 
 def test_agentic_search_ranks_the_stated_level_and_demotes_a_far_one(monkeypatch):
-    import asyncio
     from api import people_population as pp
     from roster_kernel.providers.llm import LLMResult
 
@@ -54,7 +60,7 @@ def test_agentic_search_ranks_the_stated_level_and_demotes_a_far_one(monkeypatch
                     {"id": "c", "company": "z", "title": "Backend Engineer", "location": "Austin, TX", "sim": 0.82}]
 
     monkeypatch.setattr(pp, "embed_query", lambda q: [0.1, 0.2])
-    res = asyncio.run(pp.agentic_job_search(_Store(), "senior backend engineer roles", _LLM()))
+    res = _run(pp.agentic_job_search(_Store(), "senior backend engineer roles", _LLM()))
     order = [j["id"] for j in res["jobs"]]
     assert order[0] == "a" and order[-1] == "b", order          # stated level leads; an intern posting sinks
     by = {j["id"]: j for j in res["jobs"]}
@@ -105,8 +111,8 @@ def test_pdf_attachment_is_read_docling_first_then_text_layer(monkeypatch):
     page.insert_text((50, 72), "Jane Doe\nWork experience\nBackend Engineer, Acme, 5 years. Skills: Java, Kubernetes\nEducation\nB.S.", fontsize=10)
     att = {"name": "cv.pdf", "media_type": "application/pdf", "data": base64.b64encode(doc.tobytes()).decode()}
     monkeypatch.setattr(media, "_docling_markdown_subprocess", lambda data, name: "")     # docling unavailable here
-    out = asyncio.run(media.attachment_texts_async([att]))
+    out = _run(media.attachment_texts_async([att]))
     assert len(out) == 1 and "Kubernetes" in out[0][1] and out[0][0] == "cv.pdf"
     monkeypatch.setattr(media, "_docling_markdown_subprocess", lambda data, name: "# Jane Doe\n\n## Work experience\n\nBackend Engineer")
-    out2 = asyncio.run(media.attachment_texts_async([att]))
+    out2 = _run(media.attachment_texts_async([att]))
     assert out2[0][1].startswith("# Jane Doe")                                            # docling wins when it answers

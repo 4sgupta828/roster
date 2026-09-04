@@ -2563,6 +2563,11 @@ def rows_to_people(rows: list[dict]) -> list[dict]:
 
 _MANAGER_LEVELS = {"engineering_manager", "senior_manager", "director", "head", "vp", "lead", "c_level", "cto"}
 _MANAGER_TITLE_RX = re.compile(r"(?i)\b(manager|director|head of|vp\b|vice president|lead\b|chief|cto|ceo|founder|principal)\b")
+# titles that carry 'manager' / 'lead' but do not HIRE for an engineering / product opening
+_NON_HIRING_RX = re.compile(r"(?i)\b(account manager|technical account|program manager|project manager|community|office manager|"
+                            r"customer success|talent|recruit|people ops|people partner|hr\b|payroll|events?|partnerships?|"
+                            r"sales|marketing|communications|legal|finance|accounting)\b")
+_ENG_LEADER_RX = re.compile(r"(?i)\b(engineering|technology|platform|infrastructure|software|product|data|design|research|science|cto)\b")
 
 
 async def hiring_managers_at(store, *, tenant_id: str, company: str, title: str = "", department: str = "",
@@ -2593,7 +2598,19 @@ async def hiring_managers_at(store, *, tenant_id: str, company: str, title: str 
         if not is_mgr:
             continue
         fams = text_families(title_txt + " " + (p.get("blurb") or ""))
-        disc = 2 if (want and fams & want) else (1 if not want or not fams else 0)
+        # a posting with a discipline wants people who LEAD that discipline; a 'manager' title from
+        # sales / HR / program management is not a hiring manager for it unless the posting is in that family
+        posting_txt = (title or "") + " " + (department or "")
+        if want and _NON_HIRING_RX.search(title_txt) and not _NON_HIRING_RX.search(posting_txt):
+            continue
+        if want and fams & want:
+            disc = 2
+        elif want and _ENG_LEADER_RX.search(title_txt) and not fams:
+            disc = 1                                           # generic engineering leadership (e.g. 'Engineering Manager')
+        elif not want:
+            disc = 1
+        else:
+            disc = 0
         ev = (p.get("evidence") or {}).get("strength") or ""
         why = []
         if disc == 2:
