@@ -94,3 +94,19 @@ def test_job_brief_contract_mirrors_the_talent_map_contract():
     # nothing stated → the assumptions say so instead of a confident filter
     n = job_brief_contract(question="engineering jobs", query={"company": [], "title_keywords": ["engineering"], "location": ""})
     assert n["hard"] == {} and n["assumptions"][0].startswith("level not stated")
+
+
+def test_pdf_attachment_is_read_docling_first_then_text_layer(monkeypatch):
+    """A PDF résumé attachment yields text: docling (separate process) when available, else the text layer."""
+    import asyncio, base64
+    import fitz
+    from api import media
+    doc = fitz.open(); page = doc.new_page()
+    page.insert_text((50, 72), "Jane Doe\nWork experience\nBackend Engineer, Acme, 5 years. Skills: Java, Kubernetes\nEducation\nB.S.", fontsize=10)
+    att = {"name": "cv.pdf", "media_type": "application/pdf", "data": base64.b64encode(doc.tobytes()).decode()}
+    monkeypatch.setattr(media, "_docling_markdown_subprocess", lambda data, name: "")     # docling unavailable here
+    out = asyncio.run(media.attachment_texts_async([att]))
+    assert len(out) == 1 and "Kubernetes" in out[0][1] and out[0][0] == "cv.pdf"
+    monkeypatch.setattr(media, "_docling_markdown_subprocess", lambda data, name: "# Jane Doe\n\n## Work experience\n\nBackend Engineer")
+    out2 = asyncio.run(media.attachment_texts_async([att]))
+    assert out2[0][1].startswith("# Jane Doe")                                            # docling wins when it answers

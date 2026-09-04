@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import io
+import os
 
 _ANTHROPIC_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 _MAX_EDGE = 1400          # longest-edge px cap (Anthropic vision guidance ~1568)
@@ -84,6 +85,66 @@ def _pdf_text(att: dict) -> str:
             if sum(len(c) for c in chunks) > _MAX_DOC_CHARS:
                 break
     return "\n".join(chunks).strip()[:_MAX_DOC_CHARS]
+
+
+_DOCLING_CACHE: dict[str, str] = {}          # sha256(pdf) → markdown (in-process, small)
+_DOCLING_TIMEOUT = float(os.environ.get("ROSTER_DOCLING_TIMEOUT", "60") or 60)
+
+
+def _docling_markdown_subprocess(data: bytes, name: str) -> str:
+    """DOCLING layout-aware parse of a PDF (columns, sections, tables survive) in a SEPARATE process
+    so the model load never enters the web process; '' on timeout / failure (caller falls back to
+    the text layer). Same converter the résumé→profile parser uses (api.resume_parser)."""
+    import hashlib
+    import subprocess
+    import sys
+    import tempfile
+    key = hashlib.sha256(data).hexdigest()
+    if key in _DOCLING_CACHE:
+        return _DOCLING_CACHE[key]
+    suffix = os.path.splitext(name or "")[1] or ".pdf"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tf:
+        tf.write(data)
+        path = tf.name
+    try:
+        code = ("import sys; from api.resume_parser import extract_text_docling; "
+                "sys.stdout.write(extract_text_docling(open(sys.argv[1],'rb').read(), sys.argv[1]))")
+        res = subprocess.run([sys.executable, "-c", code, path], capture_output=True, text=True,
+                             timeout=_DOCLING_TIMEOUT, cwd=os.environ.get("ROSTER_APP_DIR") or None)
+        md = (res.stdout or "").strip() if res.returncode == 0 else ""
+    except Exception:  # noqa: BLE001 — docling is the accurate path, never the only path
+        md = ""
+    finally:
+        try:
+            os.remove(path)
+        except Exception:  # noqa: BLE001
+            pass
+    if md:
+        if len(_DOCLING_CACHE) > 32:
+            _DOCLING_CACHE.pop(next(iter(_DOCLING_CACHE)))
+        _DOCLING_CACHE[key] = md[:_MAX_DOC_CHARS]
+    return md[:_MAX_DOC_CHARS]
+
+
+async def attachment_texts_async(attachments: list[dict] | None) -> list[tuple[str, str]]:
+    """`attachment_texts` with DOCLING first for PDFs (accuracy: multi-column résumés keep their
+    reading order and sections), run off the event loop; the text layer is the fallback."""
+    import asyncio
+    out: list[tuple[str, str]] = []
+    for att in attachments or []:
+        mt = str(att.get("media_type") or "").lower()
+        name = str(att.get("name") or "")
+        if mt == "application/pdf" or name.lower().endswith(".pdf"):
+            try:
+                raw = base64.b64decode(att.get("data") or "", validate=False)
+                md = await asyncio.to_thread(_docling_markdown_subprocess, raw, name)
+            except Exception:  # noqa: BLE001
+                md = ""
+            if md and md.strip():
+                out.append((name or "file.pdf", md.strip()))
+                continue
+        out += attachment_texts([att])
+    return out
 
 
 def attachment_texts(attachments: list[dict] | None) -> list[tuple[str, str]]:

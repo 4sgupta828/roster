@@ -2656,10 +2656,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         # I'm a software engineer with 5 years…") is a PROFILE, not a query: it goes to résumé matching
         # (title / skills / level), never to free-text vector search over posting titles. Signed-in
         # users with a parsed résumé on file get it used when they say "for me" / "my résumé".
-        from api.media import attachment_texts
+        from api.media import attachment_texts_async
         from api.people_population import is_self_description, years_to_levels
         from api.qa_router import extract_resume_text
-        _att_texts = attachment_texts([a.model_dump() for a in (body.attachments or [])])
+        _att_texts = await attachment_texts_async([a.model_dump() for a in (body.attachments or [])])
         _ask, _pasted_cv = extract_resume_text(body.question or "")
         _qs = (body.question or "").strip()
         # a bare "jobs for me" stays a search; a description of oneself (or an explicit résumé mention) is a profile
@@ -3812,6 +3812,18 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     redirect_to_qa=True)
             _route = await _qr.classify_qa_route(
                 body.question, build_llm(mode=resolve_mode()), history=body.history)
+            # AN ATTACHED RÉSUMÉ decides the route (the router only sees the question text): a
+            # résumé-shaped attachment means "roles for this profile" whatever the words around it —
+            # unless the question is a JD analysis / candidates request, which reads the file as a JD.
+            _att_cv = ""
+            if body.attachments and _route.route not in ("jd_analysis", "candidates_for_jd"):
+                from api.media import attachment_texts_async
+                _att_pairs = await attachment_texts_async([a.model_dump() for a in body.attachments])
+                _att_txt = "\n\n".join(t for _, t in _att_pairs)[:20000]
+                if _att_txt and len(_qr._RESUME_MARKERS.findall(_att_txt)) >= 2:
+                    _att_cv = _att_txt
+                    _route.route = "jobs_for_profile"
+                    _route.confidence = "high"
             if on_event is not None:
                 await on_event({"type": "route", "route": _route.route,
                                 "confidence": _route.confidence})
@@ -4057,13 +4069,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 # CONNECT THE DOTS: résumé → ranked open roles from the jobs index, then a critical
                 # fit analysis (technical gems, ideal roles) over BOTH as citable documents.
                 _ask_q, _cv = _qr.extract_resume_text(body.question)
-                if not _cv:
-                    # an ATTACHED résumé (PDF / text) is the profile — read it before asking to paste
-                    from api.media import attachment_texts
-                    _att = attachment_texts([a.model_dump() for a in (body.attachments or [])])
-                    if _att:
-                        _cv = "\n\n".join(t for _, t in _att)[:20000]
-                        _ask_q = (body.question or "").strip()
+                if not _cv and _att_cv:
+                    # an ATTACHED résumé (PDF / text, docling-parsed) is the profile — never ask to paste
+                    _cv = _att_cv
+                    _ask_q = (body.question or "").strip()
                 if not _cv and len(body.question) > 200:
                     _cv = body.question
                 if not _cv:
