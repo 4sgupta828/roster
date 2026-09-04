@@ -69,3 +69,25 @@ def test_diff_rows_reports_added_removed_moved_and_evidence_changes():
     assert d["evidence_changed"] == [{"entity_id": "e14", "name": "N14", "from": "weak", "to": "strong"}]
     txt = diff_text(d, ["HM wants more like N14: prefer x"])
     assert txt.startswith("15 people (was 15): 1 new, 1 dropped, 1 moved") and "Brief changes:" in txt
+
+
+def test_fact_tags_map_one_to_one_onto_contract_edits():
+    """The redesigned control: reviewers tap the card's OWN facts (prefer:/avoid: tags)."""
+    from api.maps import derive_state, fact_tag, parse_fact_tag, valid_tag
+    assert fact_tag("avoid", "seniority", "  Junior ") == "avoid:seniority=junior"
+    assert parse_fact_tag("prefer:skill=pytorch") == ("prefer", "skill", "pytorch")
+    assert valid_tag("avoid:company=acme") and valid_tag("more_like_this") and not valid_tag("avoid:x=y") and not valid_tag("drop table")
+    fb = [{"entity_id": "p2", "tags": ["less_like_this", "avoid:seniority=junior", "avoid:company=acme"], "state": "not relevant", "reviewer_name": "HM"},
+          {"entity_id": "p1", "tags": ["more_like_this", "prefer:skill=pytorch"], "state": "shortlist", "reviewer_name": "HM"},
+          {"entity_id": "p3", "tags": ["avoid:evidence=weak"], "state": "needs more evidence"}]
+    c = feedback_to_contract("ML engineers", {"seniority": ["senior"]}, [], fb, ROWS)
+    assert c["exclude_ids"] == ["p2"] and c["exclude_companies"] == ["acme"]
+    assert "junior" in c["avoid_terms"] and "seniority" not in c["refine_facets"]
+    assert c["question"] == "ML engineers — prefer pytorch"          # a tapped fact, not the whole card
+    assert "analytics" not in c["avoid_terms"]                        # bare-👎 demotion does not fire when facts were tapped
+    assert c["evidence_kinds"] == []                                  # one weak-evidence tap is a row state, not a map rule
+    assert any("HM: Bob's level (junior) is off" in e for e in c["edits"])
+    assert any("HM: more like Ada's skill (pytorch)" in e for e in c["edits"])
+    assert derive_state(["prefer:skill=pytorch"]) == "shortlist" and derive_state(["avoid:evidence=weak"]) == "needs more evidence"
+    c2 = feedback_to_contract("ML engineers", {}, [], [{"entity_id": "p1", "tags": ["avoid:evidence=weak"]}, {"entity_id": "p3", "tags": ["avoid:evidence=weak"]}], ROWS)
+    assert c2["evidence_kinds"] == ["paper", "repo", "post", "talk", "patent"]   # two rows → the map requires linked work

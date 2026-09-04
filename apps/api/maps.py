@@ -69,17 +69,34 @@ _LEGACY_STATE = {"shortlisted": "shortlist", "reviewed": "maybe"}     # older ro
 FEEDBACK_TAGS = ("more_like_this", "less_like_this", "wrong_domain", "wrong_seniority", "wrong_location",
                  "wrong_company_target", "evidence_too_weak", "needs_artifact_evidence",
                  "self_stated_is_enough", "private_company_talent")
+# STRUCTURED feedback (the card's own facts): `prefer:<key>=<value>` under 👍, `avoid:<key>=<value>` under 👎.
+# A reviewer taps the fact that is off / the fact to find more of — never an abstract category.
+_FACT_TAG_RX = re.compile(r"^(prefer|avoid):(role|function|skill|seniority|metro|company|evidence)=([a-z0-9][a-z0-9_ .+&/-]{0,60})$")
+
+
+def fact_tag(kind: str, key: str, value: str) -> str:
+    v = re.sub(r"\s+", " ", str(value or "").strip().lower())[:60]
+    return f"{kind}:{key}={v}"
+
+
+def parse_fact_tag(tag: str) -> tuple[str, str, str] | None:
+    m = _FACT_TAG_RX.match(str(tag or ""))
+    return (m.group(1), m.group(2), m.group(3)) if m else None
+
+
+def valid_tag(tag: str) -> bool:
+    return tag in FEEDBACK_TAGS or parse_fact_tag(tag) is not None
 
 
 def derive_state(tags: list[str] | None) -> str:
     """The review state a set of feedback tags implies (ONE control in the UI: the chips; the state
     is never asked separately). Mirrors the FE's deriveReviewState."""
     t = set(tags or [])
-    if "more_like_this" in t:
+    if "more_like_this" in t or any(x.startswith("prefer:") for x in t):
         return "shortlist"
     if "less_like_this" in t:
         return "not relevant"
-    if t & {"evidence_too_weak", "needs_artifact_evidence"}:
+    if t & {"evidence_too_weak", "needs_artifact_evidence", "avoid:evidence=weak"}:
         return "needs more evidence"
     return "maybe" if t else "unreviewed"
 
@@ -316,7 +333,7 @@ class MapStore:
         overwrite each other. Feedback edits the next map's contract, never the evidence."""
         await self._ensure()
         tags_given = tags is not None
-        tags = [t for t in (tags or []) if t in FEEDBACK_TAGS][:6]
+        tags = [t for t in (tags or []) if valid_tag(t)][:10]
         if state == "auto" or (tags_given and not state):
             state = derive_state(tags)
         state = _LEGACY_STATE.get(state, state)

@@ -558,7 +558,8 @@
   .rv-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin-top:.4rem;font-size:.74rem;}
   .rv-h{font-size:.68rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--gold-strong);}
   .rv-derived{font-size:.72rem;color:var(--gold-strong);font-weight:600;}
-  .rv-why{font:inherit;font-size:.7rem;color:var(--muted);background:transparent;border:1px dashed var(--hair);border-radius:999px;padding:.15rem .5rem;min-height:28px;cursor:pointer;}
+  .rv-ask{font-size:.74rem;font-weight:600;color:var(--ink);margin-right:.2rem;}
+  .rv-fact i{font-style:normal;color:var(--muted);font-size:.64rem;margin-right:.2rem;}
   .rv-more{display:block;width:100%;margin-top:.25rem;}
   .rv-more[hidden]{display:none;}
   .rv-tags{display:inline-flex;flex-wrap:wrap;gap:.25rem;margin:.1rem 0;}
@@ -2864,7 +2865,7 @@ function peopleRowsMarkup(data){
         ${evPill?`<span class="ppl-ev">${evPill}</span>`:""}
         ${fpStrip}
         ${linkBadges?`<span class="ppl-links">${linkBadges}</span>`:""}
-        ${typeof reviewControlMarkup==="function" ? reviewControlMarkup(ref) : ""}
+        ${typeof reviewControlMarkup==="function" ? reviewControlMarkup(ref, p) : ""}
         <span class="ev-inline-box" data-ref="${esc(ref)}"></span>
       </span></div>`;
   };
@@ -8490,58 +8491,80 @@ async function syncMapReview(ref, state, tags, note){
   if(typeof refreshMapBar === "function") refreshMapBar();
 }
 // the review control rendered in a person card's footer when a map is active and the viewer may review
-function reviewControlMarkup(ref){
+function reviewControlMarkup(ref, row){
   if(!canReview()) return "";
-  const m = window.ACTIVE_MAP, cur = myReview(ref) || {};
+  window.ROW_BY_REF = window.ROW_BY_REF || {}; if(row) window.ROW_BY_REF[ref] = row; row = row || window.ROW_BY_REF[ref] || {};
+  const m = window.ACTIVE_MAP, cur = myReview(ref) || {}, tags = cur.tags || [];
   const mine = m.is_owner ? "" : reviewerKey();
   const others = (m.feedback||[]).filter(f => f.entity_id === ref && (m.is_owner ? !!f.reviewer_key : f.reviewer_key !== mine) && (f.state !== "unreviewed" || (f.tags||[]).length || f.note));
-  // ONE control — feedback chips. The review state (shortlist / not relevant / needs more evidence /
-  // maybe) is DERIVED from the chips in code, never asked separately (the dropdown duplicated them).
-  const chip = ([k,l]) => `<button type="button" class="rv-tag${(cur.tags||[]).includes(k)?" on":""}" data-ref="${esc(ref)}" data-tag="${esc(k)}">${esc(l)}</button>`;
-  const primary = FEEDBACK_TAGS.slice(0,2).map(chip).join(""), rest = FEEDBACK_TAGS.slice(2);
-  const restOn = rest.some(([k]) => (cur.tags||[]).includes(k)) || !!cur.note;
-  const st = deriveReviewState(cur.tags||[]);
+  // ONE control: 👍 / 👎, then the CARD'S OWN FACTS as the reasons — the reviewer taps the fact that is
+  // off (👎) or the fact to find more of (👍). No abstract categories; the state derives from the taps.
+  const up = tags.includes("more_like_this"), down = tags.includes("less_like_this");
+  const kind = down ? "avoid" : (up ? "prefer" : "");
+  const st = deriveReviewState(tags);
+  const facts = cardFacts(row).filter(f => !(kind === "prefer" && f.key === "company"));
+  const KL = {seniority:"level", role:"role", function:"function", skill:"skill", metro:"location", company:"company"};
+  const factChip = f => { const t = `${kind}:${f.key}=${factValue(f.v)}`; return `<button type="button" class="rv-tag rv-fact${tags.includes(t)?" on":""}" data-ref="${esc(ref)}" data-tag="${esc(t)}"><i>${esc(KL[f.key]||f.key)}</i> ${esc(f.v)}</button>`; };
+  const weak = kind === "avoid" ? `<button type="button" class="rv-tag rv-fact${tags.includes("avoid:evidence=weak")?" on":""}" data-ref="${esc(ref)}" data-tag="avoid:evidence=weak"><i>evidence</i> too weak</button>` : "";
+  const ask = kind === "avoid" ? "Which part is off?" : (kind === "prefer" ? "More of what?" : "");
   // inline-only markup: the card body is a <span>, so no block elements here (they broke the card)
   return `<span class="rv-ctl" data-ref="${esc(ref)}">
-    <span class="rv-h">Feedback</span><span class="rv-tags">${primary}</span>
-    <button type="button" class="rv-why" data-ref="${esc(ref)}">${restOn?"why ▴":"why ▾"}</button>
+    <span class="rv-h">Feedback</span><span class="rv-tags"><button type="button" class="rv-tag rv-thumb${up?" on":""}" data-ref="${esc(ref)}" data-tag="more_like_this">👍 more like this</button><button type="button" class="rv-tag rv-thumb${down?" on":""}" data-ref="${esc(ref)}" data-tag="less_like_this">👎 less like this</button></span>
     <span class="rv-derived" data-ref="${esc(ref)}">${st!=="unreviewed"?`→ ${esc(st)}`:""}</span>
-    ${others.length?`<span class="rv-others" title="${esc(others.map(o=>`${o.reviewer_name||"owner"}: ${o.state}${(o.tags||[]).length?" · "+o.tags.join(", "):""}${o.note?" — "+o.note:""}`).join("\n"))}">${others.length} other review${others.length===1?"":"s"}</span>`:""}
-    <span class="rv-more" data-ref="${esc(ref)}"${restOn?"":" hidden"}><span class="rv-h" style="font-weight:600;letter-spacing:0;text-transform:none;color:var(--muted);">Why?</span> <span class="rv-tags">${rest.map(chip).join("")}</span>
-      <input class="rv-note" data-ref="${esc(ref)}" placeholder="note for the team (optional)" value="${esc(cur.note||"")}" /></span>
+    ${others.length?`<span class="rv-others" title="${esc(others.map(o=>`${o.reviewer_name||"owner"}: ${o.state}${(o.tags||[]).length?" · "+o.tags.map(humanTag).join(", "):""}${o.note?" — "+o.note:""}`).join("\n"))}">${others.length} other review${others.length===1?"":"s"}</span>`:""}
+    ${kind?`<span class="rv-more" data-ref="${esc(ref)}"><span class="rv-ask">${ask}</span> <span class="rv-tags">${facts.map(factChip).join("")}${weak}</span>
+      <input class="rv-note" data-ref="${esc(ref)}" placeholder="${kind==="avoid"?"anything else? (optional)":"note for the team (optional)"}" value="${esc(cur.note||"")}" /></span>`:""}
   </span>`;
+}
+// the facts a reviewer can point at: level, role, function, top skills, location, company — as displayed on the card
+function cardFacts(p){
+  const A = (p && p.attributes) || [];
+  const vals = k => A.filter(a => a.key === k && a.display).map(a => String(a.display).replace(/_/g, " "));
+  const out = [];
+  const push = (key, v) => { if(v && !out.some(o => o.key === key && o.v.toLowerCase() === v.toLowerCase())) out.push({key, v}); };
+  vals("seniority").slice(0,1).forEach(v => push("seniority", v));
+  vals("role").slice(0,1).forEach(v => push("role", v));
+  vals("function").slice(0,1).forEach(v => push("function", v));
+  vals("skill").slice(0,3).forEach(v => push("skill", v));
+  vals("metro").slice(0,1).forEach(v => push("metro", v));
+  vals("company").slice(0,1).forEach(v => push("company", v));
+  return out;
+}
+function factValue(v){ return String(v||"").trim().toLowerCase().replace(/\s+/g, " ").replace(/[^a-z0-9_ .+&\/-]/g, "").slice(0,60); }
+function humanTag(t){
+  const m = /^(prefer|avoid):(\w+)=(.+)$/.exec(t||"");
+  const KL = {seniority:"level", metro:"location"};
+  if(!m) return {more_like_this:"👍", less_like_this:"👎", wrong_seniority:"wrong level", wrong_domain:"wrong domain", wrong_location:"wrong location", wrong_company_target:"wrong company", evidence_too_weak:"evidence too weak", needs_artifact_evidence:"needs public work"}[t] || t;
+  if(m[2] === "evidence") return "evidence too weak";
+  return m[1] === "prefer" ? `more like: ${m[3]}` : `${KL[m[2]]||m[2]} ${m[3]} is off`;
 }
 function refreshMapBar(){ const el = document.querySelector(".mapbar"); if(el && window.ACTIVE_MAP && window.ACTIVE_MAP.map_type !== "jobs" && typeof talentMapBar === "function"){ const box = $("#reviseBox"); const keep = box && !box.hidden ? box.innerHTML : ""; el.outerHTML = talentMapBar(); if(keep){ const nb = $("#reviseBox"); if(nb){ nb.hidden = false; nb.innerHTML = keep; } } } }
 // the review state a set of chips implies (mirrors maps.derive_state on the server)
 function deriveReviewState(tags){
   const t = new Set(tags||[]);
-  if(t.has("more_like_this")) return "shortlist";
+  if(t.has("more_like_this") || [...t].some(x => x.startsWith("prefer:"))) return "shortlist";
   if(t.has("less_like_this")) return "not relevant";
-  if(t.has("evidence_too_weak") || t.has("needs_artifact_evidence")) return "needs more evidence";
+  if(t.has("evidence_too_weak") || t.has("needs_artifact_evidence") || t.has("avoid:evidence=weak")) return "needs more evidence";
   return t.size ? "maybe" : "unreviewed";
 }
 document.addEventListener("change", e => {
   const nt = e.target.closest && e.target.closest(".rv-note"); if(nt){ syncMapReview(nt.dataset.ref, undefined, undefined, nt.value); }
 });
 document.addEventListener("click", e => {
-  const w = e.target.closest && e.target.closest(".rv-why");
-  if(w){ e.preventDefault(); e.stopPropagation(); const more = w.closest(".rv-ctl").querySelector(".rv-more"); if(more){ more.hidden = !more.hidden; w.textContent = more.hidden ? "why ▾" : "why ▴"; } return; }
   const b = e.target.closest && e.target.closest(".rv-tag"); if(!b) return;
   e.preventDefault(); e.stopPropagation();
-  const cur = myReview(b.dataset.ref) || {}; const tags = new Set(cur.tags||[]);
-  if(tags.has(b.dataset.tag)) tags.delete(b.dataset.tag); else tags.add(b.dataset.tag);
-  if(b.dataset.tag === "more_like_this" && tags.has("more_like_this")) tags.delete("less_like_this");   // mutually exclusive
-  if(b.dataset.tag === "less_like_this" && tags.has("less_like_this")) tags.delete("more_like_this");
+  const ref = b.dataset.ref, tag = b.dataset.tag;
+  const cur = myReview(ref) || {}; let tags = new Set(cur.tags||[]);
+  if(tag === "more_like_this" || tag === "less_like_this"){
+    const other = tag === "more_like_this" ? "less_like_this" : "more_like_this";
+    const otherKind = tag === "more_like_this" ? "avoid:" : "prefer:";
+    if(tags.has(tag)){ tags.delete(tag); const own = tag === "more_like_this" ? "prefer:" : "avoid:"; tags = new Set([...tags].filter(x => !x.startsWith(own))); }
+    else { tags.add(tag); tags.delete(other); tags = new Set([...tags].filter(x => !x.startsWith(otherKind))); }
+  } else if(tags.has(tag)) tags.delete(tag); else tags.add(tag);
+  const list = [...tags];
+  syncMapReview(ref, deriveReviewState(list), list);
   const ctl = b.closest(".rv-ctl");
-  if(ctl) ctl.querySelectorAll(".rv-tag").forEach(x => x.classList.toggle("on", tags.has(x.dataset.tag)));
-  // 👍 is enough on its own; 👎 opens the "why" reasons right away (a bare thumbs-down teaches the next map little)
-  if(ctl && b.dataset.tag === "less_like_this" && tags.has("less_like_this")){
-    const more = ctl.querySelector(".rv-more"), w = ctl.querySelector(".rv-why");
-    if(more){ more.hidden = false; } if(w) w.textContent = "why ▴";
-  }
-  const st = deriveReviewState([...tags]);
-  const dv = ctl && ctl.querySelector(".rv-derived"); if(dv) dv.textContent = st !== "unreviewed" ? `→ ${st}` : "";
-  syncMapReview(b.dataset.ref, st, [...tags]);
+  if(ctl){ const html = reviewControlMarkup(ref, (window.ROW_BY_REF||{})[ref]); if(html) ctl.outerHTML = html; }
 });
 function copyMapLink(){
   const m = window.ACTIVE_MAP; if(!m || !m.share_path) return;

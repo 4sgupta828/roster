@@ -22,6 +22,8 @@ import re
 
 from pydantic import BaseModel
 
+from api.maps import parse_fact_tag
+
 _EVIDENCE_ALL = ["paper", "repo", "post", "talk", "patent"]
 _DEMOTE_KEYS = ("role", "function", "skill", "seniority", "metro")
 
@@ -47,6 +49,8 @@ def feedback_to_contract(brief: str, filters: dict, evidence_kinds: list[str], f
     avoid: list[str] = []
     seniority_soft = False
     tag_counts: dict[str, int] = {}
+    _KEY_LABEL = {"role": "role", "function": "function", "skill": "skill", "seniority": "level", "metro": "location", "company": "company"}
+    weak_evidence_rows = 0
     for f in feedback or []:
         row = rows_by_id.get(f.get("entity_id") or "") or {}
         name = row.get("name") or f.get("entity_id") or "someone"
@@ -55,7 +59,36 @@ def feedback_to_contract(brief: str, filters: dict, evidence_kinds: list[str], f
         who = f.get("reviewer_name") or "owner"
         for t in tags:
             tag_counts[t] = tag_counts.get(t, 0) + 1
-        if "more_like_this" in tags or state == "shortlist":
+        # STRUCTURED facts (the card's own values, tapped by the reviewer) — one edit per tap
+        facts = [x for x in (parse_fact_tag(t) for t in tags) if x]
+        for kind, key, val in facts:
+            label = val.replace("_", " ")
+            if kind == "prefer":
+                if key == "company":
+                    continue                                   # a company is a target, not a preference
+                if label.lower() not in {p.lower() for p in prefer}:
+                    prefer.append(label)
+                    edits.append(f"{who}: more like {name}'s {_KEY_LABEL.get(key, key)} ({label})")
+            elif key == "evidence":
+                weak_evidence_rows += 1
+                edits.append(f"{who}: {name}'s evidence is too weak")
+            elif key == "company":
+                n = _norm(val)
+                targets = [c for c in facets.get("company", []) if _norm(c) == n]
+                if targets:
+                    facets["company"] = [c for c in facets["company"] if _norm(c) != n]
+                    edits.append(f"{who}: {label} is off ({name}) — removed from the company filter")
+                elif n and n not in [_norm(c) for c in exclude_companies]:
+                    exclude_companies.append(label)
+                    edits.append(f"{who}: {label} is off ({name}) — excluded")
+            else:
+                if key == "seniority":
+                    seniority_soft = True
+                if _norm(val) not in avoid:
+                    avoid.append(_norm(val))
+                    edits.append(f"{who}: {name}'s {_KEY_LABEL.get(key, key)} ({label}) is off — demote")
+        # the bare thumbs: 👍 alone prefers the person's role / function; 👎 alone excludes the person
+        if ("more_like_this" in tags or state == "shortlist") and not any(k == "prefer" for k, _, _ in facts):
             vals = _row_vals(row, "role") + _row_vals(row, "function") + _row_vals(row, "skill")[:3]
             new = [v for v in vals if v and v.lower() not in {p.lower() for p in prefer}]
             if new:
@@ -64,11 +97,11 @@ def feedback_to_contract(brief: str, filters: dict, evidence_kinds: list[str], f
         if "less_like_this" in tags or state == "not relevant":
             if row.get("entity_id") and row["entity_id"] not in exclude_ids:
                 exclude_ids.append(row["entity_id"])
-            vals = _row_vals(row, "function") + _row_vals(row, "skill")[:2]
-            for v in vals:
+            legacy_demote = [] if facts else (_row_vals(row, "function") + _row_vals(row, "skill")[:2])
+            for v in legacy_demote:
                 if _norm(v) not in avoid:
                     avoid.append(_norm(v))
-            edits.append(f"{who} wants less like {name}: excluded" + (f"; demote {', '.join(vals[:3])}" if vals else ""))
+            edits.append(f"{who} wants less like {name}: excluded" + (f"; demote {', '.join(legacy_demote[:3])}" if legacy_demote else ""))
         if "wrong_domain" in tags:
             vals = _row_vals(row, "function") + _row_vals(row, "skill")[:2]
             for v in vals:
@@ -97,7 +130,7 @@ def feedback_to_contract(brief: str, filters: dict, evidence_kinds: list[str], f
                 elif n and n not in [_norm(c) for c in exclude_companies]:
                     exclude_companies.append(co)
                     edits.append(f"{who}: {co} is the wrong target — excluded")
-    if tag_counts.get("needs_artifact_evidence") or tag_counts.get("evidence_too_weak"):
+    if tag_counts.get("needs_artifact_evidence") or tag_counts.get("evidence_too_weak") or weak_evidence_rows >= 2:
         if not ev:
             ev = list(_EVIDENCE_ALL)
             edits.append("reviewers want linked public work — the next map requires at least one linked paper, repo, post, talk or patent")
