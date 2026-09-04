@@ -83,7 +83,11 @@
     }
     // TEXT-LIKE
     if (["text", "textarea", "email", "tel", "url", "date"].includes(kind)) {
-      const el = els.find(el => ["INPUT", "TEXTAREA"].includes(el.tagName) && visible(el)) || els[0];
+      let el = els.find(el => ["INPUT", "TEXTAREA"].includes(el.tagName) && visible(el)) || els[0];
+      if (!el) {   // no stable name on the input (Ashby's Location widget): find it under the question's own label
+        const box = containerByLabel(q.label);
+        el = box && [...box.querySelectorAll("input, textarea")].find(x => visible(x) && x.type !== "hidden" && x.type !== "file");
+      }
       if (!el) return false;
       if (el.getAttribute("role") === "combobox" || (el.getAttribute("aria-autocomplete") || "") !== "") {
         setNative(el, val); await new Promise(r => setTimeout(r, 500));

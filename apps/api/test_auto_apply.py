@@ -88,3 +88,17 @@ def test_links_to_work_and_legal_name_come_from_the_profile():
     assert standard_answer("Please share links to your most relevant technical work.", "textarea", [], prof) == "https://github.com/ada\nhttps://ada.dev\nhttps://linkedin.com/in/ada"
     assert map_label("Full Legal Name") == "full_name" and map_label("Legal name *") == "full_name"
     assert standard_answer("Please share links to your most relevant technical work.", "textarea", [], {}) == ""
+
+
+def test_date_and_address_questions_answer_from_code_and_profile():
+    import datetime
+    from api.auto_apply import map_label, standard_answer, value_for
+    prof = {"address_line1": "1 Main St", "city": "Austin", "region": "TX", "postal_code": "78701"}
+    assert standard_answer("Today's Date of Application (MM/DD/YY Format)", "text", [], prof) == datetime.date.today().strftime("%m/%d/%y")
+    assert standard_answer("Application date (DD/MM/YYYY)", "text", [], prof) == datetime.date.today().strftime("%d/%m/%Y")
+    # address-block lines go through the profile mapping the planner uses for text fields
+    field = lambda lab: value_for(map_label(lab), prof)
+    assert field("Home Address Line 1") == "1 Main St"
+    assert field("Home Address City") == "Austin" and field("Home Address State") == "TX"
+    assert field("Home Address Zip Code") == "78701"
+    assert field("Location") == "Austin, TX"        # a Location field wants City, State; the address City line does not

@@ -16,7 +16,11 @@ _FIELD_RX: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(?i)^degree|highest (level of )?education|education level"), "highest_degree"),
     (re.compile(r"(?i)discipline|field of study|major"), "field_of_study"),
     (re.compile(r"(?i)(graduation|grad)\s*(year|date)|year of graduation|end date"), "grad_year"),
-    (re.compile(r"(?i)(state|province).{0,20}(reside|live|located)|which (u\.?s\.? )?state"), "region"),
+    (re.compile(r"(?i)(state|province).{0,20}(reside|live|located)|which (u\.?s\.? )?state|^(home )?address (state|province)|^state( ?/ ?province)?$"), "region"),
+    (re.compile(r"(?i)^(home )?address (line )?1|^street address|^address line 1|^address$"), "address_line1"),
+    (re.compile(r"(?i)^(home )?address (line )?2|^apt|^suite|^address line 2"), "address_line2"),
+    (re.compile(r"(?i)^(home )?address city|^city$"), "address_city"),
+    (re.compile(r"(?i)^(home )?address (zip|postal)"), "postal_code"),
     (re.compile(r"(?i)^where are you (located|based)|^current location|^location\b"), "city"),
     (re.compile(r"(?i)^(full\s*)?(legal\s*)?name$|^your (full |legal )?name|^name\s*\*?$|^legal name"), "full_name"),
     (re.compile(r"(?i)e-?mail"), "email"),
@@ -69,8 +73,10 @@ def value_for(key: str, profile: dict, answers: dict | None = None) -> str:
         return str(answers[key]).strip()
     if key == "full_name":
         return (" ".join(str(profile.get(k) or "") for k in ("first_name", "last_name"))).strip()
-    if key == "city":
+    if key == "city":      # a "Location" style field: City, State
         return ", ".join(str(profile.get(k) or "") for k in ("city", "region") if profile.get(k))
+    if key == "address_city":   # the City line of an address block: the bare city
+        return str(profile.get("city") or "").strip()
     v = profile.get(key)
     return str(v).strip() if v not in (None, "") else ""
 
@@ -171,6 +177,15 @@ def _pick_option(options: list[str], want: str) -> str:
 def standard_answer(label: str, kind: str, options: list[str], profile: dict) -> str:
     """The Apply profile's answer to a recurring ATS question ('' when the profile doesn't hold one —
     never a guess). A profile value never overrides a choice the user already made for this question."""
+    if re.search(r"(?i)today.?s date|date of application|application date", label or ""):
+        import datetime as _dt
+        d = _dt.date.today()
+        fmt = (label or "").upper()
+        if re.search(r"MM/DD/YY(?!Y)", fmt):
+            return d.strftime("%m/%d/%y")
+        if re.search(r"DD/MM/YYYY", fmt):
+            return d.strftime("%d/%m/%Y")
+        return d.strftime("%m/%d/%Y") if ("MM" in fmt or "DD" in fmt) else d.isoformat()
     for rx, key, mode in _STANDARD_QS:
         if not rx.search(label or ""):
             continue
