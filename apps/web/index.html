@@ -2506,7 +2506,8 @@ async function loadConfig(){
     buildSessionTabs();
     if(VISION_ENABLED){
       $("#attach").hidden = false;
-      if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) $("#camera").hidden = false;
+      // camera / photo capture retired (owner, 2026-09-04): an inherited affordance with no use in Jobs / Q&A / Talent Map
+      $("#camera").hidden = true;
     }
     // vertical-supplied console copy (heading + placeholder) — keeps the shell domain-neutral
     const con = c.console || {};

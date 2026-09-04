@@ -357,7 +357,7 @@ async def upsert_jobs(conn, source: str, rows: list[dict], vecs: list[str | None
         await conn.execute(
             """INSERT INTO rs_job (company, title, location, department, url, source, title_norm, embedding, updated_at,
                                    body, skills, body_at)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8::vector,now(),$9,$10::text[], CASE WHEN $9 IS NULL THEN NULL ELSE now() END)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8::vector,now(),$9::text,$10::text[], CASE WHEN $9::text IS NULL THEN NULL ELSE now() END)
                ON CONFLICT (company, title, location, source) DO UPDATE SET
                  department = EXCLUDED.department, url = EXCLUDED.url, title_norm = EXCLUDED.title_norm,
                  embedding  = CASE WHEN EXCLUDED.body IS NOT NULL THEN COALESCE(EXCLUDED.embedding, rs_job.embedding)
