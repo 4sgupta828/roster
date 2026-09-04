@@ -214,6 +214,11 @@ name, pronouns, work location, salary, start date, source, voluntary EEO, standi
 sharing a container are ONE question with options; an answer bank (`roster_answer_bank`) remembers every
 reviewed answer by normalized question. Jobs search for a signed-in user with a résumé is PROFILE-
 STEERED (the query steers the résumé-match engine); Match-résumé results are full job cards + Job Map.
+`scripts/apply_smoke.py` = the FILL-ONLY smoke across boards (Greenhouse job-boards / boards via a
+company careers page / embedded gh_jid, Lever, Ashby posting + apply URLs, Workday → needs_you): 7/7 on
+2026-09-04. Lessons baked in: choose the form document by visible inputs, never by URL text; wait for
+late forms before clicking any "Apply"; cap per-action waits after load (a stuck react-select cost
+minutes); comboboxes are typed then picked; asterisk variants (✱) mark required.
 Verified locally on a real Greenhouse form (fill only). A prod prepare test with a throwaway identity
 was declined by the session's safety classifier; the first prod run is the owner with their own profile.
 Still open: the eval layer (invariants + relevance judge + traps, run twice); (the ranking root cause — titles
