@@ -35,11 +35,10 @@ def _post(org: str, job_id: str):
         return json.loads(r.read())
 
 
-def definition_to_form(jp: dict, *, org: str, job_id: str) -> dict:
+def _entries(sections: list, *, default_group: str, policy: str | None) -> list[dict]:
     qs = []
-    af = jp.get("applicationForm") or {}
-    for sec in af.get("sections") or []:
-        group = str(sec.get("title") or "")
+    for sec in sections or []:
+        group = str(sec.get("title") or default_group)
         for fe in sec.get("fieldEntries") or []:
             f = fe.get("field") or {}
             path = str(f.get("path") or f.get("id") or "")
@@ -49,8 +48,21 @@ def definition_to_form(jp: dict, *, org: str, job_id: str) -> dict:
             opts = [str(o.get("label") or o.get("value") or "") for o in (f.get("selectableValues") or [])]
             if kind == "boolean" and not opts:
                 opts = ["Yes", "No"]
+            # the live page stamps data-field-path=<path> on every field's container (main form, diversity
+            # survey and EEOC alike) — the extension scopes its widget search to that box
             qs.append(question(id=path, label=f.get("title") or path, kind=kind, options=opts, required=bool(fe.get("isRequired")),
-                               group=group, selector=f"[name=\"{path}\"]"))
+                               group=group, selector=f"[name=\"{path}\"]", policy=policy))
+    return qs
+
+
+def definition_to_form(jp: dict, *, org: str, job_id: str) -> dict:
+    af = jp.get("applicationForm") or {}
+    qs = _entries(af.get("sections") or [], default_group="", policy=None)
+    # SURVEY forms render on the same page below the application (a company's diversity survey, the EEOC
+    # block). They are self-identification by construction → identity_sensitive: the profile's stated
+    # default or the decline option, never a guess (the same rule the planner applies to EEO questions).
+    for sf in jp.get("surveyForms") or []:
+        qs += _entries(sf.get("sections") or [], default_group="Voluntary self-identification", policy="identity_sensitive")
     return {"ats": "ashby", "board": org, "job_id": job_id, "title": jp.get("title") or "", "company": org,
             "form_url": f"https://jobs.ashbyhq.com/{org}/{job_id}/application", "questions": qs}
 

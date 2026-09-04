@@ -62,8 +62,28 @@ def _run_chunk(argv: list[str]) -> None:
         print(f"[bulk] chunk failed {argv}: {e}", flush=True)
 
 
+def _body_backfill_loop(body_boards: int, pause: int) -> None:
+    """POSTING BODIES in their OWN loop. Serialized inside the main cycle they landed ~150 boards every
+    few HOURS (the people / artifacts / sweep legs dominate a cycle); here a chunk runs back to back.
+    Same kill switch; the live jobs leg never clears a board's body_done marker, so the two never redo
+    each other's work."""
+    while True:
+        try:
+            stopped = asyncio.run(_is_stopped())
+        except Exception:   # noqa: BLE001
+            stopped = False
+        if not stopped:
+            _run_chunk(["scripts/ingest_jobs.py", "--bodies", str(body_boards)])
+        time.sleep(pause)
+
+
 def run_bulk_ingest_loop() -> None:
     people_on = os.environ.get("ROSTER_BULK_INGEST_PEOPLE", "").lower() in ("1", "true", "yes")
+    body_boards = int(os.environ.get("ROSTER_BULK_BODY_BACKFILL", "0") or 0)
+    if body_boards:
+        import threading
+        threading.Thread(target=_body_backfill_loop, args=(body_boards, 30), daemon=True, name="body-backfill").start()
+        print(f"[bulk] body backfill thread started — {body_boards} boards per chunk, back to back", flush=True)
     jobs_chunk = int(os.environ.get("ROSTER_BULK_JOBS_CHUNK", "0") or 0)
     people_chunk = int(os.environ.get("ROSTER_BULK_PEOPLE_CHUNK", "500") or 500)
     # public-artifact linking (papers/repos/orgs by identity key): people per source per cycle; 0 = off
@@ -96,9 +116,7 @@ def run_bulk_ingest_loop() -> None:
         # self-heal: jobs written without a vector (embed hiccups during big sweeps) are invisible to
         # résumé matching — give them their embedding (~$0.0004 / 1k jobs)
         _run_chunk(["scripts/ingest_jobs.py", "--backfill", str(embed_backfill)])
-        body_boards = int(os.environ.get("ROSTER_BULK_BODY_BACKFILL", "0") or 0)
-        if body_boards:      # POSTING BODIES: refetch N already-done ATS boards with content, store body + skills, re-embed
-            _run_chunk(["scripts/ingest_jobs.py", "--bodies", str(body_boards)])
+        # (posting BODIES run in their own thread — see _body_backfill_loop)
         if people_on:
             _run_chunk(["scripts/ingest_people.py", "--live", "--limit", str(people_chunk),
                         "--per-window", str(per_window)])

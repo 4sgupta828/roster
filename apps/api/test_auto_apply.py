@@ -102,3 +102,27 @@ def test_date_and_address_questions_answer_from_code_and_profile():
     assert field("Home Address City") == "Austin" and field("Home Address State") == "TX"
     assert field("Home Address Zip Code") == "78701"
     assert field("Location") == "Austin, TX"        # a Location field wants City, State; the address City line does not
+    # a one-line "city, state and country" question wants the whole location (Promise's Ashby form gave just 'TX')
+    prof["country"] = "United States"
+    assert field("Specify your city, state, and country of residence.") == "Austin, TX, United States"
+    assert field("Home Address State") == "TX"
+
+
+def test_decline_never_resolves_to_a_yes_no_option():
+    from api.auto_apply import _pick_option
+    opts = ["Yes", "No", "I prefer not to answer"]
+    assert _pick_option(opts, "prefer not to say") == "I prefer not to answer"      # was 'No' ('no' ⊂ 'prefer NOt to say')
+    assert _pick_option(["Male", "Female", "Decline to self-identify"], "Prefer not to say") == "Decline to self-identify"
+    assert _pick_option(["Man", "Woman", "Non-Binary"], "Man") == "Man"             # exact beats the substring in 'Woman'
+    assert _pick_option(["Yes", "No"], "No") == "No" and _pick_option(["Yes", "No"], "yes") == "Yes"
+
+
+def test_citizenship_and_onsite_questions_answer_from_the_profile_only():
+    from api.auto_apply import standard_answer
+    yn = ["Yes", "No"]
+    prof = {"us_citizen_or_permanent_resident": "Yes", "can_work_onsite": "No"}
+    assert standard_answer("Are you a U.S. Citizen or Green Card holder?", "boolean", yn, prof) == "Yes"
+    assert standard_answer("Are you able to work in person at the Promise office location listed in the job description at least four times per week?", "boolean", yn, prof) == "No"
+    # not in the profile → no guess
+    assert standard_answer("Are you a U.S. Citizen or Green Card holder?", "boolean", yn, {}) == ""
+    assert standard_answer("Are you able to work in person at the office?", "boolean", yn, {"remote_preference": "Remote"}) == ""

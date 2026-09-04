@@ -41,6 +41,32 @@ def test_ashby_definition_keeps_boolean_questions_the_dom_never_showed():
     assert kinds["_systemfield_resume"] == ("file", "file", [])
 
 
+def test_ashby_survey_forms_are_planned_as_self_identification_and_declined_by_default():
+    # the diversity survey + EEOC block render below the application on the same page (Promise, 2026-09-04):
+    # the definition carries them in surveyForms, not applicationForm — dropping them left half the page unfilled
+    jp = {"title": "Lead", "applicationForm": {"sections": [{"title": "", "fieldEntries": [
+              {"isRequired": True, "field": {"path": "_systemfield_name", "title": "Name", "type": "String"}}]}]},
+          "surveyForms": [
+              {"sections": [{"title": "Diversity Survey", "fieldEntries": [
+                  {"isRequired": False, "field": {"path": "age-1", "title": "What is your current age?", "type": "ValueSelect",
+                                                  "selectableValues": [{"label": "Under 30"}, {"label": "30-39"}, {"label": "I prefer not to answer"}]}},
+                  {"isRequired": False, "field": {"path": "so-1", "title": "How do you identify your sexual orientation?", "type": "MultiValueSelect",
+                                                  "selectableValues": [{"label": "Gay"}, {"label": "Other"}, {"label": "I prefer not to answer"}]}}]}]},
+              {"sections": [{"title": None, "fieldEntries": [
+                  {"isRequired": False, "field": {"path": "_systemfield_eeoc_disability_status", "title": "Disability Status", "type": "ValueSelect",
+                                                  "selectableValues": [{"label": "Yes, I have a disability"}, {"label": "No, I do not have a disability"}, {"label": "I do not want to answer"}]}}]}]}]}
+    f = ashby_form(jp, org="promise", job_id="x")
+    byid = {q["id"]: q for q in f["questions"]}
+    assert byid["age-1"]["policy"] == "identity_sensitive" and byid["age-1"]["group"] == "Diversity Survey"
+    assert byid["so-1"]["kind"] == "multiselect" and byid["so-1"]["policy"] == "identity_sensitive"
+    assert byid["_systemfield_eeoc_disability_status"]["group"] == "Voluntary self-identification"
+    plan = {p["id"]: p for p in bind_plan(f, {"first_name": "A", "last_name": "B"}, {}, {})["plan"]}
+    assert plan["age-1"]["answer"] == "I prefer not to answer" and plan["age-1"]["source"] == "declined by default"
+    assert plan["so-1"]["answer"] == "I prefer not to answer"
+    assert plan["_systemfield_eeoc_disability_status"]["answer"] == "I do not want to answer"
+    assert not any(p["blocking"] for p in plan.values() if p["id"] != "_systemfield_name")
+
+
 def test_lever_page_parses_standard_and_custom_questions():
     page = '''<form><input name="name" required><input name="email"><input name="resume" type="file"><textarea name="comments"></textarea>
     <li class="application-question custom-question"><div class="application-label">Where are you located? ✱</div>

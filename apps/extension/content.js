@@ -28,8 +28,12 @@
     return els;
   }
 
-  // the container that holds a question's widget on React forms (Ashby / Greenhouse job-boards): the
-  // nearest ancestor whose text starts with the question label
+  const WIDGET = "input, textarea, select, button, [role='radio'], [role='checkbox'], [role='combobox']";
+  const nInputs = box => box.querySelectorAll("input:not([type=hidden]), textarea, select").length;
+
+  // the container that holds ONE question's widget on React forms (Ashby / Greenhouse job-boards): the
+  // nearest ancestor of the question's label that holds a widget — and never a whole section (a box
+  // holding many fields would make us write this question's value into somebody else's input)
   function containerByLabel(label) {
     const want = norm(label).slice(0, 60);
     if (!want) return null;
@@ -38,21 +42,35 @@
     for (const el of cands) {
       let n = el;
       for (let i = 0; i < 6 && n; i++) {
-        if (n.querySelector && n.querySelector("input, textarea, select, button, [role='radio'], [role='checkbox'], [role='combobox']") && n !== el) return n;
+        if (n.querySelector && n.querySelector(WIDGET)) return nInputs(n) <= 12 ? n : null;
         n = n.parentElement;
       }
     }
     return null;
   }
 
+  // Ashby stamps data-field-path=<field path> on every field's container (application form, diversity
+  // survey, EEOC block alike) — exact, so it comes first; other ATSs fall back to the label walk
+  function fieldBox(q) {
+    if (q.id) { try { const b = document.querySelector(`[data-field-path="${CSS.escape(q.id)}"]`); if (b) return b; } catch (e) {} }
+    return containerByLabel(q.label);
+  }
+
   function clickOption(scope, text) {
     const want = norm(text);
+    if (!want) return false;
     const pool = [...scope.querySelectorAll("label, button, [role='radio'], [role='checkbox'], [role='option'], li, span, div")]
       .filter(el => visible(el) && el.children.length < 4);
     let best = pool.find(el => norm(el.textContent) === want) || pool.find(el => norm(el.textContent).startsWith(want)) || pool.find(el => norm(el.textContent).includes(want) && norm(el.textContent).length < want.length + 40);
     if (!best) return false;
-    const inp = best.querySelector && best.querySelector("input[type=radio], input[type=checkbox]");
-    (inp || best).click();
+    // the real control: an input inside the match, the label's own control, or the input next to it
+    // (a BUTTON is the control itself — Ashby's Yes / No pair sits next to one hidden checkbox whose
+    // toggle means "Yes", so never reach past a button for a sibling input)
+    let ctl = best.querySelector && best.querySelector("input[type=radio], input[type=checkbox]");
+    if (!ctl && best.tagName === "LABEL" && best.control) ctl = best.control;
+    if (!ctl && best.tagName === "LABEL" && best.parentElement) ctl = best.parentElement.querySelector("input[type=radio], input[type=checkbox]");
+    if (ctl && ctl.checked) { mark(best, true); return true; }   // already set — never toggle it off
+    (ctl || best).click();
     mark(best, true);
     return true;
   }
@@ -84,9 +102,10 @@
     // TEXT-LIKE
     if (["text", "textarea", "email", "tel", "url", "date"].includes(kind)) {
       let el = els.find(el => ["INPUT", "TEXTAREA"].includes(el.tagName) && visible(el)) || els[0];
-      if (!el) {   // no stable name on the input (Ashby's Location widget): find it under the question's own label
-        const box = containerByLabel(q.label);
-        el = box && [...box.querySelectorAll("input, textarea")].find(x => visible(x) && x.type !== "hidden" && x.type !== "file");
+      if (!el) {   // no stable name on the input (Ashby's Location widget): the one text input in this question's own box
+        const box = fieldBox(q);
+        const ins = box ? [...box.querySelectorAll("input, textarea")].filter(x => visible(x) && !["hidden", "file", "checkbox", "radio", "submit", "button"].includes(x.type)) : [];
+        el = ins.length === 1 ? ins[0] : null;
       }
       if (!el) return false;
       if (el.getAttribute("role") === "combobox" || (el.getAttribute("aria-autocomplete") || "") !== "") {
@@ -103,23 +122,27 @@
       const i2 = idx >= 0 ? idx : [...sel.options].findIndex(o => norm(o.text).includes(w) || w.includes(norm(o.text)) && norm(o.text).length > 2);
       if (i2 >= 0) { sel.selectedIndex = i2; sel.dispatchEvent(new Event("change", { bubbles: true })); mark(sel, true); return true; }
     }
-    // RADIO / CHECKBOX groups by name, then by the question's container
-    const grp = els.filter(el => el.type === "radio" || el.type === "checkbox");
-    if (grp.length) {
-      const w = norm(val);
-      const hit = grp.find(el => { const l = el.labels && el.labels[0] ? el.labels[0].textContent : (el.closest("label") || {}).textContent || el.value; return norm(l) === w || norm(l).startsWith(w) || w.startsWith(norm(l)); });
-      if (hit) { hit.click(); mark(hit.closest("label") || hit, true); return true; }
-    }
-    const box = containerByLabel(q.label);
+    // the question's own box first (exact on Ashby): a custom dropdown → open it, pick; a Boolean →
+    // Yes / No buttons; radio / checkbox groups → the option by its label; a multi-select → every value
+    const box = fieldBox(q);
     if (box) {
-      // Ashby-style: a custom dropdown → open it, pick; a Boolean → Yes / No buttons
       const combo = box.querySelector("[role='combobox'], input[aria-autocomplete]");
       if (combo && kind !== "boolean") {
         combo.focus(); setNative(combo, val); await new Promise(r => setTimeout(r, 500));
         if (clickOption(document, val)) return true;
         combo.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); return true;
       }
-      if (clickOption(box, val)) return true;
+      const vals = kind === "multiselect" ? String(val).split(/\s*[;|\n]\s*/).filter(Boolean) : [val];
+      let ok = false;
+      for (const v of vals) ok = clickOption(box, v) || ok;
+      if (ok) return true;
+    }
+    // then RADIO / CHECKBOX groups that share the question's name
+    const grp = els.filter(el => el.type === "radio" || el.type === "checkbox");
+    if (grp.length) {
+      const w = norm(val);
+      const hit = grp.find(el => { const l = el.labels && el.labels[0] ? el.labels[0].textContent : (el.closest("label") || {}).textContent || el.value; return norm(l) === w || norm(l).startsWith(w) || w.startsWith(norm(l)); });
+      if (hit) { if (!hit.checked) hit.click(); mark(hit.closest("label") || hit, true); return true; }
     }
     return false;
   }

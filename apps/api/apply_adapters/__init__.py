@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 
-_EEO_RX = re.compile(r"(?i)gender|race|ethnic|hispanic|latin|veteran|disabilit|sexual orientation|transgender|self-identif|pronoun")
+_EEO_RX = re.compile(r"(?i)gender|race|ethnic|hispanic|latin|veteran|disabilit|sexual orientation|orientation\?|transgender|self-identif|pronoun|\bage\b|communities do you|identify (as|with|your)|diversity")
 _LEGAL_RX = re.compile(r"(?i)certify|acknowledg|privacy (notice|policy|statement)|consent|i agree|terms|authorize.*(background|check)|attest|true and (accurate|complete)")
 _NEVER_RX = re.compile(r"(?i)captcha|password")
 

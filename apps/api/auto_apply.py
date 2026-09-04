@@ -16,6 +16,8 @@ _FIELD_RX: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(?i)^degree|highest (level of )?education|education level"), "highest_degree"),
     (re.compile(r"(?i)discipline|field of study|major"), "field_of_study"),
     (re.compile(r"(?i)(graduation|grad)\s*(year|date)|year of graduation|end date"), "grad_year"),
+    # a ONE-LINE "city, state and country" question wants the whole location, not just the state
+    (re.compile(r"(?i)city.{0,12}state.{0,20}country|city,? state|city and state|where (do you|are you) (currently )?(live|located|based|reside)|current (city|location)"), "location_full"),
     (re.compile(r"(?i)(state|province).{0,20}(reside|live|located)|which (u\.?s\.? )?state|^(home )?address (state|province)|^state( ?/ ?province)?$"), "region"),
     (re.compile(r"(?i)^(home )?address (line )?1|^street address|^address line 1|^address$"), "address_line1"),
     (re.compile(r"(?i)^(home )?address (line )?2|^apt|^suite|^address line 2"), "address_line2"),
@@ -77,6 +79,8 @@ def value_for(key: str, profile: dict, answers: dict | None = None) -> str:
         return ", ".join(str(profile.get(k) or "") for k in ("city", "region") if profile.get(k))
     if key == "address_city":   # the City line of an address block: the bare city
         return str(profile.get("city") or "").strip()
+    if key == "location_full":  # "city, state and country" on one line
+        return ", ".join(str(profile.get(k) or "").strip() for k in ("city", "region", "country") if str(profile.get(k) or "").strip())
     v = profile.get(key)
     return str(v).strip() if v not in (None, "") else ""
 
@@ -120,6 +124,8 @@ def group_fields(fields: list[dict]) -> list[dict]:
 #   ack     → a single-option acknowledgement box: tick it when the profile pre-approved it (Yes)
 _STANDARD_QS: list[tuple[re.Pattern, str, str]] = [
     (re.compile(r"(?i)sponsor"), "requires_sponsorship", "yn"),
+    (re.compile(r"(?i)citizen|green.?card|permanent resident"), "us_citizen_or_permanent_resident", "yn"),
+    (re.compile(r"(?i)(work|be|come|report)\S* (in.person|on.?site|in the office|from the office|at (the|our) office)|in.person at|commut"), "can_work_onsite", "yn"),
     (re.compile(r"(?i)(authori[sz]ed|eligible|legally|right).{0,25}work|work authori[sz]ation"), "us_authorized_to_work", "yn"),
     (re.compile(r"(?i)relocat"), "willing_to_relocate", "yn"),
     (re.compile(r"(?i)previously (worked|employed|consulted)|former employee|worked (at|for) .* before|have you (ever )?(worked|been employed|consulted|contracted)|(ever|previously|currently).{0,20}(work(ed|ing)?|employed|contractor).{0,40}(at|for|with)"), "previously_worked_here", "yn"),
@@ -161,16 +167,22 @@ def _pick_option(options: list[str], want: str) -> str:
             if ol == w or ol.startswith(w + ",") or ol.startswith(w + " ") or ol.startswith(w + "."):
                 return o
         return ""
-    for o in options:                       # exact, then contains, then 'prefer not to say' families
+    for o in options:                       # exact first
         if o.strip().lower() == w:
             return o
-    for o in options:
-        if w in o.strip().lower() or o.strip().lower() in w:
-            return o
+    # a DECLINE phrase resolves to the option's own decline wording before any substring rule ('no' is a
+    # substring of 'prefer NOt to say' — the substring rule once turned a decline into a "No")
     if "prefer" in w or "decline" in w or "not to" in w:
         for o in options:
-            if re.search(r"(?i)prefer not|decline|rather not|don.?t wish|do not wish|not wish to|choose not", o):
+            if re.search(r"(?i)prefer not|decline|rather not|don.?t wish|do not wish|not wish to|choose not|do not want|don.?t want|not to answer|not to say", o):
                 return o
+    for o in options:                       # the wanted value inside an option ('Man' in 'Man / Male')
+        if w in o.strip().lower():
+            return o
+    for o in options:                       # an option inside the wanted value — whole words only, never a 2-letter option
+        ol = o.strip().lower()
+        if len(ol) >= 4 and re.search(r"(?<![a-z])" + re.escape(ol) + r"(?![a-z])", w):
+            return o
     return ""
 
 
