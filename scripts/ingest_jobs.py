@@ -382,9 +382,30 @@ async def backfill_bodies(conn, boards: int, *, live: bool) -> tuple[int, int]:
              AND split_part(c.cursor_key, ':', 1) IN ('greenhouse', 'ashby', 'lever')
              AND COALESCE(c.error, '') NOT LIKE 'body_done%'
            ORDER BY c.updated_at LIMIT $1""", int(boards))
+    keys = [r["cursor_key"] for r in rows]
+    if len(keys) < int(boards):
+        # boards the sweep wrote WITHOUT a checkpoint row (jobs_sweep.py): derive the board token from
+        # the posting URLs of rows still lacking a body, most rows first
+        derived = await conn.fetch(
+            r"""SELECT source, tok, count(*) n FROM (
+                 SELECT source,
+                        CASE source
+                          WHEN 'greenhouse' THEN substring(url from 'greenhouse\.io/([^/?#]+)')
+                          WHEN 'ashby'      THEN substring(url from 'ashbyhq\.com/([^/?#]+)')
+                          WHEN 'lever'      THEN substring(url from 'lever\.co/([^/?#]+)')
+                        END AS tok
+                 FROM rs_job WHERE body IS NULL AND source IN ('greenhouse','ashby','lever') AND url IS NOT NULL) t
+               WHERE tok IS NOT NULL AND tok <> ''
+                 AND NOT EXISTS (SELECT 1 FROM rs_ingest_checkpoint c WHERE c.source = 'jobs' AND c.cursor_key = t.source || ':' || t.tok)
+               GROUP BY source, tok ORDER BY n DESC LIMIT $1""", int(boards) - len(keys))
+        for d in derived:
+            k = f"{d['source']}:{d['tok']}"
+            if live:   # a checkpoint row so the key is resumable / skippable like the others
+                await conn.execute("""INSERT INTO rs_ingest_checkpoint (source, cursor_key, status, n_seen, n_written)
+                                      VALUES ('jobs', $1, 'done', 0, 0) ON CONFLICT DO NOTHING""", k)
+            keys.append(k)
     nb = nj = 0
-    for r in rows:
-        key = r["cursor_key"]
+    for key in keys:
         ats, token = key.split(":", 1)
         company = await conn.fetchval("SELECT company FROM rs_job WHERE source = $1 AND url ILIKE '%' || $2 || '%' LIMIT 1", ats, token) or ""
         try:

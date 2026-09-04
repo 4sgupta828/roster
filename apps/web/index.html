@@ -593,6 +593,7 @@
   .evfilters{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:.4rem auto 0;max-width:var(--wrapw,880px);padding:0 .2rem;font-size:.76rem;color:var(--muted);}
   .evfilters[hidden]{display:none!important;}   /* the flex rule must not defeat the hidden attribute (Jobs / Q&A) */
   .evf-lbl{font-family:var(--mono);font-size:.64rem;letter-spacing:.08em;text-transform:uppercase;margin-right:.35rem;padding:.3rem .6rem;border-radius:6px;background:var(--gold);color:var(--on-accent);font-weight:700;}
+  #evfilters .lvsel{min-height:32px;font:inherit;font-size:.74rem;border:1.5px solid var(--gold);border-radius:999px;background:transparent;color:var(--ink);padding:.15rem .5rem;}
   #evfilters .ev-filter{min-height:32px;padding:.2rem .65rem;border:1.5px solid var(--gold);border-radius:999px;background:transparent;color:var(--ink);font-size:.74rem;font-weight:500;cursor:pointer;}
   #evfilters .ev-filter:hover{background:rgba(var(--gold-rgb),.12);}
   #evfilters .ev-filter.on{border:1px solid var(--gold);background:rgba(var(--gold-rgb),.1);color:var(--gold-strong);font-weight:600;}
@@ -2314,14 +2315,14 @@ const EV_LABEL = {repo:"repos", paper:"papers", post:"blog posts", talk:"talks",
 let JOB_MUST = new Set();
 const JOB_MUST_ALL = ["remote","hybrid","f500","public","startup","leadership"];
 const JOB_MUST_LABEL = {remote:"Remote", hybrid:"Hybrid", f500:"Fortune 500", public:"Public company", startup:"Startup", leadership:"Leadership"};
-// EXPLICIT LEVEL filter (both surfaces): junior / mid / senior / staff+ / manager-exec; empty = all levels
-let LEVELS = new Set();
+// LEVEL PREFERENCE (both surfaces): one optional dropdown — a centre, never a gate (levels are not
+// calibrated across companies): exact level leads, ±1 next, unstated neutral, the rest ranked last.
+let LEVEL = "";
 const LEVEL_ALL = ["junior","mid","senior","staff","exec"];
 const LEVEL_LABEL = {junior:"Junior", mid:"Mid", senior:"Senior", staff:"Staff+", exec:"Manager / Exec"};
-function levelChips(){
-  return `<span class="evf-lbl" style="margin-left:.6rem;">Level</span>` + LEVEL_ALL.map(k => `<button type="button" class="ev-filter lv-filter${LEVELS.has(k)?" on":""}" data-level="${k}" aria-pressed="${LEVELS.has(k)}" title="${LEVELS.has(k)?"Required — tap to drop":"Only "+LEVEL_LABEL[k]+" — stated levels; unstated ones are shown separately"}">${LEVEL_LABEL[k]}</button>`).join("");
+function levelSelect(){
+  return `<label class="evf-lbl" style="margin-left:.6rem;display:inline-flex;align-items:center;gap:.3rem;text-transform:none;letter-spacing:0;">Level <select id="levelsel" class="lvsel" title="A preference, not a filter — the chosen level leads, one level either side next; nothing is dropped" onchange="LEVEL=this.value; renderEvFilters();"><option value=""${LEVEL?"":" selected"}>any</option>${LEVEL_ALL.map(k=>`<option value="${k}"${LEVEL===k?" selected":""}>${LEVEL_LABEL[k]} ±1</option>`).join("")}</select></label>`;
 }
-function toggleLevel(k){ if(LEVELS.has(k)) LEVELS.delete(k); else LEVELS.add(k); renderEvFilters(); }
 function evFilterActive(){ return EVIDENCE_KINDS.size > 0; }
 function renderEvFilters(){
   const box = document.getElementById("evfchips"), wrap = document.getElementById("evfilters"), rs = document.getElementById("evfreset");
@@ -2329,13 +2330,13 @@ function renderEvFilters(){
   wrap.hidden = !(SEARCH_MODE === "people" || SEARCH_MODE === "jobs");
   if(SEARCH_MODE === "jobs"){
     wrap.title = "Tap to require it — every selected kind must hold for a role to show. Nothing selected = all roles.";
-    box.innerHTML = JOB_MUST_ALL.map(k => `<button type="button" class="ev-filter${JOB_MUST.has(k)?" on":""}" data-kind="${k}" aria-pressed="${JOB_MUST.has(k)}" title="${JOB_MUST.has(k)?"Required — tap to drop":"Tap to require "+JOB_MUST_LABEL[k]}">${JOB_MUST_LABEL[k]}</button>`).join("") + levelChips();
-    wrap.classList.toggle("active", JOB_MUST.size > 0 || LEVELS.size > 0);
+    box.innerHTML = JOB_MUST_ALL.map(k => `<button type="button" class="ev-filter${JOB_MUST.has(k)?" on":""}" data-kind="${k}" aria-pressed="${JOB_MUST.has(k)}" title="${JOB_MUST.has(k)?"Required — tap to drop":"Tap to require "+JOB_MUST_LABEL[k]}">${JOB_MUST_LABEL[k]}</button>`).join("") + levelSelect();
+    wrap.classList.toggle("active", JOB_MUST.size > 0 || !!LEVEL);
     return;
   }
   wrap.title = "Tap a kind to require it — people must have at least one of the selected kinds of linked public work. Nothing selected = everyone.";
-  box.innerHTML = EV_ALL.map(k => `<button type="button" class="ev-filter${EVIDENCE_KINDS.has(k)?" on":""}" data-kind="${k}" aria-pressed="${EVIDENCE_KINDS.has(k)}" title="${EVIDENCE_KINDS.has(k)?"Required — tap to drop":"Tap to require linked "+EV_LABEL[k]}">${EV_LABEL[k]}</button>`).join("") + levelChips();
-  wrap.classList.toggle("active", evFilterActive() || LEVELS.size > 0);
+  box.innerHTML = EV_ALL.map(k => `<button type="button" class="ev-filter${EVIDENCE_KINDS.has(k)?" on":""}" data-kind="${k}" aria-pressed="${EVIDENCE_KINDS.has(k)}" title="${EVIDENCE_KINDS.has(k)?"Required — tap to drop":"Tap to require linked "+EV_LABEL[k]}">${EV_LABEL[k]}</button>`).join("") + levelSelect();
+  wrap.classList.toggle("active", evFilterActive() || !!LEVEL);
 }
 let TAB_THREADS = {};           // per-tab CONVERSATION state: People and Q&A each keep their OWN thread —
 //                                 a Q&A question must never append onto a People search's thread (the
@@ -2584,7 +2585,7 @@ async function runJobs(question){
       body: JSON.stringify({question, tenant_id:"demo", refine_query: (JOBS_CTX||undefined),
         ...geoPayload(),   // the top-right scope applies to jobs too
         job_must: JOB_MUST.size ? [...JOB_MUST] : undefined,   // the pre-search "must have" toggles
-        levels: LEVELS.size ? [...LEVELS] : undefined,          // the explicit level filter
+        levels: LEVEL ? [LEVEL] : undefined,                   // the level preference (±1)
         attachments: sent.length ? sent.map(a => ({data:a.data, media_type:a.media_type||"", name:a.name||""})) : undefined,
         user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""})}); }
   catch(e){ if(goBtn){ goBtn.disabled = false; goBtn.classList.remove("loading"); } return false; }
@@ -2602,7 +2603,7 @@ async function runJobs(question){
                        stats: d.stats||{}, semantic: d.semantic, geo_scope: d.geo_scope||null,
                        related_jobs: d.related_jobs||[], company_indexed: d.company_indexed,
                        agentic: !!d.agentic, intent: d.intent||"", query_angles: d.query_angles||[],
-                       redirect_to_qa: !!d.redirect_to_qa, note: d.note||"", must: d.must||null, linkedin_profile: d.linkedin_profile||null, matched_on: d.matched_on||"", needs_profile: !!d.needs_profile, brief_contract: d.brief_contract||null, level_filter: d.level_filter||null, unstated_level: d.unstated_level||[], answer: ""});
+                       redirect_to_qa: !!d.redirect_to_qa, note: d.note||"", must: d.must||null, linkedin_profile: d.linkedin_profile||null, matched_on: d.matched_on||"", needs_profile: !!d.needs_profile, brief_contract: d.brief_contract||null, level_pref: d.level_pref||null, answer: ""});
     renderThread();
   }
   catch(e){ const out = $("#out"); if(out){ out.hidden = false;
@@ -2817,22 +2818,18 @@ function jobsMarkup(d){
     + intentHtml
     + (d.linkedin_profile ? `<div class="ppl-cov" style="border-left-color:var(--gold);">in Jobs for <b>${esc(d.linkedin_profile.name||"")}</b>${d.linkedin_profile.headline?` — ${esc(d.linkedin_profile.headline)}`:""} <span class="ppl-fc" style="text-transform:none;">· read from search-engine results for the pasted profile · <a href="${esc(d.linkedin_profile.url||"#")}" target="_blank" rel="noopener noreferrer">profile ↗</a></span></div>` : "")
     + (d.must && d.must.kinds && d.must.kinds.length ? `<div class="ppl-cov" style="border-left-color:var(--gold);">✓ Must have: <b>${esc((d.must.labels||d.must.kinds).join(" · "))}</b> — ${d.must.kept} role${d.must.kept===1?"":"s"} qualify${d.must.dropped?`, ${d.must.dropped} left out`:""}. Remote/hybrid read from the posting's location, company type from Roster's curated sets, seniority from the title.</div>` : "")
-    + (d.level_filter && d.level_filter.labels ? `<div class="ppl-cov" style="border-left-color:var(--gold);">✓ Level: <b>${esc(d.level_filter.labels.join(" · "))}</b> — ${d.level_filter.kept} role${d.level_filter.kept===1?"":"s"} state that level${d.level_filter.dropped?`, ${d.level_filter.dropped} state another and are left out`:""}${d.level_filter.unstated?`, ${d.level_filter.unstated} don't state a level (folded below — an unmarked title is not a level)`:""}.</div>` : "")
+    + (d.level_pref && d.level_pref.label ? `<div class="ppl-cov" style="border-left-color:var(--gold);">⇅ Level preference <b>${esc(d.level_pref.label)} ±1</b> — ${d.level_pref.exact} at that level lead, ${d.level_pref.near} one level away next, ${d.level_pref.unstated} with no stated level stay neutral, ${d.level_pref.far} further away rank last. Nothing is dropped — levels aren't calibrated across companies.</div>` : "")
     + (d.note && ((q.company||[]).length || d.linkedin_profile) ? `<div class="ppl-cov">◔ ${esc(d.note)}</div>` : "")
     + ((q.company||[]).length ? "" : scopeChip(d.geo_scope))   // a company search: the scope only shapes the RELATED list
     + (st.jobs ? `<div class="ppl-cov">◔ Aggregated from public ATS boards — ${st.jobs} jobs across ${st.companies||0} companies indexed. Each links to the company's apply page.</div>`
                : `<div class="ppl-cov">◔ Aggregated from public ATS boards — each card links to the company's apply page.</div>`);
   // RELATED roles at OTHER companies (a company-named search): folded, clearly labeled, never
   // counted as the company's.
-  const uns = Array.isArray(d.unstated_level) ? d.unstated_level : [];
-  const unsHtml = uns.length
-    ? `<details class="jobs-related"><summary>Level not stated in the title (${uns.length}) — could be any level; read the posting</summary>${jobsMarkup({jobs: uns, query: {}, stats: {}, geo_scope: d.geo_scope, _jpid: d._jpid + "u", _jpage: d._upage||0, _noMapBar: true})}</details>`
-    : "";
   const rel = Array.isArray(d.related_jobs) ? d.related_jobs : [];
   const relHtml = rel.length
     ? `<details class="jobs-related"><summary>Related roles at other companies (${rel.length}) — similar titles from the semantic search, not ${esc((q.company||[]).join(", ").replace(/_/g," ")||"this company")}</summary>${jobsMarkup({jobs: rel, query: {}, stats: {}, geo_scope: d.geo_scope, _jpid: d._jpid + "r", _jpage: d._rpage||0, _noMapBar: true})}</details>`
     : "";
-  return `<div class="ppl-wrap" data-jpid="${esc(d._jpid)}">${head}${jpage>0?jpager:""}<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">' + esc((d.must && d.must.dropped && !d.must.kept) ? `No role in this search satisfies Must have: ${(d.must.labels||d.must.kinds).join(" · ")} (${d.must.dropped} left out) — drop a toggle above or widen the search.` : (d.note || "No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.")) + '</div>'}</div>${jpager}${unsHtml}${relHtml}</div>`;
+  return `<div class="ppl-wrap" data-jpid="${esc(d._jpid)}">${head}${jpage>0?jpager:""}<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">' + esc((d.must && d.must.dropped && !d.must.kept) ? `No role in this search satisfies Must have: ${(d.must.labels||d.must.kinds).join(" · ")} (${d.must.dropped} left out) — drop a toggle above or widen the search.` : (d.note || "No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.")) + '</div>'}</div>${jpager}${relHtml}</div>`;
 }
 // INTERPRETED BRIEF strip — ONE component for Talent Map and Jobs (consistency): Must (what filtered)
 // · Prefer (what only ranks) · Subject / Angles · Scope · assumptions · one clarifying question.
@@ -6021,7 +6018,7 @@ async function askQuestion(question, opts){
   // Person-lookup conversation: "which <name>?" was asked — this utterance is context for that name.
   if(SEARCH_MODE === "people" && PENDING_PERSON){ payload.prior_person = PENDING_PERSON; payload.prior_context = PENDING_CTX; }
   if(SEARCH_MODE === "people" && evFilterActive()) payload.evidence_kinds = [...EVIDENCE_KINDS];
-  if(SEARCH_MODE === "people" && LEVELS.size) payload.levels = [...LEVELS];
+  if(SEARCH_MODE === "people" && LEVEL) payload.levels = [LEVEL];
   if(EFFORT_ENABLED && EFFORT > 1) payload.effort = EFFORT;
   if(ATTACHMENTS.length) payload.attachments = ATTACHMENTS.slice();
   if(PENDING_INTAKE_TRANSCRIPT && PENDING_INTAKE_TRANSCRIPT.length && !THREAD.turns.length){
@@ -6559,7 +6556,7 @@ function newConversation(){
   THREAD = {session_id:null, turns:[]};
   MODE_VIEWS = {}; TAB_THREADS = {};   // "＋ New search" wipes every tab's remembered result/thread
   window.ACTIVE_MAP = null;            // …and leaves any saved-map view
-  PEOPLE_CTX = null; JOBS_CTX = null; PENDING_PERSON = null; PENDING_CTX = ""; EVIDENCE_KINDS = new Set(); JOB_MUST = new Set(); LEVELS = new Set(); renderEvFilters();  // …and both tabs' refinement conversations start fresh
+  PEOPLE_CTX = null; JOBS_CTX = null; PENDING_PERSON = null; PENDING_CTX = ""; EVIDENCE_KINDS = new Set(); JOB_MUST = new Set(); LEVEL = ""; renderEvFilters();  // …and both tabs' refinement conversations start fresh
   GUIDED_REFINED = false;
   document.body.classList.remove("chatting"); out.style.paddingBottom = "";   // back to landing layout
   out.innerHTML = "";
@@ -9089,7 +9086,6 @@ document.addEventListener("click", e => {
   const rr = e.target.closest && e.target.closest(".ppl-rerank");
   if(rr){ e.preventDefault(); rerankShown(rr.dataset.pid); return; }
   const ef = e.target.closest && e.target.closest("#evfilters .ev-filter");
-  if(ef && ef.dataset.level){ e.preventDefault(); toggleLevel(ef.dataset.level); return; }
   if(ef){ e.preventDefault(); toggleEvidenceFilter(ef.dataset.kind); return; }
   const aa = e.target.closest && e.target.closest(".aa-apply");
   if(aa){ e.preventDefault(); applyWithAssistant(aa.dataset.ref); return; }

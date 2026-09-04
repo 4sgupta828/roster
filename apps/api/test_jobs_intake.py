@@ -118,15 +118,16 @@ def test_pdf_attachment_is_read_docling_first_then_text_layer(monkeypatch):
     assert out2[0][1].startswith("# Jane Doe")                                            # docling wins when it answers
 
 
-def test_explicit_level_filter_keeps_stated_matches_and_folds_unstated():
-    from api.people_population import apply_level_filter, level_bucket
-    assert level_bucket("Staff") == "staff" and level_bucket("engineering_manager") == "exec" and level_bucket("Mid") == "mid" and level_bucket("") == ""
-    jobs = [{"title": "Senior Backend Engineer"}, {"title": "Backend Engineer"}, {"title": "Engineering Manager, Payments"}, {"title": "Staff Engineer"}]
-    kept, uns, info = apply_level_filter(jobs, ["senior", "staff"], kind="job")
-    assert [j["title"] for j in kept] == ["Senior Backend Engineer", "Staff Engineer"]
-    assert [j["title"] for j in uns] == ["Backend Engineer"]                 # unmarked title: folded, not hidden, not matched
-    assert info["dropped"] == 1 and info["labels"] == ["Senior", "Staff+"]
+def test_level_preference_ranks_exact_then_adjacent_then_unstated_and_drops_nothing():
+    from api.people_population import apply_level_pref, level_bucket
+    assert level_bucket("Staff") == "staff" and level_bucket("engineering_manager") == "exec" and level_bucket("") == ""
+    jobs = [{"title": "Backend Engineer Intern"}, {"title": "Backend Engineer"}, {"title": "Staff Engineer"},
+            {"title": "Senior Backend Engineer"}, {"title": "Engineering Manager, Payments"}]
+    out, info = apply_level_pref(jobs, "senior", kind="job")
+    assert [j["title"] for j in out] == ["Senior Backend Engineer", "Staff Engineer", "Backend Engineer", "Backend Engineer Intern", "Engineering Manager, Payments"]
+    assert info == {"level": "senior", "label": "Senior", "exact": 1, "near": 1, "unstated": 1, "far": 2}
+    assert "level match" in out[0]["reasons"] and "level ±1" in out[1]["reasons"]
     people = [{"name": "A", "attributes": [{"key": "seniority", "display": "Junior"}]}, {"name": "B", "attributes": [{"key": "seniority", "display": "Director"}]}, {"name": "C", "attributes": []}]
-    kept, uns, info = apply_level_filter(people, ["exec"], kind="person")
-    assert [p["name"] for p in kept] == ["B"] and [p["name"] for p in uns] == ["C"] and info["dropped"] == 1
-    assert apply_level_filter(jobs, [], kind="job")[0] == jobs                # no chips → untouched
+    out, info = apply_level_pref(people, "exec", kind="person")
+    assert [p["name"] for p in out] == ["B", "C", "A"] and info["far"] == 1
+    assert apply_level_pref(jobs, "", kind="job") == (jobs, {})           # no preference → untouched

@@ -209,9 +209,7 @@ def job_brief_contract(*, question: str, plan: dict | None = None, query: dict |
         hard["location"] = [loc]
     if job_must:
         hard["must have"] = [_MUST_LABELS.get(str(m), str(m)) for m in job_must]
-    _lv = [LEVEL_LABELS[l] for l in (levels or []) if l in LEVEL_LABELS]
-    if _lv:
-        hard["level"] = _lv
+    _lv = [LEVEL_LABELS[l] + " ±1" for l in (levels or [])[:1] if l in LEVEL_LABELS]
     if scope and scope.get("label"):
         hard["scope"] = [str(scope["label"])]
     profile: dict = {}
@@ -227,7 +225,7 @@ def job_brief_contract(*, question: str, plan: dict | None = None, query: dict |
         if skills:
             soft["skills"] = skills[:6]
         if _lv:
-            pass
+            soft["level"] = _lv
         elif levels:
             soft["level"] = [l.replace("_", " ") for l in levels]
         else:
@@ -240,7 +238,7 @@ def job_brief_contract(*, question: str, plan: dict | None = None, query: dict |
             soft["title words"] = kw[:6]
         sen = (stated_seniority or plan.get("seniority") or "").strip()
         if _lv:
-            pass
+            soft["level"] = _lv
         elif sen:
             soft["level"] = [sen]
         else:
@@ -278,33 +276,48 @@ def level_bucket(value: str) -> str:
     return ""
 
 
-def apply_level_filter(rows: list[dict], levels: list[str] | None, *, kind: str) -> tuple[list[dict], list[dict], dict]:
-    """HARD level filter (explicit chips). Returns (kept, unstated, info). A row whose level is STATED and
-    outside the selection leaves; a row whose level is UNSTATED (an unmarked 'Software Engineer' title,
-    a person with no seniority facet) is returned separately so the UI can fold it honestly rather
-    than hide it or pretend it matched. `kind` = 'job' (level from the title) | 'person' (seniority attribute)."""
-    want = {str(l).lower() for l in (levels or []) if str(l).lower() in LEVEL_BUCKETS}
-    if not want:
-        return list(rows or []), [], {}
-    kept, unstated, dropped = [], [], 0
-    for r in rows or []:
+_LEVEL_ORDER = ["junior", "mid", "senior", "staff", "exec"]
+
+
+def apply_level_pref(rows: list[dict], level: str, *, kind: str) -> tuple[list[dict], dict]:
+    """LEVEL PREFERENCE (owner, 2026-09-04: levels are not calibrated across companies, so a level is
+    a centre, never a gate). Stable partition: the stated level EXACTLY the preference leads, then
+    ±1 level, then rows whose level is UNSTATED (neutral — an unmarked title is not a level), then
+    the rest (still shown, ranked down). `kind` = 'job' (level from the title) | 'person' (seniority)."""
+    want = (level or "").strip().lower()
+    if want not in LEVEL_BUCKETS or not rows:
+        return list(rows or []), {}
+    wi = _LEVEL_ORDER.index(want)
+    exact, near, unstated, far = [], [], [], []
+    for r in rows:
         if kind == "job":
             t = r.get("title") or ""
             lvl, known = _title_level(t)
             b = level_bucket(lvl) if known else ""
             if not b and re.search(r"(?i)\bmanager\b", t) and not re.search(r"(?i)\b(account|technical account|program|project|community|office)\s+manager\b", t):
-                b = "exec"                                   # 'Engineering Manager, Payments' hires; a TAM does not
+                b = "exec"
         else:
             sen = next((a.get("display") for a in (r.get("attributes") or []) if a.get("key") == "seniority" and a.get("display")), "")
             b = level_bucket(sen)
         if not b:
             unstated.append(r)
-        elif b in want:
-            kept.append(r)
+        elif b == want:
+            exact.append(r)
+        elif abs(_LEVEL_ORDER.index(b) - wi) == 1:
+            near.append(r)
         else:
-            dropped += 1
-    return kept, unstated, {"levels": sorted(want), "labels": [LEVEL_LABELS[l] for l in sorted(want, key=list(LEVEL_BUCKETS).index)],
-                            "kept": len(kept), "dropped": dropped, "unstated": len(unstated)}
+            far.append(r)
+    for r in exact:
+        r.setdefault("reasons", [])
+        if "level match" not in r["reasons"]:
+            r["reasons"] = list(r["reasons"]) + ["level match"]
+    for r in near:
+        r.setdefault("reasons", [])
+        if "level ±1" not in r["reasons"]:
+            r["reasons"] = list(r["reasons"]) + ["level ±1"]
+    info = {"level": want, "label": LEVEL_LABELS[want], "exact": len(exact), "near": len(near),
+            "unstated": len(unstated), "far": len(far)}
+    return exact + near + unstated + far, info
 
 
 _WANT_LEVELS = {"intern": {"intern"}, "junior": {"junior"}, "entry": {"junior"}, "new grad": {"junior"},
@@ -3326,8 +3339,9 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     # company-gap web discovery): stated levels outside the selection leave; people with no stated
     # level leave too and are COUNTED (an explicit filter is a filter) — the strip says so.
     if levels:
-        people_rows, _lv_unstated, _lv_info = apply_level_filter(people_rows, levels, kind="person")
-        coverage["level_filter"] = _lv_info
+        people_rows, _lv_info = apply_level_pref(people_rows, (levels or [""])[0], kind="person")
+        if _lv_info:
+            coverage["level_pref"] = _lv_info
     # CALIBRATION DEMOTION (last partition, stable): rows carrying a reviewer-demoted value go to the
     # back, each group keeping its order — they remain visible (feedback edits rank, never evidence).
     if people_rows and any(p.get("calibration_demoted") for p in people_rows):
@@ -3353,15 +3367,15 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             question, _contract_facets, hard_keys=_hard_keys, soft_keys=_soft_all, guard_added=guard_added,
             relaxed_from=relaxed_from, semantic_first=semantic_first, ev_kinds=_ev_kinds,
             scope=(coverage.get("geo_scope") or {}), topic_terms=topic_terms)
-        if levels and coverage.get("level_filter"):
+        if levels and coverage.get("level_pref"):
             _bc0 = coverage["brief_contract"]
-            _bc0["hard"] = {**{"level": coverage["level_filter"]["labels"]}, **{k: v for k, v in (_bc0.get("hard") or {}).items() if k != "seniority"}}
-            _bc0["soft"] = {k: v for k, v in (_bc0.get("soft") or {}).items() if k != "seniority"}
+            _lp = coverage["level_pref"]
+            _bc0["soft"] = {**{"level": [f"{_lp['label']} ±1"]}, **{k: v for k, v in (_bc0.get("soft") or {}).items() if k != "seniority"}}
+            _bc0["hard"] = {k: v for k, v in (_bc0.get("hard") or {}).items() if k != "seniority"}
             _bc0["assumptions"] = [a for a in (_bc0.get("assumptions") or []) if "seniority" not in a and "level" not in a]
             _bc0["clarification"] = None
-            _lf = coverage["level_filter"]
-            _bc0["assumptions"].insert(0, f"level filter: {_lf['kept']} people state {' / '.join(_lf['labels'])}"
-                                          + (f"; {_lf['dropped']} state another level and {_lf['unstated']} state none — both left out" if (_lf['dropped'] or _lf['unstated']) else ""))
+            _bc0["assumptions"].insert(0, f"level preference {_lp['label']}: {_lp['exact']} at that level lead, {_lp['near']} one level away next, "
+                                          f"{_lp['unstated']} with no stated level stay neutral, {_lp['far']} further away rank last — nobody is dropped (levels aren't calibrated across companies)")
         if _fixed is not None:
             # a REVISED map: the contract came from reviewer feedback — no clarifying question (the
             # reviewers already answered it) and the assumption line says where the filters came from

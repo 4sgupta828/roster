@@ -2648,8 +2648,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                   "resume": f"That profile isn't visible to search engines, so these roles are matched to the résumé on your account instead.",
                                   "pasted": f"That profile isn't visible to search engines, so these roles are matched to the text you pasted with the link."}[matched_on]),
                         "stats": await store.jobs_stats()})
-            from api.people_population import apply_level_filter, job_brief_contract
-            jobs, res["unstated_level"], res["level_filter"] = apply_level_filter(jobs, body.levels, kind="job")
+            from api.people_population import apply_level_pref, job_brief_contract
+            jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job")
             res.update({"jobs": jobs, "count": len(jobs)})
             res["brief_contract"] = job_brief_contract(question=body.question or "", job_must=body.job_must, scope=res.get("geo_scope"),
                                                        profile_text=text, matched_on=matched_on, levels=body.levels)
@@ -2704,8 +2704,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                  "resume": "Matched to the résumé on your account plus what you wrote — title, skills and level first.",
                                  "description": "Matched to your description — title, skills and level first. Attach a résumé (📎) for a deeper match."}[matched_on],
                         "stats": await store.jobs_stats()})
-            from api.people_population import apply_level_filter, job_brief_contract
-            jobs, res["unstated_level"], res["level_filter"] = apply_level_filter(jobs, body.levels, kind="job")
+            from api.people_population import apply_level_pref, job_brief_contract
+            jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job")
             res.update({"jobs": jobs, "count": len(jobs)})
             res["brief_contract"] = job_brief_contract(question=body.question or "", job_must=body.job_must, scope=res.get("geo_scope"),
                                                        profile_text=cv_text, matched_on=matched_on, levels=body.levels)
@@ -2782,11 +2782,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         res["jobs"], res["geo_scope"] = apply_job_scope(
                             res["jobs"], metro=(body.metro or ""), state=(body.state or ""),
                             country=(body.country or "us"), query_location=(_q.get("location") or ""))
-                from api.people_population import apply_level_filter, job_brief_contract
-                res["jobs"], res["unstated_level"], res["level_filter"] = apply_level_filter(res.get("jobs") or [], body.levels, kind="job")
+                from api.people_population import apply_level_pref, job_brief_contract
+                res["jobs"], res["level_pref"] = apply_level_pref(res.get("jobs") or [], (body.levels or [""])[0], kind="job")
                 if res.get("related_jobs") and body.levels:
-                    res["related_jobs"], _ru, _ = apply_level_filter(res["related_jobs"], body.levels, kind="job")
-                    res["related_jobs"] += _ru
+                    res["related_jobs"], _ = apply_level_pref(res["related_jobs"], (body.levels or [""])[0], kind="job")
                 res["count"] = len(res.get("jobs", []))
                 res["agentic"] = True
                 res["query"] = _q if _cos else {}
@@ -2873,10 +2872,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         rows = rows[:80]
         stats = await store.jobs_stats()
         sid = await _save_job_session(rows, q)   # JOB searches appear in the user's private History
-        from api.people_population import apply_level_filter, job_brief_contract
-        rows, _uns, _lf = apply_level_filter(rows, body.levels, kind="job")
+        from api.people_population import apply_level_pref, job_brief_contract
+        rows, _lp = apply_level_pref(rows, (body.levels or [""])[0], kind="job")
         return {"jobs": rows, "count": len(rows), "query": q, "semantic": bool(qvec), "stats": stats,
-                "geo_scope": _gs, "session_id": sid, "must": _must, "unstated_level": _uns, "level_filter": _lf,
+                "geo_scope": _gs, "session_id": sid, "must": _must, "level_pref": _lp,
                 "brief_contract": job_brief_contract(question=body.question or "", query=q, job_must=body.job_must, scope=_gs, levels=body.levels)}
 
     @app.post("/insights")
