@@ -558,6 +558,9 @@
   .rv-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin-top:.4rem;font-size:.74rem;}
   .rv-h{font-size:.68rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--gold-strong);}
   .rv-derived{font-size:.72rem;color:var(--gold-strong);font-weight:600;}
+  .rv-why{font:inherit;font-size:.7rem;color:var(--muted);background:transparent;border:1px dashed var(--hair);border-radius:999px;padding:.15rem .5rem;min-height:28px;cursor:pointer;}
+  .rv-more{display:block;width:100%;margin-top:.25rem;}
+  .rv-more[hidden]{display:none;}
   .rv-tags{display:inline-flex;flex-wrap:wrap;gap:.25rem;margin:.1rem 0;}
   .rv-tag{font:inherit;font-size:.7rem;padding:.15rem .5rem;border:1px solid var(--hair);border-radius:999px;background:var(--panel2);color:var(--ink);cursor:pointer;min-height:28px;}
   .rv-tag.on{border-color:var(--gold);background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);font-weight:600;}
@@ -8481,7 +8484,9 @@ async function syncMapReview(ref, state, tags, note){
   const rec = {...cur, state: body.state, tags: (tags !== undefined ? tags : (cur.tags||[])), note: (note !== undefined ? note : (cur.note||"")), reviewer_key: m.is_owner ? "" : reviewerKey(), reviewer_name: m.is_owner ? "" : reviewerName(), entity_id: ref};
   if(m.is_owner){ m.reviews = m.reviews || {}; m.reviews[ref] = rec; }
   else { m.feedback = (m.feedback||[]).filter(f => !(f.entity_id === ref && f.reviewer_key === reviewerKey())).concat([rec]); }
+  rec.updated_at = new Date().toISOString().replace("T", " ");   // counts as NEW feedback for the revise button
   try{ await fetch(`/maps/${encodeURIComponent(m.id)}/review`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(body)}); }catch(e){}
+  if(typeof refreshMapBar === "function") refreshMapBar();
 }
 // the review control rendered in a person card's footer when a map is active and the viewer may review
 function reviewControlMarkup(ref){
@@ -8491,16 +8496,21 @@ function reviewControlMarkup(ref){
   const others = (m.feedback||[]).filter(f => f.entity_id === ref && (m.is_owner ? !!f.reviewer_key : f.reviewer_key !== mine) && (f.state !== "unreviewed" || (f.tags||[]).length || f.note));
   // ONE control — feedback chips. The review state (shortlist / not relevant / needs more evidence /
   // maybe) is DERIVED from the chips in code, never asked separately (the dropdown duplicated them).
-  const tagBtns = FEEDBACK_TAGS.map(([k,l]) => `<button type="button" class="rv-tag${(cur.tags||[]).includes(k)?" on":""}" data-ref="${esc(ref)}" data-tag="${esc(k)}">${esc(l)}</button>`).join("");
+  const chip = ([k,l]) => `<button type="button" class="rv-tag${(cur.tags||[]).includes(k)?" on":""}" data-ref="${esc(ref)}" data-tag="${esc(k)}">${esc(l)}</button>`;
+  const primary = FEEDBACK_TAGS.slice(0,2).map(chip).join(""), rest = FEEDBACK_TAGS.slice(2);
+  const restOn = rest.some(([k]) => (cur.tags||[]).includes(k)) || !!cur.note;
   const st = deriveReviewState(cur.tags||[]);
   // inline-only markup: the card body is a <span>, so no block elements here (they broke the card)
   return `<span class="rv-ctl" data-ref="${esc(ref)}">
-    <span class="rv-h">Feedback</span><span class="rv-tags">${tagBtns}</span>
+    <span class="rv-h">Feedback</span><span class="rv-tags">${primary}</span>
+    <button type="button" class="rv-why" data-ref="${esc(ref)}">${restOn?"why ▴":"why ▾"}</button>
     <span class="rv-derived" data-ref="${esc(ref)}">${st!=="unreviewed"?`→ ${esc(st)}`:""}</span>
     ${others.length?`<span class="rv-others" title="${esc(others.map(o=>`${o.reviewer_name||"owner"}: ${o.state}${(o.tags||[]).length?" · "+o.tags.join(", "):""}${o.note?" — "+o.note:""}`).join("\n"))}">${others.length} other review${others.length===1?"":"s"}</span>`:""}
-    <input class="rv-note" data-ref="${esc(ref)}" placeholder="note for the team (optional)" value="${esc(cur.note||"")}" />
+    <span class="rv-more" data-ref="${esc(ref)}"${restOn?"":" hidden"}><span class="rv-tags">${rest.map(chip).join("")}</span>
+      <input class="rv-note" data-ref="${esc(ref)}" placeholder="note for the team (optional)" value="${esc(cur.note||"")}" /></span>
   </span>`;
 }
+function refreshMapBar(){ const el = document.querySelector(".mapbar"); if(el && window.ACTIVE_MAP && window.ACTIVE_MAP.map_type !== "jobs" && typeof talentMapBar === "function"){ const box = $("#reviseBox"); const keep = box && !box.hidden ? box.innerHTML : ""; el.outerHTML = talentMapBar(); if(keep){ const nb = $("#reviseBox"); if(nb){ nb.hidden = false; nb.innerHTML = keep; } } } }
 // the review state a set of chips implies (mirrors maps.derive_state on the server)
 function deriveReviewState(tags){
   const t = new Set(tags||[]);
@@ -8513,6 +8523,8 @@ document.addEventListener("change", e => {
   const nt = e.target.closest && e.target.closest(".rv-note"); if(nt){ syncMapReview(nt.dataset.ref, undefined, undefined, nt.value); }
 });
 document.addEventListener("click", e => {
+  const w = e.target.closest && e.target.closest(".rv-why");
+  if(w){ e.preventDefault(); e.stopPropagation(); const more = w.closest(".rv-ctl").querySelector(".rv-more"); if(more){ more.hidden = !more.hidden; w.textContent = more.hidden ? "why ▾" : "why ▴"; } return; }
   const b = e.target.closest && e.target.closest(".rv-tag"); if(!b) return;
   e.preventDefault(); e.stopPropagation();
   const cur = myReview(b.dataset.ref) || {}; const tags = new Set(cur.tags||[]);
