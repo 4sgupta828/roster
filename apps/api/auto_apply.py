@@ -20,8 +20,10 @@ import tempfile
 
 # ---- pure helpers (unit-tested; no browser) ---------------------------------------------------------
 _FIELD_RX: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"(?i)^(first|given)\s*name"), "first_name"),
-    (re.compile(r"(?i)^(last|family|sur)\s*name"), "last_name"),
+    (re.compile(r"(?i)^(preferred\s+)?(first|given)\s*name"), "first_name"),
+    (re.compile(r"(?i)^(preferred\s+)?(last|family|sur)\s*name"), "last_name"),
+    (re.compile(r"(?i)^(most recent|current|present|last)\s+(company|employer|organization)"), "current_company"),
+    (re.compile(r"(?i)^(most recent|current|present|last)\s+(title|role|job title|position)"), "current_title"),
     (re.compile(r"(?i)^(full\s*)?name$|^your name|^name\s*\*?$"), "full_name"),
     (re.compile(r"(?i)e-?mail"), "email"),
     (re.compile(r"(?i)phone|mobile|telephone"), "phone"),
@@ -35,6 +37,8 @@ _FIELD_RX: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(?i)cover letter"), "cover_letter"),
     (re.compile(r"(?i)resume|résumé|cv\b"), "resume"),
 ]
+# voluntary self-identification (EEO): never drafted, never required by Roster, shown folded as optional
+_VOLUNTARY_RX = re.compile(r"(?i)racial|race|ethnic|gender|pronoun|veteran|disabilit|self-identif|sexual orientation|select all that apply")
 _LOGIN_RX = re.compile(r"(?i)(sign in|log in|create account|password)")
 _WORKDAY_RX = re.compile(r"(?i)myworkdayjobs\.com|workday")
 _CAPTCHA_RX = re.compile(r"(?i)recaptcha|hcaptcha|captcha")
@@ -77,11 +81,43 @@ def value_for(key: str, profile: dict, answers: dict | None = None) -> str:
     return str(v).strip() if v not in (None, "") else ""
 
 
+def group_fields(fields: list[dict]) -> list[dict]:
+    """Radio / checkbox inputs that share a name are ONE question (its group label) with options; a
+    placeholder-only label ('Start typing...') is not a label — the group label is used instead."""
+    out, groups = [], {}
+    for f in fields:
+        kind = f.get("kind") or "text"
+        if kind in ("radio", "checkbox") and (f.get("group_key") or f.get("name") or f.get("group_label")):
+            key = f.get("group_key") or f.get("name") or f.get("group_label")
+            g = groups.get(key)
+            if g is None:
+                g = {"label": (f.get("group_label") or f.get("label") or f.get("name") or "").strip(), "kind": kind, "name": f.get("name") or "",
+                     "required": bool(f.get("required")), "options": [], "option_selectors": {}, "selector": ""}
+                groups[key] = g
+                out.append(g)
+            opt = (f.get("label") or "").strip()
+            if opt and opt not in g["options"]:
+                g["options"].append(opt)
+                g["option_selectors"][opt] = f.get("selector") or ""
+            g["required"] = g["required"] or bool(f.get("required"))
+            continue
+        lab = (f.get("label") or "").strip()
+        if (not lab or lab.endswith("...") or lab.lower().startswith("type here") or lab.lower().startswith("start typing")) and f.get("group_label"):
+            f = {**f, "label": f["group_label"]}
+        out.append(f)
+    for g in groups.values():
+        g["label"] = re.sub(r"\s*\*\s*$", "", g["label"] or "")
+        # the walk reached page chrome (tab titles) instead of a question: name the group by its options
+        if not g["label"] or len(g["label"]) < 4 or re.fullmatch(r"(?i)(overview|application|apply|overview application|job description)\s*", g["label"]):
+            g["label"] = " / ".join(g["options"][:2]) + (" …" if len(g["options"]) > 2 else "")
+    return out
+
+
 def plan_fill(fields: list[dict], profile: dict, answers: dict | None = None) -> dict:
     """CODE-OWNED plan: which discovered fields get which value, which stay open for the user.
     fields = [{label, kind, name, required, options}] as the browser found them."""
     filled, open_q = [], []
-    for f in fields:
+    for f in group_fields(fields):
         key = map_label(f.get("label") or f.get("name") or f.get("placeholder") or "")
         kind = f.get("kind") or "text"
         if key == "resume" and kind == "file":
@@ -100,7 +136,10 @@ def plan_fill(fields: list[dict], profile: dict, answers: dict | None = None) ->
         if ans:
             filled.append({**f, "key": "answer", "value": str(ans)})
         elif kind in ("text", "textarea", "select", "radio", "checkbox", "email", "tel", "url"):
-            open_q.append({"label": label, "kind": kind, "required": bool(f.get("required")), "options": f.get("options") or []})
+            if label.lower().startswith("start typing") or label.lower().startswith("type here"):
+                continue
+            open_q.append({"label": label, "kind": kind, "required": bool(f.get("required")), "options": f.get("options") or [],
+                           "voluntary": bool(_VOLUNTARY_RX.search(label))})
     return {"filled": filled, "open": open_q,
             "blocking": [q for q in open_q if q["required"]]}
 
@@ -121,6 +160,45 @@ def _discover_fields(scope) -> list[dict]:
         if (!t) t = el.placeholder || el.name || "";
         return (t || "").replace(/\s+/g, " ").trim().slice(0, 160);
       };
+      // the QUESTION a radio / checkbox / combobox belongs to: a fieldset legend, a labelled group, or the
+      // nearest preceding label-like text above the group
+      let gkCounter = 0;
+      const groupOf = el => {
+        const type = (el.type || "").toLowerCase();
+        if (type !== "radio" && type !== "checkbox") return null;
+        let anc = el.parentElement;
+        while (anc && anc !== document.body && anc.tagName !== "FORM" && anc.querySelectorAll(`input[type='${type}']`).length < 2) anc = anc.parentElement;
+        if (!anc || anc === document.body || anc.tagName === "FORM" || anc.querySelectorAll("input, select, textarea").length > 40) {
+          anc = el.closest("fieldset, [role='group'], [role='radiogroup']") || el.closest("label") || el.parentElement;   // a lone option is its own group
+        }
+        if (!anc.dataset.rosterGk) anc.dataset.rosterGk = "g" + (++gkCounter) + "_" + Math.random().toString(36).slice(2, 6);
+        return anc;
+      };
+      const groupLab = el => {
+        const fs = el.closest("fieldset"); const lg = fs && fs.querySelector("legend"); if (lg && lg.innerText.trim()) return lg.innerText.replace(/\s+/g, " ").trim().slice(0, 160);
+        const g = el.closest("[role='group'],[role='radiogroup']");
+        if (g) { const by = g.getAttribute("aria-labelledby"); const l = by && document.getElementById(by); if (l && l.innerText.trim()) return l.innerText.replace(/\s+/g, " ").trim().slice(0, 160); if (g.getAttribute("aria-label")) return g.getAttribute("aria-label").slice(0, 160); }
+        const grp = groupOf(el);
+        if (grp) {   // the question text usually sits INSIDE the group container, before its first option
+          for (const ch of grp.children) {
+            if (ch.querySelector("input, select, textarea") || ch.tagName === "INPUT") break;
+            const txt = (ch.innerText || "").replace(/\s+/g, " ").trim();
+            if (txt && txt.length <= 200) return txt.slice(0, 160);
+          }
+        }
+        let node = grp || el.closest("label") || el; 
+        for (let depth = 0; node && depth < 6; depth++) {
+          let sib = node.previousElementSibling;
+          while (sib) {
+            const txt = (sib.innerText || "").replace(/\s+/g, " ").trim();
+            if (txt && txt.length <= 200 && !sib.querySelector("input, select, textarea")) return txt.slice(0, 160);
+            if (sib.querySelector("input, select, textarea")) break;
+            sib = sib.previousElementSibling;
+          }
+          node = node.parentElement;
+        }
+        return "";
+      };
       const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return (r.width > 0 || el.type === "file") && s.visibility !== "hidden" && s.display !== "none"; };
       document.querySelectorAll("input, textarea, select").forEach(el => {
         const type = (el.type || "text").toLowerCase();
@@ -128,8 +206,12 @@ def _discover_fields(scope) -> list[dict]:
         if (!vis(el)) return;
         let kind = el.tagName === "SELECT" ? "select" : el.tagName === "TEXTAREA" ? "textarea" : type;
         const options = el.tagName === "SELECT" ? [...el.options].map(o => o.text.trim()).filter(Boolean).slice(0, 40) : [];
-        out.push({ label: lab(el), name: el.name || "", id: el.id || "", kind, required: !!el.required || el.getAttribute("aria-required") === "true",
-                   placeholder: el.placeholder || "", options, selector: el.id ? `#${CSS.escape(el.id)}` : (el.name ? `[name="${el.name}"]` : "") });
+        const isCombo = el.getAttribute("role") === "combobox" || (el.getAttribute("aria-autocomplete") || "") !== "";
+        const gl = (kind === "radio" || kind === "checkbox" || isCombo) ? groupLab(el) : "";
+        const grp = groupOf(el); const gk = grp ? grp.dataset.rosterGk : "";
+        const sel = el.id ? `#${CSS.escape(el.id)}` : (el.name ? `[name="${el.name}"]` : "");
+        out.push({ label: lab(el), group_label: gl, group_key: gk, name: el.name || "", id: el.id || "", kind, required: !!el.required || el.getAttribute("aria-required") === "true" || /\*\s*$/.test(gl) || /\*\s*$/.test(lab(el)),
+                   placeholder: el.placeholder || "", options, selector: (kind === "radio" || kind === "checkbox") && el.id ? `#${CSS.escape(el.id)}` : sel });
       });
       return out;
     }"""
@@ -149,10 +231,11 @@ def _run_browser(mode: str, job: dict) -> dict:
         return out
     resume_path = ""
     if resume.get("b64"):
-        suffix = os.path.splitext(resume.get("name") or "resume.pdf")[1] or ".pdf"
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tf:
-            tf.write(base64.b64decode(resume["b64"]))
-            resume_path = tf.name
+        _dir = tempfile.mkdtemp()
+        _name = re.sub(r"[^A-Za-z0-9._ -]+", "_", resume.get("name") or "resume.pdf") or "resume.pdf"
+        resume_path = os.path.join(_dir, _name)            # the ATS shows the file name — keep the user's
+        with open(resume_path, "wb") as fh:
+            fh.write(base64.b64decode(resume["b64"]))
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
         ctx = browser.new_context(viewport={"width": 1200, "height": 1600},
@@ -199,19 +282,32 @@ def _run_browser(mode: str, job: dict) -> dict:
                     elif f["kind"] == "select":
                         loc.select_option(label=f["value"])
                         done.append({"label": f["label"], "value": f["value"]})
+                    elif f["kind"] in ("radio", "checkbox"):
+                        osel = (f.get("option_selectors") or {}).get(f["value"]) or ""
+                        if osel:
+                            scope.locator(osel).first.check()
+                        else:
+                            scope.locator(f"label:has-text('{f['value']}')").first.click()
+                        done.append({"label": f["label"], "value": f["value"]})
                     else:
                         loc.fill(f["value"])
                         done.append({"label": f["label"], "value": f["value"]})
                 except Exception as e:  # noqa: BLE001 — one field failing is a note, not a failure
                     out["notes"].append(f"couldn't fill '{f.get('label')}': {str(e)[:80]}")
             out["filled"] = done
-            out["captcha"] = bool(_CAPTCHA_RX.search(html))
+            # a VISIBLE challenge widget blocks; an invisible score-only script is the page's own business
+            try:
+                out["captcha"] = any(scope.locator(sel).first.is_visible() for sel in
+                                     ("iframe[src*='recaptcha/api2/anchor']", "iframe[src*='hcaptcha.com']", ".g-recaptcha", ".h-captcha", "[data-sitekey]")
+                                     if scope.locator(sel).count())
+            except Exception:  # noqa: BLE001
+                out["captcha"] = False
             page.wait_for_timeout(800)
             if mode == "submit":
                 if out["blocking"]:
                     out.update(status="needs_you", reason="Required questions still need your answer.")
                 elif out["captcha"]:
-                    out.update(status="needs_you", reason="This form has a CAPTCHA — Roster never bypasses one. Open the link; the fields are prepared.")
+                    out.update(status="needs_you", reason="This form shows a CAPTCHA challenge — Roster never solves one. Open the link; the fields are prepared.")
                 else:
                     clicked = False
                     for sel in ("button[type=submit]:has-text('Submit')", "input[type=submit]", "button:has-text('Submit application')",
@@ -227,8 +323,10 @@ def _run_browser(mode: str, job: dict) -> dict:
                     page.wait_for_timeout(4000)
                     body = (page.content() or "")[:200000]
                     ok = bool(re.search(r"(?i)thank you|application (has been )?(submitted|received)|we('ve| have) received|successfully", body))
+                    challenge = bool(re.search(r"(?i)recaptcha/api2/bframe|hcaptcha\.com/captcha", body))
                     out.update(status=("submitted" if (clicked and ok) else "needs_you"),
-                               reason=("" if (clicked and ok) else "No confirmation was seen after submitting — check the apply page yourself before retrying."))
+                               reason=("" if (clicked and ok) else ("A CAPTCHA challenge appeared on submit — Roster never solves one; open the link and finish there (your answers are prepared)."
+                                                                    if challenge else "No confirmation was seen after submitting — check the apply page yourself before retrying.")))
             out["screenshot_b64"] = base64.b64encode(page.screenshot(full_page=True, type="png")).decode()
             out["page_title"] = page.title()
         except Exception as e:  # noqa: BLE001
@@ -240,7 +338,7 @@ def _run_browser(mode: str, job: dict) -> dict:
                 pass
             if resume_path:
                 try:
-                    os.remove(resume_path)
+                    os.remove(resume_path); os.rmdir(os.path.dirname(resume_path))
                 except Exception:  # noqa: BLE001
                     pass
     return out

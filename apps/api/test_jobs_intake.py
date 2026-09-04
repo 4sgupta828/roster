@@ -135,3 +135,18 @@ def test_level_preference_ranks_exact_then_adjacent_then_unstated_and_drops_noth
     out, info = apply_level_pref(people, "exec", kind="person")
     assert [p["name"] for p in out] == ["B", "C", "A"] and info["far"] == 1
     assert apply_level_pref(jobs, "", kind="job") == (jobs, {})           # no preference → untouched
+
+
+def test_profile_search_prefs_merge_query_brief_and_saved_config():
+    from api.people_population import profile_search_prefs
+    p = profile_search_prefs("ML infra platform leadership roles", brief_search_text="Founder-level AI platform builder; LLM systems, RAG, ranking",
+                             saved_config={"locations": ["san francisco"], "remote": True, "company_types": ["startup"], "exclude_keywords": ["intern"],
+                                           "role_keywords": ["ignored when the query has its own"], "seniorities": ["senior"]},
+                             title_keywords=["machine learning", "infrastructure"], level="exec")
+    assert p["brief_text"].startswith("ML infra platform leadership roles\n\nFounder-level")
+    assert p["role_keywords"] == ["machine learning", "infrastructure"]          # the query's title words lead
+    assert p["locations"] == ["san francisco"] and p["remote"] is True and p["company_types"] == ["startup"] and p["exclude_keywords"] == ["intern"]
+    assert p["seniorities"] == ["leadership"]                                    # the centered level beats the remembered one
+    q = profile_search_prefs("kafka streaming", saved_config={"seniorities": ["senior"]})
+    assert "role_keywords" not in q
+    assert q["seniorities"] == ["senior"] and "locations" not in q

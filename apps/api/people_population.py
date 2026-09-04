@@ -320,6 +320,33 @@ def apply_level_pref(rows: list[dict], level: str, *, kind: str, span: int = 1) 
     return exact + near + unstated + far, info
 
 
+def profile_search_prefs(question: str, *, brief_search_text: str = "", saved_config: dict | None = None,
+                         title_keywords: list[str] | None = None, level: str = "", country: str = "us",
+                         metro: str = "", state: str = "", limit: int = 60) -> dict:
+    """PROFILE-STEERED job search (owner, 2026-09-04: 'Match jobs to résumé works wonderfully; make Find
+    jobs that good'): the résumé-match engine's preferences for a free-text query. The query STEERS
+    (brief_text leads the embedding; its title words lead the slate) while the résumé's synthesized
+    brief and the user's remembered fine-tune preferences (locations, remote, company types, exclusions)
+    still shape the match. Code-owned merge; nothing is a model's call here."""
+    cfg = saved_config or {}
+    kws = [str(k).strip().lower() for k in (title_keywords or []) if str(k).strip()][:6]
+    brief = (question or "").strip()
+    if brief_search_text:
+        brief = brief + "\n\n" + brief_search_text.strip()
+    prefs = {"brief_text": brief[:4000], "role_keywords": kws or [str(k) for k in (cfg.get("role_keywords") or [])][:6],
+             "limit": limit, "country": country, "metro": metro, "state": state,
+             "locations": [str(x) for x in (cfg.get("locations") or [])][:8], "remote": bool(cfg.get("remote")),
+             "company_types": [str(x) for x in (cfg.get("company_types") or [])][:3],
+             "exclude_keywords": [str(x) for x in (cfg.get("exclude_keywords") or [])][:10]}
+    _CHIP = {"junior": {"junior"}, "mid": {"mid"}, "senior": {"senior"}, "staff": {"staff_plus"}, "exec": {"leadership"}}
+    lv = _CHIP.get((level or "").strip().lower()) or wanted_levels(level or "")
+    if lv:
+        prefs["seniorities"] = sorted(lv)
+    elif cfg.get("seniorities"):
+        prefs["seniorities"] = [str(x) for x in cfg["seniorities"]][:4]
+    return {k: v for k, v in prefs.items() if v not in ([], "", None, False) or k in ("limit", "country")}
+
+
 _WANT_LEVELS = {"intern": {"intern"}, "junior": {"junior"}, "entry": {"junior"}, "new grad": {"junior"},
                 "mid": {"mid"}, "senior": {"senior"}, "staff": {"staff_plus"}, "principal": {"staff_plus"},
                 "lead": {"senior", "leadership"}, "leadership": {"leadership"}, "manager": {"leadership"},

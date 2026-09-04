@@ -2726,6 +2726,62 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             res["session_id"] = await _save_job_session(jobs, res["query"])
             return res
 
+        # PROFILE-STEERED search (signed in, résumé on file): the free-text query runs through the
+        # résumé-match engine — the query steers, the résumé's brief + remembered preferences shape —
+        # instead of a bare vector search over titles. What made "Match jobs to résumé" good, for Jobs.
+        _pu = await _optional_user(x_roster_token)
+        _pacc = _accounts() if _pu else None
+        if _pacc is not None and not (body.refine_query and isinstance(body.refine_query, dict) and body.refine_query.get("company")):
+            try:
+                _saved = ((await _pacc.get_profile(_pu["id"])).get("profile") or {})
+                _parsed = ((await _pacc.get_parse(_pu["id"])).get("profile") or {})
+            except Exception:  # noqa: BLE001
+                _saved, _parsed = {}, {}
+            _prof = {**_parsed, **_saved}
+            if len(str(_prof.get("_resume_text") or "")) >= 200:
+                from api.people_population import (apply_job_must, apply_level_pref, job_brief_contract, match_resume_jobs,
+                                                   parse_job_query, profile_search_prefs)
+                try:
+                    _pq = await parse_job_query(body.question, build_llm(mode=resolve_mode()))
+                except Exception:  # noqa: BLE001
+                    _pq = {"company": [], "title_keywords": [], "location": ""}
+                _cos = [c for c in (_pq.get("company") or []) if str(c).strip()]
+                if not _cos:      # a company-named search stays the company's own board (below)
+                    _brief_txt = ""
+                    try:
+                        _cb = await _get_cached_brief(_pacc, _pu["id"])
+                        if _cb and _cb.get("hash") == _resume_fingerprint(_prof) and (_cb.get("brief") or {}).get("search_text"):
+                            _brief_txt = _cb["brief"]["search_text"]
+                    except Exception:  # noqa: BLE001
+                        _brief_txt = ""
+                    try:
+                        _cfg = json.loads(await _pacc.get_pref(_pu["id"], "match_config") or "{}")
+                    except Exception:  # noqa: BLE001
+                        _cfg = {}
+                    _geo = people_geo_scope_enabled()
+                    prefs = profile_search_prefs(body.question or "", brief_search_text=_brief_txt, saved_config=_cfg,
+                                                 title_keywords=_pq.get("title_keywords") or [], level=(body.levels or [""])[0],
+                                                 country=((body.country or "us").strip().lower() if _geo else ""),
+                                                 metro=((body.metro or "") if _geo else ""), state=((body.state or "") if _geo else ""))
+                    res = await match_resume_jobs(store, _prof, prefs)
+                    jobs = list(res.get("jobs") or [])
+                    if body.job_must:
+                        jobs, res["must"] = await apply_job_must(store, jobs, body.job_must)
+                    jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job", span=int(body.level_span))
+                    bc = job_brief_contract(question=body.question or "", query=_pq, job_must=body.job_must, scope=res.get("geo_scope"),
+                                            profile_text=str(_prof.get("_resume_text") or ""), matched_on="resume",
+                                            levels=body.levels, level_span=int(body.level_span))
+                    bc["soft"] = {"title words": [str(k) for k in (_pq.get("title_keywords") or [])][:6], **bc.get("soft", {})} if _pq.get("title_keywords") else bc.get("soft", {})
+                    bc["ranking"] = ("your search steers, your résumé shapes: postings whose title carries your search words lead; within them, "
+                                     "similarity to your résumé's brief, your remembered preferences, skills the posting names, the level you "
+                                     "centered on and location — the reasons are on each card")
+                    res.update({"jobs": jobs, "count": len(jobs), "query": {"company": [], "title_keywords": _pq.get("title_keywords") or [], "location": _pq.get("location") or ""},
+                                "matched_on": "profile_search", "brief_contract": bc,
+                                "note": "Matched to your résumé, steered by this search" + (" and the brief from Fine-tune" if _brief_txt else "")
+                                        + ". Sign out (or search a company by name) for a plain search.", "stats": await store.jobs_stats()})
+                    res["session_id"] = await _save_job_session(jobs, res["query"])
+                    return res
+
         # AGENTIC mode (flag): LLM expands the query into multiple angles → multi-leg retrieval → rerank
         if agentic_jobs_enabled():
             from api.people_population import agentic_job_search, parse_job_query

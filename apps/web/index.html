@@ -2845,8 +2845,8 @@ function jobsMarkup(d){
     + (d.must && d.must.kinds && d.must.kinds.length ? `<div class="ppl-cov" style="border-left-color:var(--gold);">✓ Must have: <b>${esc((d.must.labels||d.must.kinds).join(" · "))}</b> — ${d.must.kept} role${d.must.kept===1?"":"s"} qualify${d.must.dropped?`, ${d.must.dropped} left out`:""}. Remote/hybrid read from the posting's location, company type from Roster's curated sets, seniority from the title.</div>` : "")
     + (d.level_pref && d.level_pref.label ? `<div class="ppl-cov" style="border-left-color:var(--gold);">⇅ Centered on <b>${esc(d.level_pref.label)}</b> — ${d.level_pref.exact} at that level lead, ${d.level_pref.near} nearby next, ${d.level_pref.unstated} with no stated level stay neutral, ${d.level_pref.far} further away rank last. Nothing is dropped — levels aren't calibrated across companies.</div>` : "")
     + (d.note && ((q.company||[]).length || d.linkedin_profile) ? `<div class="ppl-cov">◔ ${esc(d.note)}</div>` : "")
-    + ((q.company||[]).length ? "" : scopeChip(d.geo_scope))   // a company search: the scope only shapes the RELATED list
-    + (st.jobs ? `<div class="ppl-cov">◔ Aggregated from public ATS boards — ${st.jobs} jobs across ${st.companies||0} companies indexed. Each links to the company's apply page.</div>`
+    + ((q.company||[]).length || d._noScope ? "" : scopeChip(d.geo_scope))   // a company search: the scope only shapes the RELATED list
+    + (d._noScope ? "" : st.jobs ? `<div class="ppl-cov">◔ Aggregated from public ATS boards — ${st.jobs} jobs across ${st.companies||0} companies indexed. Each links to the company's apply page.</div>`
                : `<div class="ppl-cov">◔ Aggregated from public ATS boards — each card links to the company's apply page.</div>`);
   // RELATED roles at OTHER companies (a company-named search): folded, clearly labeled, never
   // counted as the company's.
@@ -7450,12 +7450,15 @@ async function deleteApplication(id){ try{ await fetch(`/me/applications/${id}`,
 async function openApplication(id){
   let d; try{ const r = await fetch(`/me/applications/${id}`, {headers: authHeaders()}); if(!r.ok) return; d = await r.json(); }catch(e){ return; }
   const m = $("#appmodal"); if(!m) return;
-  const qs = (d.open_questions||[]).map((q,i) => { const key = q.label; const val = (d.answers||{})[key] || (d.drafts||{})[key] || "";
+  const qrow = (q) => { const key = q.label; const val = (d.answers||{})[key] || (d.drafts||{})[key] || "";
     const isDraft = !(d.answers||{})[key] && !!(d.drafts||{})[key];
-    const input = q.kind === "select" || q.kind === "radio" ? `<select data-q="${esc(key)}" class="appq"><option value="">— choose —</option>${(q.options||[]).map(o=>`<option${val===o?" selected":""}>${esc(o)}</option>`).join("")}</select>`
+    const input = (q.kind === "select" || q.kind === "radio" || q.kind === "checkbox") && (q.options||[]).length ? `<select data-q="${esc(key)}" class="appq"><option value="">— choose —</option>${(q.options||[]).map(o=>`<option${val===o?" selected":""}>${esc(o)}</option>`).join("")}</select>`
       : `<textarea data-q="${esc(key)}" class="appq" rows="${q.kind==="textarea"?4:1}" placeholder="${q.required?"required":"optional"}">${esc(val)}</textarea>`;
-    return `<label class="appqrow"><span>${esc(key)}${q.required?" <b style='color:var(--gold-strong)'>*</b>":""}${isDraft?" <span class='ppl-fc' style='text-transform:none;'>· draft from your résumé — check it</span>":""}</span>${input}</label>`; }).join("");
-  const shot = d.screenshot_b64 ? `<img src="data:image/png;base64,${d.screenshot_b64}" alt="the filled form" style="max-width:100%;border:1px solid var(--hair);border-radius:8px;max-height:60vh;object-fit:contain;object-position:top;">` : "";
+    return `<label class="appqrow"><span>${esc(key)}${q.required?" <b style='color:var(--gold-strong)'>*</b>":""}${isDraft?" <span class='ppl-fc' style='text-transform:none;'>· draft from your résumé — check it</span>":""}</span>${input}</label>`; };
+  const mainQs = (d.open_questions||[]).filter(q => !q.voluntary).map(qrow).join("");
+  const volQs = (d.open_questions||[]).filter(q => q.voluntary).map(qrow).join("");
+  const qs = mainQs + (volQs ? `<details style="margin-top:.5rem;"><summary class="ppl-fc" style="text-transform:none;cursor:pointer;">Voluntary self-identification (${(d.open_questions||[]).filter(q=>q.voluntary).length}) — optional; leave blank unless you want to answer</summary>${volQs}</details>` : "");
+  const shot = d.screenshot_b64 ? `<div style="margin-top:.5rem;"><b style="font-size:.86rem;">The form as the agent left it</b> <span class="ppl-fc" style="text-transform:none;">· scroll inside</span><div style="max-height:70vh;overflow:auto;border:1px solid var(--hair);border-radius:8px;margin-top:.3rem;"><img src="data:image/png;base64,${d.screenshot_b64}" alt="the filled form" style="width:100%;display:block;"></div></div>` : "";
   $("#appbody").innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;"><b>${esc(d.title||"role")}</b> <span style="color:var(--muted)">@ ${esc(d.company||"")}</span> <span class="ppl-tag">${esc(APP_STATUS[d.status]||d.status)}</span> <a class="histbtn" href="${esc(d.url)}" target="_blank" rel="noopener noreferrer">Open apply page ↗</a></div>
     ${d.reason?`<div class="ppl-cov" style="margin-top:.5rem;border-left-color:var(--gold);">${esc(d.reason)}</div>`:""}
     <div class="ppl-fc" style="text-transform:none;margin:.5rem 0 .3rem;">Filled from your profile: ${esc((d.filled||[]).map(f=>f.label).join(" · ")||"nothing yet")}</div>
@@ -7855,21 +7858,13 @@ function renderMatchResults(d){
     ? ` · <a href="#" onclick="resetJobRotation();return false;" style="color:var(--gold);">start over</a>` : "")
     + scopeChip(d.geo_scope);
   rememberSeenJobs(jobs);   // what's on screen now rotates DOWN next run (never removed)
-  $("#matchresults").innerHTML = jobs.map(j=>{
-    const co = esc((j.company||"").replace(/_/g," "));
-    const tags = (j.company_types||[]).map(t=>`<span class="ppl-tag">${esc(t)}</span>`).join("");
-    const reasons = (j.reasons||[]).length ? `<span style="color:var(--muted);font-size:.76rem;"> · ${(j.reasons||[]).map(esc).join(" · ")}</span>` : "";
-    const jref = j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||""));
-    const save = `<div class="ppl-acts"><button type="button" class="rsave" data-kind="job" data-ref="${esc(String(jref))}" data-label="${esc(j.title||"")}" data-sub="${esc(co+(j.location?" · "+j.location:""))}" data-url="${esc(j.url||"")}" title="Save to a shortlist">☆</button></div>`;
-    window.MATCH_JOBS = window.MATCH_JOBS || {}; window.MATCH_JOBS[String(jref)] = {...j, from: "match"};
-    const assist = j.url?`<button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="Analyze your fit for this role, then draft the application with the Apply Assistant">✨ Apply with assistant</button>`:"";
-    const apply = j.url?`<a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer" title="Go straight to the company's apply page">Apply directly ↗</a>`:"";
-    return `<div class="ppl-card job-card" data-jref="${esc(String(jref))}" title="Click for a summary of this posting">${save}<span class="ppl-body">
-      <span class="ppl-name">${esc(j.title)} <span style="color:var(--gold);font-weight:700;font-size:.78rem;">${j.match_pct}% match</span></span>
-      <span class="ppl-blurb">${co}${j.location?` · ${esc(j.location)}`:""}${reasons}</span>
-      ${tags?`<span class="ppl-tags">${tags}</span>`:""}
-      ${apply?`<span class="ppl-links">${assist}${apply}</span>`:""}<span class="js-sumbox" data-ref="${esc(String(jref))}">${typeof openSummaryMarkup==="function"?openSummaryMarkup(jref, j):""}</span></span></div>`;
-  }).join("");
+  // SAME CARDS as the Jobs tab (summary on click, Apply with assistant, Apply directly, Intro path,
+  // Prepare application, feedback) and the same Save-as-Job-Map bar.
+  const view = {jobs, query: {}, stats: {}, geo_scope: d.geo_scope||null, note: "", matched_on: "resume", brief_contract: d.brief_contract||null, _noScope: true};
+  window.MATCH_JOBS = window.MATCH_JOBS || {};
+  jobs.forEach(j => { const jref = j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||"")); window.MATCH_JOBS[String(jref)] = {...j, from: "match"}; });
+  $("#matchresults").innerHTML = jobsMarkup(view);
+  jobs.forEach(j => { const jref = String(j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||""))); if(window.JOBS_INDEX && window.JOBS_INDEX[jref]) window.JOBS_INDEX[jref].from = "match"; });
 }
 $("#matchclose") && $("#matchclose").addEventListener("click", ()=>{ $("#matchmodal").hidden = true; });
 $("#mGo") && $("#mGo").addEventListener("click", runMatch);
@@ -8632,7 +8627,8 @@ async function saveJobMap(jpid){
   const d = (window.JOBS_RENDERS||{})[jpid]; if(!d) return;
   const t = (THREAD.turns||[]).slice().reverse().find(x => x.kind === "jobs") || {};
   const rows = (d.jobs||[]).slice(0,400).map(j => ({...j, summary: (window.JOB_SUMMARIES||{})[j.url||""] || undefined}));
-  const body = {tenant_id:"demo", map_type:"jobs", brief:(t.question||CURRENT_Q||"Job search"), title:(t.question||"Job search").slice(0,80),
+  const briefTxt = d.matched_on === "resume" ? "Match jobs to my résumé" : (t.question||CURRENT_Q||"Job search");
+  const body = {tenant_id:"demo", map_type:"jobs", brief:briefTxt, title:briefTxt.slice(0,80),
     rows, coverage:{must:d.must||null, geo_scope:d.geo_scope||null, linkedin_profile:d.linkedin_profile||null, note:d.note||"", brief_contract:d.brief_contract||null}, filters:(d.query||{})};
   try{
     const r = await fetch("/maps", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(body)});

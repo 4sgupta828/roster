@@ -40,3 +40,23 @@ def test_plan_fill_uses_profile_then_saved_answers_and_flags_required_open_quest
     plan2 = plan_fill(fields, profile, {"Are you authorized to work in the US?": "Yes"})
     assert not plan2["blocking"] and any(f["key"] == "answer" and f["value"] == "Yes" for f in plan2["filled"])
     assert value_for("full_name", profile) == "Ada Lovelace" and value_for("github", profile) == ""
+
+
+def test_options_group_into_one_question_and_voluntary_ones_are_flagged():
+    from api.auto_apply import group_fields
+    fields = [{"label": "Yes, I will require sponsorship", "kind": "radio", "name": "visa", "group_key": "g1", "group_label": "Will you require visa sponsorship? *", "selector": "#v1"},
+              {"label": "No, I will not", "kind": "radio", "name": "visa", "group_key": "g1", "group_label": "Will you require visa sponsorship? *", "selector": "#v2"},
+              {"label": "East Asian", "kind": "checkbox", "name": "c1", "group_key": "g2", "group_label": "What are your racial, ethnic, and origin identities?", "selector": "#c1"},
+              {"label": "White", "kind": "checkbox", "name": "c2", "group_key": "g2", "group_label": "What are your racial, ethnic, and origin identities?", "selector": "#c2"},
+              {"label": "I certify the above is true", "kind": "checkbox", "name": "ack", "group_key": "g3", "group_label": "Overview Application", "selector": "#a1"},
+              {"label": "Start typing...", "kind": "text", "name": "loc", "group_label": "Intended work location (city, state)", "selector": "#loc"}]
+    g = group_fields(fields)
+    labels = [(x["label"], x["kind"], len(x.get("options") or [])) for x in g]
+    assert labels[0] == ("Will you require visa sponsorship?", "radio", 2)
+    assert labels[1] == ("What are your racial, ethnic, and origin identities?", "checkbox", 2)
+    assert labels[2] == ("I certify the above is true", "checkbox", 1)          # page chrome never names a question
+    assert labels[3] == ("Intended work location (city, state)", "text", 0)   # a placeholder is not a label
+    plan = plan_fill(fields, {"first_name": "A"}, {})
+    vol = [q for q in plan["open"] if q.get("voluntary")]
+    assert [q["label"] for q in vol] == ["What are your racial, ethnic, and origin identities?"]
+    assert any(f["key"] == "answer" for f in plan_fill(fields, {}, {"Will you require visa sponsorship?": "No, I will not"})["filled"])
