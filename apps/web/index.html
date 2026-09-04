@@ -7762,12 +7762,14 @@ async function summarizeJob(ref){
   set(`<div class="sethint" style="margin-top:.4rem;">✨ Reading the posting…</div>`);
   try{
     const r = await fetch("/jobs/summarize", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({job_url: j.url, title: j.title||"", company: j.company||""})});
-    if(!r.ok){ const e = await r.json().catch(()=>({})); set(`<div class="sethint" style="margin-top:.4rem;">${esc(e.detail || "Couldn't read that posting — open the apply link.")}</div>`); return; }
+    if(!r.ok){ const e = await r.json().catch(()=>({}));
+      const retry = r.status >= 500 ? ` <button type="button" class="ppl-lnk" onclick="event.stopPropagation(); summarizeJob('${esc(String(ref))}')">↻ Retry</button>` : "";
+      set(`<div class="sethint" style="margin-top:.4rem;">${esc(e.detail || "Couldn't read that posting — open the apply link.")}${retry}</div>`); return; }
     const d = await r.json();
     if(d.closed || !d.summary){ set(`<div class="ppl-cov" style="margin-top:.4rem;border-left-color:var(--gap);">⊘ ${esc(d.note || "This posting looks closed.")}</div>`); return; }
     window.JOB_SUMMARIES[j.url] = d.summary;
     set(jobSummaryMarkup(d.summary, j, {ref, assist:true, cached: !!d.cached}));
-  }catch(e){ set(`<div class="sethint" style="margin-top:.4rem;">Summary failed — open the apply link.</div>`); }
+  }catch(e){ set(`<div class="sethint" style="margin-top:.4rem;">Summary failed (network) — <button type="button" class="ppl-lnk" onclick="event.stopPropagation(); summarizeJob('${esc(String(ref))}')">↻ Retry</button> or open the apply link.</div>`); }
 }
 async function runApplyAnalysis(){
   const url = ($("#aaUrl").value||"").trim(), text = ($("#aaText").value||"").trim();

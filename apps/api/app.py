@@ -3223,6 +3223,9 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 return {"summary": hit, "cached": True, "job_url": url}
         jd = await asyncio.to_thread(_fetch_jd_text, url)
         from api.ats_posting import CLOSED
+        if jd != CLOSED and len(jd) < 300:
+            await asyncio.sleep(1.0)                 # a slow / flaky page fetch: one more try before giving up
+            jd = await asyncio.to_thread(_fetch_jd_text, url)
         if jd == CLOSED:
             return {"summary": None, "closed": True, "job_url": url,
                     "note": "This posting is no longer on the company's board — it looks closed or filled."}
@@ -3230,7 +3233,13 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=400, detail="Couldn't read that posting — open the apply link directly.")
         summ = await build_job_summary(jd, build_llm(mode=resolve_mode()), title=body.title, company=body.company)
         if not summ:
-            raise HTTPException(status_code=502, detail="Couldn't summarize right now — open the apply link directly.")
+            # TRANSIENT model failures (rate limit, timeout) are the usual cause — retry once before failing
+            await asyncio.sleep(1.5)
+            summ = await build_job_summary(jd, build_llm(mode=resolve_mode()), title=body.title, company=body.company)
+        if not summ:
+            __import__("logging").getLogger("api.jobs").warning("summarize failed twice for host=%s jd_chars=%d",
+                                                                urllib.parse.urlparse(url).netloc, len(jd))
+            raise HTTPException(status_code=502, detail="The summary didn't come back this time (a temporary model hiccup) — click the card again to retry, or open the apply link.")
         if pool is not None:
             await store_job_summary(pool, url, summ)
         return {"summary": summ, "cached": False, "job_url": url}
