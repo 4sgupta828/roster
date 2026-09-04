@@ -6127,7 +6127,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=400, detail="fill your Apply profile first (name + email) under Account → Apply profile")
         rec = await store.queue_application(user["id"], job_ref=body.job_ref or "", company=body.company or "", title=body.title or "",
                                             url=url, ats=detect_ats(url))
-        res = await _apply_run("fill", url=url, profile=profile, answers={}, resume=resume)
+        bank = await store.answer_bank(user["id"])          # answers given before → filled, not asked again
+        res = await _apply_run("fill", url=url, profile=profile, answers=bank, resume=resume)
         drafts = {}
         if res.get("open"):
             parsed = ((await store.get_parse(user["id"])).get("profile") or {})
@@ -6160,7 +6161,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=404, detail="not found")
         answers = {str(k)[:200]: str(v)[:4000] for k, v in (body.answers or {}).items()}
         await store.update_application(user["id"], app_id, answers={**(d.get("answers") or {}), **answers})
-        return {"ok": True}
+        remembered = await store.remember_answers(user["id"], answers)     # next application: filled, reviewed, not retyped
+        return {"ok": True, "remembered": remembered}
 
     @app.post("/me/applications/{app_id}/approve")
     async def me_application_approve(app_id: int, x_roster_token: str = Header(default="")) -> dict:
@@ -6175,7 +6177,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             return {"id": app_id, "status": "submitted", "note": "already submitted"}
         profile, resume = await _apply_profile_and_resume(store, user["id"])
         await store.update_application(user["id"], app_id, status="approved")
-        res = await _apply_run("submit", url=d["url"], profile=profile, answers=(d.get("answers") or {}), resume=resume)
+        bank = await store.answer_bank(user["id"])
+        res = await _apply_run("submit", url=d["url"], profile=profile, answers={**bank, **(d.get("answers") or {})}, resume=resume)
         shot = base64.b64decode(res["screenshot_b64"]) if res.get("screenshot_b64") else None
         fields = {"status": res.get("status") or "failed", "reason": res.get("reason") or "", "filled": res.get("filled") or [],
                   "open_questions": res.get("open") or []}

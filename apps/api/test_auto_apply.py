@@ -60,3 +60,23 @@ def test_options_group_into_one_question_and_voluntary_ones_are_flagged():
     vol = [q for q in plan["open"] if q.get("voluntary")]
     assert [q["label"] for q in vol] == ["What are your racial, ethnic, and origin identities?"]
     assert any(f["key"] == "answer" for f in plan_fill(fields, {}, {"Will you require visa sponsorship?": "No, I will not"})["filled"])
+
+
+def test_standard_questions_are_answered_from_the_profile_and_the_answer_bank():
+    from api.auto_apply import norm_question, standard_answer
+    prof = {"requires_sponsorship": "No", "us_authorized_to_work": "Yes", "preferred_name": "Sam", "pronouns": "He/Him", "work_location": "Austin, TX, USA",
+            "ack_privacy": "Yes", "ack_certify": "No", "veteran_status": "Prefer not to say", "gender": "Man", "desired_salary": "$200k"}
+    yes_no = ["Yes, I will require visa sponsorship for employment with Sift now or in the future", "No, I will not require visa sponsorship for employment with Sift now or in the future"]
+    assert standard_answer("Will you now or in the future require visa sponsorship for employment at Sift?", "radio", yes_no, prof).startswith("No,")
+    assert standard_answer("Are you eligible to work in the country in which you are applying?", "radio", ["Yes", "No"], prof) == "Yes"
+    assert standard_answer("Preferred First Name", "text", [], prof) == "Sam"
+    assert standard_answer("What are your pronouns?", "checkbox", ["She/Her/Hers", "He/Him/His", "They/Them/Theirs"], prof) == "He/Him/His"
+    assert standard_answer("Please list the location where you expect to work.", "text", [], prof) == "Austin, TX, USA"
+    assert standard_answer("Point of data transfer — Yes, I acknowledge Sift's Global Recruitment Privacy Notice", "radio", ["Yes, I acknowledge Sift’s Global Recruitment Privacy Notice"], prof).startswith("Yes")
+    assert standard_answer("I certify that all information provided is true, accurate, and complete", "checkbox", ["I certify …"], prof) == ""   # not pre-approved
+    assert standard_answer("Veteran status", "radio", ["I am not a protected veteran", "I identify as a protected veteran", "Prefer not to say"], prof) == "Prefer not to say"
+    assert standard_answer("What gender do you identify as?", "radio", ["Woman", "Man", "Non-binary"], prof) == "Man"
+    assert standard_answer("Why do you want to work here?", "textarea", [], prof) == ""                     # never a guess
+    assert norm_question("Why do you want to work here?!") == "why do you want to work here"
+    fields = [{"label": "Why do you want to work here?", "kind": "textarea", "name": "q", "required": True}]
+    assert plan_fill(fields, {}, {"Why do you want to work here?!": "Because of the mission."})["filled"][0]["value"] == "Because of the mission."

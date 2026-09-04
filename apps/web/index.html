@@ -7563,11 +7563,18 @@ const APPLY_FIELDS = [
   {title:"Preferences", fields:[
     {k:"willing_to_relocate",l:"Willing to relocate?",t:"yn"},
     {k:"remote_preference",l:"Remote preference",t:"select",o:["","Remote","Hybrid","On-site","Flexible"]},
+    {k:"work_location",l:"Where you expect to work (city, state, country)"},
     {k:"earliest_start_date",l:"Earliest start date"},{k:"notice_period",l:"Notice period"},
-    {k:"desired_salary",l:"Desired salary"},{k:"source",l:"How did you hear about us?"}]},
+    {k:"desired_salary",l:"Desired salary"},{k:"source",l:"How did you hear about us?"},
+    {k:"pronouns",l:"Pronouns",t:"select",o:["","She/Her","He/Him","They/Them","Prefer not to say"]},
+    {k:"previously_worked_here",l:"Previously worked at the company? (default answer)",t:"yn"}]},
+  {title:"Standing acknowledgements (so the agent can tick them for you)", fields:[
+    {k:"ack_privacy",l:"Pre-approve acknowledging an employer's recruitment privacy notice",t:"yn"},
+    {k:"ack_certify",l:"Pre-approve certifying that your application is true and complete",t:"yn"}]},
   {title:"Voluntary EEO (optional — off by default, only sent when an employer asks)", opt:true, fields:[
-    {k:"gender",l:"Gender"},{k:"race_ethnicity",l:"Race / Ethnicity"},{k:"hispanic_latino",l:"Hispanic/Latino?",t:"yn"},
-    {k:"veteran_status",l:"Veteran status"},{k:"disability_status",l:"Disability status"}]},
+    {k:"gender",l:"Gender",t:"select",o:["","Man","Woman","Non-binary","Prefer not to say"]},{k:"race_ethnicity",l:"Race / Ethnicity (or 'Prefer not to say')"},{k:"hispanic_latino",l:"Hispanic/Latino?",t:"yn"},
+    {k:"veteran_status",l:"Veteran status",t:"select",o:["","I am not a protected veteran","I identify as a protected veteran","Prefer not to say"]},
+    {k:"disability_status",l:"Disability status",t:"select",o:["","No, I don't have a disability","Yes, I have a disability","Prefer not to say"]}]},
 ];
 let APPLY_PROFILE = {};
 let APPLY_STRUCT = {};                       // work_history / education / skills / summary (from résumé parse)

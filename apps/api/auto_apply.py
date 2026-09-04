@@ -113,6 +113,82 @@ def group_fields(fields: list[dict]) -> list[dict]:
     return out
 
 
+# STANDARD QUESTIONS every ATS asks, answered UPFRONT from the Apply profile (owner, 2026-09-04: source
+# every field in the account; the user mostly reviews). Each entry: (question regex, profile key, mode).
+#   yn      → the profile holds Yes/No; pick the option that starts with / contains yes|no accordingly
+#   text    → the profile value fills a text field (or is matched against options when there are some)
+#   ack     → a single-option acknowledgement box: tick it when the profile pre-approved it (Yes)
+_STANDARD_QS: list[tuple[re.Pattern, str, str]] = [
+    (re.compile(r"(?i)sponsor"), "requires_sponsorship", "yn"),
+    (re.compile(r"(?i)(authori[sz]ed|eligible|legally|right) to work|work authori[sz]ation"), "us_authorized_to_work", "yn"),
+    (re.compile(r"(?i)relocat"), "willing_to_relocate", "yn"),
+    (re.compile(r"(?i)previously (worked|employed|consulted)|former employee|worked (at|for) .* before"), "previously_worked_here", "yn"),
+    (re.compile(r"(?i)hispanic|latin"), "hispanic_latino", "yn"),
+    (re.compile(r"(?i)preferred (first )?name|name you.d prefer|what should we call you"), "preferred_name", "text"),
+    (re.compile(r"(?i)pronoun"), "pronouns", "text"),
+    (re.compile(r"(?i)(where|location).*(expect|intend|plan|would).* work|work location|intended work location|where do you (live|reside)|country of residence|current location"), "work_location", "text"),
+    (re.compile(r"(?i)remote|hybrid|on-?site preference|work arrangement"), "remote_preference", "text"),
+    (re.compile(r"(?i)salary|compensation expectation|pay expectation|desired (pay|comp)"), "desired_salary", "text"),
+    (re.compile(r"(?i)start date|when (can|could) you start|availability|notice period"), "earliest_start_date", "text"),
+    (re.compile(r"(?i)how did you (hear|find|learn)|where did you (hear|find)|referral source|source"), "source", "text"),
+    (re.compile(r"(?i)visa (status|type)|immigration status"), "visa_status", "text"),
+    (re.compile(r"(?i)gender identity|^gender|what gender"), "gender", "text"),
+    (re.compile(r"(?i)racial|race|ethnic"), "race_ethnicity", "text"),
+    (re.compile(r"(?i)veteran"), "veteran_status", "text"),
+    (re.compile(r"(?i)disabilit"), "disability_status", "text"),
+    (re.compile(r"(?i)privacy (notice|policy|statement)|data (transfer|processing)|consent to"), "ack_privacy", "ack"),
+    (re.compile(r"(?i)certify|true, accurate|accurate and complete|acknowledg"), "ack_certify", "ack"),
+]
+
+
+def norm_question(label: str) -> str:
+    """The ANSWER-BANK key for a question: lowercase, punctuation-free, whitespace-collapsed."""
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", " ", (label or "").lower())).strip()[:200]
+
+
+def _pick_option(options: list[str], want: str) -> str:
+    """The option that means `want` (a Yes/No, or a value like 'Man' / 'Prefer not to say')."""
+    w = (want or "").strip().lower()
+    if not w or not options:
+        return ""
+    if w in ("yes", "no"):
+        for o in options:
+            ol = o.strip().lower()
+            if ol == w or ol.startswith(w + ",") or ol.startswith(w + " ") or ol.startswith(w + "."):
+                return o
+        return ""
+    for o in options:                       # exact, then contains, then 'prefer not to say' families
+        if o.strip().lower() == w:
+            return o
+    for o in options:
+        if w in o.strip().lower() or o.strip().lower() in w:
+            return o
+    if "prefer" in w or "decline" in w or "not to" in w:
+        for o in options:
+            if re.search(r"(?i)prefer not|decline|rather not", o):
+                return o
+    return ""
+
+
+def standard_answer(label: str, kind: str, options: list[str], profile: dict) -> str:
+    """The Apply profile's answer to a recurring ATS question ('' when the profile doesn't hold one —
+    never a guess). A profile value never overrides a choice the user already made for this question."""
+    for rx, key, mode in _STANDARD_QS:
+        if not rx.search(label or ""):
+            continue
+        v = str(profile.get(key) or "").strip()
+        if not v:
+            return ""
+        if mode == "yn":
+            return _pick_option(options, v) if options else v
+        if mode == "ack":
+            return (options[0] if options else "Yes") if v.lower() == "yes" else ""
+        if options:
+            return _pick_option(options, v)
+        return v
+    return ""
+
+
 def plan_fill(fields: list[dict], profile: dict, answers: dict | None = None) -> dict:
     """CODE-OWNED plan: which discovered fields get which value, which stay open for the user.
     fields = [{label, kind, name, required, options}] as the browser found them."""
@@ -132,7 +208,11 @@ def plan_fill(fields: list[dict], profile: dict, answers: dict | None = None) ->
         label = f.get("label") or f.get("name") or ""
         if not label.strip():
             continue                       # a nameless input (a combobox's search box) is not a question
-        ans = (answers or {}).get(label) or (answers or {}).get(f.get("name") or "")
+        _bank = {norm_question(k): v for k, v in (answers or {}).items()}
+        ans = ((answers or {}).get(label) or (answers or {}).get(f.get("name") or "") or _bank.get(norm_question(label))
+               or standard_answer(label, kind, f.get("options") or [], profile))
+        if ans and kind in ("radio", "checkbox", "select") and (f.get("options") or []) and ans not in (f.get("options") or []):
+            ans = _pick_option(f.get("options") or [], str(ans))          # a remembered answer must name a real option
         if ans:
             filled.append({**f, "key": "answer", "value": str(ans)})
         elif kind in ("text", "textarea", "select", "radio", "checkbox", "email", "tel", "url"):

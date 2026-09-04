@@ -178,6 +178,16 @@ CREATE TABLE IF NOT EXISTS roster_application (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_ra_user ON roster_application (user_id, created_at DESC);
+-- ANSWER BANK: every answer the user gives in an application review, keyed by the normalized question,
+-- so the same question is filled next time (the user reviews instead of retyping).
+CREATE TABLE IF NOT EXISTS roster_answer_bank (
+    user_id     TEXT NOT NULL,
+    qnorm       TEXT NOT NULL,
+    question    TEXT NOT NULL DEFAULT '',
+    answer      TEXT NOT NULL DEFAULT '',
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, qnorm)
+);
 """
 
 _MAX_TOKENS_PER_USER = 10   # prune oldest beyond this (a lost device's token eventually ages out)
@@ -718,6 +728,27 @@ class AccountStore:
         for k in ("submitted_at", "created_at", "updated_at"):
             d[k] = str(d[k]) if d.get(k) else None
         return d
+
+    async def remember_answers(self, user_id: str, answers: dict) -> int:
+        from api.auto_apply import norm_question
+        await self._ensure()
+        n = 0
+        async with (await self._get_pool()).acquire() as conn:
+            for q, a in (answers or {}).items():
+                qn = norm_question(str(q))
+                if not qn or not str(a).strip():
+                    continue
+                await conn.execute("""INSERT INTO roster_answer_bank (user_id, qnorm, question, answer) VALUES ($1,$2,$3,$4)
+                                      ON CONFLICT (user_id, qnorm) DO UPDATE SET answer = EXCLUDED.answer, question = EXCLUDED.question, updated_at = now()""",
+                                   user_id, qn, str(q)[:300], str(a)[:4000])
+                n += 1
+        return n
+
+    async def answer_bank(self, user_id: str) -> dict:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            rows = await conn.fetch("SELECT question, answer FROM roster_answer_bank WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 500", user_id)
+        return {r["question"]: r["answer"] for r in rows}
 
     async def delete_application(self, user_id: str, app_id: int) -> bool:
         await self._ensure()
