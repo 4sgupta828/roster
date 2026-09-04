@@ -504,12 +504,23 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
     # USER-LED exclusions: titles containing any excluded word are DROPPED outright ("roles I don't
     # even want") — the one hard filter, because the user explicitly asked to never see them.
     excl_kw = [str(k).strip().lower() for k in (prefs.get("exclude_keywords") or []) if str(k).strip()]
+    # JOB-MAP CALIBRATION prefs (reviewer taps on a card's own facts — see calibration.job_feedback_to_prefs)
+    excl_co = {_norm_co(str(c)) for c in (prefs.get("exclude_companies") or []) if str(c).strip()}
+    pref_co = {_norm_co(str(c)) for c in (prefs.get("prefer_companies") or []) if str(c).strip()}
+    avoid_lv = {str(l).lower().replace(" ", "_") for l in (prefs.get("avoid_levels") or []) if str(l).strip()}
+    avoid_loc = [str(l).lower() for l in (prefs.get("avoid_locations") or []) if str(l).strip()]
+    avoid_mode = [str(m).lower() for m in (prefs.get("avoid_modes") or []) if str(m).strip()]
+    excl_refs = {str(x) for x in (prefs.get("exclude_refs") or []) if str(x).strip()}
     dropped_excluded = 0
     for j in cands:
         title, loc, co = j.get("title") or "", (j.get("location") or "").lower(), (j.get("company") or "")
         if not _country_ok(loc, want_country):     # honor the country scope — drop clearly-foreign jobs
             dropped_country += 1; continue
         if excl_kw and any(k in title.lower() for k in excl_kw):
+            dropped_excluded += 1; continue
+        if excl_co and _norm_co(co) in excl_co:
+            dropped_excluded += 1; continue
+        if excl_refs and (str(j.get("id") or "") in excl_refs or (co + "|" + title + "|" + (j.get("location") or "")) in excl_refs):
             dropped_excluded += 1; continue
         sim = float(j.get("sim") or 0.0)
         score, reasons = sim, []
@@ -529,6 +540,14 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
         _fam_off = family_mismatch(_prof_fams, title)
         if _fam_off:
             score -= 0.10; reasons.append(f"title says {_fam_off}")
+        if pref_co and _norm_co(co) in pref_co:
+            score += 0.15; reasons.append("preferred company")
+        if avoid_lv and _jsen_known and jsen in avoid_lv:
+            score -= 0.10; reasons.append(f"{jsen.replace('_', ' ')} level ranked down")
+        if avoid_loc and any(l in loc for l in avoid_loc):
+            score -= 0.10; reasons.append("location ranked down")
+        if avoid_mode and any(m in loc for m in avoid_mode):
+            score -= 0.10; reasons.append("work mode ranked down")
         if role_kw and any(k in title.lower() for k in role_kw):
             score += 0.10; reasons.append("role match")
         if "f500" in want and is_f500:

@@ -91,3 +91,21 @@ def test_fact_tags_map_one_to_one_onto_contract_edits():
     assert derive_state(["prefer:skill=pytorch"]) == "shortlist" and derive_state(["avoid:evidence=weak"]) == "needs more evidence"
     c2 = feedback_to_contract("ML engineers", {}, [], [{"entity_id": "p1", "tags": ["avoid:evidence=weak"]}, {"entity_id": "p3", "tags": ["avoid:evidence=weak"]}], ROWS)
     assert c2["evidence_kinds"] == ["paper", "repo", "post", "talk", "patent"]   # two rows → the map requires linked work
+
+
+def test_job_feedback_taps_become_match_preferences():
+    from api.calibration import job_feedback_to_prefs, row_ref
+    rows = {"j1": {"id": "j1", "title": "Senior Backend Engineer", "company": "stripe", "location": "Austin, TX"},
+            "j2": {"id": "j2", "title": "SDE II - Frontend", "company": "netomi", "location": "Remote"}}
+    assert row_ref(rows["j1"]) == "j1" and row_ref({"company": "x", "title": "T", "location": "L"}) == "x|T|L"
+    fb = [{"entity_id": "j2", "tags": ["less_like_this", "avoid:title=frontend", "avoid:company=netomi"], "state": "not relevant"},
+          {"entity_id": "j1", "tags": ["more_like_this", "prefer:level=senior", "prefer:location=austin"], "state": "shortlist", "reviewer_name": "me"}]
+    c = job_feedback_to_prefs("backend roles", fb, rows)
+    p = c["prefs"]
+    assert p["exclude_keywords"] == ["frontend"] and p["exclude_companies"] == ["netomi"]
+    assert p["seniorities"] == ["senior"] and p["locations"] == ["austin"]
+    assert c["exclude_refs"] == ["j2"]
+    assert any("SDE II - Frontend @ netomi's title (frontend) is off — excluded" in e for e in c["edits"])
+    assert any("me: more like Senior Backend Engineer @ stripe's level (senior)" in e for e in c["edits"])
+    bare = job_feedback_to_prefs("backend roles", [{"entity_id": "j1", "tags": ["more_like_this"], "state": "shortlist"}], rows)
+    assert bare["prefs"]["role_keywords"] == ["backend"]           # a bare 👍 prefers the title's own words

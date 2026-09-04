@@ -71,7 +71,7 @@ FEEDBACK_TAGS = ("more_like_this", "less_like_this", "wrong_domain", "wrong_seni
                  "self_stated_is_enough", "private_company_talent")
 # STRUCTURED feedback (the card's own facts): `prefer:<key>=<value>` under 👍, `avoid:<key>=<value>` under 👎.
 # A reviewer taps the fact that is off / the fact to find more of — never an abstract category.
-_FACT_TAG_RX = re.compile(r"^(prefer|avoid):(role|function|skill|seniority|metro|company|evidence)=([a-z0-9][a-z0-9_ .+&/-]{0,60})$")
+_FACT_TAG_RX = re.compile(r"^(prefer|avoid):(role|function|skill|seniority|metro|company|evidence|title|level|location|mode)=([a-z0-9][a-z0-9_ .+&/-]{0,60})$")
 
 
 def fact_tag(kind: str, key: str, value: str) -> str:

@@ -5709,7 +5709,58 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         if m is None or not m.get("is_owner"):
             raise HTTPException(status_code=404, detail="map not found")
         if (m.get("map_type") or "talent") == "jobs":
-            raise HTTPException(status_code=400, detail="only talent maps revise from feedback")
+            # JOB MAP: taps on job cards → résumé-match preferences → the roles re-run → a new revision
+            from api.calibration import job_feedback_to_prefs, row_ref
+            from api.people_population import apply_job_must, job_brief_contract, match_resume_jobs, years_to_levels
+            rows = [r for r in (m.get("rows") or []) if isinstance(r, dict)]
+            rows_by_ref = {row_ref(r): r for r in rows}
+            feedback = [f for f in (m.get("feedback") or []) if (f.get("tags") or []) or f.get("state") in ("shortlist", "not relevant")]
+            if not feedback:
+                raise HTTPException(status_code=400, detail="no feedback yet — 👍 / 👎 a few roles first")
+            cal = job_feedback_to_prefs(m.get("brief") or "", feedback, rows_by_ref)
+            cal["n_feedback"] = len(feedback)
+            cal["next_revision"] = len(m.get("revisions") or [])
+            contract = {"question": m.get("brief") or "", "edits": cal["edits"], "prefs": cal["prefs"], "exclude_refs": cal["exclude_refs"],
+                        "n_feedback": len(feedback), "next_revision": cal["next_revision"]}
+            if body.preview:
+                return {"preview": True, "contract": contract}
+            if not cal["edits"]:
+                raise HTTPException(status_code=400, detail="the feedback so far implies no change to the search")
+            store = _claim_store_cached()
+            if store is None:
+                raise HTTPException(status_code=503, detail="the job index is unavailable right now — please retry")
+            cov = m.get("coverage") or {}
+            # the profile the map was matched on: the signed-in user's résumé when on file, else the brief text
+            _acc = _accounts()
+            _parsed = ((await _acc.get_parse(user["id"])).get("profile") or {}) if _acc else {}
+            _cv = str(_parsed.get("_resume_text") or "")
+            lp = cov.get("linkedin_profile") or {}
+            _prof_text = " ".join(x for x in [lp.get("name") or "", lp.get("headline") or "", _cv] if x).strip()
+            gs = cov.get("geo_scope") or {}
+            prefs = {"limit": 60, "brief_text": (m.get("brief") or ""), "country": (body.country or "us"),
+                     "metro": (gs.get("metro") or ""), "state": (gs.get("state") or ""),
+                     "seniorities": sorted(years_to_levels(_cv)) if _cv else [], **cal["prefs"], "exclude_refs": cal["exclude_refs"]}
+            res = await match_resume_jobs(store, {"_resume_text": _prof_text}, prefs)
+            new_rows = list(res.get("jobs") or [])
+            must = (cov.get("must") or {}).get("kinds") or []
+            if must:
+                new_rows, _ = await apply_job_must(store, new_rows, must)
+            for j in new_rows:                                  # saved summaries travel with the map
+                old = rows_by_ref.get(row_ref(j))
+                if old and old.get("summary"):
+                    j["summary"] = old["summary"]
+            bc = job_brief_contract(question=m.get("brief") or "", job_must=must, scope=res.get("geo_scope"),
+                                    profile_text=_prof_text, matched_on=("resume" if _cv else "description"))
+            bc["assumptions"] = ["filters fixed by this revision (your feedback) — the brief's wording only ranks"] + [a for a in bc.get("assumptions") or []][:2]
+            new_cov = {**cov, "geo_scope": res.get("geo_scope"), "brief_contract": bc, "note": res.get("note") or ""}
+            delta = diff_rows(rows, new_rows)
+            summary = await phrase_delta(build_llm(mode=resolve_mode()), delta, cal["edits"])
+            delta_rec = {**delta, "edits": cal["edits"], "summary": summary, "contract": {"prefs": cal["prefs"], "exclude_refs": cal["exclude_refs"]}}
+            rev = await ms.add_revision(map_id, owner_id=user["id"], reason="hiring_manager_feedback", brief=m.get("brief") or "",
+                                        filters=(m.get("filters") or {}), coverage=new_cov, rows=new_rows, delta=delta_rec)
+            if rev is None:
+                raise HTTPException(status_code=404, detail="map not found")
+            return {"revision_id": rev, "summary": summary, "delta": delta_rec, "rows": new_rows, "coverage": new_cov}
         rows = [r for r in (m.get("rows") or []) if isinstance(r, dict)]
         rows_by_id = {str(r.get("entity_id") or ""): r for r in rows}
         for eid, name in (m.get("row_names") or {}).items():      # reviewed people no longer on the map

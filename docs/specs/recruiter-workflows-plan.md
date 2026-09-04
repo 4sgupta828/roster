@@ -173,6 +173,16 @@ QUESTION text only, so a résumé PDF rode along as a vision document unless the
 sends attachments at all (it did not before). PDFs parse DOCLING-first (the converter the profile
 parser already uses) in a separate process with a 60s cap and a content-hash cache; the text layer
 is the fallback. Verified in prod: Jobs 26s cold / 1s cached, Q&A routes with high confidence.
+Jobs feedback loop (owner, 2026-09-04, "similar mechanism … tailored to jobs"): a job card gets the
+same 👍 / 👎 control; the reasons are the POSTING'S facts — company, the title's discipline words,
+stated level, location, work mode. Taps map in code (`calibration.job_feedback_to_prefs`) onto the
+résumé-match preferences: prefer/avoid title words → role_keywords / exclude_keywords, company →
+prefer_companies / exclude_companies, level → seniorities / avoid_levels, location → locations /
+avoid_locations, mode → remote / avoid_modes; a bare 👎 excludes the posting. A saved Job Map revises
+in place via the same `POST /maps/{id}/revise` (jobs branch: the profile is the signed-in résumé on
+file, else the brief text; saved summaries travel with the rows) with the same revision box.
+Q&A bias-to-cards reaffirmed: résumé → roles answers with job cards; the written fit analysis only on
+an explicit ask ("analyze the fit", "why", "how well").
 Still open from the panel: ingest posting BODIES into the job index (the ranking root cause — titles
 only today; needs a cost projection), a level tag with an explicit "unstated" state + filter chips,
 and the landing re-shuffle (only after intake proves out).

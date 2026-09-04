@@ -2784,7 +2784,7 @@ function jobsMarkup(d){
       <span class="ppl-name">${esc(j.title)}${pct}</span>
       <span class="ppl-blurb">${co}${j.source?` · via ${esc(j.source)}`:""}${jr}</span>
       ${loc||dept?`<span class="ppl-tags">${loc}${dept}</span>`:""}
-      ${apply?`<span class="ppl-links">${apply}</span>`:""}<span class="js-sumbox" data-ref="${esc(String(jref))}">${typeof openSummaryMarkup==="function"?openSummaryMarkup(jref, j):""}</span></span></div>`;
+      ${apply?`<span class="ppl-links">${apply}</span>`:""}${typeof jobFeedbackMarkup==="function" ? jobFeedbackMarkup(String(jref), j) : ""}<span class="js-sumbox" data-ref="${esc(String(jref))}">${typeof openSummaryMarkup==="function"?openSummaryMarkup(jref, j):""}</span></span></div>`;
   }).join("");
   const at = (q.company&&q.company.length)?` at ${esc(q.company.join(", ").replace(/_/g," "))}`:"";
   const bcJ = d.brief_contract || null;
@@ -8422,8 +8422,16 @@ function jobMapBarMarkup(d){
     const title = m.is_owner
       ? `<input class="mb-title" id="mapTitle" value="${esc(m.title||"")}" placeholder="Job map title" onchange="saveMapMeta()">`
       : `<span class="mb-title">${esc(m.title||"Job Map")}</span>`;
-    return `<div class="mapbar">${title}${share}<a class="mb-btn" href="${csvHref}" target="_blank" rel="noopener">⬇ Export CSV</a>
-      <span class="mb-meta">Saved Job Map · ${m.n_rows||0} roles · ${m.is_owner?"you own this map — notes persist here":"shared read-only view"}${m.created_at?` · saved ${esc(String(m.created_at).slice(0,10))}`:""}</span>
+    const revs = m.revisions || [];
+    const revN = revs.length ? revs[revs.length-1].revision_id : 0;
+    const since = revN ? String(revs[revs.length-1].created_at||"") : "";
+    const nAct = (m.feedback||[]).filter(f => ((f.tags||[]).length || f.state === "shortlist" || f.state === "not relevant") && (!since || String(f.updated_at||"") > since)).length;
+    const revise = (m.is_owner && nAct) ? `<button type="button" class="mb-btn" id="reviseBtn" onclick="reviseMapPreview()">↻ Revise from feedback (${nAct} new)</button>`
+      : (m.is_owner && revN ? `<span class="mb-meta" style="flex-basis:auto;">no new feedback since revision ${revN}</span>` : "");
+    return `<div class="mapbar">${title}${share}<a class="mb-btn" href="${csvHref}" target="_blank" rel="noopener">⬇ Export CSV</a>${revise}
+      <span class="mb-meta">Saved Job Map${revN?` · revision ${revN}`:""} · ${m.n_rows||0} roles · ${m.is_owner?"you own this map — 👍 / 👎 roles, then revise; notes persist here":"shared read-only view"}${m.created_at?` · saved ${esc(String(m.created_at).slice(0,10))}`:""}</span>
+      ${revisionsMarkup(m)}
+      <div id="reviseBox" hidden></div>
       ${m.is_owner?`<textarea class="mapnotes" id="mapNotes" placeholder="Map notes — where you are with these roles (persisted)" onchange="saveMapMeta()">${esc(m.notes||"")}</textarea>`:(m.notes?`<div class="mb-meta">Notes: ${esc(m.notes)}</div>`:"")}
     </div>`;
   }
@@ -8442,7 +8450,7 @@ async function saveJobMap(jpid){
     const r = await fetch("/maps", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(body)});
     if(!r.ok){ const e = await r.json().catch(()=>({})); alert(e.detail || "Couldn't save the job map."); return; }
     const res = await r.json();
-    window.ACTIVE_MAP = {id:res.id, map_type:"jobs", title:res.title, share_path:res.share_path, token:(res.share_token||""), is_owner:true, reviews:{}, n_rows:res.rows, notes:"", created_at:new Date().toISOString()};
+    window.ACTIVE_MAP = {id:res.id, map_type:"jobs", title:res.title, share_path:res.share_path, token:(res.share_token||""), is_owner:true, reviews:{}, feedback:[], revisions:[], n_rows:res.rows, notes:"", created_at:new Date().toISOString()};
     try{ history.replaceState(null, "", res.share_path); }catch(e){}
     renderThread();
   }catch(e){ alert("Couldn't save the job map — " + (e.message||e)); }
@@ -8475,7 +8483,7 @@ async function loadMapView(id, token){
     if(m.map_type === "jobs"){
       if(typeof setSearchMode === "function") setSearchMode("jobs");
       window.ACTIVE_MAP = {id:m.id, map_type:"jobs", title:m.title, notes:m.notes||"", share_path:m.share_path||"", token:(token||""),
-        is_owner:!!m.is_owner, reviews:(m.reviews||{}), n_rows:(m.rows||[]).length, created_at:m.created_at};
+        is_owner:!!m.is_owner, reviews:(m.reviews||{}), feedback:(m.feedback||[]), revisions:(m.revisions||[]), n_rows:(m.rows||[]).length, created_at:m.created_at};
       window.JOB_SUMMARIES = window.JOB_SUMMARIES || {};
       (m.rows||[]).forEach(j => { if(j.summary && j.url) window.JOB_SUMMARIES[j.url] = j.summary; });   // saved reads travel with the map
       const cov = m.coverage || {};
@@ -8519,7 +8527,7 @@ async function setReviewerName(n){
     renderThread();
   }catch(e){ alert("Couldn't register you as a reviewer — try again."); }
 }
-function canReview(){ const m = window.ACTIVE_MAP; return !!(m && m.map_type !== "jobs" && (m.is_owner || (m.token && reviewerKey()))); }
+function canReview(){ const m = window.ACTIVE_MAP; return !!(m && (m.is_owner || (m.token && reviewerKey()))); }
 function myReview(ref){
   const m = window.ACTIVE_MAP; if(!m) return null;
   if(m.is_owner) return (m.reviews||{})[ref] || null;
@@ -8589,7 +8597,43 @@ function humanTag(t){
   if(m[2] === "evidence") return "evidence too weak";
   return m[1] === "prefer" ? `more like: ${m[3]}` : `${KL[m[2]]||m[2]} ${m[3]} is off`;
 }
-function refreshMapBar(){ const el = document.querySelector(".mapbar"); if(el && window.ACTIVE_MAP && window.ACTIVE_MAP.map_type !== "jobs" && typeof talentMapBar === "function"){ const box = $("#reviseBox"); const keep = box && !box.hidden ? box.innerHTML : ""; el.outerHTML = talentMapBar(); if(keep){ const nb = $("#reviseBox"); if(nb){ nb.hidden = false; nb.innerHTML = keep; } } } }
+function refreshMapBar(){ const el = document.querySelector(".mapbar"); if(!el || !window.ACTIVE_MAP) return; const box = $("#reviseBox"); const keep = box && !box.hidden ? box.innerHTML : ""; el.outerHTML = window.ACTIVE_MAP.map_type === "jobs" ? jobMapBarMarkup((window.JOBS_RENDERS||{})[(document.querySelector(".ppl-wrap[data-jpid]")||{}).dataset ? document.querySelector(".ppl-wrap[data-jpid]").dataset.jpid : ""] || null) : talentMapBar(); if(keep){ const nb = $("#reviseBox"); if(nb){ nb.hidden = false; nb.innerHTML = keep; } } }
+// JOB-CARD FEEDBACK (tailored to jobs): 👍 / 👎, then the POSTING'S OWN FACTS as the reasons — company,
+// the title's discipline words, the stated level, location, work mode. Taps become the résumé-match
+// preferences the next revision honors (calibration.job_feedback_to_prefs); nothing is a model's call.
+const _JOB_FAMILY_WORDS = ["backend","frontend","front-end","full stack","fullstack","mobile","ios","android","security","data","machine learning","ml","ai","platform","infrastructure","infra","devops","sre","site reliability","cloud","embedded","firmware","qa","test","product","design","sales","marketing","finance","research","analytics","support","solutions","customer","hardware"];
+function jobFacts(j){
+  const out = [];
+  const t = String(j.title||"").toLowerCase();
+  if(j.company) out.push({key:"company", v:String(j.company).replace(/_/g," ")});
+  const fam = _JOB_FAMILY_WORDS.filter(w => new RegExp("(^|[^a-z])" + w.replace(/[-]/g,"\\-") + "([^a-z]|$)").test(t)).slice(0,2);
+  fam.forEach(w => out.push({key:"title", v:w}));
+  const lvl = j.seniority || (/\b(intern)/.test(t) ? "intern" : /\b(junior|jr\.?|entry|new grad|associate)\b/.test(t) ? "junior" : /\b(principal|staff|distinguished)\b/.test(t) ? "staff plus" : /\b(director|vp|head of|chief)\b/.test(t) ? "leadership" : /\b(senior|sr\.?|lead)\b/.test(t) ? "senior" : "");
+  if(lvl) out.push({key:"level", v:String(lvl).replace(/_/g," ")});
+  const loc = String(j.location||"").trim();
+  const mode = /remote/i.test(loc) ? "remote" : (/hybrid/i.test(loc) ? "hybrid" : "");
+  const place = loc.replace(/\b(remote|hybrid)\b/ig,"").replace(/[·,\-–]+\s*$/,"").replace(/^\s*[·,\-–]+/,"").trim();
+  if(place) out.push({key:"location", v:place.split(",")[0].trim()});
+  if(mode) out.push({key:"mode", v:mode});
+  return out;
+}
+function jobFeedbackMarkup(ref, j){
+  if(!canReview() || !j) return "";
+  window.ROW_BY_REF = window.ROW_BY_REF || {}; window.ROW_BY_REF[ref] = j;
+  const m = window.ACTIVE_MAP, cur = myReview(ref) || {}, tags = cur.tags || [];
+  const up = tags.includes("more_like_this"), down = tags.includes("less_like_this");
+  const kind = down ? "avoid" : (up ? "prefer" : "");
+  const st = deriveReviewState(tags);
+  const KL = {company:"company", title:"title", level:"level", location:"location", mode:"work mode"};
+  const chip = f => { const t = `${kind}:${f.key}=${factValue(f.v)}`; return `<button type="button" class="rv-tag rv-fact${tags.includes(t)?" on":""}" data-ref="${esc(ref)}" data-tag="${esc(t)}"><i>${esc(KL[f.key]||f.key)}</i> ${esc(f.v)}</button>`; };
+  const ask = kind === "avoid" ? "Which part is off?" : (kind === "prefer" ? "More of what?" : "");
+  return `<span class="rv-ctl" data-ref="${esc(ref)}" data-kind="job">
+    <span class="rv-h">Feedback</span><span class="rv-tags"><button type="button" class="rv-tag rv-thumb${up?" on":""}" data-ref="${esc(ref)}" data-tag="more_like_this">👍 more like this</button><button type="button" class="rv-tag rv-thumb${down?" on":""}" data-ref="${esc(ref)}" data-tag="less_like_this">👎 less like this</button></span>
+    <span class="rv-derived" data-ref="${esc(ref)}">${st!=="unreviewed"?`→ ${esc(st)}`:""}</span>
+    ${kind?`<span class="rv-more" data-ref="${esc(ref)}"><span class="rv-ask">${ask}</span> <span class="rv-tags">${jobFacts(j).map(chip).join("")}</span>
+      <input class="rv-note" data-ref="${esc(ref)}" placeholder="${kind==="avoid"?"anything else? (optional)":"note (optional)"}" value="${esc(cur.note||"")}" /></span>`:""}
+  </span>`;
+}
 // the review state a set of chips implies (mirrors maps.derive_state on the server)
 function deriveReviewState(tags){
   const t = new Set(tags||[]);
@@ -8615,7 +8659,7 @@ document.addEventListener("click", e => {
   const list = [...tags];
   syncMapReview(ref, deriveReviewState(list), list);
   const ctl = b.closest(".rv-ctl");
-  if(ctl){ const html = reviewControlMarkup(ref, (window.ROW_BY_REF||{})[ref]); if(html) ctl.outerHTML = html; }
+  if(ctl){ const html = ctl.dataset.kind === "job" ? jobFeedbackMarkup(ref, (window.ROW_BY_REF||{})[ref]) : reviewControlMarkup(ref, (window.ROW_BY_REF||{})[ref]); if(html) ctl.outerHTML = html; }
 });
 function copyMapLink(){
   const m = window.ACTIVE_MAP; if(!m || !m.share_path) return;

@@ -150,20 +150,88 @@ def feedback_to_contract(brief: str, filters: dict, evidence_kinds: list[str], f
             "exclude_companies": exclude_companies, "avoid_terms": avoid[:12], "edits": edits}
 
 
+def job_feedback_to_prefs(brief: str, feedback: list[dict], rows_by_ref: dict[str, dict]) -> dict:
+    """JOB MAP calibration (tailored to jobs): reviewer taps on a job card's own facts become the
+    résumé-match PREFERENCES the next run honors — never a model's judgment of the feedback.
+      prefer:title=…     → role_keywords (titles with the word LEAD)      avoid:title=…    → exclude_keywords (dropped)
+      prefer:company=…   → prefer_companies (ranked up)                  avoid:company=…  → exclude_companies (dropped)
+      prefer:level=…     → seniorities (ranked up)                       avoid:level=…    → avoid_levels (ranked down)
+      prefer:location=…  → locations (ranked up)                         avoid:location=… → avoid_locations (ranked down)
+      prefer:mode=remote → remote                                        avoid:mode=…     → avoid_modes (ranked down)
+      bare 👎            → the posting itself is excluded (seen_ids / exclude_refs)
+    Returns {prefs, exclude_refs, edits}."""
+    prefs: dict = {"role_keywords": [], "exclude_keywords": [], "prefer_companies": [], "exclude_companies": [],
+                   "seniorities": [], "avoid_levels": [], "locations": [], "avoid_locations": [], "avoid_modes": []}
+    exclude_refs: list[str] = []
+    edits: list[str] = []
+    _KEY = {"title": ("role_keywords", "exclude_keywords", "title"), "company": ("prefer_companies", "exclude_companies", "company"),
+            "level": ("seniorities", "avoid_levels", "level"), "location": ("locations", "avoid_locations", "location"),
+            "mode": ("_mode", "avoid_modes", "work mode")}
+
+    def _add(key, val):
+        if val and val not in prefs[key]:
+            prefs[key].append(val)
+            return True
+        return False
+    for f in feedback or []:
+        ref = str(f.get("entity_id") or "")
+        row = rows_by_ref.get(ref) or {}
+        label = (row.get("title") or ref or "this role") + ((" @ " + str(row.get("company") or "").replace("_", " ")) if row.get("company") else "")
+        who = f.get("reviewer_name") or "owner"
+        tags = list(f.get("tags") or [])
+        facts = [x for x in (parse_fact_tag(t) for t in tags) if x]
+        for kind, key, val in facts:
+            if key not in _KEY:
+                continue
+            pk, ak, human = _KEY[key]
+            v = val.replace("_", " ")
+            if kind == "prefer":
+                if key == "mode":
+                    if v == "remote":
+                        prefs["remote"] = True; edits.append(f"{who}: more remote roles (from {label})")
+                    continue
+                if _add(pk, v):
+                    edits.append(f"{who}: more like {label}'s {human} ({v})")
+            else:
+                if _add(ak, v):
+                    edits.append(f"{who}: {label}'s {human} ({v}) is off — " + ("excluded" if key in ("title", "company") else "ranked down"))
+        if "less_like_this" in tags or f.get("state") == "not relevant":
+            if ref and ref not in exclude_refs:
+                exclude_refs.append(ref)
+                edits.append(f"{who} wants less like {label}: this posting leaves")
+        if ("more_like_this" in tags or f.get("state") == "shortlist") and not any(k == "prefer" for k, _, _ in facts):
+            # a bare 👍: the posting's title words become role keywords
+            words = [w for w in re.split(r"[^a-z0-9+#]+", str(row.get("title") or "").lower()) if len(w) > 3 and w not in _TITLE_STOP][:3]
+            new = [w for w in words if w not in prefs["role_keywords"]]
+            if new:
+                prefs["role_keywords"] += new
+                edits.append(f"{who} wants more like {label}: prefer titles with {', '.join(new)}")
+    prefs = {k: v for k, v in prefs.items() if v}
+    return {"prefs": prefs, "exclude_refs": exclude_refs, "edits": edits}
+
+
+_TITLE_STOP = {"senior", "junior", "staff", "lead", "principal", "engineer", "manager", "director", "remote", "with", "and", "the", "for"}
+
+
+def row_ref(r: dict) -> str:
+    """The stable identity of a row: a person's entity_id, or a job's id / company|title|location."""
+    return str(r.get("entity_id") or r.get("id") or ((r.get("company") or "") + "|" + (r.get("title") or "") + "|" + (r.get("location") or "")))
+
+
 def diff_rows(before: list[dict], after: list[dict]) -> dict:
-    """CODE-COMPUTED delta between two row snapshots: added, removed, moved (rank change ≥ 10),
-    and evidence-type changes for people present in both."""
-    b_ids = [r.get("entity_id") for r in before]
-    a_ids = [r.get("entity_id") for r in after]
+    """CODE-COMPUTED delta between two row snapshots (people OR jobs): added, removed, moved (rank
+    change ≥ 10), and evidence-type changes for rows present in both."""
+    b_ids = [row_ref(r) for r in before]
+    a_ids = [row_ref(r) for r in after]
     b_pos = {e: i for i, e in enumerate(b_ids)}
     a_pos = {e: i for i, e in enumerate(a_ids)}
-    name = {r.get("entity_id"): r.get("name") for r in before + after}
+    name = {row_ref(r): (r.get("name") or ((r.get("title") or "") + ((" @ " + str(r.get("company") or "").replace("_", " ")) if r.get("company") else ""))) for r in before + after}
     added = [e for e in a_ids if e not in b_pos]
     removed = [e for e in b_ids if e not in a_pos]
     moved = [(e, b_pos[e], a_pos[e]) for e in a_ids if e in b_pos and abs(a_pos[e] - b_pos[e]) >= 10]
-    ev_before = {r.get("entity_id"): ((r.get("evidence") or {}).get("strength") or "") for r in before}
-    ev_changed = [(r.get("entity_id"), ev_before.get(r.get("entity_id")), (r.get("evidence") or {}).get("strength") or "")
-                  for r in after if r.get("entity_id") in ev_before and ((r.get("evidence") or {}).get("strength") or "") != ev_before.get(r.get("entity_id"))]
+    ev_before = {row_ref(r): ((r.get("evidence") or {}).get("strength") or "") for r in before}
+    ev_changed = [(row_ref(r), ev_before.get(row_ref(r)), (r.get("evidence") or {}).get("strength") or "")
+                  for r in after if row_ref(r) in ev_before and ((r.get("evidence") or {}).get("strength") or "") != ev_before.get(row_ref(r))]
     return {"added": [{"entity_id": e, "name": name.get(e)} for e in added[:40]], "n_added": len(added),
             "removed": [{"entity_id": e, "name": name.get(e)} for e in removed[:40]], "n_removed": len(removed),
             "moved": [{"entity_id": e, "name": name.get(e), "from": bp + 1, "to": ap + 1} for e, bp, ap in moved[:20]], "n_moved": len(moved),
