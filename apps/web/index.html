@@ -8507,7 +8507,7 @@ function reviewControlMarkup(ref){
     <button type="button" class="rv-why" data-ref="${esc(ref)}">${restOn?"why ▴":"why ▾"}</button>
     <span class="rv-derived" data-ref="${esc(ref)}">${st!=="unreviewed"?`→ ${esc(st)}`:""}</span>
     ${others.length?`<span class="rv-others" title="${esc(others.map(o=>`${o.reviewer_name||"owner"}: ${o.state}${(o.tags||[]).length?" · "+o.tags.join(", "):""}${o.note?" — "+o.note:""}`).join("\n"))}">${others.length} other review${others.length===1?"":"s"}</span>`:""}
-    <span class="rv-more" data-ref="${esc(ref)}"${restOn?"":" hidden"}><span class="rv-tags">${rest.map(chip).join("")}</span>
+    <span class="rv-more" data-ref="${esc(ref)}"${restOn?"":" hidden"}><span class="rv-h" style="font-weight:600;letter-spacing:0;text-transform:none;color:var(--muted);">Why?</span> <span class="rv-tags">${rest.map(chip).join("")}</span>
       <input class="rv-note" data-ref="${esc(ref)}" placeholder="note for the team (optional)" value="${esc(cur.note||"")}" /></span>
   </span>`;
 }
@@ -8534,6 +8534,11 @@ document.addEventListener("click", e => {
   if(b.dataset.tag === "less_like_this" && tags.has("less_like_this")) tags.delete("more_like_this");
   const ctl = b.closest(".rv-ctl");
   if(ctl) ctl.querySelectorAll(".rv-tag").forEach(x => x.classList.toggle("on", tags.has(x.dataset.tag)));
+  // 👍 is enough on its own; 👎 opens the "why" reasons right away (a bare thumbs-down teaches the next map little)
+  if(ctl && b.dataset.tag === "less_like_this" && tags.has("less_like_this")){
+    const more = ctl.querySelector(".rv-more"), w = ctl.querySelector(".rv-why");
+    if(more){ more.hidden = false; } if(w) w.textContent = "why ▴";
+  }
   const st = deriveReviewState([...tags]);
   const dv = ctl && ctl.querySelector(".rv-derived"); if(dv) dv.textContent = st !== "unreviewed" ? `→ ${st}` : "";
   syncMapReview(b.dataset.ref, st, [...tags]);
