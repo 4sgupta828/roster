@@ -27,12 +27,6 @@ RUN pip install --no-cache-dir Pillow PyMuPDF numpy boto3
 # API role never loads it.
 RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu docling
 
-# PLAYWRIGHT + headless Chromium — the CONTROLLED auto-apply agent (apps/api/auto_apply.py): fills an
-# ATS form from the Apply profile, screenshots, stops; submits only on the user's per-application
-# approval. Runs in a subprocess, never in the web process. Own cached layer.
-RUN pip install --no-cache-dir playwright \
- && python -m playwright install --with-deps chromium \
- && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install the kernel (serve + postgres extras) and the TECH vertical.
 COPY packages packages

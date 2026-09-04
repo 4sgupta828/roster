@@ -1168,6 +1168,12 @@ class ApplicationAnswersIn(BaseModel):
     answers: dict = {}
 
 
+class ApplicationExecIn(BaseModel):
+    filled: list[str] = []
+    missing: list[str] = []
+    note: str = ""
+
+
 class ResumeIn(BaseModel):
     name: str
     content_type: str = "application/octet-stream"
@@ -6048,130 +6054,95 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 "managers": mgrs.get("managers") or [], "n_at_company": mgrs.get("n_at_company", 0),
                 "discipline": mgrs.get("discipline") or [], "note": " ".join(note)}
 
-    # ---- CONTROLLED AUTO-APPLY: queue → fill (screenshot, stop) → the user approves → submit ----
-    async def _apply_run(mode: str, *, url: str, profile: dict, answers: dict, resume: dict | None) -> dict:
-        """Run the browser filler in a SEPARATE process (Chromium never enters the web process), capped."""
-        import json as _json
-        import subprocess
-        import tempfile
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fi:
-            _json.dump({"url": url, "profile": profile, "answers": answers, "resume": resume or {}}, fi)
-            inp = fi.name
-        outp = inp + ".out"
-
-        def _go():
-            try:
-                r = subprocess.run([sys.executable, "-m", "api.auto_apply", mode, inp, outp], capture_output=True, text=True, timeout=240)
-                if r.returncode != 0:
-                    return {"status": "failed", "reason": ("the browser step failed: " + (r.stderr or "")[-200:]).strip()}
-                return _json.load(open(outp))
-            except subprocess.TimeoutExpired:
-                return {"status": "failed", "reason": "the apply page took too long to load — try again, or open the link yourself"}
-            except Exception as e:  # noqa: BLE001
-                return {"status": "failed", "reason": f"{type(e).__name__}: {str(e)[:120]}"}
-            finally:
-                for pth in (inp, outp):
-                    try:
-                        os.remove(pth)
-                    except Exception:  # noqa: BLE001
-                        pass
-        return await asyncio.to_thread(_go)
-
-    async def _apply_profile_and_resume(store, user_id: str) -> tuple[dict, dict | None]:
+    # ---- APPLICATION PLANS (definition-driven auto-apply): the server PLANS from the ATS's own form
+    # definition, the user REVIEWS and corrects, the Chrome extension EXECUTES in the user's browser,
+    # the user SUBMITS. No headless browser, no bookmarklet, no server-side submit.
+    async def _apply_profile(store, user_id: str) -> tuple[dict, str]:
         prof = ((await store.get_profile(user_id)).get("profile") or {})
         parsed = ((await store.get_parse(user_id)).get("profile") or {})
         merged = {**{k: v for k, v in parsed.items() if isinstance(v, (str, int, float)) and v not in ("", None)}, **{k: v for k, v in prof.items() if v not in ("", None)}}
-        rz = await store.get_resume(user_id)
-        resume = {"name": rz[0], "b64": base64.b64encode(rz[2]).decode()} if rz else None
-        return merged, resume
+        return merged, str(parsed.get("_resume_text") or "")
 
-    async def _draft_open_answers(open_qs: list[dict], profile: dict, resume_text: str, *, company: str = "", title: str = "") -> dict:
-        """The agent's BEST ANSWER for every remaining question (owner, 2026-09-04: fill everything; the
-        user overrides). Free text is drafted from the profile / résumé; a choice question gets ONE of
-        its real options (validated in code — anything else is dropped). Voluntary self-identification
-        is never drafted; acknowledgements come only from the profile's standing pre-approval."""
-        qs = [q for q in open_qs if not q.get("voluntary") and not re.search(r"(?i)certify|acknowledg|privacy notice|consent", q.get("label") or "")][:14]
+    async def _draft_plan(plan: dict, profile: dict, resume_text: str) -> dict:
+        """The agent's best answer for every OPEN question (policy 'open' only — identity, legal and file
+        questions are structurally out of reach). Choice questions get one real option, validated in code."""
+        from api.apply_plan import apply_drafts, draftable
+        qs = draftable(plan)[:16]
         if not qs:
-            return {}
+            return plan
         try:
             from pydantic import BaseModel as _BM
 
             class _Drafts(_BM):
                 answers: list[str] = []
             llm = build_llm(mode=resolve_mode())
-            lines = []
-            for i, q in enumerate(qs):
-                opts = q.get("options") or []
-                lines.append(f"{i + 1}. {q['label']}" + (f"  [choose exactly one: {' | '.join(opts[:30])}]" if opts else "  [free text, ≤ 90 words]"))
+            lines = [f"{i + 1}. {q['label']}" + (f"  [choose exactly one: {' | '.join(q['options'][:30])}]" if q.get("options") else "  [free text, ≤ 90 words]")
+                     for i, q in enumerate(qs)]
             comp = await llm.complete(
                 system=("You are completing a job application on a candidate's behalf, for their review. Answer EVERY question with the "
                         "best answer the profile and résumé support. For a choice question return exactly one of the listed options, "
-                        "verbatim. For yes/no questions about the candidate's own circumstances (relocation, sponsorship, prior "
-                        "employment at the company, availability), pick the answer most consistent with the profile; if truly unknown, "
-                        "choose the option that keeps the candidate eligible and is safest to correct (e.g. 'No' for prior employment). "
-                        "For free text, write specifically from the résumé — never invent employers, dates, numbers or credentials. "
-                        "Return answers in the same order, one per question, empty only when nothing reasonable can be said."),
-                messages=[{"role": "user", "content": (f"POSTING: {title} at {company}\n" if title or company else "")
-                                                       + "PROFILE: " + json.dumps({k: v for k, v in profile.items() if k not in ("resume", "_resume_text", "work_history", "education")})[:2500]
-                                                       + "\n\nRÉSUMÉ:\n" + (resume_text or "")[:6000]
-                                                       + "\n\nQUESTIONS:\n" + "\n".join(lines)}],
+                        "verbatim. For yes/no questions about the candidate's own circumstances pick the answer most consistent with the "
+                        "profile; if truly unknown, choose the option that keeps the candidate eligible and is safest to correct. For free "
+                        "text, write specifically from the résumé — never invent employers, dates, numbers or credentials. Return answers "
+                        "in the same order, one per question, empty only when nothing reasonable can be said."),
+                messages=[{"role": "user", "content": f"POSTING: {plan.get('title') or ''} at {plan.get('company') or ''}\n"
+                                                       + "PROFILE: " + json.dumps({k: v for k, v in profile.items() if k not in ("work_history", "education", "_resume_text")})[:2500]
+                                                       + "\n\nRÉSUMÉ:\n" + (resume_text or "")[:6000] + "\n\nQUESTIONS:\n" + "\n".join(lines)}],
                 response_format=_Drafts, max_tokens=1600, temperature=0.0)
             ans = list(getattr(comp.parsed, "answers", []) or [])
-            out = {}
-            for q, a in zip(qs, ans):
-                a = (a or "").strip()
-                if not a:
-                    continue
-                opts = q.get("options") or []
-                if opts:
-                    from api.auto_apply import _pick_option
-                    a = _pick_option(opts, a)
-                    if not a:
-                        continue
-                out[q["label"]] = a
-            return out
-        except Exception:  # noqa: BLE001 — drafts are a convenience
-            return {}
+            drafts = {q["label"]: (a or "").strip() for q, a in zip(qs, ans) if (a or "").strip()}
+            return apply_drafts(plan, drafts)
+        except Exception:  # noqa: BLE001 — drafts are a convenience; the plan stands without them
+            return plan
+
+    async def _plan_for(store, user: dict, url: str, *, user_answers: dict | None = None, draft: bool = True) -> dict:
+        from api.apply_adapters import detect, fetch_form
+        from api.apply_plan import bind_plan
+        form = await fetch_form(url)
+        if not form:
+            ats = detect(url)
+            why = ("This portal requires creating an account and signing in — Roster never does that for you." if ats == "workday"
+                   else "Roster can read application forms hosted by Greenhouse, Lever and Ashby (including company career pages that embed them). "
+                        "This posting's form isn't one of those, so it can't be planned — open the link and apply there.")
+            return {"status": "needs_you", "reason": why, "plan": [], "form_url": url, "ats": ats}
+        profile, resume_text = await _apply_profile(store, user["id"])
+        bank = await store.answer_bank(user["id"])
+        plan = bind_plan(form, profile, bank, user_answers or {})
+        if draft:
+            plan = await _draft_plan(plan, profile, resume_text)
+        from api.apply_plan import summary
+        sm = summary(plan)
+        plan["status"] = "planned"
+        plan["summary"] = sm
+        return plan
 
     @app.post("/me/applications")
-    async def me_application_queue(body: ApplicationIn, x_roster_token: str = Header(default="")) -> dict:
-        """Queue a posting and FILL it now: the agent opens the apply page, fills what the Apply profile +
-        résumé answer, uploads the résumé, screenshots, and stops (status filled / needs_you). Nothing
-        is submitted here."""
+    async def me_application_plan(body: ApplicationIn, x_roster_token: str = Header(default="")) -> dict:
+        """PLAN an application: the ATS's own form definition → every question bound to an answer from
+        the Apply profile, the answer bank, or a constrained draft (policy-gated). Nothing touches the job
+        site; the user reviews, then the extension fills the live form in their browser."""
         store, user = await _require_user(x_roster_token)
-        from api.auto_apply import detect_ats
         url = (body.job_url or "").strip()
         if not url.startswith("http"):
             raise HTTPException(status_code=400, detail="job_url required")
         if not _url_is_public(url):
             raise HTTPException(status_code=400, detail="that link isn't a public apply page")
-        profile, resume = await _apply_profile_and_resume(store, user["id"])
+        profile, _ = await _apply_profile(store, user["id"])
         if not (profile.get("email") and (profile.get("first_name") or profile.get("last_name"))):
             raise HTTPException(status_code=400, detail="fill your Apply profile first (name + email) under Account → Apply profile")
-        rec = await store.queue_application(user["id"], job_ref=body.job_ref or "", company=body.company or "", title=body.title or "",
-                                            url=url, ats=detect_ats(url))
-        bank = await store.answer_bank(user["id"])          # answers given before → filled, not asked again
-        res = await _apply_run("fill", url=url, profile=profile, answers=bank, resume=resume)
-        drafts = {}
-        if res.get("open") and res.get("status") == "filled":
-            parsed = ((await store.get_parse(user["id"])).get("profile") or {})
-            drafts = await _draft_open_answers(res["open"], profile, str(parsed.get("_resume_text") or ""),
-                                               company=body.company or "", title=body.title or "")
-            if drafts:
-                # SECOND PASS: fill the drafts too, so the form (and its screenshot) is complete — the user reviews a
-                # finished application and corrects, instead of answering
-                res2 = await _apply_run("fill", url=url, profile=profile, answers={**bank, **drafts}, resume=resume)
-                if res2.get("status") == "filled" and len(res2.get("filled") or []) >= len(res.get("filled") or []):
-                    for f in res2.get("filled") or []:
-                        if f.get("label") in drafts and not f.get("source"):
-                            f["source"] = "agent draft"
-                    res = {**res, **{k: res2[k] for k in ("filled", "open", "blocking", "screenshot_b64", "notes", "captcha") if k in res2}}
-        shot = base64.b64decode(res["screenshot_b64"]) if res.get("screenshot_b64") else None
-        await store.update_application(user["id"], rec["id"], status=res.get("status") or "failed", reason=res.get("reason") or "",
-                                       filled=res.get("filled") or [], open_questions=res.get("open") or [], drafts=drafts, screenshot=shot,
-                                       form_url=(res.get("form_url") or url)[:1000])
-        return {"id": rec["id"], "status": res.get("status"), "reason": res.get("reason") or "", "filled": res.get("filled") or [],
-                "open": res.get("open") or [], "blocking": res.get("blocking") or [], "drafts": drafts, "captcha": bool(res.get("captcha"))}
+        from api.apply_adapters import detect
+        rec = await store.queue_application(user["id"], job_ref=body.job_ref or "", company=body.company or "", title=body.title or "", url=url, ats=detect(url))
+        plan = await _plan_for(store, user, url)
+        sm = plan.get("summary") or {}
+        await store.update_application(user["id"], rec["id"], status=plan.get("status") or "planned", reason=plan.get("reason") or "",
+                                       plan=plan.get("plan") or [], form_url=(plan.get("form_url") or url)[:1000],
+                                       filled=[{"label": p["label"], "value": p["answer"], "source": p["source"]} for p in plan.get("plan") or [] if p.get("answer")],
+                                       open_questions=[{"label": p["label"], "kind": p["kind"], "required": p["required"], "options": p.get("options") or [],
+                                                        "voluntary": p.get("policy") == "identity_sensitive", "profile_key": ""} for p in plan.get("plan") or [] if not p.get("answer") and p.get("policy") not in ("skip", "never")])
+        if plan.get("title") and not body.title:
+            pass
+        return {"id": rec["id"], "status": plan.get("status"), "reason": plan.get("reason") or "", "summary": sm, "form_url": plan.get("form_url") or url,
+                "ats": plan.get("ats"), "n_questions": len(plan.get("plan") or []), "blocking": sm.get("blocking") or []}
 
     @app.get("/me/applications")
     async def me_applications(x_roster_token: str = Header(default="")) -> dict:
@@ -6180,6 +6151,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
 
     @app.get("/me/applications/{app_id}")
     async def me_application(app_id: int, x_roster_token: str = Header(default="")) -> dict:
+        """The plan (for the review UI and the extension): every question with its answer, source, policy,
+        required flag and the selector the extension uses on the live form."""
         store, user = await _require_user(x_roster_token)
         d = await store.get_application(user["id"], app_id)
         if not d:
@@ -6188,49 +6161,44 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
 
     @app.post("/me/applications/{app_id}/answers")
     async def me_application_answers(app_id: int, body: ApplicationAnswersIn, x_roster_token: str = Header(default="")) -> dict:
-        """The user's answers to the open questions (edited drafts included). Saved; used on approve."""
+        """The user's corrections. Saved on the application, remembered in the answer bank, and the plan
+        re-bound so their answer stands (source 'your answer')."""
         store, user = await _require_user(x_roster_token)
         d = await store.get_application(user["id"], app_id)
         if not d:
             raise HTTPException(status_code=404, detail="not found")
-        answers = {str(k)[:200]: str(v)[:4000] for k, v in (body.answers or {}).items()}
-        await store.update_application(user["id"], app_id, answers={**(d.get("answers") or {}), **answers})
-        remembered = await store.remember_answers(user["id"], answers)     # next application: filled, reviewed, not retyped
-        return {"ok": True, "remembered": remembered}
+        answers = {str(k)[:300]: str(v)[:4000] for k, v in (body.answers or {}).items() if str(v).strip()}
+        merged = {**(d.get("answers") or {}), **answers}
+        remembered = await store.remember_answers(user["id"], answers)
+        plan = await _plan_for(store, user, d.get("url") or "", user_answers=merged, draft=False)
+        # keep the agent's earlier drafts where the user did not answer
+        prev = {p["label"]: p for p in (d.get("plan") or [])}
+        for p in plan.get("plan") or []:
+            if not p.get("answer") and prev.get(p["label"], {}).get("answer") and prev[p["label"]].get("source") == "agent draft":
+                p["answer"], p["source"], p["blocking"] = prev[p["label"]]["answer"], "agent draft", False
+        from api.apply_plan import summary
+        sm = summary(plan)
+        await store.update_application(user["id"], app_id, answers=merged, plan=plan.get("plan") or [],
+                                       filled=[{"label": p["label"], "value": p["answer"], "source": p["source"]} for p in plan.get("plan") or [] if p.get("answer")])
+        return {"ok": True, "remembered": remembered, "summary": sm}
 
-    @app.post("/me/applications/{app_id}/approve")
-    async def me_application_approve(app_id: int, x_roster_token: str = Header(default="")) -> dict:
-        """THE ONLY PATH THAT SUBMITS. Re-opens the page, fills profile + saved answers, clicks submit,
-        records the confirmation. Stops as needs_you on a CAPTCHA, a login wall, or a required
-        question without an answer."""
+    @app.post("/me/applications/{app_id}/executed")
+    async def me_application_executed(app_id: int, body: ApplicationExecIn, x_roster_token: str = Header(default="")) -> dict:
+        """The EXTENSION's field-by-field report after filling the live form (what it set, what it could
+        not find). Status 'filled' — the user still submits."""
         store, user = await _require_user(x_roster_token)
         d = await store.get_application(user["id"], app_id)
         if not d:
             raise HTTPException(status_code=404, detail="not found")
-        if d.get("status") == "submitted":
-            return {"id": app_id, "status": "submitted", "note": "already submitted"}
-        profile, resume = await _apply_profile_and_resume(store, user["id"])
-        await store.update_application(user["id"], app_id, status="approved")
-        bank = await store.answer_bank(user["id"])
-        # the agent's drafts stand unless the user changed them (their saved answers win)
-        res = await _apply_run("submit", url=d["url"], profile=profile, answers={**bank, **(d.get("drafts") or {}), **(d.get("answers") or {})}, resume=resume)
-        shot = base64.b64decode(res["screenshot_b64"]) if res.get("screenshot_b64") else None
-        fields = {"status": res.get("status") or "failed", "reason": res.get("reason") or "", "filled": res.get("filled") or [],
-                  "open_questions": res.get("open") or []}
-        if shot:
-            fields["submit_screenshot"] = shot            # the PREPARE screenshot stays: it is what the user reviewed
-        if res.get("status") == "submitted":
-            from datetime import datetime, timezone
-            fields["submitted_at"] = datetime.now(timezone.utc)
-            fields["submitted_by"] = "roster"
-        elif res.get("status") == "needs_you" and not res.get("blocking"):
-            fields["reason"] = ((res.get("reason") or "") + " The job site may be refusing automated submits — use “Fill this form in my browser” and submit there.").strip()
-        await store.update_application(user["id"], app_id, **fields)
-        return {"id": app_id, "status": res.get("status"), "reason": fields.get("reason") or ""}
+        rep = {"filled": [str(x)[:200] for x in (body.filled or [])][:200], "missing": [str(x)[:200] for x in (body.missing or [])][:100],
+               "note": str(body.note or "")[:500]}
+        await store.update_application(user["id"], app_id, status="filled", reason=("" if not rep["missing"] else f"{len(rep['missing'])} field(s) not found on the live form — check them before submitting"),
+                                       drafts={**(d.get("drafts") or {}), "_execution": rep})
+        return {"ok": True, **rep}
 
     @app.post("/me/applications/{app_id}/mark-submitted")
     async def me_application_mark_submitted(app_id: int, x_roster_token: str = Header(default="")) -> dict:
-        """The user submitted in their OWN browser (the bookmarklet path): record it so the tracker is complete."""
+        """The user submitted in their OWN browser (the extension observed it, or they clicked 'I submitted it')."""
         store, user = await _require_user(x_roster_token)
         from datetime import datetime, timezone
         ok = await store.update_application(user["id"], app_id, status="submitted", reason="", submitted_at=datetime.now(timezone.utc), submitted_by="user")
@@ -6242,6 +6210,23 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     async def me_application_delete(app_id: int, x_roster_token: str = Header(default="")) -> dict:
         store, user = await _require_user(x_roster_token)
         return {"ok": await store.delete_application(user["id"], app_id)}
+
+    @app.get("/extension.zip")
+    async def extension_zip():
+        """The Roster Apply Chrome extension (unpacked-load): a zip of apps/extension built on request."""
+        import io as _io
+        import zipfile
+        from fastapi.responses import Response as _Resp
+        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "extension")
+        if not os.path.isdir(root):
+            raise HTTPException(status_code=404, detail="extension not bundled")
+        buf = _io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for fn in sorted(os.listdir(root)):
+                fp = os.path.join(root, fn)
+                if os.path.isfile(fp):
+                    z.write(fp, arcname=f"roster-apply/{fn}")
+        return _Resp(content=buf.getvalue(), media_type="application/zip", headers={"Content-Disposition": 'attachment; filename="roster-apply-extension.zip"'})
 
     @app.post("/me/resume")
     async def me_upload_resume(body: ResumeIn, x_roster_token: str = Header(default="")) -> dict:

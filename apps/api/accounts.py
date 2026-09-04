@@ -180,7 +180,8 @@ CREATE TABLE IF NOT EXISTS roster_application (
 CREATE INDEX IF NOT EXISTS idx_ra_user ON roster_application (user_id, created_at DESC);
 ALTER TABLE roster_application ADD COLUMN IF NOT EXISTS submit_screenshot BYTEA;   -- the page after a submit attempt (the prepare shot stays)
 ALTER TABLE roster_application ADD COLUMN IF NOT EXISTS submitted_by TEXT;          -- 'roster' | 'user' (submitted in their own browser)
-ALTER TABLE roster_application ADD COLUMN IF NOT EXISTS form_url TEXT;              -- the form's OWN page (an embedded frame's URL) — where the bookmarklet can reach the fields
+ALTER TABLE roster_application ADD COLUMN IF NOT EXISTS form_url TEXT;              -- the form's OWN page (the ATS-hosted application form)
+ALTER TABLE roster_application ADD COLUMN IF NOT EXISTS plan JSONB NOT NULL DEFAULT '[]'::jsonb;   -- the application plan (every question: answer, source, policy, selector)
 -- ANSWER BANK: every answer the user gives in an application review, keyed by the normalized question,
 -- so the same question is filled next time (the user reviews instead of retyping).
 CREATE TABLE IF NOT EXISTS roster_answer_bank (
@@ -693,13 +694,13 @@ class AccountStore:
     async def update_application(self, user_id: str, app_id: int, **fields) -> bool:
         """Set any of: status, reason, filled, open_questions, answers, drafts, screenshot (bytes), submitted_at."""
         await self._ensure()
-        allowed = {"status", "reason", "filled", "open_questions", "answers", "drafts", "screenshot", "submitted_at", "submit_screenshot", "submitted_by", "form_url"}
+        allowed = {"status", "reason", "filled", "open_questions", "answers", "drafts", "screenshot", "submitted_at", "submit_screenshot", "submitted_by", "form_url", "plan"}
         sets, vals = [], []
         for k, v in fields.items():
             if k not in allowed:
                 continue
-            vals.append(json.dumps(v) if k in ("filled", "open_questions", "answers", "drafts") else v)
-            sets.append(f"{k} = ${len(vals) + 2}" + ("::jsonb" if k in ("filled", "open_questions", "answers", "drafts") else ""))
+            vals.append(json.dumps(v) if k in ("filled", "open_questions", "answers", "drafts", "plan") else v)
+            sets.append(f"{k} = ${len(vals) + 2}" + ("::jsonb" if k in ("filled", "open_questions", "answers", "drafts", "plan") else ""))
         if not sets:
             return False
         async with (await self._get_pool()).acquire() as conn:
@@ -724,8 +725,8 @@ class AccountStore:
         if not r:
             return None
         d = dict(r)
-        for k in ("filled", "open_questions", "answers", "drafts"):
-            d[k] = json.loads(d[k]) if isinstance(d[k], str) else (d[k] or ([] if k in ("filled", "open_questions") else {}))
+        for k in ("filled", "open_questions", "answers", "drafts", "plan"):
+            d[k] = json.loads(d[k]) if isinstance(d[k], str) else (d[k] or ([] if k in ("filled", "open_questions", "plan") else {}))
         shot = d.pop("screenshot", None)
         d["screenshot_b64"] = base64.b64encode(shot).decode() if shot else ""
         sshot = d.pop("submit_screenshot", None)

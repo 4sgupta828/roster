@@ -1,22 +1,10 @@
-"""AUTO-APPLY, CONTROLLED (owner ask 2026-09-04): open a posting's apply page in a headless browser,
-fill what the user's Apply profile + résumé answer, screenshot the filled form, and STOP. Submission
-happens only after the user approves THAT application in Roster. The agent never bypasses a CAPTCHA,
-never creates an ATS account or types a password (Workday-style portals → `needs_you` with the
-prefilled answers ready to paste), and never invents an answer to a question the profile can't answer
-(those are listed for the user; a model may DRAFT free-text answers from the profile, labeled as drafts).
-
-Runs as a SEPARATE PROCESS (Chromium never lives in the web process):
-    python -m api.auto_apply fill|submit <in.json> <out.json>
-in.json  = {url, profile, answers, resume: {name, b64}}   out.json = the result dict below.
+"""AUTO-APPLY — the CODE-OWNED answer mapping: a form question (label, kind, options) → the Apply
+profile's value (standard questions), the user's saved answers, or nothing (a draft is the caller's,
+policy-gated, step). Used by apply_plan.bind_plan. No browser here.
 """
 from __future__ import annotations
 
-import base64
-import json
-import os
 import re
-import sys
-import tempfile
 
 # ---- pure helpers (unit-tested; no browser) ---------------------------------------------------------
 _FIELD_RX: list[tuple[re.Pattern, str]] = [
@@ -126,9 +114,10 @@ def group_fields(fields: list[dict]) -> list[dict]:
 #   ack     → a single-option acknowledgement box: tick it when the profile pre-approved it (Yes)
 _STANDARD_QS: list[tuple[re.Pattern, str, str]] = [
     (re.compile(r"(?i)sponsor"), "requires_sponsorship", "yn"),
-    (re.compile(r"(?i)(authori[sz]ed|eligible|legally|right) to work|work authori[sz]ation"), "us_authorized_to_work", "yn"),
+    (re.compile(r"(?i)(authori[sz]ed|eligible|legally|right).{0,25}work|work authori[sz]ation"), "us_authorized_to_work", "yn"),
     (re.compile(r"(?i)relocat"), "willing_to_relocate", "yn"),
-    (re.compile(r"(?i)previously (worked|employed|consulted)|former employee|worked (at|for) .* before|(ever|previously|currently).{0,20}(work(ed|ing)?|employed|contractor).{0,40}(at|for|with)"), "previously_worked_here", "yn"),
+    (re.compile(r"(?i)previously (worked|employed|consulted)|former employee|worked (at|for) .* before|have you (ever )?(worked|been employed|consulted|contracted)|(ever|previously|currently).{0,20}(work(ed|ing)?|employed|contractor).{0,40}(at|for|with)"), "previously_worked_here", "yn"),
+    (re.compile(r"(?i)marketing communications|receive (emails|updates|communications)|subscribe"), "marketing_opt_in", "yn"),
     (re.compile(r"(?i)zip|postal"), "postal_code", "text"),
     (re.compile(r"(?i)^country"), "country", "text"),
     (re.compile(r"(?i)hispanic|latin"), "hispanic_latino", "yn"),
@@ -174,7 +163,7 @@ def _pick_option(options: list[str], want: str) -> str:
             return o
     if "prefer" in w or "decline" in w or "not to" in w:
         for o in options:
-            if re.search(r"(?i)prefer not|decline|rather not", o):
+            if re.search(r"(?i)prefer not|decline|rather not|don.?t wish|do not wish|not wish to|choose not", o):
                 return o
     return ""
 
@@ -246,309 +235,8 @@ def plan_fill(fields: list[dict], profile: dict, answers: dict | None = None) ->
             "blocking": [q for q in open_q if q["required"]]}
 
 
-# ---- the browser part (separate process) -------------------------------------------------------------
-def _discover_fields(scope) -> list[dict]:
-    """Every visible input / textarea / select in the form with its best label."""
-    js = r"""
-    () => {
-      const out = [];
-      const lab = el => {
-        let t = "";
-        if (el.id) { const l = document.querySelector(`label[for="${CSS.escape(el.id)}"]`); if (l) t = l.innerText; }
-        if (!t) { const p = el.closest("label"); if (p) t = p.innerText; }
-        if (!t && el.getAttribute("aria-label")) t = el.getAttribute("aria-label");
-        if (!t && el.getAttribute("aria-labelledby")) { const l = document.getElementById(el.getAttribute("aria-labelledby")); if (l) t = l.innerText; }
-        if (!t) { const wrap = el.closest(".field, .application-question, [class*='field'], [class*='question'], li, div"); const l = wrap && wrap.querySelector("label, legend, .label, [class*='label']"); if (l) t = l.innerText; }
-        if (!t) t = el.placeholder || el.name || "";
-        return (t || "").replace(/\s+/g, " ").trim().slice(0, 160);
-      };
-      // the QUESTION a radio / checkbox / combobox belongs to: a fieldset legend, a labelled group, or the
-      // nearest preceding label-like text above the group
-      let gkCounter = 0;
-      const groupOf = el => {
-        const type = (el.type || "").toLowerCase();
-        if (type !== "radio" && type !== "checkbox") return null;
-        let anc = el.parentElement;
-        while (anc && anc !== document.body && anc.tagName !== "FORM" && anc.querySelectorAll(`input[type='${type}']`).length < 2) anc = anc.parentElement;
-        if (!anc || anc === document.body || anc.tagName === "FORM" || anc.querySelectorAll("input, select, textarea").length > 40) {
-          anc = el.closest("fieldset, [role='group'], [role='radiogroup']") || el.closest("label") || el.parentElement;   // a lone option is its own group
-        }
-        if (!anc.dataset.rosterGk) anc.dataset.rosterGk = "g" + (++gkCounter) + "_" + Math.random().toString(36).slice(2, 6);
-        return anc;
-      };
-      const groupLab = el => {
-        const fs = el.closest("fieldset"); const lg = fs && fs.querySelector("legend"); if (lg && lg.innerText.trim()) return lg.innerText.replace(/\s+/g, " ").trim().slice(0, 160);
-        const g = el.closest("[role='group'],[role='radiogroup']");
-        if (g) { const by = g.getAttribute("aria-labelledby"); const l = by && document.getElementById(by); if (l && l.innerText.trim()) return l.innerText.replace(/\s+/g, " ").trim().slice(0, 160); if (g.getAttribute("aria-label")) return g.getAttribute("aria-label").slice(0, 160); }
-        const grp = groupOf(el);
-        if (grp) {   // the question text usually sits INSIDE the group container, before its first option
-          for (const ch of grp.children) {
-            if (ch.querySelector("input, select, textarea") || ch.tagName === "INPUT") break;
-            const txt = (ch.innerText || "").replace(/\s+/g, " ").trim();
-            if (txt && txt.length <= 200) return txt.slice(0, 160);
-          }
-        }
-        let node = grp || el.closest("label") || el; 
-        for (let depth = 0; node && depth < 6; depth++) {
-          let sib = node.previousElementSibling;
-          while (sib) {
-            const txt = (sib.innerText || "").replace(/\s+/g, " ").trim();
-            if (txt && txt.length <= 200 && !sib.querySelector("input, select, textarea")) return txt.slice(0, 160);
-            if (sib.querySelector("input, select, textarea")) break;
-            sib = sib.previousElementSibling;
-          }
-          node = node.parentElement;
-        }
-        return "";
-      };
-      const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return (r.width > 0 || el.type === "file") && s.visibility !== "hidden" && s.display !== "none"; };
-      document.querySelectorAll("input, textarea, select").forEach((el, idx) => {
-        el.setAttribute("data-roster-i", String(idx));       // a selector that exists even without id / name
-        const type = (el.type || "text").toLowerCase();
-        if (["hidden", "submit", "button", "image", "reset"].includes(type)) return;
-        if (!vis(el)) return;
-        let kind = el.tagName === "SELECT" ? "select" : el.tagName === "TEXTAREA" ? "textarea" : type;
-        const options = el.tagName === "SELECT" ? [...el.options].map(o => o.text.trim()).filter(Boolean).slice(0, 40) : [];
-        const isCombo = el.getAttribute("role") === "combobox" || (el.getAttribute("aria-autocomplete") || "") !== "" || (el.closest("[class*='select__']") !== null);
-        let l0 = lab(el);
-        const gl = (kind === "radio" || kind === "checkbox" || isCombo || !l0 || l0 === (el.name || "") || /^cards\[/.test(l0)) ? groupLab(el) : "";
-        const grp = groupOf(el); const gk = grp ? grp.dataset.rosterGk : "";
-        const sel = el.id ? `#${CSS.escape(el.id)}` : (el.name ? `[name="${el.name}"]` : "");
-        if ((!l0 || l0 === (el.name || "") || /^cards\[/.test(l0)) && gl) l0 = gl;
-        out.push({ label: l0, group_label: gl, group_key: gk, name: el.name || "", id: el.id || "", kind, combo: isCombo,
-                   required: !!el.required || el.getAttribute("aria-required") === "true" || /[*✱]\s*$/.test(gl) || /[*✱]\s*$/.test(l0),
-                   placeholder: el.placeholder || "", options, selector: `[data-roster-i="${idx}"]` });
-      });
-      return out;
-    }"""
-    return scope.evaluate(js)
-
-
-def _run_browser(mode: str, job: dict) -> dict:
-    from playwright.sync_api import sync_playwright  # noqa: WPS433 — only in the subprocess
-    url = job["url"]
-    profile = job.get("profile") or {}
-    answers = job.get("answers") or {}
-    resume = job.get("resume") or {}
-    ats = detect_ats(url)
-    out: dict = {"ats": ats, "url": url, "status": "filled", "filled": [], "open": [], "blocking": [], "notes": []}
-    if ats == "workday":
-        out.update(status="needs_you", reason="This portal requires creating an account and signing in — Roster never does that for you. Your answers are prepared below; open the link and paste.")
-        return out
-    resume_path = ""
-    if resume.get("b64"):
-        _dir = tempfile.mkdtemp()
-        _name = re.sub(r"[^A-Za-z0-9._ -]+", "_", resume.get("name") or "resume.pdf") or "resume.pdf"
-        resume_path = os.path.join(_dir, _name)            # the ATS shows the file name — keep the user's
-        with open(resume_path, "wb") as fh:
-            fh.write(base64.b64decode(resume["b64"]))
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
-        ctx = browser.new_context(viewport={"width": 1200, "height": 1600},
-                                  user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-        page = ctx.new_page()
-        page.set_default_timeout(20000)
-        try:
-            page.goto(url, wait_until="domcontentloaded")
-            page.wait_for_timeout(2000)
-
-            def _n_inputs(sc):
-                try:
-                    return sum(1 for e in sc.locator("input:not([type=hidden]), textarea, select").all()[:80] if e.is_visible())
-                except Exception:  # noqa: BLE001
-                    return 0
-
-            def _form_scope():
-                """The document holding the application form: the page itself, or an embedded frame
-                (Greenhouse embeds on company career pages) — whichever shows the most inputs. Never
-                chosen by URL text (a Google proxy frame carries the parent's host in its query string)."""
-                best, best_n = page, _n_inputs(page)
-                for fr in page.frames:
-                    if fr == page.main_frame:
-                        continue
-                    try:
-                        n = _n_inputs(fr)
-                    except Exception:  # noqa: BLE001
-                        n = 0
-                    if n > best_n:
-                        best, best_n = fr, n
-                return best
-
-            scope = _form_scope()
-            # give a late-rendering form a fair chance BEFORE deciding to click anything (Greenhouse
-            # job-boards pages render the form inline a few seconds after load)
-            for _w in range(5):
-                if _n_inputs(scope) >= 4:
-                    break
-                page.wait_for_timeout(1500)
-                scope = _form_scope()
-            out["notes"].append(f"inputs visible before any click: {_n_inputs(scope)}")
-            # reach the FORM only when it is not already on the page: Lever's posting page → "Apply for this
-            # job"; Ashby → "Apply" tab. (Clicking a page's own "Apply" anchor when the form is already
-            # rendered re-mounts it and the next look sees nothing — the Gusto / Greenhouse case.)
-            if _n_inputs(scope) < 4:
-                for sel in ("a.postings-btn", "a:has-text('Apply for this job')", "button:has-text('Apply for this job')",
-                            "a:has-text('Apply Now')", "a:has-text('Apply now')", "a[href$='/apply']", "a[href*='/apply']",
-                            "a[href*='greenhouse.io']", "a[href*='lever.co']", "a[href*='ashbyhq.com']", "button:has-text('Apply')"):
-                    try:
-                        loc = page.locator(sel).first
-                        if loc.count() and loc.is_visible():
-                            loc.click()
-                            page.wait_for_timeout(2000)
-                            break
-                    except Exception:  # noqa: BLE001
-                        continue
-                scope = _form_scope()
-            page.set_default_timeout(4000)            # per-action cap from here on: a stuck field costs seconds
-            fields = []
-            for _try in range(8):                     # forms render late; look until inputs are there
-                fields = _discover_fields(scope)
-                if len(fields) >= 3:
-                    break
-                page.wait_for_timeout(1500)
-                scope = _form_scope()
-            out["notes"].append(f"fields discovered: {len(fields)} (ats {ats})")
-            try:
-                fu = scope.url if scope is not page else page.url
-                m_for = re.search(r"[?&]for=([A-Za-z0-9_-]+)", fu or "")
-                m_tok = re.search(r"[?&](?:token|gh_jid)=(\d+)", (fu or "") + "&" + (url or ""))
-                if "greenhouse.io/embed/job_app" in (fu or "") and m_for and m_tok:
-                    fu = f"https://job-boards.greenhouse.io/embed/job_app?for={m_for.group(1)}&token={m_tok.group(1)}"
-                out["form_url"] = fu or url
-            except Exception:  # noqa: BLE001
-                out["form_url"] = url
-            html = scope.content()
-            if _LOGIN_RX.search(scope.title() or "") and scope.locator("input[type=password]").count():
-                out.update(status="needs_you", reason="The apply page asks you to sign in — Roster never enters passwords. Open it yourself; your answers are ready below.")
-                return out
-            if not fields:
-                out.update(status="needs_you", reason="No application form was found on that page (it may open the form on another site). Open the link and apply there; your answers are prepared.")
-            plan = plan_fill(fields, profile, answers)
-            # custom dropdowns (react-select and kin) list their options only when opened: read them for
-            # the open questions so the review shows real choices instead of an empty picker
-            for q in [x for x in plan["open"] if x.get("combo") and not x.get("options") and x.get("selector")][:8]:
-                try:
-                    loc = scope.locator(q["selector"]).first
-                    before = set(t.strip() for t in scope.locator("[role='option']").all_inner_texts() if t.strip())
-                    loc.click()
-                    page.wait_for_timeout(500)
-                    owns = (loc.get_attribute("aria-controls") or loc.get_attribute("aria-owns") or "").strip()
-                    if owns:
-                        opts = [t.strip() for t in scope.locator(f"#{owns} [role='option']").all_inner_texts() if t.strip()]
-                    else:   # the options that APPEARED because of this click, not lists already on the page (a phone dial-code list)
-                        opts = [t.strip() for t in scope.locator("[role='option']").all_inner_texts() if t.strip() and t.strip() not in before]
-                    page.keyboard.press("Escape")
-                    opts = opts[:40]
-                    dialish = sum(1 for o in opts if re.search(r"^\+?\d{1,4}\b|\(\+\d", o))
-                    if opts and dialish < len(opts) / 2:
-                        q["options"] = opts
-                        q["kind"] = "select"
-                except Exception:  # noqa: BLE001
-                    pass
-            for q in plan["open"]:
-                q.pop("selector", None)
-            out["open"], out["blocking"] = plan["open"], plan["blocking"]
-            done = []
-            for f in plan["filled"]:
-                sel = f.get("selector")
-                if not sel and f["kind"] not in ("radio", "checkbox"):
-                    continue
-                try:
-                    loc = scope.locator(sel).first if sel else None
-                    if f["key"] == "resume":
-                        if resume_path:
-                            loc.set_input_files(resume_path)
-                            done.append({"label": f["label"], "value": resume.get("name") or "résumé"})
-                    elif f["kind"] == "select":
-                        loc.select_option(label=f["value"])
-                        done.append({"label": f["label"], "value": f["value"]})
-                    elif f["kind"] in ("radio", "checkbox"):
-                        osel = (f.get("option_selectors") or {}).get(f["value"]) or ""
-                        tgt = scope.locator(osel).first if osel else scope.locator(f"label:has-text('{f['value'][:60]}')").first
-                        try:
-                            tgt.check(force=True)
-                        except Exception:  # noqa: BLE001 — custom-styled inputs: click the label instead
-                            scope.locator(f"label:has-text('{f['value'][:60]}')").first.click()
-                        done.append({"label": f["label"], "value": f["value"]})
-                    elif f.get("combo"):
-                        loc.click()
-                        loc.fill(f["value"])
-                        page.wait_for_timeout(900)
-                        try:
-                            opt = scope.locator("[role='option']").first
-                            if opt.count() and opt.is_visible():
-                                opt.click()
-                            else:
-                                loc.press("ArrowDown"); loc.press("Enter")
-                        except Exception:  # noqa: BLE001
-                            loc.press("Enter")
-                        done.append({"label": f["label"], "value": f["value"], "source": f.get("source") or ""})
-                    else:
-                        loc.fill(f["value"])
-                        done.append({"label": f["label"], "value": f["value"], "source": f.get("source") or ""})
-                except Exception as e:  # noqa: BLE001 — one field failing is a note, not a failure
-                    out["notes"].append(f"couldn't fill '{f.get('label')}': {str(e)[:80]}")
-            out["filled"] = done
-            # a VISIBLE challenge widget blocks; an invisible score-only script is the page's own business
-            try:
-                out["captcha"] = any(scope.locator(sel).first.is_visible() for sel in
-                                     ("iframe[src*='recaptcha/api2/anchor']", "iframe[src*='hcaptcha.com']", ".g-recaptcha", ".h-captcha", "[data-sitekey]")
-                                     if scope.locator(sel).count())
-            except Exception:  # noqa: BLE001
-                out["captcha"] = False
-            page.wait_for_timeout(800)
-            if mode == "submit":
-                if out["blocking"]:
-                    out.update(status="needs_you", reason="Required questions still need your answer.")
-                elif out["captcha"]:
-                    out.update(status="needs_you", reason="This form shows a CAPTCHA challenge — Roster never solves one. Open the link; the fields are prepared.")
-                else:
-                    clicked = False
-                    for sel in ("button[type=submit]:has-text('Submit')", "input[type=submit]", "button:has-text('Submit application')",
-                                "button:has-text('Submit Application')", "button[type=submit]"):
-                        try:
-                            loc = scope.locator(sel).first
-                            if loc.count() and loc.is_visible():
-                                loc.click()
-                                clicked = True
-                                break
-                        except Exception:  # noqa: BLE001
-                            continue
-                    page.wait_for_timeout(4000)
-                    body = (page.content() or "")[:200000]
-                    ok = bool(re.search(r"(?i)thank you|application (has been )?(submitted|received)|we('ve| have) received|successfully", body))
-                    challenge = bool(re.search(r"(?i)recaptcha/api2/bframe|hcaptcha\.com/captcha", body))
-                    out.update(status=("submitted" if (clicked and ok) else "needs_you"),
-                               reason=("" if (clicked and ok) else ("A CAPTCHA challenge appeared on submit — Roster never solves one; open the link and finish there (your answers are prepared)."
-                                                                    if challenge else "No confirmation was seen after submitting — check the apply page yourself before retrying.")))
-            # the screenshot is THE FORM (the element), not the whole posting page — what the user reviews
-            try:
-                _frm = scope.locator("form").first
-                if _frm.count() and _frm.is_visible():
-                    _frm.scroll_into_view_if_needed()
-                    out["screenshot_b64"] = base64.b64encode(_frm.screenshot(type="png")).decode()
-                else:
-                    out["screenshot_b64"] = base64.b64encode(page.screenshot(full_page=True, type="png")).decode()
-            except Exception:  # noqa: BLE001
-                out["screenshot_b64"] = base64.b64encode(page.screenshot(full_page=True, type="png")).decode()
-            out["page_title"] = page.title()
-        except Exception as e:  # noqa: BLE001
-            out.update(status="failed", reason=f"{type(e).__name__}: {str(e)[:160]}")
-        finally:
-            try:
-                browser.close()
-            except Exception:  # noqa: BLE001
-                pass
-            if resume_path:
-                try:
-                    os.remove(resume_path); os.rmdir(os.path.dirname(resume_path))
-                except Exception:  # noqa: BLE001
-                    pass
-    return out
-
-
-if __name__ == "__main__":
-    mode, inp, outp = sys.argv[1], sys.argv[2], sys.argv[3]
-    job = json.load(open(inp))
-    res = _run_browser(mode, job)
-    json.dump(res, open(outp, "w"))
+# The browser executor that used to live here (headless Chromium on the server) is GONE: job sites
+# refuse automated submits from datacenter browsers and a bookmarklet cannot attach files or enter
+# cross-origin frames. Planning is definition-driven (apply_adapters + apply_plan); execution is the
+# Roster Apply Chrome extension in the user's own browser (apps/extension). The helpers above are the
+# code-owned mapping the planner uses.

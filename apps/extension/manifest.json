@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Roster Apply",
+  "version": "0.1.0",
+  "description": "Fills a job application in YOUR browser from the plan you reviewed in Roster. Never submits — you do.",
+  "permissions": ["storage", "activeTab", "scripting", "webNavigation"],
+  "host_permissions": [
+    "https://*.greenhouse.io/*",
+    "https://jobs.lever.co/*",
+    "https://jobs.ashbyhq.com/*",
+    "https://roster-api-production-3405.up.railway.app/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://*.greenhouse.io/*", "https://jobs.lever.co/*", "https://jobs.ashbyhq.com/*"],
+      "js": ["content.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ],
+  "action": { "default_popup": "popup.html", "default_title": "Roster Apply" }
+}

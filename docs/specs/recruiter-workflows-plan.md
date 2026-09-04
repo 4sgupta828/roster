@@ -199,7 +199,21 @@ Camera / photo capture retired from the intake.
 Level (owner correction): a PREFERENCE, never a gate — "Center around <level>" with a segmented width
 (exactly · nearby too · wide); exact leads, nearby next, unstated neutral, the rest ranked last, nothing
 dropped (`apply_level_pref`, `level_span`).
-CONTROLLED AUTO-APPLY (owner ask): `apps/api/auto_apply.py` runs headless Chromium in a SEPARATE
+AUTO-APPLY v2 (panel-reviewed 2026-09-04 — Codex, Gemini, code-grounded agent all: "server plans,
+client executes, user governs"): the headless browser and the bookmarklet are GONE. `apps/api/
+apply_adapters/` reads each ATS's OWN form definition (Greenhouse public questions API incl. company
+pages that embed via gh_jid; Ashby `ApiJobPosting` GraphQL — which exposes Boolean questions the DOM
+never showed; Lever's server-rendered apply page); `apps/api/apply_plan.py` binds every question to an
+answer (profile → answer bank → policy-gated LLM draft) with policy classes `identity_sensitive` (EEO:
+profile default or the decline option, never drafted), `legal` (standing pre-approval only), `file`,
+`never` (CAPTCHA / password), and `blocking` for required-and-open. `POST /me/applications` plans (no
+browser); the review shows the whole plan, editable; the Roster Apply Chrome extension
+(`apps/extension`, `/extension.zip`) fills the live form in the USER's browser — every frame, résumé
+via DataTransfer, React-safe setters, Ashby Yes/No buttons — reports field by field (`/executed`),
+has no submit code, and records a submission only when it observes the confirmation. Workday and
+unknown hosts have no adapter → unplannable by construction. `scripts/apply_smoke.py` = planner
+coverage over live definitions, no browser. The paragraph below describes the retired v1 for history.
+CONTROLLED AUTO-APPLY v1 (retired): `apps/api/auto_apply.py` ran headless Chromium in a SEPARATE
 process (Playwright in the image): `fill` opens the apply page, reaches the form (Lever/Ashby apply
 buttons, Greenhouse iframe), maps labels → Apply-profile fields in code, uploads the résumé, screenshots,
 STOPS; open questions are listed (model drafts for free-text only, labeled; selects never guessed);
