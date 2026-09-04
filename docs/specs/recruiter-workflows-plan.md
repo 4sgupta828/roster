@@ -219,6 +219,14 @@ company careers page / embedded gh_jid, Lever, Ashby posting + apply URLs, Workd
 2026-09-04. Lessons baked in: choose the form document by visible inputs, never by URL text; wait for
 late forms before clicking any "Apply"; cap per-action waits after load (a stuck react-select cost
 minutes); comboboxes are typed then picked; asterisk variants (✱) mark required.
+SUBMIT PATH (owner test 2026-09-04, Dedalus/Ashby): the server-side submit was refused by the job site
+("We couldn't submit your application — problem with the network connection" = bot defense against a
+headless datacenter browser). Design change: the agent PREPARES and SHOWS (a table of what it filled +
+the prepare screenshot, kept intact); the reliable submit is the user's own browser via a
+per-application bookmarklet that inlines the profile + this application's answers (drafts kept,
+choices made, standard answers) and fills the live form by label — verified on Ashby: 15 fields incl.
+radios; "I submitted it" records the outcome (`submitted_by='user'`). "Try submitting from Roster"
+stays as the secondary path with a progress state; its outcome screenshot is stored separately.
 Verified locally on a real Greenhouse form (fill only). A prod prepare test with a throwaway identity
 was declined by the session's safety classifier; the first prod run is the owner with their own profile.
 Still open: the eval layer (invariants + relevance judge + traps, run twice); (the ranking root cause — titles
