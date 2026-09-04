@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import json
 import os
+import sys
 import urllib.parse
 import re
 import time
@@ -1153,6 +1154,17 @@ class SavedSearchIn(BaseModel):
 
 class ProfileIn(BaseModel):
     profile: dict                   # the superset candidate profile (free-form; FE defines the fields)
+
+
+class ApplicationIn(BaseModel):
+    job_url: str
+    job_ref: str = ""
+    company: str = ""
+    title: str = ""
+
+
+class ApplicationAnswersIn(BaseModel):
+    answers: dict = {}
 
 
 class ResumeIn(BaseModel):
@@ -5978,6 +5990,150 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         return {"company": co, "connections": conns, "connections_total": summ.get("count", 0),
                 "managers": mgrs.get("managers") or [], "n_at_company": mgrs.get("n_at_company", 0),
                 "discipline": mgrs.get("discipline") or [], "note": " ".join(note)}
+
+    # ---- CONTROLLED AUTO-APPLY: queue → fill (screenshot, stop) → the user approves → submit ----
+    async def _apply_run(mode: str, *, url: str, profile: dict, answers: dict, resume: dict | None) -> dict:
+        """Run the browser filler in a SEPARATE process (Chromium never enters the web process), capped."""
+        import json as _json
+        import subprocess
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fi:
+            _json.dump({"url": url, "profile": profile, "answers": answers, "resume": resume or {}}, fi)
+            inp = fi.name
+        outp = inp + ".out"
+
+        def _go():
+            try:
+                r = subprocess.run([sys.executable, "-m", "api.auto_apply", mode, inp, outp], capture_output=True, text=True, timeout=150)
+                if r.returncode != 0:
+                    return {"status": "failed", "reason": ("the browser step failed: " + (r.stderr or "")[-200:]).strip()}
+                return _json.load(open(outp))
+            except subprocess.TimeoutExpired:
+                return {"status": "failed", "reason": "the apply page took too long to load — try again, or open the link yourself"}
+            except Exception as e:  # noqa: BLE001
+                return {"status": "failed", "reason": f"{type(e).__name__}: {str(e)[:120]}"}
+            finally:
+                for pth in (inp, outp):
+                    try:
+                        os.remove(pth)
+                    except Exception:  # noqa: BLE001
+                        pass
+        return await asyncio.to_thread(_go)
+
+    async def _apply_profile_and_resume(store, user_id: str) -> tuple[dict, dict | None]:
+        prof = ((await store.get_profile(user_id)).get("profile") or {})
+        parsed = ((await store.get_parse(user_id)).get("profile") or {})
+        merged = {**{k: v for k, v in parsed.items() if isinstance(v, (str, int, float)) and v not in ("", None)}, **{k: v for k, v in prof.items() if v not in ("", None)}}
+        rz = await store.get_resume(user_id)
+        resume = {"name": rz[0], "b64": base64.b64encode(rz[2]).decode()} if rz else None
+        return merged, resume
+
+    async def _draft_open_answers(open_qs: list[dict], profile: dict, resume_text: str) -> dict:
+        """DRAFTS for free-text questions the profile can't answer directly — labeled as drafts, from the
+        profile / résumé only (temperature 0); selects and yes/no questions are never guessed."""
+        qs = [q for q in open_qs if q.get("kind") in ("text", "textarea") and len(q.get("label") or "") > 8][:6]
+        if not qs:
+            return {}
+        try:
+            from pydantic import BaseModel as _BM
+
+            class _Drafts(_BM):
+                answers: list[str] = []
+            llm = build_llm(mode=resolve_mode())
+            comp = await llm.complete(
+                system=("You draft short answers (≤ 80 words each) to job-application questions for a candidate, using ONLY "
+                        "the profile and résumé text given. If the material doesn't answer a question, return an empty string "
+                        "for it — never invent facts, dates, employers, or authorizations. Return answers in the same order."),
+                messages=[{"role": "user", "content": "PROFILE: " + json.dumps({k: v for k, v in profile.items() if k != "resume"})[:3000]
+                                                       + "\n\nRÉSUMÉ:\n" + (resume_text or "")[:6000]
+                                                       + "\n\nQUESTIONS:\n" + "\n".join(f"{i + 1}. {q['label']}" for i, q in enumerate(qs))}],
+                response_format=_Drafts, max_tokens=900, temperature=0.0)
+            ans = list(getattr(comp.parsed, "answers", []) or [])
+            return {q["label"]: a.strip() for q, a in zip(qs, ans) if (a or "").strip()}
+        except Exception:  # noqa: BLE001 — drafts are a convenience
+            return {}
+
+    @app.post("/me/applications")
+    async def me_application_queue(body: ApplicationIn, x_roster_token: str = Header(default="")) -> dict:
+        """Queue a posting and FILL it now: the agent opens the apply page, fills what the Apply profile +
+        résumé answer, uploads the résumé, screenshots, and stops (status filled / needs_you). Nothing
+        is submitted here."""
+        store, user = await _require_user(x_roster_token)
+        from api.auto_apply import detect_ats
+        url = (body.job_url or "").strip()
+        if not url.startswith("http"):
+            raise HTTPException(status_code=400, detail="job_url required")
+        if not _url_is_public(url):
+            raise HTTPException(status_code=400, detail="that link isn't a public apply page")
+        profile, resume = await _apply_profile_and_resume(store, user["id"])
+        if not (profile.get("email") and (profile.get("first_name") or profile.get("last_name"))):
+            raise HTTPException(status_code=400, detail="fill your Apply profile first (name + email) under Account → Apply profile")
+        rec = await store.queue_application(user["id"], job_ref=body.job_ref or "", company=body.company or "", title=body.title or "",
+                                            url=url, ats=detect_ats(url))
+        res = await _apply_run("fill", url=url, profile=profile, answers={}, resume=resume)
+        drafts = {}
+        if res.get("open"):
+            parsed = ((await store.get_parse(user["id"])).get("profile") or {})
+            drafts = await _draft_open_answers(res["open"], profile, str(parsed.get("_resume_text") or ""))
+        shot = base64.b64decode(res["screenshot_b64"]) if res.get("screenshot_b64") else None
+        await store.update_application(user["id"], rec["id"], status=res.get("status") or "failed", reason=res.get("reason") or "",
+                                       filled=res.get("filled") or [], open_questions=res.get("open") or [], drafts=drafts, screenshot=shot)
+        return {"id": rec["id"], "status": res.get("status"), "reason": res.get("reason") or "", "filled": res.get("filled") or [],
+                "open": res.get("open") or [], "blocking": res.get("blocking") or [], "drafts": drafts, "captcha": bool(res.get("captcha"))}
+
+    @app.get("/me/applications")
+    async def me_applications(x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return {"applications": await store.list_applications(user["id"])}
+
+    @app.get("/me/applications/{app_id}")
+    async def me_application(app_id: int, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        d = await store.get_application(user["id"], app_id)
+        if not d:
+            raise HTTPException(status_code=404, detail="not found")
+        return d
+
+    @app.post("/me/applications/{app_id}/answers")
+    async def me_application_answers(app_id: int, body: ApplicationAnswersIn, x_roster_token: str = Header(default="")) -> dict:
+        """The user's answers to the open questions (edited drafts included). Saved; used on approve."""
+        store, user = await _require_user(x_roster_token)
+        d = await store.get_application(user["id"], app_id)
+        if not d:
+            raise HTTPException(status_code=404, detail="not found")
+        answers = {str(k)[:200]: str(v)[:4000] for k, v in (body.answers or {}).items()}
+        await store.update_application(user["id"], app_id, answers={**(d.get("answers") or {}), **answers})
+        return {"ok": True}
+
+    @app.post("/me/applications/{app_id}/approve")
+    async def me_application_approve(app_id: int, x_roster_token: str = Header(default="")) -> dict:
+        """THE ONLY PATH THAT SUBMITS. Re-opens the page, fills profile + saved answers, clicks submit,
+        records the confirmation. Stops as needs_you on a CAPTCHA, a login wall, or a required
+        question without an answer."""
+        store, user = await _require_user(x_roster_token)
+        d = await store.get_application(user["id"], app_id)
+        if not d:
+            raise HTTPException(status_code=404, detail="not found")
+        if d.get("status") == "submitted":
+            return {"id": app_id, "status": "submitted", "note": "already submitted"}
+        profile, resume = await _apply_profile_and_resume(store, user["id"])
+        await store.update_application(user["id"], app_id, status="approved")
+        res = await _apply_run("submit", url=d["url"], profile=profile, answers=(d.get("answers") or {}), resume=resume)
+        shot = base64.b64decode(res["screenshot_b64"]) if res.get("screenshot_b64") else None
+        fields = {"status": res.get("status") or "failed", "reason": res.get("reason") or "", "filled": res.get("filled") or [],
+                  "open_questions": res.get("open") or []}
+        if shot:
+            fields["screenshot"] = shot
+        if res.get("status") == "submitted":
+            from datetime import datetime, timezone
+            fields["submitted_at"] = datetime.now(timezone.utc)
+        await store.update_application(user["id"], app_id, **fields)
+        return {"id": app_id, "status": res.get("status"), "reason": res.get("reason") or ""}
+
+    @app.delete("/me/applications/{app_id}")
+    async def me_application_delete(app_id: int, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return {"ok": await store.delete_application(user["id"], app_id)}
 
     @app.post("/me/resume")
     async def me_upload_resume(body: ResumeIn, x_roster_token: str = Header(default="")) -> dict:

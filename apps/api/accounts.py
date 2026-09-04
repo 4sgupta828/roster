@@ -17,6 +17,7 @@ Best-effort like SessionStore: a persistence failure must never break an answer.
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import secrets
@@ -154,6 +155,29 @@ CREATE TABLE IF NOT EXISTS roster_connection (
     uploaded_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_rc_user_co ON roster_connection (user_id, company_norm);
+-- APPLICATIONS (controlled auto-apply): one row per posting the user queued. The agent fills and
+-- screenshots (status filled / needs_you); the user approves; only then it submits. Tracks what was
+-- applied to, where, when, with what answers. Screenshot = the filled form as the user saw it.
+CREATE TABLE IF NOT EXISTS roster_application (
+    id            BIGSERIAL PRIMARY KEY,
+    user_id       TEXT NOT NULL,
+    job_ref       TEXT NOT NULL DEFAULT '',
+    company       TEXT NOT NULL DEFAULT '',
+    title         TEXT NOT NULL DEFAULT '',
+    url           TEXT NOT NULL,
+    ats           TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'queued',   -- queued|filled|needs_you|approved|submitted|failed
+    reason        TEXT NOT NULL DEFAULT '',
+    filled        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    open_questions JSONB NOT NULL DEFAULT '[]'::jsonb,
+    answers       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    drafts        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    screenshot    BYTEA,
+    submitted_at  TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ra_user ON roster_application (user_id, created_at DESC);
 """
 
 _MAX_TOKENS_PER_USER = 10   # prune oldest beyond this (a lost device's token eventually ages out)
@@ -642,6 +666,64 @@ class AccountStore:
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             await conn.execute("DELETE FROM roster_connection WHERE user_id = $1", user_id)
+
+    # ---- applications (controlled auto-apply) ----
+    async def queue_application(self, user_id: str, *, job_ref: str, company: str, title: str, url: str, ats: str) -> dict:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            r = await conn.fetchrow(
+                """INSERT INTO roster_application (user_id, job_ref, company, title, url, ats)
+                   VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, status, created_at""",
+                user_id, job_ref[:300], company[:160], title[:200], url[:1000], ats[:40])
+        return {"id": int(r["id"]), "status": r["status"], "created_at": str(r["created_at"])}
+
+    async def update_application(self, user_id: str, app_id: int, **fields) -> bool:
+        """Set any of: status, reason, filled, open_questions, answers, drafts, screenshot (bytes), submitted_at."""
+        await self._ensure()
+        allowed = {"status", "reason", "filled", "open_questions", "answers", "drafts", "screenshot", "submitted_at"}
+        sets, vals = [], []
+        for k, v in fields.items():
+            if k not in allowed:
+                continue
+            vals.append(json.dumps(v) if k in ("filled", "open_questions", "answers", "drafts") else v)
+            sets.append(f"{k} = ${len(vals) + 2}" + ("::jsonb" if k in ("filled", "open_questions", "answers", "drafts") else ""))
+        if not sets:
+            return False
+        async with (await self._get_pool()).acquire() as conn:
+            res = await conn.execute(f"UPDATE roster_application SET {', '.join(sets)}, updated_at = now() WHERE user_id = $1 AND id = $2",
+                                     user_id, int(app_id), *vals)
+        return res.endswith("1")
+
+    async def list_applications(self, user_id: str, *, limit: int = 200) -> list[dict]:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT id, job_ref, company, title, url, ats, status, reason, submitted_at, created_at, updated_at,
+                          jsonb_array_length(open_questions) AS n_open, (screenshot IS NOT NULL) AS has_shot
+                   FROM roster_application WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2""", user_id, int(limit))
+        return [{**dict(r), "submitted_at": (str(r["submitted_at"]) if r["submitted_at"] else None),
+                 "created_at": str(r["created_at"]), "updated_at": str(r["updated_at"])} for r in rows]
+
+    async def get_application(self, user_id: str, app_id: int) -> dict | None:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            r = await conn.fetchrow("SELECT * FROM roster_application WHERE user_id = $1 AND id = $2", user_id, int(app_id))
+        if not r:
+            return None
+        d = dict(r)
+        for k in ("filled", "open_questions", "answers", "drafts"):
+            d[k] = json.loads(d[k]) if isinstance(d[k], str) else (d[k] or ([] if k in ("filled", "open_questions") else {}))
+        shot = d.pop("screenshot", None)
+        d["screenshot_b64"] = base64.b64encode(shot).decode() if shot else ""
+        for k in ("submitted_at", "created_at", "updated_at"):
+            d[k] = str(d[k]) if d.get(k) else None
+        return d
+
+    async def delete_application(self, user_id: str, app_id: int) -> bool:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            res = await conn.execute("DELETE FROM roster_application WHERE user_id = $1 AND id = $2", user_id, int(app_id))
+        return res.endswith("1")
 
     async def set_parse_pending(self, user_id: str) -> None:
         await self._ensure()

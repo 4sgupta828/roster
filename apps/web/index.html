@@ -639,6 +639,8 @@
   .mapbar .mb-btn{font-size:.78rem;font-weight:600;color:var(--gold);background:var(--panel);border:1px solid var(--hair);border-radius:999px;padding:.45rem .8rem;min-height:40px;cursor:pointer;text-decoration:none;white-space:nowrap;}
   .mapbar .mb-btn:hover{border-color:var(--gold);}
   .mapbar .mb-meta{flex-basis:100%;font-size:.74rem;color:var(--muted);}
+  .appqrow{display:flex;flex-direction:column;gap:.2rem;margin:.4rem 0;font-size:.84rem;}
+  .appqrow .appq{font:inherit;font-size:.84rem;border:1px solid var(--hair);border-radius:6px;padding:.35rem .5rem;background:var(--panel);color:var(--ink);}
   .rev-box{flex-basis:100%;border:1px solid var(--hair);border-left:3px solid var(--gold);border-radius:8px;padding:.5rem .7rem;background:var(--panel);font-size:.82rem;color:var(--ink);}
   .rev-h{font-weight:640;font-size:.84rem;margin-bottom:.25rem;}
   .rev-sum{margin:.15rem 0 .3rem;line-height:1.45;}
@@ -1959,6 +1961,11 @@
         </div>
       </section>
       <section class="acctcard acctwide">
+        <h3>Applications <span class="acctmuted">prepared by the agent · you approve every submit</span></h3>
+        <p class="acctcardsub">"📨 Prepare application" on a job card fills the form from your Apply profile and résumé and stops at review. Nothing is sent until you approve it here. CAPTCHAs and sign-in portals are never bypassed — those show as "needs you" with your answers ready to paste.</p>
+        <div id="applist"><span class="acctmuted">none yet</span></div>
+      </section>
+      <section class="acctcard acctwide">
         <h3>Shortlists <span class="acctmuted">saved people &amp; jobs</span></h3>
         <div class="acctrow">
           <input id="newbucket" type="text" placeholder="New shortlist (e.g. ML hires)" />
@@ -2140,6 +2147,12 @@
   </div>
 </div>
 <!-- Reach out: draft a message → hand off to whatever channel the person shared (no auto-send) -->
+<div class="idmodal" id="appmodal" hidden style="overflow:auto;">
+  <div class="idcard" style="max-width:820px;width:min(96vw,820px);max-height:92vh;overflow:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;"><h2 style="margin:0;font-size:1.05rem;">Review application</h2><button type="button" class="histbtn" id="appclose">✕ Close</button></div>
+    <div id="appbody" style="margin-top:.6rem;"></div>
+  </div>
+</div>
 <div class="idmodal" id="reachmodal" hidden>
   <div class="idcard" style="max-width:560px;width:94%;text-align:left;">
     <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -2804,6 +2817,7 @@ function jobsMarkup(d){
     window.JOBS_INDEX = window.JOBS_INDEX || {}; window.JOBS_INDEX[String(jref)] = j;
     const apply = j.url?`<button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="Analyze your fit, then draft the application with the Apply Assistant">✨ Apply with assistant</button><a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer" title="Go straight to the company's apply page">Apply directly ↗</a>`:"";
     const intro = j.company ? `<button type="button" class="ppl-lnk job-intro" data-ref="${esc(String(jref))}" title="Who you know at this company (your LinkedIn export) and likely hiring managers from public data">🤝 Intro path</button>` : "";
+    const prep = j.url ? `<button type="button" class="ppl-lnk job-prep" data-ref="${esc(String(jref))}" title="The agent opens the apply page, fills it from your Apply profile + résumé, screenshots it and stops — you approve before anything is submitted">📨 Prepare application</button>` : "";
     const jsave = `<div class="ppl-acts"><button type="button" class="rsave" data-kind="job" data-ref="${esc(String(jref))}" data-label="${esc(j.title||"")}" data-sub="${esc(((j.company||"").replace(/_/g," "))+(j.location?" · "+j.location:""))}" data-url="${esc(j.url||"")}" title="Save to a shortlist">☆</button></div>`;
     const pct = j.match_pct ? ` <span style="color:var(--gold);font-weight:700;font-size:.76rem;">${j.match_pct}% match</span>` : "";
     const jr = (j.reasons&&j.reasons.length) ? ` <span style="color:var(--muted);font-size:.74rem;">· ${j.reasons.map(esc).join(" · ")}</span>` : "";
@@ -2811,7 +2825,7 @@ function jobsMarkup(d){
       <span class="ppl-name">${esc(j.title)}${pct}</span>
       <span class="ppl-blurb">${co}${j.source?` · via ${esc(j.source)}`:""}${jr}</span>
       ${loc||dept?`<span class="ppl-tags">${loc}${dept}</span>`:""}
-      ${apply||intro?`<span class="ppl-links">${apply}${intro}</span>`:""}<span class="js-introbox" data-ref="${esc(String(jref))}"></span>${typeof jobFeedbackMarkup==="function" ? jobFeedbackMarkup(String(jref), j) : ""}<span class="js-sumbox" data-ref="${esc(String(jref))}">${typeof openSummaryMarkup==="function"?openSummaryMarkup(jref, j):""}</span></span></div>`;
+      ${apply||intro?`<span class="ppl-links">${apply}${intro}${prep}</span>`:""}<span class="js-prepbox" data-ref="${esc(String(jref))}"></span><span class="js-introbox" data-ref="${esc(String(jref))}"></span>${typeof jobFeedbackMarkup==="function" ? jobFeedbackMarkup(String(jref), j) : ""}<span class="js-sumbox" data-ref="${esc(String(jref))}">${typeof openSummaryMarkup==="function"?openSummaryMarkup(jref, j):""}</span></span></div>`;
   }).join("");
   const at = (q.company&&q.company.length)?` at ${esc(q.company.join(", ").replace(/_/g," "))}`:"";
   const bcJ = d.brief_contract || null;
@@ -7191,7 +7205,7 @@ async function openAccount(){
   const em = $("#acctemail"); if(em) em.textContent = (USER && USER.email) || "";
   const av = $("#acctavatar"); if(av) av.textContent = ((USER && USER.email) || "◈").slice(0,1);
   await openSaved();
-  refreshConnStatus();
+  refreshConnStatus(); renderApplications();
 }
 // LinkedIn connections (the user's own export) — the intro path's private half
 async function refreshConnStatus(){
@@ -7394,6 +7408,78 @@ async function doReach(ch){
   try{ await fetch("/me/outreach", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
     body: JSON.stringify({person_ref:REACH_REF, person_name:(REACH_PERSON||{}).name||"", channel:ch.kind, message:msg})}); }catch(e){}
 }
+// CONTROLLED AUTO-APPLY: prepare (fill + screenshot, stop) → review → approve (the only submit path)
+const APP_STATUS = {queued:"queued", filled:"ready for your review", needs_you:"needs you", approved:"submitting…", submitted:"submitted ✓", failed:"failed"};
+async function prepareApplication(ref){
+  if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
+  const j = (window.JOBS_INDEX||{})[ref] || (window.MATCH_JOBS||{})[ref]; if(!j || !j.url) return;
+  const boxes = document.querySelectorAll(`.js-prepbox[data-ref="${CSS.escape(String(ref))}"]`);
+  const set = html => boxes.forEach(b => { b.innerHTML = html; });
+  set(`<div class="sethint" style="margin-top:.4rem;">📨 Opening the apply page and filling it from your profile… (≈30s; nothing is submitted)</div>`);
+  try{
+    const r = await fetch("/me/applications", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({job_url: j.url, job_ref: String(ref), company: (j.company||"").replace(/_/g," "), title: j.title||""})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ set(`<div class="sethint" style="margin-top:.4rem;">${esc(d.detail||"Couldn't prepare that application.")}</div>`); return; }
+    const st = APP_STATUS[d.status] || d.status;
+    set(`<div class="ppl-cov" style="margin-top:.45rem;border-left-color:var(--gold);"><b>Application ${esc(st)}</b>${d.reason?` — ${esc(d.reason)}`:""}<br>
+      <span class="ppl-fc" style="text-transform:none;">${(d.filled||[]).length} field${(d.filled||[]).length===1?"":"s"} filled${(d.open||[]).length?` · ${(d.open||[]).length} question${(d.open||[]).length===1?"":"s"} for you${(d.blocking||[]).length?` (${(d.blocking||[]).length} required)`:""}`:""}${d.captcha?" · this form has a CAPTCHA — you'll finish the submit yourself":""}</span><br>
+      <button type="button" class="ppl-lnk" onclick="event.stopPropagation(); openApplication(${Number(d.id)})">Review &amp; approve</button></div>`);
+  }catch(e){ set(`<div class="sethint" style="margin-top:.4rem;">Couldn't prepare that application — try again.</div>`); }
+}
+async function renderApplications(){
+  const el = $("#applist"); if(!el) return;
+  try{
+    const d = await (await fetch("/me/applications", {headers: authHeaders()})).json(); const apps = d.applications||[];
+    if(!apps.length){ el.innerHTML = "<span class='acctmuted'>none yet — use 📨 Prepare application on a job card</span>"; return; }
+    el.innerHTML = apps.map(a => `<div class="bkt" style="border:1px solid var(--hair);border-radius:8px;padding:.5rem;margin:.35rem 0;display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;">
+      <b style="flex:1 1 240px;">${esc(a.title||"role")} <span style="font-weight:400;color:var(--muted);">@ ${esc(a.company||"")}</span></b>
+      <span class="ppl-tag" style="${a.status==="submitted"?"background:rgba(19,122,84,.12);color:var(--verified);":a.status==="needs_you"?"background:rgba(var(--gold-rgb),.14);color:var(--gold-strong);":""}">${esc(APP_STATUS[a.status]||a.status)}</span>
+      <span class="acctmuted">${esc(String(a.submitted_at||a.created_at||"").slice(0,16))}${a.n_open?` · ${a.n_open} question${a.n_open===1?"":"s"}`:""}</span>
+      <button type="button" class="histbtn" onclick="openApplication(${Number(a.id)})">Review</button>
+      <a class="histbtn" href="${esc(a.url)}" target="_blank" rel="noopener noreferrer">Open ↗</a>
+      <button type="button" class="histbtn" onclick="deleteApplication(${Number(a.id)})" title="Remove from the list">✕</button></div>`).join("");
+  }catch(e){ el.innerHTML = "<span class='acctmuted'>couldn't load</span>"; }
+}
+async function deleteApplication(id){ try{ await fetch(`/me/applications/${id}`, {method:"DELETE", headers: authHeaders()}); }catch(e){} renderApplications(); }
+async function openApplication(id){
+  let d; try{ const r = await fetch(`/me/applications/${id}`, {headers: authHeaders()}); if(!r.ok) return; d = await r.json(); }catch(e){ return; }
+  const m = $("#appmodal"); if(!m) return;
+  const qs = (d.open_questions||[]).map((q,i) => { const key = q.label; const val = (d.answers||{})[key] || (d.drafts||{})[key] || "";
+    const isDraft = !(d.answers||{})[key] && !!(d.drafts||{})[key];
+    const input = q.kind === "select" || q.kind === "radio" ? `<select data-q="${esc(key)}" class="appq"><option value="">— choose —</option>${(q.options||[]).map(o=>`<option${val===o?" selected":""}>${esc(o)}</option>`).join("")}</select>`
+      : `<textarea data-q="${esc(key)}" class="appq" rows="${q.kind==="textarea"?4:1}" placeholder="${q.required?"required":"optional"}">${esc(val)}</textarea>`;
+    return `<label class="appqrow"><span>${esc(key)}${q.required?" <b style='color:var(--gold-strong)'>*</b>":""}${isDraft?" <span class='ppl-fc' style='text-transform:none;'>· draft from your résumé — check it</span>":""}</span>${input}</label>`; }).join("");
+  const shot = d.screenshot_b64 ? `<img src="data:image/png;base64,${d.screenshot_b64}" alt="the filled form" style="max-width:100%;border:1px solid var(--hair);border-radius:8px;max-height:60vh;object-fit:contain;object-position:top;">` : "";
+  $("#appbody").innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;"><b>${esc(d.title||"role")}</b> <span style="color:var(--muted)">@ ${esc(d.company||"")}</span> <span class="ppl-tag">${esc(APP_STATUS[d.status]||d.status)}</span> <a class="histbtn" href="${esc(d.url)}" target="_blank" rel="noopener noreferrer">Open apply page ↗</a></div>
+    ${d.reason?`<div class="ppl-cov" style="margin-top:.5rem;border-left-color:var(--gold);">${esc(d.reason)}</div>`:""}
+    <div class="ppl-fc" style="text-transform:none;margin:.5rem 0 .3rem;">Filled from your profile: ${esc((d.filled||[]).map(f=>f.label).join(" · ")||"nothing yet")}</div>
+    ${qs?`<div style="margin:.4rem 0;"><b style="font-size:.86rem;">Questions for you</b>${qs}</div>`:""}
+    ${shot}
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.7rem;align-items:center;">
+      ${qs?`<button type="button" class="histbtn" onclick="saveApplicationAnswers(${Number(d.id)})">Save answers</button>`:""}
+      ${d.status!=="submitted"?`<button type="button" class="idgo" style="width:auto;" onclick="approveApplication(${Number(d.id)})">✓ Approve &amp; submit</button>`:""}
+      <span class="acctmuted" id="appnote">${d.status==="submitted"?"Submitted "+esc(String(d.submitted_at||"").slice(0,16)):"Submitting sends this application to the company. Roster never submits without this click."}</span>
+    </div>`;
+  m.dataset.id = String(d.id); m.hidden = false;
+}
+async function saveApplicationAnswers(id){
+  const answers = {}; document.querySelectorAll("#appbody .appq").forEach(el => { if(el.value) answers[el.dataset.q] = el.value; });
+  try{ await fetch(`/me/applications/${id}/answers`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({answers})}); $("#appnote").textContent = "Answers saved."; }catch(e){ $("#appnote").textContent = "Couldn't save."; }
+}
+async function approveApplication(id){
+  await saveApplicationAnswers(id);
+  $("#appnote").textContent = "Submitting… (≈30s)";
+  try{
+    const r = await fetch(`/me/applications/${id}/approve`, {method:"POST", headers: authHeaders()}); const d = await r.json().catch(()=>({}));
+    $("#appnote").textContent = (APP_STATUS[d.status]||d.status||"") + (d.reason?" — "+d.reason:"");
+    renderApplications(); if(d.status === "submitted") setTimeout(()=>openApplication(id), 400);
+  }catch(e){ $("#appnote").textContent = "Couldn't submit — try again."; }
+}
+document.addEventListener("click", (e)=>{
+  const pb = e.target.closest(".job-prep");
+  if(pb){ e.preventDefault(); e.stopPropagation(); prepareApplication(pb.dataset.ref); return; }
+});
+$("#appclose") && $("#appclose").addEventListener("click", ()=>{ $("#appmodal").hidden = true; });
 // INTRO PATH on a job card: who you know at the company (your own export) + likely hiring managers
 // from Roster's public index, each with its evidence label. Roster never sends anything.
 async function showIntroPath(ref){
