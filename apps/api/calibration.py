@@ -270,9 +270,10 @@ async def phrase_delta(llm, delta: dict, edits: list[str]) -> str:
              f"ADDED (first few): {names('added') or 'none'}\nREMOVED (first few): {names('removed') or 'none'}")
     try:
         comp = await llm.complete(
-            system=("You write ONE plain sentence (≤ 35 words) saying what changed in a recruiter's revised "
-                    "candidate list. Use ONLY the counts and the named people given. No adjectives about quality, "
-                    "no advice, no reasons, no numbers that are not in the facts, no people not named."),
+            system=("You write ONE plain sentence (≤ 35 words) saying what changed in a revised results list "
+                    "(people or job postings — call them 'people' or 'roles' as the names suggest, never "
+                    "'candidates'). Use ONLY the counts and the names given. No adjectives about quality, no "
+                    "advice, no reasons, no numbers that are not in the facts, no names not given."),
             messages=[{"role": "user", "content": facts[:2000]}],
             response_format=_WhatChanged, max_tokens=200, temperature=0.0)
         line = (getattr(comp.parsed, "line", "") or "").strip()

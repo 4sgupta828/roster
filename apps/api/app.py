@@ -5749,8 +5749,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 old = rows_by_ref.get(row_ref(j))
                 if old and old.get("summary"):
                     j["summary"] = old["summary"]
+            _lv = re.search(r"(?i)\b(intern|junior|entry[- ]level|new grad|mid|senior|staff|principal|lead|director|vp|head of)\b", m.get("brief") or "")
             bc = job_brief_contract(question=m.get("brief") or "", job_must=must, scope=res.get("geo_scope"),
-                                    profile_text=_prof_text, matched_on=("resume" if _cv else "description"))
+                                    profile_text=(_prof_text if _cv else ""), matched_on=("resume" if _cv else "description"),
+                                    stated_seniority=(_lv.group(1).lower() if _lv else ""))
             bc["assumptions"] = ["filters fixed by this revision (your feedback) — the brief's wording only ranks"] + [a for a in bc.get("assumptions") or []][:2]
             new_cov = {**cov, "geo_scope": res.get("geo_scope"), "brief_contract": bc, "note": res.get("note") or ""}
             delta = diff_rows(rows, new_rows)
