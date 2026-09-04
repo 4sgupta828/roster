@@ -72,8 +72,8 @@ def _body_backfill_loop(body_boards: int, pause: int) -> None:
             stopped = asyncio.run(_is_stopped())
         except Exception:   # noqa: BLE001
             stopped = False
-        if not stopped:
-            _run_chunk(["scripts/ingest_jobs.py", "--bodies", str(body_boards)])
+        if not stopped:   # --live: without it the script is a DRY run (the serial leg ran dry for a day)
+            _run_chunk(["scripts/ingest_jobs.py", "--live", "--bodies", str(body_boards)])
         time.sleep(pause)
 
 
