@@ -167,6 +167,12 @@ title words / level, or discipline / skills / level read from the résumé; Angl
 variants; "reads as" = the planner's intent; assumptions; a "Ranked by" line). Q&A builds its strip in
 the FE from the router decision (route label + confidence, entities, axes) and the source counts, with
 a "Held to evidence" line (claims backed by located verbatim quotes). One renderer (`briefStripMarkup`).
+Attached résumés (owner report "Q&A doesn't look at the attached PDF"): the Q&A router classified the
+QUESTION text only, so a résumé PDF rode along as a vision document unless the words happened to say
+"résumé". Now a résumé-shaped attachment DECIDES the route (`jobs_for_profile`) in Q&A, and Jobs
+sends attachments at all (it did not before). PDFs parse DOCLING-first (the converter the profile
+parser already uses) in a separate process with a 60s cap and a content-hash cache; the text layer
+is the fallback. Verified in prod: Jobs 26s cold / 1s cached, Q&A routes with high confidence.
 Still open from the panel: ingest posting BODIES into the job index (the ranking root cause — titles
 only today; needs a cost projection), a level tag with an explicit "unstated" state + filter chips,
 and the landing re-shuffle (only after intake proves out).
