@@ -30,7 +30,7 @@ _FIELD_RX: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(?i)(graduation|grad)\s*(year|date)|year of graduation|end date"), "grad_year"),
     (re.compile(r"(?i)(state|province).{0,20}(reside|live|located)|which (u\.?s\.? )?state"), "region"),
     (re.compile(r"(?i)^where are you (located|based)|^current location|^location\b"), "city"),
-    (re.compile(r"(?i)^(full\s*)?name$|^your name|^name\s*\*?$"), "full_name"),
+    (re.compile(r"(?i)^(full\s*)?(legal\s*)?name$|^your (full |legal )?name|^name\s*\*?$|^legal name"), "full_name"),
     (re.compile(r"(?i)e-?mail"), "email"),
     (re.compile(r"(?i)phone|mobile|telephone"), "phone"),
     (re.compile(r"(?i)linkedin"), "linkedin"),
@@ -140,6 +140,7 @@ _STANDARD_QS: list[tuple[re.Pattern, str, str]] = [
     (re.compile(r"(?i)start date|when (can|could) you start|availability|notice period"), "earliest_start_date", "text"),
     (re.compile(r"(?i)how did you (hear|find|learn)|where did you (hear|find)|referral source|source"), "source", "text"),
     (re.compile(r"(?i)visa (status|type)|immigration status"), "visa_status", "text"),
+    (re.compile(r"(?i)(links? to|share links|relevant (technical )?work|work samples|code samples|portfolio|github|open[- ]source)"), "work_links", "text"),
     (re.compile(r"(?i)gender identity|^gender|what gender"), "gender", "text"),
     (re.compile(r"(?i)racial|race|ethnic"), "race_ethnicity", "text"),
     (re.compile(r"(?i)veteran"), "veteran_status", "text"),
@@ -184,7 +185,10 @@ def standard_answer(label: str, kind: str, options: list[str], profile: dict) ->
     for rx, key, mode in _STANDARD_QS:
         if not rx.search(label or ""):
             continue
-        v = str(profile.get(key) or "").strip()
+        if key == "work_links":     # the profile's public work, most technical first
+            v = "\n".join(str(profile.get(k) or "").strip() for k in ("github", "portfolio_website", "linkedin") if str(profile.get(k) or "").strip())
+        else:
+            v = str(profile.get(key) or "").strip()
         if not v:
             return ""
         if mode == "yn":
@@ -217,8 +221,12 @@ def plan_fill(fields: list[dict], profile: dict, answers: dict | None = None) ->
         if not label.strip():
             continue                       # a nameless input (a combobox's search box) is not a question
         _bank = {norm_question(k): v for k, v in (answers or {}).items()}
-        ans = ((answers or {}).get(label) or (answers or {}).get(f.get("name") or "") or _bank.get(norm_question(label))
-               or standard_answer(label, kind, f.get("options") or [], profile))
+        ans = (answers or {}).get(label) or (answers or {}).get(f.get("name") or "") or _bank.get(norm_question(label))
+        src = "saved answer" if ans else ""
+        if not ans:
+            ans = standard_answer(label, kind, f.get("options") or [], profile)
+            src = "profile" if ans else ""
+        f = {**f, "source": src}
         if ans and kind in ("radio", "checkbox", "select") and (f.get("options") or []) and ans not in (f.get("options") or []):
             ans = _pick_option(f.get("options") or [], str(ans))          # a remembered answer must name a real option
         if ans:
@@ -228,8 +236,12 @@ def plan_fill(fields: list[dict], profile: dict, answers: dict | None = None) ->
                 continue
             if any(q["label"] == label for q in open_q):
                 continue                       # a combobox renders two inputs for one question
+            if re.fullmatch(r"(?i)other( \(please specify\))?|please specify|if other, please specify", label) and not f.get("required"):
+                continue                       # the free-text box under a checkbox group is not a question
+            pk = next((key for rx, key, _m in _STANDARD_QS if rx.search(label)), "")
             open_q.append({"label": label, "kind": kind, "required": bool(f.get("required")), "options": f.get("options") or [],
-                           "voluntary": bool(_VOLUNTARY_RX.search(label))})
+                           "voluntary": bool(_VOLUNTARY_RX.search(label)), "profile_key": pk, "combo": bool(f.get("combo")),
+                           "selector": f.get("selector") or ""})
     return {"filled": filled, "open": open_q,
             "blocking": [q for q in open_q if q["required"]]}
 
@@ -403,6 +415,22 @@ def _run_browser(mode: str, job: dict) -> dict:
             if not fields:
                 out.update(status="needs_you", reason="No application form was found on that page (it may open the form on another site). Open the link and apply there; your answers are prepared.")
             plan = plan_fill(fields, profile, answers)
+            # custom dropdowns (react-select and kin) list their options only when opened: read them for
+            # the open questions so the review shows real choices instead of an empty picker
+            for q in [x for x in plan["open"] if x.get("combo") and not x.get("options") and x.get("selector")][:8]:
+                try:
+                    loc = scope.locator(q["selector"]).first
+                    loc.click()
+                    page.wait_for_timeout(500)
+                    opts = [t.strip() for t in scope.locator("[role='option']").all_inner_texts() if t.strip()][:40]
+                    page.keyboard.press("Escape")
+                    if opts:
+                        q["options"] = opts
+                        q["kind"] = "select"
+                except Exception:  # noqa: BLE001
+                    pass
+            for q in plan["open"]:
+                q.pop("selector", None)
             out["open"], out["blocking"] = plan["open"], plan["blocking"]
             done = []
             for f in plan["filled"]:
@@ -438,10 +466,10 @@ def _run_browser(mode: str, job: dict) -> dict:
                                 loc.press("ArrowDown"); loc.press("Enter")
                         except Exception:  # noqa: BLE001
                             loc.press("Enter")
-                        done.append({"label": f["label"], "value": f["value"]})
+                        done.append({"label": f["label"], "value": f["value"], "source": f.get("source") or ""})
                     else:
                         loc.fill(f["value"])
-                        done.append({"label": f["label"], "value": f["value"]})
+                        done.append({"label": f["label"], "value": f["value"], "source": f.get("source") or ""})
                 except Exception as e:  # noqa: BLE001 — one field failing is a note, not a failure
                     out["notes"].append(f"couldn't fill '{f.get('label')}': {str(e)[:80]}")
             out["filled"] = done

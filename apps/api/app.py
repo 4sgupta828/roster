@@ -6183,12 +6183,25 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         fields = {"status": res.get("status") or "failed", "reason": res.get("reason") or "", "filled": res.get("filled") or [],
                   "open_questions": res.get("open") or []}
         if shot:
-            fields["screenshot"] = shot
+            fields["submit_screenshot"] = shot            # the PREPARE screenshot stays: it is what the user reviewed
         if res.get("status") == "submitted":
             from datetime import datetime, timezone
             fields["submitted_at"] = datetime.now(timezone.utc)
+            fields["submitted_by"] = "roster"
+        elif res.get("status") == "needs_you" and not res.get("blocking"):
+            fields["reason"] = ((res.get("reason") or "") + " The job site may be refusing automated submits — use “Fill this form in my browser” and submit there.").strip()
         await store.update_application(user["id"], app_id, **fields)
-        return {"id": app_id, "status": res.get("status"), "reason": res.get("reason") or ""}
+        return {"id": app_id, "status": res.get("status"), "reason": fields.get("reason") or ""}
+
+    @app.post("/me/applications/{app_id}/mark-submitted")
+    async def me_application_mark_submitted(app_id: int, x_roster_token: str = Header(default="")) -> dict:
+        """The user submitted in their OWN browser (the bookmarklet path): record it so the tracker is complete."""
+        store, user = await _require_user(x_roster_token)
+        from datetime import datetime, timezone
+        ok = await store.update_application(user["id"], app_id, status="submitted", reason="", submitted_at=datetime.now(timezone.utc), submitted_by="user")
+        if not ok:
+            raise HTTPException(status_code=404, detail="not found")
+        return {"id": app_id, "status": "submitted"}
 
     @app.delete("/me/applications/{app_id}")
     async def me_application_delete(app_id: int, x_roster_token: str = Header(default="")) -> dict:

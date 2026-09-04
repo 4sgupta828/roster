@@ -7449,40 +7449,82 @@ async function renderApplications(){
 async function deleteApplication(id){ try{ await fetch(`/me/applications/${id}`, {method:"DELETE", headers: authHeaders()}); }catch(e){} renderApplications(); }
 async function openApplication(id){
   let d; try{ const r = await fetch(`/me/applications/${id}`, {headers: authHeaders()}); if(!r.ok) return; d = await r.json(); }catch(e){ return; }
+  if(!Object.keys(APPLY_PROFILE||{}).length){ try{ const pr = await (await fetch("/me/profile", {headers: authHeaders()})).json(); APPLY_PROFILE = splitStruct(pr.profile||{}); }catch(e){} }
   const m = $("#appmodal"); if(!m) return;
+  const PK_LABEL = {requires_sponsorship:"Work authorization → Require visa sponsorship?", us_authorized_to_work:"Work authorization → Authorized to work?", willing_to_relocate:"Preferences → Willing to relocate?", previously_worked_here:"Preferences → Previously worked at the company?", preferred_name:"Contact → Preferred name", pronouns:"Preferences → Pronouns", work_location:"Preferences → Where you expect to work", remote_preference:"Preferences → Remote preference", desired_salary:"Preferences → Desired salary", earliest_start_date:"Preferences → Earliest start date", source:"Preferences → How did you hear about us?", visa_status:"Work authorization → Visa status", gender:"Voluntary EEO → Gender", race_ethnicity:"Voluntary EEO → Race / Ethnicity", veteran_status:"Voluntary EEO → Veteran status", disability_status:"Voluntary EEO → Disability status", ack_privacy:"Standing acknowledgements → privacy notice", ack_certify:"Standing acknowledgements → certification", postal_code:"Contact → ZIP / Postal code", country:"Contact → Country", school:"Education → School", highest_degree:"Education → Highest degree", field_of_study:"Education → Field of study", grad_year:"Education → Graduation year", region:"Contact → State / Region", city:"Contact → City", hispanic_latino:"Voluntary EEO → Hispanic/Latino?", work_links:"Links → GitHub / Portfolio"};
   const qrow = (q) => { const key = q.label; const val = (d.answers||{})[key] || (d.drafts||{})[key] || "";
     const isDraft = !(d.answers||{})[key] && !!(d.drafts||{})[key];
     const input = (q.kind === "select" || q.kind === "radio" || q.kind === "checkbox") && (q.options||[]).length ? `<select data-q="${esc(key)}" class="appq"><option value="">— choose —</option>${(q.options||[]).map(o=>`<option${val===o?" selected":""}>${esc(o)}</option>`).join("")}</select>`
-      : `<textarea data-q="${esc(key)}" class="appq" rows="${q.kind==="textarea"?4:1}" placeholder="${q.required?"required":"optional"}">${esc(val)}</textarea>`;
-    return `<label class="appqrow"><span>${esc(key)}${q.required?" <b style='color:var(--gold-strong)'>*</b>":""}${isDraft?" <span class='ppl-fc' style='text-transform:none;'>· draft from your résumé — check it</span>":""}</span>${input}</label>`; };
+      : `<textarea data-q="${esc(key)}" class="appq" rows="${q.kind==="textarea"?4:1}" placeholder="${(q.kind==="select"||q.combo)?"type the choice exactly as the form offers it":(q.required?"required":"optional")}">${esc(val)}</textarea>`;
+    const hint = q.profile_key && PK_LABEL[q.profile_key] ? ` <span class='ppl-fc' style='text-transform:none;'>· answer it once under Account → Apply profile (${esc(PK_LABEL[q.profile_key])}) and it won't be asked again</span>` : "";
+    return `<label class="appqrow"><span>${esc(key)}${q.required?" <b style='color:var(--gold-strong)'>*</b>":""}${isDraft?" <span class='ppl-fc' style='text-transform:none;'>· draft from your résumé — check it</span>":""}${hint}</span>${input}</label>`; };
   const mainQs = (d.open_questions||[]).filter(q => !q.voluntary).map(qrow).join("");
   const volQs = (d.open_questions||[]).filter(q => q.voluntary).map(qrow).join("");
   const qs = mainQs + (volQs ? `<details style="margin-top:.5rem;"><summary class="ppl-fc" style="text-transform:none;cursor:pointer;">Voluntary self-identification (${(d.open_questions||[]).filter(q=>q.voluntary).length}) — optional; leave blank unless you want to answer</summary>${volQs}</details>` : "");
-  const shot = d.screenshot_b64 ? `<div style="margin-top:.5rem;"><b style="font-size:.86rem;">The form as the agent left it</b> <span class="ppl-fc" style="text-transform:none;">· scroll inside</span><div style="max-height:70vh;overflow:auto;border:1px solid var(--hair);border-radius:8px;margin-top:.3rem;"><img src="data:image/png;base64,${d.screenshot_b64}" alt="the filled form" style="width:100%;display:block;"></div></div>` : "";
-  $("#appbody").innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;"><b>${esc(d.title||"role")}</b> <span style="color:var(--muted)">@ ${esc(d.company||"")}</span> <span class="ppl-tag">${esc(APP_STATUS[d.status]||d.status)}</span> <a class="histbtn" href="${esc(d.url)}" target="_blank" rel="noopener noreferrer">Open apply page ↗</a></div>
+  // WHAT THE AGENT FILLED — as a table you can read, not only a picture
+  const filledRows = (d.filled||[]).map(f => `<tr><td style="color:var(--muted);padding:.15rem .5rem .15rem 0;vertical-align:top;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis;">${esc(f.label||"")}</td><td style="padding:.15rem 0;vertical-align:top;">${esc(String(f.value||"").slice(0,300))}${f.source==="saved answer"?" <span class='ppl-fc' style='text-transform:none;'>· your saved answer</span>":""}</td></tr>`).join("");
+  const filledBlock = filledRows ? `<details open style="margin:.5rem 0;"><summary style="cursor:pointer;font-size:.86rem;"><b>What the agent filled</b> <span class="ppl-fc" style="text-transform:none;">(${(d.filled||[]).length} fields)</span></summary><div style="overflow-x:auto;"><table style="font-size:.82rem;border-collapse:collapse;margin-top:.3rem;">${filledRows}</table></div></details>` : `<div class="ppl-fc" style="text-transform:none;margin:.5rem 0;">Nothing filled yet.</div>`;
+  const shot = d.screenshot_b64 ? `<details open style="margin-top:.5rem;"><summary style="cursor:pointer;font-size:.86rem;"><b>The filled form, as prepared</b> <span class="ppl-fc" style="text-transform:none;">· scroll inside</span></summary><div style="max-height:70vh;overflow:auto;border:1px solid var(--hair);border-radius:8px;margin-top:.3rem;"><img src="data:image/png;base64,${d.screenshot_b64}" alt="the filled form" style="width:100%;display:block;"></div></details>` : "";
+  const sshot = d.submit_screenshot_b64 ? `<details style="margin-top:.5rem;"><summary style="cursor:pointer;font-size:.86rem;"><b>What the job site showed after the submit attempt</b></summary><div style="max-height:60vh;overflow:auto;border:1px solid var(--hair);border-radius:8px;margin-top:.3rem;"><img src="data:image/png;base64,${d.submit_screenshot_b64}" alt="after submit" style="width:100%;display:block;"></div></details>` : "";
+  const bm = appBookmarkletHref(d);
+  $("#appbody").innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;"><b>${esc(d.title||"role")}</b> <span style="color:var(--muted)">@ ${esc(d.company||"")}</span> <span class="ppl-tag">${esc(APP_STATUS[d.status]||d.status)}${d.submitted_by==="user"?" (by you)":""}</span> <a class="histbtn" href="${esc(d.url)}" target="_blank" rel="noopener noreferrer">Open apply page ↗</a></div>
     ${d.reason?`<div class="ppl-cov" style="margin-top:.5rem;border-left-color:var(--gold);">${esc(d.reason)}</div>`:""}
-    <div class="ppl-fc" style="text-transform:none;margin:.5rem 0 .3rem;">Filled from your profile: ${esc((d.filled||[]).map(f=>f.label).join(" · ")||"nothing yet")}</div>
+    ${filledBlock}
     ${qs?`<div style="margin:.4rem 0;"><b style="font-size:.86rem;">Questions for you</b>${qs}</div>`:""}
-    ${shot}
+    ${shot}${sshot}
+    <div class="ppl-cov" style="margin-top:.8rem;border-left-color:var(--gold);">
+      <b>Submit it yourself, with everything prefilled</b> <span class="ppl-fc" style="text-transform:none;">— the reliable path: job sites often refuse automated submits</span><br>
+      <span style="font-size:.82rem;">1. Drag this to your bookmarks bar once: <a id="appbm" href="${bm}" style="display:inline-block;padding:.25rem .6rem;border:1px solid var(--gold);border-radius:6px;color:var(--gold);text-decoration:none;font-weight:600;" onclick="event.preventDefault(); alert('Drag this button to your bookmarks bar, then click it on the apply page.');">⚡ Fill this application</a>
+      &nbsp;2. <a href="${esc(d.url)}" target="_blank" rel="noopener noreferrer">Open the apply page ↗</a>, click the bookmark, attach your résumé, review, submit.
+      &nbsp;3. <button type="button" class="histbtn" onclick="markSubmitted(${Number(d.id)})">✓ I submitted it</button></span>
+    </div>
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.7rem;align-items:center;">
       ${qs?`<button type="button" class="histbtn" onclick="saveApplicationAnswers(${Number(d.id)})">Save answers</button>`:""}
-      ${d.status!=="submitted"?`<button type="button" class="idgo" style="width:auto;" onclick="approveApplication(${Number(d.id)})">✓ Approve &amp; submit</button>`:""}
-      <span class="acctmuted" id="appnote">${d.status==="submitted"?"Submitted "+esc(String(d.submitted_at||"").slice(0,16)):"Submitting sends this application to the company. Roster never submits without this click."}</span>
+      ${d.status!=="submitted"?`<button type="button" class="histbtn" id="appapprove" onclick="approveApplication(${Number(d.id)})">Try submitting from Roster</button>`:""}
+      <span class="acctmuted" id="appnote">${d.status==="submitted"?"Submitted "+esc(String(d.submitted_at||"").slice(0,16)):"Roster never submits without your click; the job site may still refuse an automated submit."}</span>
     </div>`;
   m.dataset.id = String(d.id); m.hidden = false;
+}
+// A per-application bookmarklet: the Apply profile PLUS this application's answers (drafts you kept,
+// choices you made, standard answers) inlined — runs in YOUR browser on the apply page, fills what it can
+// by label, and never submits. No token, no network call from the job site.
+function appBookmarkletHref(d){
+  const prof = {...(APPLY_PROFILE||{})};
+  if(prof.first_name || prof.last_name) prof.full_name = ((prof.first_name||"")+" "+(prof.last_name||"")).trim();
+  const A = {};
+  (d.filled||[]).forEach(f => { if(f.label && f.value && f.value !== "<résumé file>" && !/résumé|resume/i.test(f.label)) A[f.label] = String(f.value); });
+  Object.entries(d.drafts||{}).forEach(([k,v]) => { if(v) A[k] = String(v); });
+  Object.entries(d.answers||{}).forEach(([k,v]) => { if(v) A[k] = String(v); });
+  const code = "(function(){var A="+JSON.stringify(A)+";var P="+JSON.stringify(prof)+";"
+    + "function norm(s){return (s||'').toLowerCase().replace(/[^a-z0-9 ]+/g,' ').replace(/\\s+/g,' ').trim();}"
+    + "var AN={};Object.keys(A).forEach(function(k){AN[norm(k)]=A[k];});"
+    + "function lab(el){var s='';if(el.id){var l=document.querySelector('label[for='+JSON.stringify(el.id)+']');if(l)s=l.innerText;}if(!s){var p=el.closest('label');if(p)s=p.innerText;}if(!s)s=el.getAttribute('aria-label')||'';if(!s){var w=el.closest('fieldset,[role=group],[role=radiogroup],div');var q=w&&w.querySelector('label,legend,[class*=label]');if(q)s=q.innerText;}return norm(s||el.placeholder||el.name);}"
+    + "function grp(el){var t=(el.type||'').toLowerCase();var a=el.parentElement;while(a&&a!==document.body&&a.tagName!=='FORM'&&a.querySelectorAll('input[type='+t+']').length<2)a=a.parentElement;if(!a||a===document.body||a.tagName==='FORM')return null;var c=a.children;for(var i=0;i<c.length;i++){if(c[i].querySelector('input,select,textarea'))break;var tx=norm(c[i].innerText);if(tx)return tx;}var n=a;for(var k=0;k<5&&n;k++){var sb=n.previousElementSibling;while(sb){var tx2=norm(sb.innerText);if(tx2&&!sb.querySelector('input,select,textarea'))return tx2;if(sb.querySelector('input,select,textarea'))break;sb=sb.previousElementSibling;}n=n.parentElement;}return null;}"
+    + "function setv(el,v){var pr=el.tagName==='TEXTAREA'?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype;var d=Object.getOwnPropertyDescriptor(pr,'value');if(d&&d.set)d.set.call(el,v);else el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));}"
+    + "function ans(l){if(!l)return '';if(AN[l])return AN[l];var ks=Object.keys(AN);for(var i=0;i<ks.length;i++){if(ks[i].length>12&&(l.indexOf(ks[i])>=0||ks[i].indexOf(l)>=0))return AN[ks[i]];}return '';}"
+    + "var n=0,seen={};document.querySelectorAll('input,textarea,select').forEach(function(el){var t=(el.type||'').toLowerCase();if(['hidden','password','file','submit','button','image'].indexOf(t)>=0)return;"
+    + "if(t==='radio'||t==='checkbox'){var g=grp(el)||'';var v=ans(g);if(!v)return;var ot=norm(el.labels&&el.labels[0]?el.labels[0].innerText:(el.closest('label')||{}).innerText||el.value);if(ot&&(ot===norm(v)||ot.indexOf(norm(v))>=0||norm(v).indexOf(ot)>=0)){if(!el.checked){el.click();n++;}}return;}"
+    + "var l=lab(el);var v2=ans(l);if(!v2){var G=grp(el);if(G)v2=ans(G);}if(!v2)return;if(seen[l+'|'+v2])return;seen[l+'|'+v2]=1;"
+    + "if(el.tagName==='SELECT'){for(var j=0;j<el.options.length;j++){var o=norm(el.options[j].text);if(o===norm(v2)||o.indexOf(norm(v2))>=0||norm(v2).indexOf(o)>=0){el.selectedIndex=j;el.dispatchEvent(new Event('change',{bubbles:true}));n++;break;}}}else{setv(el,v2);n++;}});"
+    + "alert('Roster: filled '+n+' fields from your prepared application. Attach your résumé, review everything, then submit.');})();";
+  return "javascript:" + encodeURIComponent(code);
+}
+async function markSubmitted(id){
+  try{ const r = await fetch(`/me/applications/${id}/mark-submitted`, {method:"POST", headers: authHeaders()}); if(r.ok){ $("#appnote").textContent = "Recorded as submitted by you."; renderApplications(); setTimeout(()=>openApplication(id), 300); } }catch(e){}
 }
 async function saveApplicationAnswers(id){
   const answers = {}; document.querySelectorAll("#appbody .appq").forEach(el => { if(el.value) answers[el.dataset.q] = el.value; });
   try{ await fetch(`/me/applications/${id}/answers`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({answers})}); $("#appnote").textContent = "Answers saved."; }catch(e){ $("#appnote").textContent = "Couldn't save."; }
 }
 async function approveApplication(id){
+  const b = $("#appapprove"); if(b){ b.disabled = true; b.textContent = "Submitting… (up to a minute)"; }
   await saveApplicationAnswers(id);
-  $("#appnote").textContent = "Submitting… (≈30s)";
+  $("#appnote").textContent = "Submitting from Roster… this takes up to a minute; keep this open.";
   try{
     const r = await fetch(`/me/applications/${id}/approve`, {method:"POST", headers: authHeaders()}); const d = await r.json().catch(()=>({}));
     $("#appnote").textContent = (APP_STATUS[d.status]||d.status||"") + (d.reason?" — "+d.reason:"");
-    renderApplications(); if(d.status === "submitted") setTimeout(()=>openApplication(id), 400);
-  }catch(e){ $("#appnote").textContent = "Couldn't submit — try again."; }
+    renderApplications(); setTimeout(()=>openApplication(id), 600);
+  }catch(e){ $("#appnote").textContent = "Couldn't submit — try again."; if(b){ b.disabled = false; b.textContent = "Try submitting from Roster"; } }
 }
 document.addEventListener("click", (e)=>{
   const pb = e.target.closest(".job-prep");

@@ -178,6 +178,8 @@ CREATE TABLE IF NOT EXISTS roster_application (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_ra_user ON roster_application (user_id, created_at DESC);
+ALTER TABLE roster_application ADD COLUMN IF NOT EXISTS submit_screenshot BYTEA;   -- the page after a submit attempt (the prepare shot stays)
+ALTER TABLE roster_application ADD COLUMN IF NOT EXISTS submitted_by TEXT;          -- 'roster' | 'user' (submitted in their own browser)
 -- ANSWER BANK: every answer the user gives in an application review, keyed by the normalized question,
 -- so the same question is filled next time (the user reviews instead of retyping).
 CREATE TABLE IF NOT EXISTS roster_answer_bank (
@@ -690,7 +692,7 @@ class AccountStore:
     async def update_application(self, user_id: str, app_id: int, **fields) -> bool:
         """Set any of: status, reason, filled, open_questions, answers, drafts, screenshot (bytes), submitted_at."""
         await self._ensure()
-        allowed = {"status", "reason", "filled", "open_questions", "answers", "drafts", "screenshot", "submitted_at"}
+        allowed = {"status", "reason", "filled", "open_questions", "answers", "drafts", "screenshot", "submitted_at", "submit_screenshot", "submitted_by"}
         sets, vals = [], []
         for k, v in fields.items():
             if k not in allowed:
@@ -725,6 +727,8 @@ class AccountStore:
             d[k] = json.loads(d[k]) if isinstance(d[k], str) else (d[k] or ([] if k in ("filled", "open_questions") else {}))
         shot = d.pop("screenshot", None)
         d["screenshot_b64"] = base64.b64encode(shot).decode() if shot else ""
+        sshot = d.pop("submit_screenshot", None)
+        d["submit_screenshot_b64"] = base64.b64encode(sshot).decode() if sshot else ""
         for k in ("submitted_at", "created_at", "updated_at"):
             d[k] = str(d[k]) if d.get(k) else None
         return d

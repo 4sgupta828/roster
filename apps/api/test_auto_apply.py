@@ -80,3 +80,11 @@ def test_standard_questions_are_answered_from_the_profile_and_the_answer_bank():
     assert norm_question("Why do you want to work here?!") == "why do you want to work here"
     fields = [{"label": "Why do you want to work here?", "kind": "textarea", "name": "q", "required": True}]
     assert plan_fill(fields, {}, {"Why do you want to work here?!": "Because of the mission."})["filled"][0]["value"] == "Because of the mission."
+
+
+def test_links_to_work_and_legal_name_come_from_the_profile():
+    from api.auto_apply import standard_answer
+    prof = {"github": "https://github.com/ada", "portfolio_website": "https://ada.dev", "linkedin": "https://linkedin.com/in/ada"}
+    assert standard_answer("Please share links to your most relevant technical work.", "textarea", [], prof) == "https://github.com/ada\nhttps://ada.dev\nhttps://linkedin.com/in/ada"
+    assert map_label("Full Legal Name") == "full_name" and map_label("Legal name *") == "full_name"
+    assert standard_answer("Please share links to your most relevant technical work.", "textarea", [], {}) == ""
