@@ -280,7 +280,8 @@ def _discover_fields(scope) -> list[dict]:
         return "";
       };
       const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return (r.width > 0 || el.type === "file") && s.visibility !== "hidden" && s.display !== "none"; };
-      document.querySelectorAll("input, textarea, select").forEach(el => {
+      document.querySelectorAll("input, textarea, select").forEach((el, idx) => {
+        el.setAttribute("data-roster-i", String(idx));       // a selector that exists even without id / name
         const type = (el.type || "text").toLowerCase();
         if (["hidden", "submit", "button", "image", "reset"].includes(type)) return;
         if (!vis(el)) return;
@@ -291,7 +292,7 @@ def _discover_fields(scope) -> list[dict]:
         const grp = groupOf(el); const gk = grp ? grp.dataset.rosterGk : "";
         const sel = el.id ? `#${CSS.escape(el.id)}` : (el.name ? `[name="${el.name}"]` : "");
         out.push({ label: lab(el), group_label: gl, group_key: gk, name: el.name || "", id: el.id || "", kind, required: !!el.required || el.getAttribute("aria-required") === "true" || /\*\s*$/.test(gl) || /\*\s*$/.test(lab(el)),
-                   placeholder: el.placeholder || "", options, selector: (kind === "radio" || kind === "checkbox") && el.id ? `#${CSS.escape(el.id)}` : sel });
+                   placeholder: el.placeholder || "", options, selector: `[data-roster-i="${idx}"]` });
       });
       return out;
     }"""
@@ -351,10 +352,10 @@ def _run_browser(mode: str, job: dict) -> dict:
             done = []
             for f in plan["filled"]:
                 sel = f.get("selector")
-                if not sel:
+                if not sel and f["kind"] not in ("radio", "checkbox"):
                     continue
                 try:
-                    loc = scope.locator(sel).first
+                    loc = scope.locator(sel).first if sel else None
                     if f["key"] == "resume":
                         if resume_path:
                             loc.set_input_files(resume_path)
@@ -364,10 +365,11 @@ def _run_browser(mode: str, job: dict) -> dict:
                         done.append({"label": f["label"], "value": f["value"]})
                     elif f["kind"] in ("radio", "checkbox"):
                         osel = (f.get("option_selectors") or {}).get(f["value"]) or ""
-                        if osel:
-                            scope.locator(osel).first.check()
-                        else:
-                            scope.locator(f"label:has-text('{f['value']}')").first.click()
+                        tgt = scope.locator(osel).first if osel else scope.locator(f"label:has-text('{f['value'][:60]}')").first
+                        try:
+                            tgt.check(force=True)
+                        except Exception:  # noqa: BLE001 — custom-styled inputs: click the label instead
+                            scope.locator(f"label:has-text('{f['value'][:60]}')").first.click()
                         done.append({"label": f["label"], "value": f["value"]})
                     else:
                         loc.fill(f["value"])

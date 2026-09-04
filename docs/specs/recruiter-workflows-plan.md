@@ -207,6 +207,13 @@ STOPS; open questions are listed (model drafts for free-text only, labeled; sele
 required question without an answer (needs_you), and records the confirmation. Workday-style portals
 are needs_you (Roster never creates accounts / types passwords). Tracked in `roster_application`;
 Account → Applications lists status, review modal with screenshot + editable answers, Approve & submit.
+Upfront answers (owner: "source every field in the account; the user mostly reviews"): the Apply
+profile carries the recurring ATS questions (sponsorship, work authorization, relocation, preferred
+name, pronouns, work location, salary, start date, source, voluntary EEO, standing acknowledgements);
+`auto_apply.standard_answer` maps a question class → profile key → the real option; radios/checkboxes
+sharing a container are ONE question with options; an answer bank (`roster_answer_bank`) remembers every
+reviewed answer by normalized question. Jobs search for a signed-in user with a résumé is PROFILE-
+STEERED (the query steers the résumé-match engine); Match-résumé results are full job cards + Job Map.
 Verified locally on a real Greenhouse form (fill only). A prod prepare test with a throwaway identity
 was declined by the session's safety classifier; the first prod run is the owner with their own profile.
 Still open: the eval layer (invariants + relevance judge + traps, run twice); (the ranking root cause — titles
