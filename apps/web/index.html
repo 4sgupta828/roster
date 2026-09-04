@@ -3641,6 +3641,9 @@ function render(data, target, opts){
     const html = STRUCTURED
       ? mdToHtml(data.answer)
       : linkCitationRefs(esc(data.answer));
+    // the SAME interpreted-brief strip as Talent Map / Jobs: how the question was read, what it is
+    // about, which sources answered, and how the answer is held to evidence
+    if(data.qa_route && typeof qaBriefStrip === "function") parts.push(qaBriefStrip(data));
     parts.push(`<div class="answer${STRUCTURED?" md":""}">${html}</div>`);
     if(STRUCTURED && /<mark class="hl/.test(html)){
       parts.push(`<div class="hllegend" hidden>

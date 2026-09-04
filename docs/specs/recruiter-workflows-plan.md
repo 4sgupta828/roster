@@ -161,6 +161,12 @@ résumé; a meta-question ("can I give you my resume…") gets a "attach or desc
 résumé matching for titles that STATE a different discipline than the profile ("title says
 frontend"); never a gate. (4) Loading state on the Jobs submit. Verified in prod with the tester's
 exact query: senior SRE/infra titles lead; frontend/security titles left the top 40.
+Consistency (owner, 2026-09-04): every surface shows the SAME interpreted-brief strip. Jobs returns a
+`brief_contract` (`job_brief_contract`: Must = company / location / must-have toggles / scope; Prefer =
+title words / level, or discipline / skills / level read from the résumé; Angles = the planner's
+variants; "reads as" = the planner's intent; assumptions; a "Ranked by" line). Q&A builds its strip in
+the FE from the router decision (route label + confidence, entities, axes) and the source counts, with
+a "Held to evidence" line (claims backed by located verbatim quotes). One renderer (`briefStripMarkup`).
 Still open from the panel: ingest posting BODIES into the job index (the ranking root cause — titles
 only today; needs a cost projection), a level tag with an explicit "unstated" state + filter chips,
 and the landing re-shuffle (only after intake proves out).
