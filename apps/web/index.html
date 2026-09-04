@@ -8482,9 +8482,10 @@ async function syncMapReview(ref, state, tags, note){
   if(note !== undefined) body.note = note;
   if(!m.is_owner){ const rr = reviewerRec() || {}; body.reviewer_key = rr.reviewer_key || ""; body.reviewer_name = rr.reviewer_name || ""; body.reviewer_token = rr.reviewer_token || ""; }
   const rec = {...cur, state: body.state, tags: (tags !== undefined ? tags : (cur.tags||[])), note: (note !== undefined ? note : (cur.note||"")), reviewer_key: m.is_owner ? "" : reviewerKey(), reviewer_name: m.is_owner ? "" : reviewerName(), entity_id: ref};
-  if(m.is_owner){ m.reviews = m.reviews || {}; m.reviews[ref] = rec; }
-  else { m.feedback = (m.feedback||[]).filter(f => !(f.entity_id === ref && f.reviewer_key === reviewerKey())).concat([rec]); }
   rec.updated_at = new Date().toISOString().replace("T", " ");   // counts as NEW feedback for the revise button
+  if(m.is_owner){ m.reviews = m.reviews || {}; m.reviews[ref] = rec; }
+  const myKey = m.is_owner ? "" : reviewerKey();
+  m.feedback = (m.feedback||[]).filter(f => !(f.entity_id === ref && (f.reviewer_key||"") === myKey)).concat([rec]);
   try{ await fetch(`/maps/${encodeURIComponent(m.id)}/review`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(body)}); }catch(e){}
   if(typeof refreshMapBar === "function") refreshMapBar();
 }
