@@ -408,6 +408,15 @@ def _run_browser(mode: str, job: dict) -> dict:
                 page.wait_for_timeout(1500)
                 scope = _form_scope()
             out["notes"].append(f"fields discovered: {len(fields)} (ats {ats})")
+            try:
+                fu = scope.url if scope is not page else page.url
+                m_for = re.search(r"[?&]for=([A-Za-z0-9_-]+)", fu or "")
+                m_tok = re.search(r"[?&](?:token|gh_jid)=(\d+)", (fu or "") + "&" + (url or ""))
+                if "greenhouse.io/embed/job_app" in (fu or "") and m_for and m_tok:
+                    fu = f"https://job-boards.greenhouse.io/embed/job_app?for={m_for.group(1)}&token={m_tok.group(1)}"
+                out["form_url"] = fu or url
+            except Exception:  # noqa: BLE001
+                out["form_url"] = url
             html = scope.content()
             if _LOGIN_RX.search(scope.title() or "") and scope.locator("input[type=password]").count():
                 out.update(status="needs_you", reason="The apply page asks you to sign in — Roster never enters passwords. Open it yourself; your answers are ready below.")
@@ -420,11 +429,18 @@ def _run_browser(mode: str, job: dict) -> dict:
             for q in [x for x in plan["open"] if x.get("combo") and not x.get("options") and x.get("selector")][:8]:
                 try:
                     loc = scope.locator(q["selector"]).first
+                    before = set(t.strip() for t in scope.locator("[role='option']").all_inner_texts() if t.strip())
                     loc.click()
                     page.wait_for_timeout(500)
-                    opts = [t.strip() for t in scope.locator("[role='option']").all_inner_texts() if t.strip()][:40]
+                    owns = (loc.get_attribute("aria-controls") or loc.get_attribute("aria-owns") or "").strip()
+                    if owns:
+                        opts = [t.strip() for t in scope.locator(f"#{owns} [role='option']").all_inner_texts() if t.strip()]
+                    else:   # the options that APPEARED because of this click, not lists already on the page (a phone dial-code list)
+                        opts = [t.strip() for t in scope.locator("[role='option']").all_inner_texts() if t.strip() and t.strip() not in before]
                     page.keyboard.press("Escape")
-                    if opts:
+                    opts = opts[:40]
+                    dialish = sum(1 for o in opts if re.search(r"^\+?\d{1,4}\b|\(\+\d", o))
+                    if opts and dialish < len(opts) / 2:
                         q["options"] = opts
                         q["kind"] = "select"
                 except Exception:  # noqa: BLE001

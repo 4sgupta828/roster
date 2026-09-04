@@ -6135,7 +6135,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             drafts = await _draft_open_answers(res["open"], profile, str(parsed.get("_resume_text") or ""))
         shot = base64.b64decode(res["screenshot_b64"]) if res.get("screenshot_b64") else None
         await store.update_application(user["id"], rec["id"], status=res.get("status") or "failed", reason=res.get("reason") or "",
-                                       filled=res.get("filled") or [], open_questions=res.get("open") or [], drafts=drafts, screenshot=shot)
+                                       filled=res.get("filled") or [], open_questions=res.get("open") or [], drafts=drafts, screenshot=shot,
+                                       form_url=(res.get("form_url") or url)[:1000])
         return {"id": rec["id"], "status": res.get("status"), "reason": res.get("reason") or "", "filled": res.get("filled") or [],
                 "open": res.get("open") or [], "blocking": res.get("blocking") or [], "drafts": drafts, "captcha": bool(res.get("captcha"))}
 

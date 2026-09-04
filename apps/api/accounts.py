@@ -180,6 +180,7 @@ CREATE TABLE IF NOT EXISTS roster_application (
 CREATE INDEX IF NOT EXISTS idx_ra_user ON roster_application (user_id, created_at DESC);
 ALTER TABLE roster_application ADD COLUMN IF NOT EXISTS submit_screenshot BYTEA;   -- the page after a submit attempt (the prepare shot stays)
 ALTER TABLE roster_application ADD COLUMN IF NOT EXISTS submitted_by TEXT;          -- 'roster' | 'user' (submitted in their own browser)
+ALTER TABLE roster_application ADD COLUMN IF NOT EXISTS form_url TEXT;              -- the form's OWN page (an embedded frame's URL) — where the bookmarklet can reach the fields
 -- ANSWER BANK: every answer the user gives in an application review, keyed by the normalized question,
 -- so the same question is filled next time (the user reviews instead of retyping).
 CREATE TABLE IF NOT EXISTS roster_answer_bank (
@@ -692,7 +693,7 @@ class AccountStore:
     async def update_application(self, user_id: str, app_id: int, **fields) -> bool:
         """Set any of: status, reason, filled, open_questions, answers, drafts, screenshot (bytes), submitted_at."""
         await self._ensure()
-        allowed = {"status", "reason", "filled", "open_questions", "answers", "drafts", "screenshot", "submitted_at", "submit_screenshot", "submitted_by"}
+        allowed = {"status", "reason", "filled", "open_questions", "answers", "drafts", "screenshot", "submitted_at", "submit_screenshot", "submitted_by", "form_url"}
         sets, vals = [], []
         for k, v in fields.items():
             if k not in allowed:
@@ -710,7 +711,7 @@ class AccountStore:
         await self._ensure()
         async with (await self._get_pool()).acquire() as conn:
             rows = await conn.fetch(
-                """SELECT id, job_ref, company, title, url, ats, status, reason, submitted_at, created_at, updated_at,
+                """SELECT id, job_ref, company, title, url, form_url, ats, status, reason, submitted_at, created_at, updated_at,
                           jsonb_array_length(open_questions) AS n_open, (screenshot IS NOT NULL) AS has_shot
                    FROM roster_application WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2""", user_id, int(limit))
         return [{**dict(r), "submitted_at": (str(r["submitted_at"]) if r["submitted_at"] else None),
