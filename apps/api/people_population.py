@@ -3012,8 +3012,8 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             # reviewers already answered it) and the assumption line says where the filters came from
             _bc = coverage["brief_contract"]
             _bc["clarification"] = None
-            _bc["assumptions"] = (["filters fixed by this revision (reviewer feedback) — the brief's wording only ranks"]
-                                  + [a for a in (_bc.get("assumptions") or []) if "seniority" not in a and "compiled" not in a])[:4]
+            _bc["assumptions"] = []          # the revision box on the map says where the filters came from
+            _bc["revised"] = True
         coverage["ranking"] = ("how closely each profile's wording matches your brief first; among "
                                "near-equal matches, the strength of public evidence (confirmed employer, "
                                "linked papers and repos, recent activity, LinkedIn headline fit) — the "

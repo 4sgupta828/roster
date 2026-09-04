@@ -248,6 +248,18 @@ class MapStore:
             async with conn.transaction():
                 nxt = int(await conn.fetchval(
                     "SELECT COALESCE(MAX(revision_id), -1) + 1 FROM rs_map_revision WHERE map_id = $1", map_id) or 0)
+                if nxt == 0:
+                    # a map saved before revision tracking: its CURRENT state becomes revision 0 first, so
+                    # the pre-revision list is kept and the new state is revision 1 (never overwrite 0)
+                    cur = await conn.fetchrow("SELECT brief, filters, coverage, rows FROM rs_map WHERE id = $1", map_id)
+                    await conn.execute(
+                        """INSERT INTO rs_map_revision (map_id, revision_id, reason, brief_snapshot, filters_snapshot,
+                                                        coverage_snapshot, row_snapshot)
+                           VALUES ($1, 0, 'initial', $2, $3::jsonb, $4::jsonb, $5::jsonb)""",
+                        map_id, cur["brief"] or "", json.dumps(cur["filters"] if not isinstance(cur["filters"], str) else json.loads(cur["filters"])),
+                        json.dumps(cur["coverage"] if not isinstance(cur["coverage"], str) else json.loads(cur["coverage"])),
+                        json.dumps(cur["rows"] if not isinstance(cur["rows"], str) else json.loads(cur["rows"])))
+                    nxt = 1
                 await conn.execute(
                     """INSERT INTO rs_map_revision (map_id, revision_id, reason, brief_snapshot, filters_snapshot,
                                                     coverage_snapshot, row_snapshot, delta)

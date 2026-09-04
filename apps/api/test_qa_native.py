@@ -1275,4 +1275,4 @@ def test_fixed_facets_topic_ignores_the_prefer_tail_and_asks_nothing(monkeypatch
     bc = res["coverage_basis"]["brief_contract"]
     assert not any("prefer" in t or "pytorch" in t for t in bc["topic"]), bc["topic"]
     assert bc["clarification"] is None
-    assert bc["assumptions"][0].startswith("filters fixed by this revision")
+    assert bc["assumptions"] == [] and bc["revised"] is True
