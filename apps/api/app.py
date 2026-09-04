@@ -6085,10 +6085,12 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         resume = {"name": rz[0], "b64": base64.b64encode(rz[2]).decode()} if rz else None
         return merged, resume
 
-    async def _draft_open_answers(open_qs: list[dict], profile: dict, resume_text: str) -> dict:
-        """DRAFTS for free-text questions the profile can't answer directly — labeled as drafts, from the
-        profile / résumé only (temperature 0); selects and yes/no questions are never guessed."""
-        qs = [q for q in open_qs if q.get("kind") in ("text", "textarea") and len(q.get("label") or "") > 8][:6]
+    async def _draft_open_answers(open_qs: list[dict], profile: dict, resume_text: str, *, company: str = "", title: str = "") -> dict:
+        """The agent's BEST ANSWER for every remaining question (owner, 2026-09-04: fill everything; the
+        user overrides). Free text is drafted from the profile / résumé; a choice question gets ONE of
+        its real options (validated in code — anything else is dropped). Voluntary self-identification
+        is never drafted; acknowledgements come only from the profile's standing pre-approval."""
+        qs = [q for q in open_qs if not q.get("voluntary") and not re.search(r"(?i)certify|acknowledg|privacy notice|consent", q.get("label") or "")][:14]
         if not qs:
             return {}
         try:
@@ -6097,16 +6099,37 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             class _Drafts(_BM):
                 answers: list[str] = []
             llm = build_llm(mode=resolve_mode())
+            lines = []
+            for i, q in enumerate(qs):
+                opts = q.get("options") or []
+                lines.append(f"{i + 1}. {q['label']}" + (f"  [choose exactly one: {' | '.join(opts[:30])}]" if opts else "  [free text, ≤ 90 words]"))
             comp = await llm.complete(
-                system=("You draft short answers (≤ 80 words each) to job-application questions for a candidate, using ONLY "
-                        "the profile and résumé text given. If the material doesn't answer a question, return an empty string "
-                        "for it — never invent facts, dates, employers, or authorizations. Return answers in the same order."),
-                messages=[{"role": "user", "content": "PROFILE: " + json.dumps({k: v for k, v in profile.items() if k != "resume"})[:3000]
+                system=("You are completing a job application on a candidate's behalf, for their review. Answer EVERY question with the "
+                        "best answer the profile and résumé support. For a choice question return exactly one of the listed options, "
+                        "verbatim. For yes/no questions about the candidate's own circumstances (relocation, sponsorship, prior "
+                        "employment at the company, availability), pick the answer most consistent with the profile; if truly unknown, "
+                        "choose the option that keeps the candidate eligible and is safest to correct (e.g. 'No' for prior employment). "
+                        "For free text, write specifically from the résumé — never invent employers, dates, numbers or credentials. "
+                        "Return answers in the same order, one per question, empty only when nothing reasonable can be said."),
+                messages=[{"role": "user", "content": (f"POSTING: {title} at {company}\n" if title or company else "")
+                                                       + "PROFILE: " + json.dumps({k: v for k, v in profile.items() if k not in ("resume", "_resume_text", "work_history", "education")})[:2500]
                                                        + "\n\nRÉSUMÉ:\n" + (resume_text or "")[:6000]
-                                                       + "\n\nQUESTIONS:\n" + "\n".join(f"{i + 1}. {q['label']}" for i, q in enumerate(qs))}],
-                response_format=_Drafts, max_tokens=900, temperature=0.0)
+                                                       + "\n\nQUESTIONS:\n" + "\n".join(lines)}],
+                response_format=_Drafts, max_tokens=1600, temperature=0.0)
             ans = list(getattr(comp.parsed, "answers", []) or [])
-            return {q["label"]: a.strip() for q, a in zip(qs, ans) if (a or "").strip()}
+            out = {}
+            for q, a in zip(qs, ans):
+                a = (a or "").strip()
+                if not a:
+                    continue
+                opts = q.get("options") or []
+                if opts:
+                    from api.auto_apply import _pick_option
+                    a = _pick_option(opts, a)
+                    if not a:
+                        continue
+                out[q["label"]] = a
+            return out
         except Exception:  # noqa: BLE001 — drafts are a convenience
             return {}
 
@@ -6130,9 +6153,19 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         bank = await store.answer_bank(user["id"])          # answers given before → filled, not asked again
         res = await _apply_run("fill", url=url, profile=profile, answers=bank, resume=resume)
         drafts = {}
-        if res.get("open"):
+        if res.get("open") and res.get("status") == "filled":
             parsed = ((await store.get_parse(user["id"])).get("profile") or {})
-            drafts = await _draft_open_answers(res["open"], profile, str(parsed.get("_resume_text") or ""))
+            drafts = await _draft_open_answers(res["open"], profile, str(parsed.get("_resume_text") or ""),
+                                               company=body.company or "", title=body.title or "")
+            if drafts:
+                # SECOND PASS: fill the drafts too, so the form (and its screenshot) is complete — the user reviews a
+                # finished application and corrects, instead of answering
+                res2 = await _apply_run("fill", url=url, profile=profile, answers={**bank, **drafts}, resume=resume)
+                if res2.get("status") == "filled" and len(res2.get("filled") or []) >= len(res.get("filled") or []):
+                    for f in res2.get("filled") or []:
+                        if f.get("label") in drafts and not f.get("source"):
+                            f["source"] = "agent draft"
+                    res = {**res, **{k: res2[k] for k in ("filled", "open", "blocking", "screenshot_b64", "notes", "captcha") if k in res2}}
         shot = base64.b64decode(res["screenshot_b64"]) if res.get("screenshot_b64") else None
         await store.update_application(user["id"], rec["id"], status=res.get("status") or "failed", reason=res.get("reason") or "",
                                        filled=res.get("filled") or [], open_questions=res.get("open") or [], drafts=drafts, screenshot=shot,
@@ -6179,7 +6212,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         profile, resume = await _apply_profile_and_resume(store, user["id"])
         await store.update_application(user["id"], app_id, status="approved")
         bank = await store.answer_bank(user["id"])
-        res = await _apply_run("submit", url=d["url"], profile=profile, answers={**bank, **(d.get("answers") or {})}, resume=resume)
+        # the agent's drafts stand unless the user changed them (their saved answers win)
+        res = await _apply_run("submit", url=d["url"], profile=profile, answers={**bank, **(d.get("drafts") or {}), **(d.get("answers") or {})}, resume=resume)
         shot = base64.b64decode(res["screenshot_b64"]) if res.get("screenshot_b64") else None
         fields = {"status": res.get("status") or "failed", "reason": res.get("reason") or "", "filled": res.get("filled") or [],
                   "open_questions": res.get("open") or []}
