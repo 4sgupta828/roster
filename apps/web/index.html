@@ -2582,7 +2582,7 @@ async function runJobs(question){
                        stats: d.stats||{}, semantic: d.semantic, geo_scope: d.geo_scope||null,
                        related_jobs: d.related_jobs||[], company_indexed: d.company_indexed,
                        agentic: !!d.agentic, intent: d.intent||"", query_angles: d.query_angles||[],
-                       redirect_to_qa: !!d.redirect_to_qa, note: d.note||"", must: d.must||null, linkedin_profile: d.linkedin_profile||null, matched_on: d.matched_on||"", needs_profile: !!d.needs_profile, answer: ""});
+                       redirect_to_qa: !!d.redirect_to_qa, note: d.note||"", must: d.must||null, linkedin_profile: d.linkedin_profile||null, matched_on: d.matched_on||"", needs_profile: !!d.needs_profile, brief_contract: d.brief_contract||null, answer: ""});
     renderThread();
   }
   catch(e){ const out = $("#out"); if(out){ out.hidden = false;
@@ -2669,6 +2669,31 @@ function insightsMarkup(d){
 }
 // Render an Eigen answer as a grounded card: markdown prose + a numbered source list. Mirrors the
 // research answer surface's look without pulling in its flag-gated machinery (predictable + self-contained).
+// Q&A INTERPRETED BRIEF — the same strip as Talent Map and Jobs, built in code from the router's
+// decision (route, subject, entities, axes, confidence) and the source counts: what the question was
+// read as, what it is about, which sources answered, and how the answer is held to evidence.
+const QA_ROUTE_LABELS = {indexed_people_discovery:"people search over Roster's index", indexed_job_search:"open-roles search over Roster's job index",
+  person_dossier:"a person dossier (index + public web)", company_hiring:"a company's hiring picture", jd_analysis:"a job-description analysis",
+  connection_path:"a connection path between people / companies", insights:"insights over the people & jobs index", candidates_for_jd:"candidates for a job description",
+  jobs_for_profile:"open roles for a profile / résumé", general_professional_qa:"a general professional question (grounded research)", clarify:"ambiguous — one clarifying question"};
+function qaBriefContract(d){
+  const r = d.qa_route || null; if(!r && !d.source_stats) return null;
+  const hard = {}, soft = {};
+  if(r && (r.entities||[]).length) hard[(r.subject_kind && r.subject_kind !== "general") ? r.subject_kind : "about"] = r.entities.slice(0,4);
+  if(r && (r.axes||[]).length) soft["asked about"] = r.axes.slice(0,5);
+  const st = d.source_stats || {};
+  const srcs = Object.entries(st).filter(([k,v]) => v && (v.retrieved||v.cited)).map(([k,v]) => `${k}${v.cited?` (${v.cited} cited)`:""}`).slice(0,6);
+  if(srcs.length) soft["sources"] = srcs;
+  const conf = r && r.confidence ? ` · ${r.confidence} confidence` : "";
+  const intent = r ? `${QA_ROUTE_LABELS[r.route] || String(r.route||"").replace(/_/g," ")}${conf}` : "";
+  const assumptions = [];
+  if(d.derived_from_prior) assumptions.push("reshaped from the previous answer — no new evidence was gathered");
+  if(!d.grounded && d.answer) assumptions.push("model read — not verified against the corpus; treat as a lead, not a fact");
+  const claims = (d.claims||[]).length;
+  const ranking = claims ? `${claims} claim${claims===1?"":"s"} each backed by a verbatim quote found in its source; sentences without a located quote were dropped` : (d.grounded ? "grounded in Roster's index" : "");
+  return {hard, soft, intent, assumptions, ranking, clarification: null};
+}
+function qaBriefStrip(d){ const bc = qaBriefContract(d); if(!bc) return ""; return briefStripMarkup(bc) + (bc.ranking ? `<div class="ppl-cov ev-dist">⇅ Held to evidence: ${esc(bc.ranking)}.</div>` : ""); }
 function qaMarkup(d, question){
   d = d || {};
   if(d.error){ return `<div class="ppl-wrap"><div class="pitem-empty">${esc(d.error)}</div></div>`; }
@@ -2679,12 +2704,12 @@ function qaMarkup(d, question){
   }
   if(Array.isArray(d.people_rows) && d.people_rows.length){
     const head = `<div class="ppl-head"><b>Q&amp;A</b> <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">✓ grounded in Roster's index</span></div>`;
-    return `<div class="ppl-wrap">${head}</div>` + peopleRowsMarkup(d);
+    return `<div class="ppl-wrap">${head}${d.qa_route ? briefStripMarkup(qaBriefContract(d)||{}) : ""}</div>` + peopleRowsMarkup(d);
   }
   if(Array.isArray(d.jobs) && d.jobs.length){
     const head = `<div class="ppl-head"><b>Q&amp;A</b> <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">✓ grounded in Roster's index</span></div>`;
     const lead = d.answer ? `<div class="ppl-cov" style="margin-top:.5rem;">${esc(d.answer)}</div>` : "";
-    return `<div class="ppl-wrap">${head}${lead}</div>` + jobsMarkup(d);
+    return `<div class="ppl-wrap">${head}${d.qa_route && !d.brief_contract ? briefStripMarkup(qaBriefContract(d)||{}) : ""}${lead}</div>` + jobsMarkup(d);
   }
   const answer = d.answer || "";
   if(!answer){ return `<div class="ppl-wrap"><div class="pitem-empty">No answer came back for that question. Try rephrasing, or ask something more specific about a person, company, role, or market.</div></div>`; }
@@ -2721,7 +2746,7 @@ function qaMarkup(d, question){
     ? `<div class="ppl-cov" style="margin-top:.7rem;">Profiles: ` + pplLinks.map(p=>
         `<a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer" style="margin-right:.6rem;">${esc(p.host||p.name||"profile")} ↗</a>`).join("") + `</div>`
     : "";
-  return `<div class="ppl-wrap">${head}<div class="rqanswer md" style="margin-top:.6rem;">${mdToHtml(answer)}</div>${citesBlock}${gapsBlock}${ppl}</div>`;
+  return `<div class="ppl-wrap">${head}${qaBriefStrip(d)}<div class="rqanswer md" style="margin-top:.6rem;">${mdToHtml(answer)}</div>${citesBlock}${gapsBlock}${ppl}</div>`;
 }
 // One-click hop from a search surface to Q&A: switch the tab and re-ask the same question there.
 function hopToQA(){
@@ -2762,10 +2787,11 @@ function jobsMarkup(d){
       ${apply?`<span class="ppl-links">${apply}</span>`:""}<span class="js-sumbox" data-ref="${esc(String(jref))}">${typeof openSummaryMarkup==="function"?openSummaryMarkup(jref, j):""}</span></span></div>`;
   }).join("");
   const at = (q.company&&q.company.length)?` at ${esc(q.company.join(", ").replace(/_/g," "))}`:"";
-  const angleChips = (d.query_angles&&d.query_angles.length>1) ? `<div style="margin-top:.4rem;display:flex;flex-wrap:wrap;gap:.3rem;">${d.query_angles.map(a=>`<span class="ppl-tag">${esc(a)}</span>`).join("")}</div>` : "";
-  const intentHtml = (d.agentic && (d.intent||angleChips)) ? `<div class="ppl-cov" style="border-left-color:var(--gold);background:rgba(var(--gold-rgb),.06);"><b>⚡ Smart search</b>${d.intent?` — ${esc(d.intent)}`:""}${angleChips}</div>` : "";
+  const bcJ = d.brief_contract || null;
+  const intentHtml = bcJ ? briefStripMarkup(bcJ) + (bcJ.ranking ? `<div class="ppl-cov ev-dist">⇅ Ranked by ${esc(bcJ.ranking)}.</div>` : "")
+    : ((d.agentic && d.intent) ? `<div class="ppl-cov"><b>⚡ Smart search</b> — ${esc(d.intent)}</div>` : "");
   const jobMapBar = (jobs.length && typeof jobMapBarMarkup === "function" && !d._noMapBar) ? jobMapBarMarkup(d) : "";
-  const head = `<div class="ppl-head"><b>${jobs.length}</b> open role${jobs.length===1?"":"s"}${at}${jpagesN>1?` <span class="ppl-fc" style="text-transform:none;">· showing ${jfrom}–${jto} · page ${jpage+1} of ${jpagesN}</span>`:""}${d.agentic?` <span class="ppl-tag" style="background:rgba(var(--gold-rgb),.14);color:var(--gold);">⚡ smart search</span>`:""}</div>`
+  const head = `<div class="ppl-head"><b>${jobs.length}</b> open role${jobs.length===1?"":"s"}${at}${jpagesN>1?` <span class="ppl-fc" style="text-transform:none;">· showing ${jfrom}–${jto} · page ${jpage+1} of ${jpagesN}</span>`:""}</div>`
     + jobMapBar
     + intentHtml
     + (d.linkedin_profile ? `<div class="ppl-cov" style="border-left-color:var(--gold);">in Jobs for <b>${esc(d.linkedin_profile.name||"")}</b>${d.linkedin_profile.headline?` — ${esc(d.linkedin_profile.headline)}`:""} <span class="ppl-fc" style="text-transform:none;">· read from search-engine results for the pasted profile · <a href="${esc(d.linkedin_profile.url||"#")}" target="_blank" rel="noopener noreferrer">profile ↗</a></span></div>` : "")
@@ -2782,6 +2808,27 @@ function jobsMarkup(d){
     : "";
   return `<div class="ppl-wrap" data-jpid="${esc(d._jpid)}">${head}${jpage>0?jpager:""}<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">' + esc((d.must && d.must.dropped && !d.must.kept) ? `No role in this search satisfies Must have: ${(d.must.labels||d.must.kinds).join(" · ")} (${d.must.dropped} left out) — drop a toggle above or widen the search.` : (d.note || "No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.")) + '</div>'}</div>${jpager}${relHtml}</div>`;
 }
+// INTERPRETED BRIEF strip — ONE component for Talent Map and Jobs (consistency): Must (what filtered)
+// · Prefer (what only ranks) · Subject / Angles · Scope · assumptions · one clarifying question.
+function briefStripMarkup(bc, opts){
+  opts = opts || {};
+  const LBL = {company:"at", worked_at:"previously at", role:"role", function:"function", skill:"skill", skills:"skills", seniority:"level", level:"level", industry:"industry", metro:"metro", state:"state", country:"country", evidence:"must have", "must have":"must have", stage:"stage", accelerator:"accelerator", location:"location", scope:"scope", discipline:"discipline", "title words":"title words"};
+  const kv = (o, cls) => Object.entries(o||{}).map(([k,v]) => `<span class="bc-item ${cls}"><span class="bc-k">${esc(LBL[k]||k)}</span> ${esc((v||[]).join(" / "))}</span>`).join("");
+  const topic = (bc.topic||[]).filter((t,i,a)=>!a.some((o,j)=>j!==i && o.length>t.length && o.includes(t)));
+  const prof = bc.profile || null;
+  const profLine = prof && prof.source ? `<div class="bc-assume"><span>· read from your ${esc({attachment:"attached résumé", pasted:"pasted résumé", resume:"résumé on file", description:"description", headline:"LinkedIn headline"}[prof.source]||prof.source)}${prof.years?`: ${esc(prof.years)} years`:""}${(prof.families||[]).length?` · ${esc(prof.families.join(", "))}`:""}${(prof.skills||[]).length?` · ${esc(prof.skills.slice(0,6).join(", "))}`:""}</span></div>` : "";
+  return `<div class="bc-strip">`
+    + (Object.keys(bc.hard||{}).length ? `<span class="bc-grp"><span class="bc-h">Must</span>${kv(bc.hard,"bc-hard")}</span>` : "")
+    + (Object.keys(bc.soft||{}).length ? `<span class="bc-grp"><span class="bc-h">Prefer</span>${kv(bc.soft,"bc-soft")}</span>` : "")
+    + (topic.length ? `<span class="bc-grp"><span class="bc-h">Subject</span><span class="bc-item bc-soft">${esc(topic.join(", "))}</span></span>` : "")
+    + ((bc.angles||[]).length ? `<span class="bc-grp"><span class="bc-h">Angles</span>${bc.angles.map(a=>`<span class="bc-item bc-soft">${esc(a)}</span>`).join("")}</span>` : "")
+    + (bc.scope && bc.scope.label ? `<span class="bc-grp"><span class="bc-h">Scope</span><span class="bc-item bc-hard">${esc(bc.scope.label)}</span></span>` : "")
+    + (bc.intent ? `<div class="bc-assume"><span>· reads as: ${esc(bc.intent)}</span></div>` : "")
+    + profLine
+    + ((bc.assumptions||[]).length ? `<div class="bc-assume">${bc.assumptions.map(a=>`<span>· ${esc(a)}</span>`).join(" ")}</div>` : "")
+    + (bc.clarification ? `<div class="bc-ask">❓ ${esc(bc.clarification.ask)} <span class="ppl-fc" style="text-transform:none;">— ${esc(bc.clarification.why)}${opts.clarifyHint?`; ${esc(opts.clarifyHint)}`:""}</span></div>` : "")
+    + `</div>`;
+}
 function peopleRowsMarkup(data){
   const rows = data.people_rows||[];
   const isEnum = !!data.coverage_basis;   // enumeration has coverage; a single-person profile does not
@@ -2791,17 +2838,8 @@ function peopleRowsMarkup(data){
   // INTERPRETED BRIEF (recruiter contract): what gated the cohort vs what only ranks it, the scope,
   // what was assumed, and at most one clarifying question — shown WITH the map, never before it.
   const bc = cb.brief_contract || null;
-  const LBL = {company:"at", worked_at:"previously at", role:"role", function:"function", skill:"skill", seniority:"level", industry:"industry", metro:"metro", state:"state", country:"country", evidence:"must have", stage:"stage", accelerator:"accelerator"};
-  const kv = (o, cls) => Object.entries(o||{}).map(([k,v]) => `<span class="bc-item ${cls}"><span class="bc-k">${esc(LBL[k]||k)}</span> ${esc((v||[]).join(" / "))}</span>`).join("");
   const facetChips = bc
-    ? `<div class="bc-strip">`
-      + (Object.keys(bc.hard||{}).length ? `<span class="bc-grp"><span class="bc-h">Must</span>${kv(bc.hard,"bc-hard")}</span>` : "")
-      + (Object.keys(bc.soft||{}).length ? `<span class="bc-grp"><span class="bc-h">Prefer</span>${kv(bc.soft,"bc-soft")}</span>` : "")
-      + ((bc.topic||[]).length ? `<span class="bc-grp"><span class="bc-h">Subject</span><span class="bc-item bc-soft">${esc(bc.topic.filter((t,i,a)=>!a.some((o,j)=>j!==i && o.length>t.length && o.includes(t))).join(", "))}</span></span>` : "")
-      + (bc.scope && bc.scope.label ? `<span class="bc-grp"><span class="bc-h">Scope</span><span class="bc-item bc-hard">${esc(bc.scope.label)}</span></span>` : "")
-      + ((bc.assumptions||[]).length ? `<div class="bc-assume">${bc.assumptions.map(a=>`<span>· ${esc(a)}</span>`).join(" ")}</div>` : "")
-      + (bc.clarification ? `<div class="bc-ask">❓ ${esc(bc.clarification.ask)} <span class="ppl-fc" style="text-transform:none;">— ${esc(bc.clarification.why)}; answer in the box below to refine this map</span></div>` : "")
-      + `</div>`
+    ? briefStripMarkup(bc, {clarifyHint: "answer in the box below to refine this map"})
     : Object.entries(facets).map(([k,v])=>`<span class="ppl-fc">${esc(k)}: ${esc((v||[]).join(" / "))}</span>`).join("");
   const cov = esc(cb.population_statement||"");
   const cardHtml = (p)=>{
@@ -8394,7 +8432,7 @@ async function saveJobMap(jpid){
   const t = (THREAD.turns||[]).slice().reverse().find(x => x.kind === "jobs") || {};
   const rows = (d.jobs||[]).slice(0,400).map(j => ({...j, summary: (window.JOB_SUMMARIES||{})[j.url||""] || undefined}));
   const body = {tenant_id:"demo", map_type:"jobs", brief:(t.question||CURRENT_Q||"Job search"), title:(t.question||"Job search").slice(0,80),
-    rows, coverage:{must:d.must||null, geo_scope:d.geo_scope||null, linkedin_profile:d.linkedin_profile||null, note:d.note||""}, filters:(d.query||{})};
+    rows, coverage:{must:d.must||null, geo_scope:d.geo_scope||null, linkedin_profile:d.linkedin_profile||null, note:d.note||"", brief_contract:d.brief_contract||null}, filters:(d.query||{})};
   try{
     const r = await fetch("/maps", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(body)});
     if(!r.ok){ const e = await r.json().catch(()=>({})); alert(e.detail || "Couldn't save the job map."); return; }
@@ -8437,7 +8475,7 @@ async function loadMapView(id, token){
       (m.rows||[]).forEach(j => { if(j.summary && j.url) window.JOB_SUMMARIES[j.url] = j.summary; });   // saved reads travel with the map
       const cov = m.coverage || {};
       THREAD = {session_id:null, turns:[{question:m.brief||m.title||"Job Map", kind:"jobs", jobs:(m.rows||[]), query:(m.filters||{}), stats:{},
-        geo_scope:cov.geo_scope||null, must:cov.must||null, linkedin_profile:cov.linkedin_profile||null, note:cov.note||"", related_jobs:[], answer:""}]};
+        geo_scope:cov.geo_scope||null, must:cov.must||null, linkedin_profile:cov.linkedin_profile||null, note:cov.note||"", brief_contract:cov.brief_contract||null, related_jobs:[], answer:""}]};
       TAB_THREADS.jobs = THREAD;
       renderThread(); window.scrollTo({top:0});
       return;

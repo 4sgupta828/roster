@@ -163,6 +163,93 @@ def family_mismatch(profile_families: set[str], title: str) -> str:
     return sorted(stated)[0]
 
 
+_SKILL_LEXICON = ("java", "kotlin", "scala", "python", "go", "golang", "rust", "c++", "c#", ".net", "ruby", "php", "swift",
+                  "typescript", "javascript", "node", "react", "angular", "vue", "next.js", "graphql", "rest", "grpc",
+                  "kubernetes", "k8s", "docker", "terraform", "ansible", "helm", "linux", "aws", "gcp", "azure",
+                  "postgres", "postgresql", "mysql", "mongodb", "redis", "cassandra", "dynamodb", "elasticsearch",
+                  "kafka", "rabbitmq", "spark", "flink", "airflow", "snowflake", "dbt", "sql", "nosql",
+                  "pytorch", "tensorflow", "jax", "llm", "langchain", "spring", "django", "flask", "fastapi", "rails",
+                  "microservices", "distributed systems", "ci/cd", "observability", "prometheus", "grafana", "datadog",
+                  "sre", "devops", "security", "ios", "android", "flutter", "react native", "figma")
+
+
+def profile_skills(text: str, limit: int = 8) -> list[str]:
+    """Skills the profile NAMES (lexicon match, code-owned) — for the interpreted-brief strip."""
+    t = " " + re.sub(r"[^a-z0-9+#./ ]+", " ", (text or "").lower()) + " "
+    out = []
+    for s in _SKILL_LEXICON:
+        if f" {s} " in t or f" {s}," in t or f" {s}." in t:
+            if s not in out:
+                out.append(s)
+    return out[:limit]
+
+
+_MUST_LABELS = {"remote": "remote", "hybrid": "hybrid", "f500": "Fortune 500", "public": "public company",
+                "startup": "startup", "leadership": "leadership"}
+
+
+def job_brief_contract(*, question: str, plan: dict | None = None, query: dict | None = None,
+                       job_must: list[str] | None = None, scope: dict | None = None,
+                       profile_text: str = "", matched_on: str = "", stated_seniority: str = "") -> dict:
+    """The INTERPRETED BRIEF for a job search — the same contract shape the Talent Map shows: what
+    FILTERED the list (hard), what only RANKS it (soft), the search angles, how the profile was read
+    (résumé path), the assumptions, and how the order was produced. Code-owned; nothing here is a
+    model's judgment beyond the planner's own fields, which are labeled as such."""
+    plan = plan or {}
+    query = query or {}
+    hard: dict[str, list[str]] = {}
+    soft: dict[str, list[str]] = {}
+    assumptions: list[str] = []
+    cos = [str(c).replace("_", " ") for c in (query.get("company") or plan.get("company") or []) if str(c).strip()]
+    if cos:
+        hard["company"] = cos[:6]
+    loc = str(query.get("location") or plan.get("location") or "").strip()
+    if loc:
+        hard["location"] = [loc]
+    if job_must:
+        hard["must have"] = [_MUST_LABELS.get(str(m), str(m)) for m in job_must]
+    if scope and scope.get("label"):
+        hard["scope"] = [str(scope["label"])]
+    profile: dict = {}
+    if profile_text:
+        fams = sorted(text_families(profile_text))
+        skills = profile_skills(profile_text)
+        yrs = re.search(r"(?i)\b(\d{1,2})\+?\s*years?\b", profile_text)
+        levels = sorted(years_to_levels(profile_text))
+        profile = {"source": matched_on, "families": fams, "skills": skills,
+                   "years": (yrs.group(1) if yrs else ""), "level_pref": [l.replace("_", " ") for l in levels]}
+        if fams:
+            soft["discipline"] = fams
+        if skills:
+            soft["skills"] = skills[:6]
+        if levels:
+            soft["level"] = [l.replace("_", " ") for l in levels]
+        else:
+            assumptions.append("years of experience not stated — all levels shown; titles that state a level rank by it")
+        if not fams:
+            assumptions.append("no discipline named (backend, frontend, data…) — titles of any discipline are eligible")
+    else:
+        kw = [str(k) for k in (plan.get("must_have") or query.get("title_keywords") or []) if str(k).strip()]
+        if kw:
+            soft["title words"] = kw[:6]
+        sen = (stated_seniority or plan.get("seniority") or "").strip()
+        if sen:
+            soft["level"] = [sen]
+        else:
+            assumptions.append("level not stated — all levels shown; titles that state a level rank by it")
+    angles = [str(a) for a in (plan.get("variants") or []) if str(a).strip()][:5]
+    if profile_text:
+        ranking = ("how closely each posting's title and team match your profile first; the stated level, your location "
+                   "scope and titles that name a different discipline adjust it — the reasons are on each card")
+    elif angles:
+        ranking = (f"how closely each posting's title matches your search across {len(angles) + 1} angles first; agreement "
+                   "across angles, must-have title words and the stated level adjust it — the reasons are on each card")
+    else:
+        ranking = "title and company match to your search first, then location and level"
+    return {"hard": hard, "soft": soft, "angles": angles, "intent": str(plan.get("intent") or "")[:200],
+            "profile": profile, "assumptions": assumptions[:3], "ranking": ranking}
+
+
 _WANT_LEVELS = {"intern": {"intern"}, "junior": {"junior"}, "entry": {"junior"}, "new grad": {"junior"},
                 "mid": {"mid"}, "senior": {"senior"}, "staff": {"staff_plus"}, "principal": {"staff_plus"},
                 "lead": {"senior", "leadership"}, "leadership": {"leadership"}, "manager": {"leadership"},
@@ -1832,7 +1919,8 @@ async def agentic_job_search(store, question: str, llm, country: str = "us") -> 
     note = ((f"{want_country.upper()} only · " if want_country else "")
             + f"agentic — {len(legs)} angles, {len(pool)} candidates")
     return {"jobs": out[:60], "intent": plan["intent"], "query_angles": legs, "note": note,
-            "dropped_out_of_country": dropped}
+            "dropped_out_of_country": dropped, "must_have": list(plan.get("must_have") or []),
+            "plan_seniority": plan.get("seniority") or "", "plan_location": plan.get("location") or ""}
 
 
 def linkedin_search_link(name: str, attrs: list[dict]) -> dict:

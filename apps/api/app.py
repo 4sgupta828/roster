@@ -2646,6 +2646,9 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                   "resume": f"That profile isn't visible to search engines, so these roles are matched to the résumé on your account instead.",
                                   "pasted": f"That profile isn't visible to search engines, so these roles are matched to the text you pasted with the link."}[matched_on]),
                         "stats": await store.jobs_stats()})
+            from api.people_population import job_brief_contract
+            res["brief_contract"] = job_brief_contract(question=body.question or "", job_must=body.job_must, scope=res.get("geo_scope"),
+                                                       profile_text=text, matched_on=matched_on)
             res["session_id"] = await _save_job_session(jobs, res["query"])
             return res
 
@@ -2697,6 +2700,9 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                  "resume": "Matched to the résumé on your account plus what you wrote — title, skills and level first.",
                                  "description": "Matched to your description — title, skills and level first. Attach a résumé (📎) for a deeper match."}[matched_on],
                         "stats": await store.jobs_stats()})
+            from api.people_population import job_brief_contract
+            res["brief_contract"] = job_brief_contract(question=body.question or "", job_must=body.job_must, scope=res.get("geo_scope"),
+                                                       profile_text=cv_text, matched_on=matched_on)
             res["session_id"] = await _save_job_session(jobs, res["query"])
             return res
 
@@ -2773,6 +2779,12 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 res["count"] = len(res.get("jobs", []))
                 res["agentic"] = True
                 res["query"] = _q if _cos else {}
+                from api.people_population import job_brief_contract
+                res["brief_contract"] = job_brief_contract(
+                    question=body.question or "", plan={"variants": res.get("query_angles") or [], "intent": res.get("intent") or "",
+                                                        "must_have": res.get("must_have") or [], "seniority": res.get("plan_seniority") or "",
+                                                        "location": res.get("plan_location") or ""},
+                    query=_q, job_must=body.job_must, scope=res.get("geo_scope"))
                 if _cos:
                     _nm = ", ".join(_cos)
                     res["note"] = (f"{res.get('company_indexed', 0)} role{'s' if res.get('company_indexed', 0) != 1 else ''} "
@@ -2851,8 +2863,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         rows = rows[:80]
         stats = await store.jobs_stats()
         sid = await _save_job_session(rows, q)   # JOB searches appear in the user's private History
+        from api.people_population import job_brief_contract
         return {"jobs": rows, "count": len(rows), "query": q, "semantic": bool(qvec), "stats": stats,
-                "geo_scope": _gs, "session_id": sid, "must": _must}
+                "geo_scope": _gs, "session_id": sid, "must": _must,
+                "brief_contract": job_brief_contract(question=body.question or "", query=q, job_must=body.job_must, scope=_gs)}
 
     @app.post("/insights")
     async def insights(body: ResearchIn) -> dict:

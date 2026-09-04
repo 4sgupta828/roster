@@ -73,3 +73,24 @@ def test_family_mismatch_is_soft_and_only_fires_on_stated_families():
     assert family_mismatch(set(), "SDE I - Frontend") == ""                  # profile names nothing: no demotion
     full = text_families("full-stack: React frontend and Go backend")
     assert family_mismatch(full, "Frontend Engineer") == "" and family_mismatch(full, "Backend Engineer") == ""
+
+
+def test_job_brief_contract_mirrors_the_talent_map_contract():
+    from api.people_population import job_brief_contract
+    # agentic free-text search: company named → hard; must-have words + level → soft; angles listed
+    c = job_brief_contract(question="senior backend roles at Stripe", query={"company": ["stripe"], "title_keywords": ["backend"], "location": ""},
+                           plan={"variants": ["backend engineer", "platform engineer"], "intent": "senior backend at Stripe",
+                                 "must_have": ["backend", "engineer"], "seniority": "senior"}, job_must=["remote"], scope={"label": "SF Bay Area"})
+    assert c["hard"] == {"company": ["stripe"], "must have": ["remote"], "scope": ["SF Bay Area"]}
+    assert c["soft"] == {"title words": ["backend", "engineer"], "level": ["senior"]}
+    assert c["angles"] == ["backend engineer", "platform engineer"] and c["assumptions"] == []
+    assert "angles" in c["ranking"]
+    # résumé path: the profile read is code-derived (years → level preference, discipline, skills)
+    p = job_brief_contract(question="roles for me", profile_text="Backend engineer, 5 years, Java, Kubernetes, Postgres, Linux", matched_on="description")
+    assert p["profile"]["years"] == "5" and p["profile"]["level_pref"] == ["mid", "senior"]
+    assert p["profile"]["families"] == ["backend / infra"] and "java" in p["profile"]["skills"] and "kubernetes" in p["profile"]["skills"]
+    assert p["soft"]["discipline"] == ["backend / infra"] and p["soft"]["level"] == ["mid", "senior"]
+    assert "profile" in p["ranking"]
+    # nothing stated → the assumptions say so instead of a confident filter
+    n = job_brief_contract(question="engineering jobs", query={"company": [], "title_keywords": ["engineering"], "location": ""})
+    assert n["hard"] == {} and n["assumptions"][0].startswith("level not stated")
