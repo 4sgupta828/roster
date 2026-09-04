@@ -3058,11 +3058,6 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         people_rows = [p for p in people_rows if _carries(p)]
         if _before_co != len(people_rows):
             coverage["company_gate_dropped"] = _before_co - len(people_rows)
-    # EXPLICIT LEVEL FILTER (chips): stated levels outside the selection leave; people with no stated
-    # level leave too and are COUNTED (an explicit filter is a filter) — the strip says so.
-    if levels:
-        people_rows, _lv_unstated, _lv_info = apply_level_filter(people_rows, levels, kind="person")
-        coverage["level_filter"] = _lv_info
     # CALIBRATION (recruiter-workflows P2b, code-owned): reviewer feedback edits the CONTRACT of the next
     # map — rows a reviewer marked "less like this"/"not relevant" leave; rows at a company marked the
     # wrong target leave; rows carrying a demoted value (a wrong level, a wrong domain) are flagged so
@@ -3327,6 +3322,12 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         grounded = False
 
     # EVIDENCE DISTRIBUTION (spec: coverage is a first-class surface) — how many rows per headline
+    # EXPLICIT LEVEL FILTER (chips) — LAST, after every leg that can add rows (local widening, the
+    # company-gap web discovery): stated levels outside the selection leave; people with no stated
+    # level leave too and are COUNTED (an explicit filter is a filter) — the strip says so.
+    if levels:
+        people_rows, _lv_unstated, _lv_info = apply_level_filter(people_rows, levels, kind="person")
+        coverage["level_filter"] = _lv_info
     # CALIBRATION DEMOTION (last partition, stable): rows carrying a reviewer-demoted value go to the
     # back, each group keeping its order — they remain visible (feedback edits rank, never evidence).
     if people_rows and any(p.get("calibration_demoted") for p in people_rows):
