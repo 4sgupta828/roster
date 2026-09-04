@@ -116,3 +116,17 @@ def test_pdf_attachment_is_read_docling_first_then_text_layer(monkeypatch):
     monkeypatch.setattr(media, "_docling_markdown_subprocess", lambda data, name: "# Jane Doe\n\n## Work experience\n\nBackend Engineer")
     out2 = _run(media.attachment_texts_async([att]))
     assert out2[0][1].startswith("# Jane Doe")                                            # docling wins when it answers
+
+
+def test_explicit_level_filter_keeps_stated_matches_and_folds_unstated():
+    from api.people_population import apply_level_filter, level_bucket
+    assert level_bucket("Staff") == "staff" and level_bucket("engineering_manager") == "exec" and level_bucket("Mid") == "mid" and level_bucket("") == ""
+    jobs = [{"title": "Senior Backend Engineer"}, {"title": "Backend Engineer"}, {"title": "Engineering Manager, Payments"}, {"title": "Staff Engineer"}]
+    kept, uns, info = apply_level_filter(jobs, ["senior", "staff"], kind="job")
+    assert [j["title"] for j in kept] == ["Senior Backend Engineer", "Staff Engineer"]
+    assert [j["title"] for j in uns] == ["Backend Engineer"]                 # unmarked title: folded, not hidden, not matched
+    assert info["dropped"] == 1 and info["labels"] == ["Senior", "Staff+"]
+    people = [{"name": "A", "attributes": [{"key": "seniority", "display": "Junior"}]}, {"name": "B", "attributes": [{"key": "seniority", "display": "Director"}]}, {"name": "C", "attributes": []}]
+    kept, uns, info = apply_level_filter(people, ["exec"], kind="person")
+    assert [p["name"] for p in kept] == ["B"] and [p["name"] for p in uns] == ["C"] and info["dropped"] == 1
+    assert apply_level_filter(jobs, [], kind="job")[0] == jobs                # no chips → untouched

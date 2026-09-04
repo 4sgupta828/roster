@@ -190,7 +190,8 @@ _MUST_LABELS = {"remote": "remote", "hybrid": "hybrid", "f500": "Fortune 500", "
 
 def job_brief_contract(*, question: str, plan: dict | None = None, query: dict | None = None,
                        job_must: list[str] | None = None, scope: dict | None = None,
-                       profile_text: str = "", matched_on: str = "", stated_seniority: str = "") -> dict:
+                       profile_text: str = "", matched_on: str = "", stated_seniority: str = "",
+                       levels: list[str] | None = None) -> dict:
     """The INTERPRETED BRIEF for a job search — the same contract shape the Talent Map shows: what
     FILTERED the list (hard), what only RANKS it (soft), the search angles, how the profile was read
     (résumé path), the assumptions, and how the order was produced. Code-owned; nothing here is a
@@ -208,6 +209,9 @@ def job_brief_contract(*, question: str, plan: dict | None = None, query: dict |
         hard["location"] = [loc]
     if job_must:
         hard["must have"] = [_MUST_LABELS.get(str(m), str(m)) for m in job_must]
+    _lv = [LEVEL_LABELS[l] for l in (levels or []) if l in LEVEL_LABELS]
+    if _lv:
+        hard["level"] = _lv
     if scope and scope.get("label"):
         hard["scope"] = [str(scope["label"])]
     profile: dict = {}
@@ -222,7 +226,9 @@ def job_brief_contract(*, question: str, plan: dict | None = None, query: dict |
             soft["discipline"] = fams
         if skills:
             soft["skills"] = skills[:6]
-        if levels:
+        if _lv:
+            pass
+        elif levels:
             soft["level"] = [l.replace("_", " ") for l in levels]
         else:
             assumptions.append("years of experience not stated — all levels shown; titles that state a level rank by it")
@@ -233,7 +239,9 @@ def job_brief_contract(*, question: str, plan: dict | None = None, query: dict |
         if kw:
             soft["title words"] = kw[:6]
         sen = (stated_seniority or plan.get("seniority") or "").strip()
-        if sen:
+        if _lv:
+            pass
+        elif sen:
             soft["level"] = [sen]
         else:
             assumptions.append("level not stated — all levels shown; titles that state a level rank by it")
@@ -248,6 +256,55 @@ def job_brief_contract(*, question: str, plan: dict | None = None, query: dict |
         ranking = "title and company match to your search first, then location and level"
     return {"hard": hard, "soft": soft, "angles": angles, "intent": str(plan.get("intent") or "")[:200],
             "profile": profile, "assumptions": assumptions[:3], "ranking": ranking}
+
+
+# EXPLICIT LEVEL FILTER (owner, 2026-09-04): junior / mid / senior / staff+ / exec chips on both Talent Map
+# and Jobs. Buckets map the index's seniority vocabulary and the title heuristic onto five user-facing levels.
+LEVEL_BUCKETS = {
+    "junior": {"junior", "intern", "student", "entry", "associate", "new_grad"},
+    "mid": {"mid", "researcher", "ic"},
+    "senior": {"senior", "lead"},
+    "staff": {"staff_plus", "staff", "principal", "distinguished_scientist", "distinguished", "fellow", "architect"},
+    "exec": {"leadership", "engineering_manager", "senior_manager", "director", "head", "vp", "c_level", "cto", "ceo", "cfo", "founder"},
+}
+LEVEL_LABELS = {"junior": "Junior", "mid": "Mid", "senior": "Senior", "staff": "Staff+", "exec": "Manager / Exec"}
+
+
+def level_bucket(value: str) -> str:
+    v = (value or "").strip().lower().replace(" ", "_").replace("-", "_")
+    for b, vals in LEVEL_BUCKETS.items():
+        if v in vals:
+            return b
+    return ""
+
+
+def apply_level_filter(rows: list[dict], levels: list[str] | None, *, kind: str) -> tuple[list[dict], list[dict], dict]:
+    """HARD level filter (explicit chips). Returns (kept, unstated, info). A row whose level is STATED and
+    outside the selection leaves; a row whose level is UNSTATED (an unmarked 'Software Engineer' title,
+    a person with no seniority facet) is returned separately so the UI can fold it honestly rather
+    than hide it or pretend it matched. `kind` = 'job' (level from the title) | 'person' (seniority attribute)."""
+    want = {str(l).lower() for l in (levels or []) if str(l).lower() in LEVEL_BUCKETS}
+    if not want:
+        return list(rows or []), [], {}
+    kept, unstated, dropped = [], [], 0
+    for r in rows or []:
+        if kind == "job":
+            t = r.get("title") or ""
+            lvl, known = _title_level(t)
+            b = level_bucket(lvl) if known else ""
+            if not b and re.search(r"(?i)\bmanager\b", t) and not re.search(r"(?i)\b(account|technical account|program|project|community|office)\s+manager\b", t):
+                b = "exec"                                   # 'Engineering Manager, Payments' hires; a TAM does not
+        else:
+            sen = next((a.get("display") for a in (r.get("attributes") or []) if a.get("key") == "seniority" and a.get("display")), "")
+            b = level_bucket(sen)
+        if not b:
+            unstated.append(r)
+        elif b in want:
+            kept.append(r)
+        else:
+            dropped += 1
+    return kept, unstated, {"levels": sorted(want), "labels": [LEVEL_LABELS[l] for l in sorted(want, key=list(LEVEL_BUCKETS).index)],
+                            "kept": len(kept), "dropped": dropped, "unstated": len(unstated)}
 
 
 _WANT_LEVELS = {"intern": {"intern"}, "junior": {"junior"}, "entry": {"junior"}, "new grad": {"junior"},
@@ -2634,7 +2691,8 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                                    exclude_ids: list[str] | None = None,
                                    exclude_companies: list[str] | None = None,
                                    avoid_terms: list[str] | None = None,
-                                   fixed_facets: dict | None = None) -> dict:
+                                   fixed_facets: dict | None = None,
+                                   levels: list[str] | None = None) -> dict:
     """Answer a people-enumeration question from the grounded people index. Always returns a structured
     result (never raises to the route): a compiled facet filter, grounded rows, and honest coverage.
 
@@ -3000,6 +3058,11 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         people_rows = [p for p in people_rows if _carries(p)]
         if _before_co != len(people_rows):
             coverage["company_gate_dropped"] = _before_co - len(people_rows)
+    # EXPLICIT LEVEL FILTER (chips): stated levels outside the selection leave; people with no stated
+    # level leave too and are COUNTED (an explicit filter is a filter) — the strip says so.
+    if levels:
+        people_rows, _lv_unstated, _lv_info = apply_level_filter(people_rows, levels, kind="person")
+        coverage["level_filter"] = _lv_info
     # CALIBRATION (recruiter-workflows P2b, code-owned): reviewer feedback edits the CONTRACT of the next
     # map — rows a reviewer marked "less like this"/"not relevant" leave; rows at a company marked the
     # wrong target leave; rows carrying a demoted value (a wrong level, a wrong domain) are flagged so
@@ -3289,6 +3352,15 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             question, _contract_facets, hard_keys=_hard_keys, soft_keys=_soft_all, guard_added=guard_added,
             relaxed_from=relaxed_from, semantic_first=semantic_first, ev_kinds=_ev_kinds,
             scope=(coverage.get("geo_scope") or {}), topic_terms=topic_terms)
+        if levels and coverage.get("level_filter"):
+            _bc0 = coverage["brief_contract"]
+            _bc0["hard"] = {**{"level": coverage["level_filter"]["labels"]}, **{k: v for k, v in (_bc0.get("hard") or {}).items() if k != "seniority"}}
+            _bc0["soft"] = {k: v for k, v in (_bc0.get("soft") or {}).items() if k != "seniority"}
+            _bc0["assumptions"] = [a for a in (_bc0.get("assumptions") or []) if "seniority" not in a and "level" not in a]
+            _bc0["clarification"] = None
+            _lf = coverage["level_filter"]
+            _bc0["assumptions"].insert(0, f"level filter: {_lf['kept']} people state {' / '.join(_lf['labels'])}"
+                                          + (f"; {_lf['dropped']} state another level and {_lf['unstated']} state none — both left out" if (_lf['dropped'] or _lf['unstated']) else ""))
         if _fixed is not None:
             # a REVISED map: the contract came from reviewer feedback — no clarifying question (the
             # reviewers already answered it) and the assumption line says where the filters came from
