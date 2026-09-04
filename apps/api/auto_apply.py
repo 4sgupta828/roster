@@ -22,8 +22,14 @@ import tempfile
 _FIELD_RX: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(?i)^(preferred\s+)?(first|given)\s*name"), "first_name"),
     (re.compile(r"(?i)^(preferred\s+)?(last|family|sur)\s*name"), "last_name"),
-    (re.compile(r"(?i)^(most recent|current|present|last)\s+(company|employer|organization)"), "current_company"),
-    (re.compile(r"(?i)^(most recent|current|present|last)\s+(title|role|job title|position)"), "current_title"),
+    (re.compile(r"(?i)^(most recent|current|present|last)\s+(company|employer|organization)|(current|previous|most recent).{0,25}(employer|company)\??$"), "current_company"),
+    (re.compile(r"(?i)^(most recent|current|present|last)\s+(title|role|job title|position)|(current|previous|most recent).{0,25}(job title|title)\??$"), "current_title"),
+    (re.compile(r"(?i)^school|university|college name|institution"), "school"),
+    (re.compile(r"(?i)^degree|highest (level of )?education|education level"), "highest_degree"),
+    (re.compile(r"(?i)discipline|field of study|major"), "field_of_study"),
+    (re.compile(r"(?i)(graduation|grad)\s*(year|date)|year of graduation|end date"), "grad_year"),
+    (re.compile(r"(?i)(state|province).{0,20}(reside|live|located)|which (u\.?s\.? )?state"), "region"),
+    (re.compile(r"(?i)^where are you (located|based)|^current location|^location\b"), "city"),
     (re.compile(r"(?i)^(full\s*)?name$|^your name|^name\s*\*?$"), "full_name"),
     (re.compile(r"(?i)e-?mail"), "email"),
     (re.compile(r"(?i)phone|mobile|telephone"), "phone"),
@@ -38,7 +44,7 @@ _FIELD_RX: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(?i)resume|résumé|cv\b"), "resume"),
 ]
 # voluntary self-identification (EEO): never drafted, never required by Roster, shown folded as optional
-_VOLUNTARY_RX = re.compile(r"(?i)racial|race|ethnic|gender|pronoun|veteran|disabilit|self-identif|sexual orientation|select all that apply")
+_VOLUNTARY_RX = re.compile(r"(?i)racial|race|ethnic|gender|pronoun|veteran|disabilit|self-identif|sexual orientation|select all that apply|first-generation|transgender|lgbt")
 _LOGIN_RX = re.compile(r"(?i)(sign in|log in|create account|password)")
 _WORKDAY_RX = re.compile(r"(?i)myworkdayjobs\.com|workday")
 _CAPTCHA_RX = re.compile(r"(?i)recaptcha|hcaptcha|captcha")
@@ -59,7 +65,7 @@ def detect_ats(url: str) -> str:
 
 def map_label(label: str) -> str:
     """A form field's label / name / placeholder → the Apply-profile key it answers ('' = a custom question)."""
-    t = re.sub(r"\s+", " ", (label or "")).strip().rstrip("*").strip()
+    t = re.sub(r"\s+", " ", (label or "")).strip().rstrip("*✱✲⁎＊").strip()
     if not t:
         return ""
     for rx, key in _FIELD_RX:
@@ -122,7 +128,9 @@ _STANDARD_QS: list[tuple[re.Pattern, str, str]] = [
     (re.compile(r"(?i)sponsor"), "requires_sponsorship", "yn"),
     (re.compile(r"(?i)(authori[sz]ed|eligible|legally|right) to work|work authori[sz]ation"), "us_authorized_to_work", "yn"),
     (re.compile(r"(?i)relocat"), "willing_to_relocate", "yn"),
-    (re.compile(r"(?i)previously (worked|employed|consulted)|former employee|worked (at|for) .* before"), "previously_worked_here", "yn"),
+    (re.compile(r"(?i)previously (worked|employed|consulted)|former employee|worked (at|for) .* before|(ever|previously|currently).{0,20}(work(ed|ing)?|employed|contractor).{0,40}(at|for|with)"), "previously_worked_here", "yn"),
+    (re.compile(r"(?i)zip|postal"), "postal_code", "text"),
+    (re.compile(r"(?i)^country"), "country", "text"),
     (re.compile(r"(?i)hispanic|latin"), "hispanic_latino", "yn"),
     (re.compile(r"(?i)preferred (first )?name|name you.d prefer|what should we call you"), "preferred_name", "text"),
     (re.compile(r"(?i)pronoun"), "pronouns", "text"),
@@ -216,8 +224,10 @@ def plan_fill(fields: list[dict], profile: dict, answers: dict | None = None) ->
         if ans:
             filled.append({**f, "key": "answer", "value": str(ans)})
         elif kind in ("text", "textarea", "select", "radio", "checkbox", "email", "tel", "url"):
-            if label.lower().startswith("start typing") or label.lower().startswith("type here"):
+            if label.lower().startswith(("start typing", "type here", "apply for this job", "select...")):
                 continue
+            if any(q["label"] == label for q in open_q):
+                continue                       # a combobox renders two inputs for one question
             open_q.append({"label": label, "kind": kind, "required": bool(f.get("required")), "options": f.get("options") or [],
                            "voluntary": bool(_VOLUNTARY_RX.search(label))})
     return {"filled": filled, "open": open_q,
@@ -287,11 +297,14 @@ def _discover_fields(scope) -> list[dict]:
         if (!vis(el)) return;
         let kind = el.tagName === "SELECT" ? "select" : el.tagName === "TEXTAREA" ? "textarea" : type;
         const options = el.tagName === "SELECT" ? [...el.options].map(o => o.text.trim()).filter(Boolean).slice(0, 40) : [];
-        const isCombo = el.getAttribute("role") === "combobox" || (el.getAttribute("aria-autocomplete") || "") !== "";
-        const gl = (kind === "radio" || kind === "checkbox" || isCombo) ? groupLab(el) : "";
+        const isCombo = el.getAttribute("role") === "combobox" || (el.getAttribute("aria-autocomplete") || "") !== "" || (el.closest("[class*='select__']") !== null);
+        let l0 = lab(el);
+        const gl = (kind === "radio" || kind === "checkbox" || isCombo || !l0 || l0 === (el.name || "") || /^cards\[/.test(l0)) ? groupLab(el) : "";
         const grp = groupOf(el); const gk = grp ? grp.dataset.rosterGk : "";
         const sel = el.id ? `#${CSS.escape(el.id)}` : (el.name ? `[name="${el.name}"]` : "");
-        out.push({ label: lab(el), group_label: gl, group_key: gk, name: el.name || "", id: el.id || "", kind, required: !!el.required || el.getAttribute("aria-required") === "true" || /\*\s*$/.test(gl) || /\*\s*$/.test(lab(el)),
+        if ((!l0 || l0 === (el.name || "") || /^cards\[/.test(l0)) && gl) l0 = gl;
+        out.push({ label: l0, group_label: gl, group_key: gk, name: el.name || "", id: el.id || "", kind, combo: isCombo,
+                   required: !!el.required || el.getAttribute("aria-required") === "true" || /[*✱]\s*$/.test(gl) || /[*✱]\s*$/.test(l0),
                    placeholder: el.placeholder || "", options, selector: `[data-roster-i="${idx}"]` });
       });
       return out;
@@ -320,33 +333,75 @@ def _run_browser(mode: str, job: dict) -> dict:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
         ctx = browser.new_context(viewport={"width": 1200, "height": 1600},
-                                  user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36 roster-apply")
+                                  user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
         page = ctx.new_page()
         page.set_default_timeout(20000)
         try:
             page.goto(url, wait_until="domcontentloaded")
-            page.wait_for_timeout(1500)
-            # reach the FORM: Lever's posting page → "Apply for this job"; Ashby → "Apply" tab; Greenhouse embeds an iframe
-            for sel in ("a.postings-btn", "a:has-text('Apply for this job')", "button:has-text('Apply for this job')",
-                        "a:has-text('Apply Now')", "button:has-text('Apply')", "a[href$='/apply']"):
+            page.wait_for_timeout(2000)
+
+            def _n_inputs(sc):
                 try:
-                    loc = page.locator(sel).first
-                    if loc.count() and loc.is_visible():
-                        loc.click()
-                        page.wait_for_timeout(1500)
-                        break
+                    return sum(1 for e in sc.locator("input:not([type=hidden]), textarea, select").all()[:80] if e.is_visible())
                 except Exception:  # noqa: BLE001
-                    continue
-            scope = page
-            for fr in page.frames:
-                if "greenhouse" in (fr.url or "") and fr != page.main_frame:
-                    scope = fr
+                    return 0
+
+            def _form_scope():
+                """The document holding the application form: the page itself, or an embedded frame
+                (Greenhouse embeds on company career pages) — whichever shows the most inputs. Never
+                chosen by URL text (a Google proxy frame carries the parent's host in its query string)."""
+                best, best_n = page, _n_inputs(page)
+                for fr in page.frames:
+                    if fr == page.main_frame:
+                        continue
+                    try:
+                        n = _n_inputs(fr)
+                    except Exception:  # noqa: BLE001
+                        n = 0
+                    if n > best_n:
+                        best, best_n = fr, n
+                return best
+
+            scope = _form_scope()
+            # give a late-rendering form a fair chance BEFORE deciding to click anything (Greenhouse
+            # job-boards pages render the form inline a few seconds after load)
+            for _w in range(5):
+                if _n_inputs(scope) >= 4:
                     break
+                page.wait_for_timeout(1500)
+                scope = _form_scope()
+            out["notes"].append(f"inputs visible before any click: {_n_inputs(scope)}")
+            # reach the FORM only when it is not already on the page: Lever's posting page → "Apply for this
+            # job"; Ashby → "Apply" tab. (Clicking a page's own "Apply" anchor when the form is already
+            # rendered re-mounts it and the next look sees nothing — the Gusto / Greenhouse case.)
+            if _n_inputs(scope) < 4:
+                for sel in ("a.postings-btn", "a:has-text('Apply for this job')", "button:has-text('Apply for this job')",
+                            "a:has-text('Apply Now')", "a:has-text('Apply now')", "a[href$='/apply']", "a[href*='/apply']",
+                            "a[href*='greenhouse.io']", "a[href*='lever.co']", "a[href*='ashbyhq.com']", "button:has-text('Apply')"):
+                    try:
+                        loc = page.locator(sel).first
+                        if loc.count() and loc.is_visible():
+                            loc.click()
+                            page.wait_for_timeout(2000)
+                            break
+                    except Exception:  # noqa: BLE001
+                        continue
+                scope = _form_scope()
+            page.set_default_timeout(4000)            # per-action cap from here on: a stuck field costs seconds
+            fields = []
+            for _try in range(8):                     # forms render late; look until inputs are there
+                fields = _discover_fields(scope)
+                if len(fields) >= 3:
+                    break
+                page.wait_for_timeout(1500)
+                scope = _form_scope()
+            out["notes"].append(f"fields discovered: {len(fields)} (ats {ats})")
             html = scope.content()
             if _LOGIN_RX.search(scope.title() or "") and scope.locator("input[type=password]").count():
                 out.update(status="needs_you", reason="The apply page asks you to sign in — Roster never enters passwords. Open it yourself; your answers are ready below.")
                 return out
-            fields = _discover_fields(scope)
+            if not fields:
+                out.update(status="needs_you", reason="No application form was found on that page (it may open the form on another site). Open the link and apply there; your answers are prepared.")
             plan = plan_fill(fields, profile, answers)
             out["open"], out["blocking"] = plan["open"], plan["blocking"]
             done = []
@@ -370,6 +425,19 @@ def _run_browser(mode: str, job: dict) -> dict:
                             tgt.check(force=True)
                         except Exception:  # noqa: BLE001 — custom-styled inputs: click the label instead
                             scope.locator(f"label:has-text('{f['value'][:60]}')").first.click()
+                        done.append({"label": f["label"], "value": f["value"]})
+                    elif f.get("combo"):
+                        loc.click()
+                        loc.fill(f["value"])
+                        page.wait_for_timeout(900)
+                        try:
+                            opt = scope.locator("[role='option']").first
+                            if opt.count() and opt.is_visible():
+                                opt.click()
+                            else:
+                                loc.press("ArrowDown"); loc.press("Enter")
+                        except Exception:  # noqa: BLE001
+                            loc.press("Enter")
                         done.append({"label": f["label"], "value": f["value"]})
                     else:
                         loc.fill(f["value"])
@@ -409,7 +477,16 @@ def _run_browser(mode: str, job: dict) -> dict:
                     out.update(status=("submitted" if (clicked and ok) else "needs_you"),
                                reason=("" if (clicked and ok) else ("A CAPTCHA challenge appeared on submit — Roster never solves one; open the link and finish there (your answers are prepared)."
                                                                     if challenge else "No confirmation was seen after submitting — check the apply page yourself before retrying.")))
-            out["screenshot_b64"] = base64.b64encode(page.screenshot(full_page=True, type="png")).decode()
+            # the screenshot is THE FORM (the element), not the whole posting page — what the user reviews
+            try:
+                _frm = scope.locator("form").first
+                if _frm.count() and _frm.is_visible():
+                    _frm.scroll_into_view_if_needed()
+                    out["screenshot_b64"] = base64.b64encode(_frm.screenshot(type="png")).decode()
+                else:
+                    out["screenshot_b64"] = base64.b64encode(page.screenshot(full_page=True, type="png")).decode()
+            except Exception:  # noqa: BLE001
+                out["screenshot_b64"] = base64.b64encode(page.screenshot(full_page=True, type="png")).decode()
             out["page_title"] = page.title()
         except Exception as e:  # noqa: BLE001
             out.update(status="failed", reason=f"{type(e).__name__}: {str(e)[:160]}")

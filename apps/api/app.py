@@ -6061,7 +6061,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
 
         def _go():
             try:
-                r = subprocess.run([sys.executable, "-m", "api.auto_apply", mode, inp, outp], capture_output=True, text=True, timeout=150)
+                r = subprocess.run([sys.executable, "-m", "api.auto_apply", mode, inp, outp], capture_output=True, text=True, timeout=240)
                 if r.returncode != 0:
                     return {"status": "failed", "reason": ("the browser step failed: " + (r.stderr or "")[-200:]).strip()}
                 return _json.load(open(outp))
