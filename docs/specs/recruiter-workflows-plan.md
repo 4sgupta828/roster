@@ -196,6 +196,19 @@ non-hiring 'manager' titles excluded); draft notes via the composer; Roster neve
 Jobs: stated levels outside the selection leave; unstated titles fold ("an unmarked title is not a
 level"); people with no stated level are counted out; the strip shows level as Must.
 Camera / photo capture retired from the intake.
+Level (owner correction): a PREFERENCE, never a gate — "Center around <level>" with a segmented width
+(exactly · nearby too · wide); exact leads, nearby next, unstated neutral, the rest ranked last, nothing
+dropped (`apply_level_pref`, `level_span`).
+CONTROLLED AUTO-APPLY (owner ask): `apps/api/auto_apply.py` runs headless Chromium in a SEPARATE
+process (Playwright in the image): `fill` opens the apply page, reaches the form (Lever/Ashby apply
+buttons, Greenhouse iframe), maps labels → Apply-profile fields in code, uploads the résumé, screenshots,
+STOPS; open questions are listed (model drafts for free-text only, labeled; selects never guessed);
+`submit` runs only from `POST /me/applications/{id}/approve`, refuses on a CAPTCHA, a login wall, or a
+required question without an answer (needs_you), and records the confirmation. Workday-style portals
+are needs_you (Roster never creates accounts / types passwords). Tracked in `roster_application`;
+Account → Applications lists status, review modal with screenshot + editable answers, Approve & submit.
+Verified locally on a real Greenhouse form (fill only). A prod prepare test with a throwaway identity
+was declined by the session's safety classifier; the first prod run is the owner with their own profile.
 Still open: the eval layer (invariants + relevance judge + traps, run twice); (the ranking root cause — titles
 only today; needs a cost projection), a level tag with an explicit "unstated" state + filter chips,
 and the landing re-shuffle (only after intake proves out).
