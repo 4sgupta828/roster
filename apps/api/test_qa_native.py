@@ -460,7 +460,13 @@ def test_jobs_for_profile_matches_and_analyzes(monkeypatch):
     client = _client(monkeypatch, svc,
                      {"route": "jobs_for_profile", "subject_kind": "person", "confidence": "high"})
     client.app.state.claim_store = object()
+    # BIAS TO CARDS: a résumé → roles ask returns job CARDS + the interpreted brief (like the Jobs tab)
     r = client.post("/qa", json={"question": cv, "tenant_id": "demo"})
+    d = r.json()
+    assert d["jobs"] and d["jobs"][0]["title"] == "Staff Infra Engineer" and d["brief_contract"]["profile"]["skills"]
+    assert "matched to your résumé" in d["answer"] and not svc.calls
+    # an EXPLICIT ask for an assessment gets the written analysis over résumé + matches as documents
+    r = client.post("/qa", json={"question": "Analyze the fit: " + cv, "tenant_id": "demo"})
     assert r.json()["answer"] == "gems + ideal roles"
     docs = svc.calls[0].get("documents") or []
     assert any("job matches" in d["name"] for d in docs)

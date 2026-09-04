@@ -1447,6 +1447,7 @@ class ResearchOut(BaseModel):
     reflection: dict = {}                 # ROSTER_REFLECTION=steer: {intent, answer_brief, confidence} — what
     #                                       the pass understood the user is really after (empty when off/low-conf)
     qa_route: dict | None = None          # ROSTER_QA_ROUTER: the intent-router decision that shaped this
+    brief_contract: dict | None = None    # the interpreted brief for a job-card answer (same strip as Jobs)
     #                                       answer {route, subject_kind, entities, axes, confidence} —
     #                                       observability/audit (None when the router did not run)
     redirect_to_qa: bool = False          # a SEARCH surface (People/Jobs tab) received a QUESTION —
@@ -2911,7 +2912,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 "grounded": out.grounded, "coverage_gaps": out.coverage_gaps, "source": "roster",
                 "session_id": out.session_id, "people_rows": out.people_rows, "jobs": out.jobs,
                 "coverage_basis": out.coverage_basis, "people": out.people,
-                "clarification": out.clarification, "qa_route": out.qa_route}
+                "clarification": out.clarification, "qa_route": out.qa_route,
+                "geo_scope": out.geo_scope, "brief_contract": out.brief_contract}
 
     @app.post("/qa")
     async def qa(body: ResearchIn) -> dict:
@@ -4082,12 +4084,35 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                       "and I'll match open roles from Roster's jobs index.",
                         qa_route=_route.model_dump())
                 if _cstore is not None:
-                    from api.people_population import match_resume_jobs
+                    from api.people_population import job_brief_contract, match_resume_jobs, years_to_levels
+                    _geo = people_geo_scope_enabled()
+                    _prefs = {"limit": 40, "country": ((body.country or "us").strip().lower() if _geo else ""),
+                              "metro": ((body.metro or "") if _geo else ""), "state": ((body.state or "") if _geo else ""),
+                              "seniorities": sorted(years_to_levels(_cv))}
                     try:
-                        mres = await match_resume_jobs(_cstore, {"_resume_text": _cv}, {"limit": 15})
+                        mres = await match_resume_jobs(_cstore, {"_resume_text": _cv}, _prefs)
                     except Exception:   # noqa: BLE001
                         mres = {}
-                    _jobs = (mres.get("jobs") or [])[:15]
+                    _jobs = list(mres.get("jobs") or [])
+                    # BIAS TO CARDS (consistency with the Jobs tab): a résumé → roles ask returns job
+                    # CARDS with the interpreted brief. Only an explicit ask for an assessment
+                    # ("analyze the fit", "why", "how well") gets the written analysis over the matches.
+                    _wants_prose = bool(re.search(r"(?i)\b(analy[sz]e|critique|assess|evaluate|how well|why|explain|compare|fit)\b",
+                                                  body.question or ""))
+                    if _jobs and not _wants_prose:
+                        if on_event is not None:
+                            await on_event({"type": "jobs", "count": len(_jobs)})
+                        _bc = job_brief_contract(question=body.question or "", scope=mres.get("geo_scope"),
+                                                 profile_text=_cv, matched_on=("attachment" if _att_cv else "pasted"))
+                        _lead = (f"{len(_jobs)} open role{'s' if len(_jobs) != 1 else ''} matched to your résumé — title, "
+                                 f"skills and level first. Ask “analyze the fit” for a written assessment of the top matches.")
+                        sid = await _persist_route(_lead, True, "jobs",
+                                                   {"jobs_count": len(_jobs), "jobs": _jobs[:60], "query": {},
+                                                    "brief_contract": _bc, "qa_route": _route.model_dump()})
+                        return ResearchOut(grounded=True, answer=_lead, jobs=_jobs, geo_scope=mres.get("geo_scope"),
+                                           brief_contract=_bc, claims=[], coverage_gaps=[], rejected=0,
+                                           session_id=sid, qa_route=_route.model_dump())
+                    _jobs = _jobs[:15]
                     if _jobs:
                         if on_event is not None:
                             await on_event({"type": "jobs", "count": len(_jobs)})

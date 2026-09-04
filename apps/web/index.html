@@ -6768,7 +6768,7 @@ function renderSearchSessionDetail(row, rowEl, t0){
   if(kind === "jobs"){
     const jobs = t0.jobs || [];
     body = jobs.length
-      ? jobsMarkup({jobs, query: t0.query || {}, stats: {}})
+      ? jobsMarkup({jobs, query: t0.query || {}, stats: {}, geo_scope: t0.geo_scope || null, brief_contract: t0.brief_contract || null, matched_on: t0.matched_on || ""})
       : `<div class="empty">This search's results weren't stored. Re-run it from the search box to see current openings.</div>`;
   } else if(kind === "qa"){
     const answer = t0.answer || row.answer || "";
