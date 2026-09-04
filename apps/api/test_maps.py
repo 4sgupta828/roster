@@ -15,3 +15,12 @@ def test_reviewer_text_is_sanitized_at_the_boundary():
     assert sanitize_text("  Hiring <b>Manager</b>\x00\n  ", 80) == "Hiring bManager/b"
     assert sanitize_text("x" * 100, 10) == "x" * 10
     assert sanitize_text(None, 10) == ""
+
+
+def test_review_state_is_derived_from_the_feedback_chips():
+    from api.maps import derive_state
+    assert derive_state(["more_like_this", "wrong_location"]) == "shortlist"
+    assert derive_state(["less_like_this"]) == "not relevant"
+    assert derive_state(["evidence_too_weak"]) == "needs more evidence"
+    assert derive_state(["wrong_seniority"]) == "maybe"
+    assert derive_state([]) == "unreviewed"

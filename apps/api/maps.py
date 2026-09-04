@@ -69,6 +69,21 @@ _LEGACY_STATE = {"shortlisted": "shortlist", "reviewed": "maybe"}     # older ro
 FEEDBACK_TAGS = ("more_like_this", "less_like_this", "wrong_domain", "wrong_seniority", "wrong_location",
                  "wrong_company_target", "evidence_too_weak", "needs_artifact_evidence",
                  "self_stated_is_enough", "private_company_talent")
+
+
+def derive_state(tags: list[str] | None) -> str:
+    """The review state a set of feedback tags implies (ONE control in the UI: the chips; the state
+    is never asked separately). Mirrors the FE's deriveReviewState."""
+    t = set(tags or [])
+    if "more_like_this" in t:
+        return "shortlist"
+    if "less_like_this" in t:
+        return "not relevant"
+    if t & {"evidence_too_weak", "needs_artifact_evidence"}:
+        return "needs more evidence"
+    return "maybe" if t else "unreviewed"
+
+
 REVISION_REASONS = ("initial", "hiring_manager_feedback", "manual_filter_change", "evidence_refresh", "corpus_expansion")
 _MAX_ROWS = 400
 
@@ -300,11 +315,13 @@ class MapStore:
         link (share token + their own key/name) writes their own row alongside — reviewers never
         overwrite each other. Feedback edits the next map's contract, never the evidence."""
         await self._ensure()
+        tags_given = tags is not None
+        tags = [t for t in (tags or []) if t in FEEDBACK_TAGS][:6]
+        if state == "auto" or (tags_given and not state):
+            state = derive_state(tags)
         state = _LEGACY_STATE.get(state, state)
         if state not in REVIEW_STATES:
             return False
-        tags_given = tags is not None
-        tags = [t for t in (tags or []) if t in FEEDBACK_TAGS][:6]
         reviewer_name = sanitize_text(reviewer_name, 80)
         note = sanitize_text(note, 2000) if note is not None else None
         pool = await self._get_pool()

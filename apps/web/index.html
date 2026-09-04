@@ -556,11 +556,9 @@
   .ppl-card.person-card .ev-inline a, .ppl-card.person-card .ev-inline button, .ppl-card.person-card .ev-inline select, .ppl-card.person-card .ev-inline summary{cursor:pointer;}
   .ev-hint{font-size:.7rem;color:var(--muted);margin-left:.35rem;}
   .rv-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin-top:.4rem;font-size:.74rem;}
-  .rv-state{min-height:32px;font-size:.76rem;padding:.15rem .4rem;border:1px solid var(--gold);border-radius:6px;background:var(--panel);color:var(--gold-strong);font-weight:600;}
-  .rv-fb-btn{font:inherit;cursor:pointer;color:var(--muted);font-size:.74rem;padding:.2rem .5rem;border:1px dashed var(--hair);border-radius:999px;background:transparent;min-height:32px;}
-  .rv-panel{display:block;width:100%;margin-top:.3rem;}
-  .rv-panel[hidden]{display:none;}
-  .rv-tags{display:flex;flex-wrap:wrap;gap:.25rem;margin:.35rem 0;}
+  .rv-h{font-size:.68rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--gold-strong);}
+  .rv-derived{font-size:.72rem;color:var(--gold-strong);font-weight:600;}
+  .rv-tags{display:inline-flex;flex-wrap:wrap;gap:.25rem;margin:.1rem 0;}
   .rv-tag{font:inherit;font-size:.7rem;padding:.15rem .5rem;border:1px solid var(--hair);border-radius:999px;background:var(--panel2);color:var(--ink);cursor:pointer;min-height:28px;}
   .rv-tag.on{border-color:var(--gold);background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);font-weight:600;}
   .rv-note{width:100%;font-size:.76rem;padding:.3rem .45rem;border:1px solid var(--hair);border-radius:6px;background:var(--panel);}
@@ -8289,12 +8287,15 @@ function talentMapBar(){
       ? `<input class="mb-title" id="mapTitle" value="${esc(m.title||"")}" placeholder="Map title" onchange="saveMapMeta()">`
       : `<span class="mb-title">${esc(m.title||"Talent Map")}</span>`;
     const nFb = (m.feedback||[]).filter(f => f.reviewer_key).length;
-    // feedback that CAN revise the brief: any tags, or an owner/reviewer shortlist / not-relevant call
-    const nAct = (m.feedback||[]).filter(f => (f.tags||[]).length || f.state === "shortlist" || f.state === "not relevant").length;
+    // feedback that CAN revise the brief: any tags, or an owner/reviewer shortlist / not-relevant call —
+    // counted only when NEWER than the last revision (everything older is already in this list)
     const revs = m.revisions || [];
     const revN = revs.length ? revs[revs.length-1].revision_id : 0;
+    const since = revN ? String(revs[revs.length-1].created_at||"") : "";
+    const nAct = (m.feedback||[]).filter(f => ((f.tags||[]).length || f.state === "shortlist" || f.state === "not relevant") && (!since || String(f.updated_at||"") > since)).length;
     const reviewAs = m.is_owner ? "" : `<span class="mb-meta" style="flex-basis:auto;">Review as <input class="mb-title" id="reviewerName" style="max-width:180px;" placeholder="your name" value="${esc(reviewerName())}" onchange="setReviewerName(this.value);"> <span class="ppl-fc" style="text-transform:none;">(no account needed — your review states and feedback save to this map under your name)</span></span>`;
-    const revise = (m.is_owner && nAct) ? `<button type="button" class="mb-btn" id="reviseBtn" onclick="reviseMapPreview()">↻ Revise from feedback (${nAct})</button>` : "";
+    const revise = (m.is_owner && nAct) ? `<button type="button" class="mb-btn" id="reviseBtn" onclick="reviseMapPreview()">↻ Revise from feedback (${nAct} new)</button>`
+      : (m.is_owner && revN ? `<span class="mb-meta" style="flex-basis:auto;">no new feedback since revision ${revN}</span>` : "");
     return `<div class="mapbar">${title}${share}<a class="mb-btn" href="${csvHref}" target="_blank" rel="noopener">⬇ Export CSV</a>${revise}
       <span class="mb-meta">Saved Talent Map${revN?` · revision ${revN}`:""} · ${m.n_rows||0} people · ${m.is_owner?"you own this map — review states, feedback and notes persist here":"shared view"}${nFb?` · ${nFb} reviewer feedback item${nFb===1?"":"s"}`:""}${m.created_at?` · saved ${esc(String(m.created_at).slice(0,10))}`:""}</span>
       ${reviewAs}
@@ -8321,7 +8322,7 @@ function revisionsMarkup(m){
     <div class="rev-meta">This map was revised <b>in place</b> — same link, nothing to re-save. Revision ${Math.max(0,last.revision_id-1)} (the list before) is kept with the map.</div>
     ${lines?`<div class="rev-sum">${lines}</div>`:""}
     <div class="rev-meta">${d.n_added||0} new${names("added")?` (${names("added")}${(d.n_added||0)>6?", …":""})`:""} · ${d.n_removed||0} dropped${names("removed")?` (${names("removed")}${(d.n_removed||0)>6?", …":""})`:""} · ${d.n_moved||0} moved 10+ places</div>
-    ${(d.edits||[]).length?`<details class="rev-edits" open><summary>Brief edits applied (${d.edits.length}) — code-owned, from the feedback tags</summary><ul>${d.edits.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></details>`:""}
+    ${(d.edits||[]).length?`<details class="rev-edits" open><summary>Feedback that produced this revision (${d.edits.length})</summary><ul>${d.edits.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></details>`:""}
     ${revs.length>1?`<div class="rev-meta">Earlier: ${revs.slice(0,-1).reverse().map(r=>`rev ${r.revision_id} (${esc(REASON[r.reason]||r.reason)})`).join(" · ")}</div>`:""}
   </div>`;
 }
@@ -8447,7 +8448,8 @@ async function saveMapMeta(){
 // REVIEWER IDENTITY on a shared map: the owner reviews as themselves (signed in); anyone else on the
 // private link reviews under a NAME they type once (stored in this browser) — no account needed.
 const REVIEW_STATES = ["unreviewed","shortlist","maybe","needs more evidence","not relevant"];
-const FEEDBACK_TAGS = [["more_like_this","more like this"],["less_like_this","less like this"],["wrong_domain","wrong domain"],["wrong_seniority","wrong seniority"],["wrong_location","wrong location"],["wrong_company_target","wrong company target"],["evidence_too_weak","evidence too weak"],["needs_artifact_evidence","needs public work"],["self_stated_is_enough","self-stated is enough"],["private_company_talent","private-company talent"]];
+// (needs_artifact_evidence stays a valid server tag; 'evidence too weak' covers it in the UI)
+const FEEDBACK_TAGS = [["more_like_this","👍 more like this"],["less_like_this","👎 less like this"],["wrong_seniority","wrong level"],["wrong_domain","wrong domain"],["wrong_location","wrong location"],["wrong_company_target","wrong company"],["evidence_too_weak","evidence too weak"],["self_stated_is_enough","self-stated is enough"],["private_company_talent","private company is fine"]];
 // a guest reviewer is REGISTERED per map: the server signs {key, name} → token; stored in this browser
 function reviewerRec(){ const m = window.ACTIVE_MAP; if(!m) return null; try{ return JSON.parse(localStorage.getItem("roster_reviewer_" + m.id) || "null"); }catch(e){ return null; } }
 function reviewerKey(){ const r = reviewerRec(); return (r && r.reviewer_key) || ""; }
@@ -8487,31 +8489,41 @@ function reviewControlMarkup(ref){
   const m = window.ACTIVE_MAP, cur = myReview(ref) || {};
   const mine = m.is_owner ? "" : reviewerKey();
   const others = (m.feedback||[]).filter(f => f.entity_id === ref && (m.is_owner ? !!f.reviewer_key : f.reviewer_key !== mine) && (f.state !== "unreviewed" || (f.tags||[]).length || f.note));
-  const opts = REVIEW_STATES.map(st => `<option value="${esc(st)}"${st===(cur.state||"unreviewed")?" selected":""}>${esc(st)}</option>`).join("");
+  // ONE control — feedback chips. The review state (shortlist / not relevant / needs more evidence /
+  // maybe) is DERIVED from the chips in code, never asked separately (the dropdown duplicated them).
   const tagBtns = FEEDBACK_TAGS.map(([k,l]) => `<button type="button" class="rv-tag${(cur.tags||[]).includes(k)?" on":""}" data-ref="${esc(ref)}" data-tag="${esc(k)}">${esc(l)}</button>`).join("");
-  const nTags = (cur.tags||[]).length;
+  const st = deriveReviewState(cur.tags||[]);
   // inline-only markup: the card body is a <span>, so no block elements here (they broke the card)
   return `<span class="rv-ctl" data-ref="${esc(ref)}">
-    <select class="rv-state" data-ref="${esc(ref)}" title="Your review of this row — decision support, never a verdict">${opts}</select>
-    <button type="button" class="rv-fb-btn" data-ref="${esc(ref)}">feedback${nTags?` · ${nTags}`:""} ▾</button>
+    <span class="rv-h">Feedback</span><span class="rv-tags">${tagBtns}</span>
+    <span class="rv-derived" data-ref="${esc(ref)}">${st!=="unreviewed"?`→ ${esc(st)}`:""}</span>
     ${others.length?`<span class="rv-others" title="${esc(others.map(o=>`${o.reviewer_name||"owner"}: ${o.state}${(o.tags||[]).length?" · "+o.tags.join(", "):""}${o.note?" — "+o.note:""}`).join("\n"))}">${others.length} other review${others.length===1?"":"s"}</span>`:""}
-    <span class="rv-panel" data-ref="${esc(ref)}" hidden><span class="rv-tags">${tagBtns}</span>
-      <input class="rv-note" data-ref="${esc(ref)}" placeholder="note for the team (optional)" value="${esc(cur.note||"")}" /></span>
+    <input class="rv-note" data-ref="${esc(ref)}" placeholder="note for the team (optional)" value="${esc(cur.note||"")}" />
   </span>`;
 }
+// the review state a set of chips implies (mirrors maps.derive_state on the server)
+function deriveReviewState(tags){
+  const t = new Set(tags||[]);
+  if(t.has("more_like_this")) return "shortlist";
+  if(t.has("less_like_this")) return "not relevant";
+  if(t.has("evidence_too_weak") || t.has("needs_artifact_evidence")) return "needs more evidence";
+  return t.size ? "maybe" : "unreviewed";
+}
 document.addEventListener("change", e => {
-  const sel = e.target.closest && e.target.closest(".rv-state"); if(sel){ syncMapReview(sel.dataset.ref, sel.value); return; }
   const nt = e.target.closest && e.target.closest(".rv-note"); if(nt){ syncMapReview(nt.dataset.ref, undefined, undefined, nt.value); }
 });
 document.addEventListener("click", e => {
-  const fb = e.target.closest && e.target.closest(".rv-fb-btn");
-  if(fb){ e.preventDefault(); e.stopPropagation(); const p = fb.closest(".rv-ctl").querySelector(".rv-panel"); if(p) p.hidden = !p.hidden; return; }
   const b = e.target.closest && e.target.closest(".rv-tag"); if(!b) return;
   e.preventDefault(); e.stopPropagation();
   const cur = myReview(b.dataset.ref) || {}; const tags = new Set(cur.tags||[]);
   if(tags.has(b.dataset.tag)) tags.delete(b.dataset.tag); else tags.add(b.dataset.tag);
-  b.classList.toggle("on"); syncMapReview(b.dataset.ref, undefined, [...tags]);
-  const btn = b.closest(".rv-ctl") && b.closest(".rv-ctl").querySelector(".rv-fb-btn"); if(btn) btn.textContent = "feedback" + (tags.size ? " · " + tags.size : "") + " ▾";
+  if(b.dataset.tag === "more_like_this" && tags.has("more_like_this")) tags.delete("less_like_this");   // mutually exclusive
+  if(b.dataset.tag === "less_like_this" && tags.has("less_like_this")) tags.delete("more_like_this");
+  const ctl = b.closest(".rv-ctl");
+  if(ctl) ctl.querySelectorAll(".rv-tag").forEach(x => x.classList.toggle("on", tags.has(x.dataset.tag)));
+  const st = deriveReviewState([...tags]);
+  const dv = ctl && ctl.querySelector(".rv-derived"); if(dv) dv.textContent = st !== "unreviewed" ? `→ ${st}` : "";
+  syncMapReview(b.dataset.ref, st, [...tags]);
 });
 function copyMapLink(){
   const m = window.ACTIVE_MAP; if(!m || !m.share_path) return;
