@@ -151,6 +151,20 @@ the requirement on for the next revision.
 - CSV export accepts `?rows=id,id,…`; a "Selected rows" checkbox mode on the map; ATS import
   templates (Greenhouse/Ashby/Lever CSV shapes) as static mappings.
 
+### Interlude — job-seeker intake (tester feedback, panel-reviewed 2026-09-04) — SHIPPED
+Panel (Codex, Gemini, code-grounded agent) verdict: do not hide Q&A; the defect is intake. Shipped:
+(1) a résumé attachment (PDF/text) or a self-description in Jobs → `match_resume_jobs`, never free-text
+search; Q&A reads an attached résumé before asking to paste; the consent copy no longer forbids a
+résumé; a meta-question ("can I give you my resume…") gets a "attach or describe yourself" reply.
+(2) `agentic_job_search` ranks the planner's stated seniority (+/−) and emits `seniority` +
+`level_source` per row — an unmarked title is UNKNOWN, never 'mid'. (3) A soft, explained demotion in
+résumé matching for titles that STATE a different discipline than the profile ("title says
+frontend"); never a gate. (4) Loading state on the Jobs submit. Verified in prod with the tester's
+exact query: senior SRE/infra titles lead; frontend/security titles left the top 40.
+Still open from the panel: ingest posting BODIES into the job index (the ranking root cause — titles
+only today; needs a cost projection), a level tag with an explicit "unstated" state + filter chips,
+and the landing re-shuffle (only after intake proves out).
+
 ## 4. Data model (all additive; no drops)
 
 ```
