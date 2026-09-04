@@ -191,7 +191,7 @@ _MUST_LABELS = {"remote": "remote", "hybrid": "hybrid", "f500": "Fortune 500", "
 def job_brief_contract(*, question: str, plan: dict | None = None, query: dict | None = None,
                        job_must: list[str] | None = None, scope: dict | None = None,
                        profile_text: str = "", matched_on: str = "", stated_seniority: str = "",
-                       levels: list[str] | None = None) -> dict:
+                       levels: list[str] | None = None, level_span: int = 1) -> dict:
     """The INTERPRETED BRIEF for a job search — the same contract shape the Talent Map shows: what
     FILTERED the list (hard), what only RANKS it (soft), the search angles, how the profile was read
     (résumé path), the assumptions, and how the order was produced. Code-owned; nothing here is a
@@ -209,7 +209,7 @@ def job_brief_contract(*, question: str, plan: dict | None = None, query: dict |
         hard["location"] = [loc]
     if job_must:
         hard["must have"] = [_MUST_LABELS.get(str(m), str(m)) for m in job_must]
-    _lv = [LEVEL_LABELS[l] + " ±1" for l in (levels or [])[:1] if l in LEVEL_LABELS]
+    _lv = ["centered on " + LEVEL_LABELS[l] + ("" if level_span == 0 else " (nearby levels too)" if level_span == 1 else " (wide)") for l in (levels or [])[:1] if l in LEVEL_LABELS]
     if scope and scope.get("label"):
         hard["scope"] = [str(scope["label"])]
     profile: dict = {}
@@ -279,7 +279,7 @@ def level_bucket(value: str) -> str:
 _LEVEL_ORDER = ["junior", "mid", "senior", "staff", "exec"]
 
 
-def apply_level_pref(rows: list[dict], level: str, *, kind: str) -> tuple[list[dict], dict]:
+def apply_level_pref(rows: list[dict], level: str, *, kind: str, span: int = 1) -> tuple[list[dict], dict]:
     """LEVEL PREFERENCE (owner, 2026-09-04: levels are not calibrated across companies, so a level is
     a centre, never a gate). Stable partition: the stated level EXACTLY the preference leads, then
     ±1 level, then rows whose level is UNSTATED (neutral — an unmarked title is not a level), then
@@ -303,7 +303,7 @@ def apply_level_pref(rows: list[dict], level: str, *, kind: str) -> tuple[list[d
             unstated.append(r)
         elif b == want:
             exact.append(r)
-        elif abs(_LEVEL_ORDER.index(b) - wi) == 1:
+        elif abs(_LEVEL_ORDER.index(b) - wi) <= max(0, int(span)):
             near.append(r)
         else:
             far.append(r)
@@ -313,9 +313,9 @@ def apply_level_pref(rows: list[dict], level: str, *, kind: str) -> tuple[list[d
             r["reasons"] = list(r["reasons"]) + ["level match"]
     for r in near:
         r.setdefault("reasons", [])
-        if "level ±1" not in r["reasons"]:
-            r["reasons"] = list(r["reasons"]) + ["level ±1"]
-    info = {"level": want, "label": LEVEL_LABELS[want], "exact": len(exact), "near": len(near),
+        if "nearby level" not in r["reasons"]:
+            r["reasons"] = list(r["reasons"]) + ["nearby level"]
+    info = {"level": want, "label": LEVEL_LABELS[want], "span": max(0, int(span)), "exact": len(exact), "near": len(near),
             "unstated": len(unstated), "far": len(far)}
     return exact + near + unstated + far, info
 
@@ -2705,7 +2705,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                                    exclude_companies: list[str] | None = None,
                                    avoid_terms: list[str] | None = None,
                                    fixed_facets: dict | None = None,
-                                   levels: list[str] | None = None) -> dict:
+                                   levels: list[str] | None = None, level_span: int = 1) -> dict:
     """Answer a people-enumeration question from the grounded people index. Always returns a structured
     result (never raises to the route): a compiled facet filter, grounded rows, and honest coverage.
 
@@ -3339,7 +3339,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     # company-gap web discovery): stated levels outside the selection leave; people with no stated
     # level leave too and are COUNTED (an explicit filter is a filter) — the strip says so.
     if levels:
-        people_rows, _lv_info = apply_level_pref(people_rows, (levels or [""])[0], kind="person")
+        people_rows, _lv_info = apply_level_pref(people_rows, (levels or [""])[0], kind="person", span=level_span)
         if _lv_info:
             coverage["level_pref"] = _lv_info
     # CALIBRATION DEMOTION (last partition, stable): rows carrying a reviewer-demoted value go to the
@@ -3370,11 +3370,11 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         if levels and coverage.get("level_pref"):
             _bc0 = coverage["brief_contract"]
             _lp = coverage["level_pref"]
-            _bc0["soft"] = {**{"level": [f"{_lp['label']} ±1"]}, **{k: v for k, v in (_bc0.get("soft") or {}).items() if k != "seniority"}}
+            _bc0["soft"] = {**{"level": [f"centered on {_lp['label']}" + ("" if _lp["span"] == 0 else " (nearby levels too)" if _lp["span"] == 1 else " (wide)")]}, **{k: v for k, v in (_bc0.get("soft") or {}).items() if k != "seniority"}}
             _bc0["hard"] = {k: v for k, v in (_bc0.get("hard") or {}).items() if k != "seniority"}
             _bc0["assumptions"] = [a for a in (_bc0.get("assumptions") or []) if "seniority" not in a and "level" not in a]
             _bc0["clarification"] = None
-            _bc0["assumptions"].insert(0, f"level preference {_lp['label']}: {_lp['exact']} at that level lead, {_lp['near']} one level away next, "
+            _bc0["assumptions"].insert(0, f"centered on {_lp['label']}: {_lp['exact']} at that level lead, {_lp['near']} nearby next, "
                                           f"{_lp['unstated']} with no stated level stay neutral, {_lp['far']} further away rank last — nobody is dropped (levels aren't calibrated across companies)")
         if _fixed is not None:
             # a REVISED map: the contract came from reviewer feedback — no clarifying question (the

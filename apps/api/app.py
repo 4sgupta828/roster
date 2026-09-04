@@ -1050,7 +1050,8 @@ class ResearchIn(BaseModel):
     country: str = ""                     # people geo-scope from the top-right selector (default 'us' when the flag is on)
     evidence_kinds: list[str] = []        # Talent Map evidence filter: only people with linked paper/repo/post/talk/patent
     job_must: list[str] = []              # Jobs 'must have' toggles: remote|hybrid|f500|public|startup|senior|leadership
-    levels: list[str] = []                # EXPLICIT level filter (both surfaces): junior|mid|senior|staff|exec
+    levels: list[str] = []                # level PREFERENCE (both surfaces): junior|mid|senior|staff|exec — a centre, never a gate
+    level_span: int = 1                   # how far from the centre still ranks as 'nearby': 0 exact · 1 nearby · 2 wide
     metro: str = ""                       # LOCAL scope: the user's metro (e.g. 'bay_area') — clearly-elsewhere dropped,
     state: str = ""                       #   unknown kept, confirmed-local lead; or a US state code; query-named places win
     surface: str = ""                     # which UI tab asked: "people" | "jobs" | "qa" | "" — People/Jobs are
@@ -2649,10 +2650,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                   "pasted": f"That profile isn't visible to search engines, so these roles are matched to the text you pasted with the link."}[matched_on]),
                         "stats": await store.jobs_stats()})
             from api.people_population import apply_level_pref, job_brief_contract
-            jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job")
+            jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job", span=int(body.level_span))
             res.update({"jobs": jobs, "count": len(jobs)})
             res["brief_contract"] = job_brief_contract(question=body.question or "", job_must=body.job_must, scope=res.get("geo_scope"),
-                                                       profile_text=text, matched_on=matched_on, levels=body.levels)
+                                                       profile_text=text, matched_on=matched_on, levels=body.levels, level_span=int(body.level_span))
             res["session_id"] = await _save_job_session(jobs, res["query"])
             return res
 
@@ -2705,10 +2706,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                  "description": "Matched to your description — title, skills and level first. Attach a résumé (📎) for a deeper match."}[matched_on],
                         "stats": await store.jobs_stats()})
             from api.people_population import apply_level_pref, job_brief_contract
-            jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job")
+            jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job", span=int(body.level_span))
             res.update({"jobs": jobs, "count": len(jobs)})
             res["brief_contract"] = job_brief_contract(question=body.question or "", job_must=body.job_must, scope=res.get("geo_scope"),
-                                                       profile_text=cv_text, matched_on=matched_on, levels=body.levels)
+                                                       profile_text=cv_text, matched_on=matched_on, levels=body.levels, level_span=int(body.level_span))
             res["session_id"] = await _save_job_session(jobs, res["query"])
             return res
 
@@ -2783,9 +2784,9 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                             res["jobs"], metro=(body.metro or ""), state=(body.state or ""),
                             country=(body.country or "us"), query_location=(_q.get("location") or ""))
                 from api.people_population import apply_level_pref, job_brief_contract
-                res["jobs"], res["level_pref"] = apply_level_pref(res.get("jobs") or [], (body.levels or [""])[0], kind="job")
+                res["jobs"], res["level_pref"] = apply_level_pref(res.get("jobs") or [], (body.levels or [""])[0], kind="job", span=int(body.level_span))
                 if res.get("related_jobs") and body.levels:
-                    res["related_jobs"], _ = apply_level_pref(res["related_jobs"], (body.levels or [""])[0], kind="job")
+                    res["related_jobs"], _ = apply_level_pref(res["related_jobs"], (body.levels or [""])[0], kind="job", span=int(body.level_span))
                 res["count"] = len(res.get("jobs", []))
                 res["agentic"] = True
                 res["query"] = _q if _cos else {}
@@ -2793,7 +2794,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     question=body.question or "", plan={"variants": res.get("query_angles") or [], "intent": res.get("intent") or "",
                                                         "must_have": res.get("must_have") or [], "seniority": res.get("plan_seniority") or "",
                                                         "location": res.get("plan_location") or ""},
-                    query=_q, job_must=body.job_must, scope=res.get("geo_scope"), levels=body.levels)
+                    query=_q, job_must=body.job_must, scope=res.get("geo_scope"), levels=body.levels, level_span=int(body.level_span))
                 if _cos:
                     _nm = ", ".join(_cos)
                     res["note"] = (f"{res.get('company_indexed', 0)} role{'s' if res.get('company_indexed', 0) != 1 else ''} "
@@ -2873,10 +2874,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         stats = await store.jobs_stats()
         sid = await _save_job_session(rows, q)   # JOB searches appear in the user's private History
         from api.people_population import apply_level_pref, job_brief_contract
-        rows, _lp = apply_level_pref(rows, (body.levels or [""])[0], kind="job")
+        rows, _lp = apply_level_pref(rows, (body.levels or [""])[0], kind="job", span=int(body.level_span))
         return {"jobs": rows, "count": len(rows), "query": q, "semantic": bool(qvec), "stats": stats,
                 "geo_scope": _gs, "session_id": sid, "must": _must, "level_pref": _lp,
-                "brief_contract": job_brief_contract(question=body.question or "", query=q, job_must=body.job_must, scope=_gs, levels=body.levels)}
+                "brief_contract": job_brief_contract(question=body.question or "", query=q, job_must=body.job_must, scope=_gs, levels=body.levels, level_span=int(body.level_span))}
 
     @app.post("/insights")
     async def insights(body: ResearchIn) -> dict:
@@ -3765,7 +3766,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 prior_context=(body.prior_context or "").strip()[:300],
                 scope_metro=((body.metro or "").strip().lower() if people_geo_scope_enabled() else ""),
                 scope_state=((body.state or "").strip().lower() if people_geo_scope_enabled() else ""),
-                evidence_kinds=list(body.evidence_kinds or []), levels=list(body.levels or []))
+                evidence_kinds=list(body.evidence_kinds or []), levels=list(body.levels or []), level_span=int(body.level_span))
             if res.get("kind") == "person":
                 if fallthrough:
                     return None, res      # router: grounded dossier, never only the static card

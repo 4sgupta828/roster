@@ -125,8 +125,12 @@ def test_level_preference_ranks_exact_then_adjacent_then_unstated_and_drops_noth
             {"title": "Senior Backend Engineer"}, {"title": "Engineering Manager, Payments"}]
     out, info = apply_level_pref(jobs, "senior", kind="job")
     assert [j["title"] for j in out] == ["Senior Backend Engineer", "Staff Engineer", "Backend Engineer", "Backend Engineer Intern", "Engineering Manager, Payments"]
-    assert info == {"level": "senior", "label": "Senior", "exact": 1, "near": 1, "unstated": 1, "far": 2}
-    assert "level match" in out[0]["reasons"] and "level ±1" in out[1]["reasons"]
+    assert info == {"level": "senior", "label": "Senior", "span": 1, "exact": 1, "near": 1, "unstated": 1, "far": 2}
+    assert "level match" in out[0]["reasons"] and "nearby level" in out[1]["reasons"]
+    wide, winfo = apply_level_pref([dict(j) for j in jobs], "senior", kind="job", span=2)
+    assert winfo["near"] == 3 and winfo["far"] == 0                        # wide band: junior/intern and exec are nearby
+    exact, einfo = apply_level_pref([dict(j) for j in jobs], "senior", kind="job", span=0)
+    assert einfo["near"] == 0 and einfo["far"] == 3
     people = [{"name": "A", "attributes": [{"key": "seniority", "display": "Junior"}]}, {"name": "B", "attributes": [{"key": "seniority", "display": "Director"}]}, {"name": "C", "attributes": []}]
     out, info = apply_level_pref(people, "exec", kind="person")
     assert [p["name"] for p in out] == ["B", "C", "A"] and info["far"] == 1

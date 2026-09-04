@@ -593,7 +593,10 @@
   .evfilters{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem;margin:.4rem auto 0;max-width:var(--wrapw,880px);padding:0 .2rem;font-size:.76rem;color:var(--muted);}
   .evfilters[hidden]{display:none!important;}   /* the flex rule must not defeat the hidden attribute (Jobs / Q&A) */
   .evf-lbl{font-family:var(--mono);font-size:.64rem;letter-spacing:.08em;text-transform:uppercase;margin-right:.35rem;padding:.3rem .6rem;border-radius:6px;background:var(--gold);color:var(--on-accent);font-weight:700;}
+  #evfilters .lvwrap{margin-left:.6rem;display:inline-flex;align-items:center;gap:.35rem;text-transform:none;letter-spacing:0;font-size:.74rem;}
   #evfilters .lvsel{min-height:32px;font:inherit;font-size:.74rem;border:1.5px solid var(--gold);border-radius:999px;background:transparent;color:var(--ink);padding:.15rem .5rem;}
+  #evfilters .lvspan{min-height:32px;font:inherit;font-size:.72rem;letter-spacing:.08em;border:1px dashed var(--hair);border-radius:999px;background:transparent;color:var(--muted);padding:.1rem .55rem;cursor:pointer;}
+  #evfilters .lvspan span{letter-spacing:0;margin-left:.15rem;}
   #evfilters .ev-filter{min-height:32px;padding:.2rem .65rem;border:1.5px solid var(--gold);border-radius:999px;background:transparent;color:var(--ink);font-size:.74rem;font-weight:500;cursor:pointer;}
   #evfilters .ev-filter:hover{background:rgba(var(--gold-rgb),.12);}
   #evfilters .ev-filter.on{border:1px solid var(--gold);background:rgba(var(--gold-rgb),.1);color:var(--gold-strong);font-weight:600;}
@@ -2315,13 +2318,15 @@ const EV_LABEL = {repo:"repos", paper:"papers", post:"blog posts", talk:"talks",
 let JOB_MUST = new Set();
 const JOB_MUST_ALL = ["remote","hybrid","f500","public","startup","leadership"];
 const JOB_MUST_LABEL = {remote:"Remote", hybrid:"Hybrid", f500:"Fortune 500", public:"Public company", startup:"Startup", leadership:"Leadership"};
-// LEVEL PREFERENCE (both surfaces): one optional dropdown — a centre, never a gate (levels are not
-// calibrated across companies): exact level leads, ±1 next, unstated neutral, the rest ranked last.
-let LEVEL = "";
+// LEVEL: "Center results around <level>" — a centre, never a gate. The width is a small stepper
+// (exact · nearby · wide) hinted by dots, never spelled as ±N. Shared by Talent Map and Jobs.
+let LEVEL = "", LEVEL_SPAN = 1;
 const LEVEL_ALL = ["junior","mid","senior","staff","exec"];
 const LEVEL_LABEL = {junior:"Junior", mid:"Mid", senior:"Senior", staff:"Staff+", exec:"Manager / Exec"};
+const SPAN_HINT = ["exactly", "and nearby levels", "and a wide band"];
 function levelSelect(){
-  return `<label class="evf-lbl" style="margin-left:.6rem;display:inline-flex;align-items:center;gap:.3rem;text-transform:none;letter-spacing:0;">Level <select id="levelsel" class="lvsel" title="A preference, not a filter — the chosen level leads, one level either side next; nothing is dropped" onchange="LEVEL=this.value; renderEvFilters();"><option value=""${LEVEL?"":" selected"}>any</option>${LEVEL_ALL.map(k=>`<option value="${k}"${LEVEL===k?" selected":""}>${LEVEL_LABEL[k]} ±1</option>`).join("")}</select></label>`;
+  const width = LEVEL ? `<button type="button" class="lvspan" title="How wide a band around ${LEVEL_LABEL[LEVEL]} ranks up — tap to change" onclick="LEVEL_SPAN=(LEVEL_SPAN+1)%3; renderEvFilters();">${["·","· ·","· · ·"][LEVEL_SPAN]} <span>${SPAN_HINT[LEVEL_SPAN]}</span></button>` : "";
+  return `<label class="evf-lbl lvwrap" title="Ranks results around a level — nothing is dropped (levels aren't calibrated across companies)">Center around <select id="levelsel" class="lvsel" onchange="LEVEL=this.value; renderEvFilters();"><option value=""${LEVEL?"":" selected"}>any level</option>${LEVEL_ALL.map(k=>`<option value="${k}"${LEVEL===k?" selected":""}>${LEVEL_LABEL[k]}</option>`).join("")}</select></label>${width}`;
 }
 function evFilterActive(){ return EVIDENCE_KINDS.size > 0; }
 function renderEvFilters(){
@@ -2585,7 +2590,7 @@ async function runJobs(question){
       body: JSON.stringify({question, tenant_id:"demo", refine_query: (JOBS_CTX||undefined),
         ...geoPayload(),   // the top-right scope applies to jobs too
         job_must: JOB_MUST.size ? [...JOB_MUST] : undefined,   // the pre-search "must have" toggles
-        levels: LEVEL ? [LEVEL] : undefined,                   // the level preference (±1)
+        levels: LEVEL ? [LEVEL] : undefined, level_span: LEVEL_SPAN,   // centre + band
         attachments: sent.length ? sent.map(a => ({data:a.data, media_type:a.media_type||"", name:a.name||""})) : undefined,
         user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""})}); }
   catch(e){ if(goBtn){ goBtn.disabled = false; goBtn.classList.remove("loading"); } return false; }
@@ -2818,7 +2823,7 @@ function jobsMarkup(d){
     + intentHtml
     + (d.linkedin_profile ? `<div class="ppl-cov" style="border-left-color:var(--gold);">in Jobs for <b>${esc(d.linkedin_profile.name||"")}</b>${d.linkedin_profile.headline?` — ${esc(d.linkedin_profile.headline)}`:""} <span class="ppl-fc" style="text-transform:none;">· read from search-engine results for the pasted profile · <a href="${esc(d.linkedin_profile.url||"#")}" target="_blank" rel="noopener noreferrer">profile ↗</a></span></div>` : "")
     + (d.must && d.must.kinds && d.must.kinds.length ? `<div class="ppl-cov" style="border-left-color:var(--gold);">✓ Must have: <b>${esc((d.must.labels||d.must.kinds).join(" · "))}</b> — ${d.must.kept} role${d.must.kept===1?"":"s"} qualify${d.must.dropped?`, ${d.must.dropped} left out`:""}. Remote/hybrid read from the posting's location, company type from Roster's curated sets, seniority from the title.</div>` : "")
-    + (d.level_pref && d.level_pref.label ? `<div class="ppl-cov" style="border-left-color:var(--gold);">⇅ Level preference <b>${esc(d.level_pref.label)} ±1</b> — ${d.level_pref.exact} at that level lead, ${d.level_pref.near} one level away next, ${d.level_pref.unstated} with no stated level stay neutral, ${d.level_pref.far} further away rank last. Nothing is dropped — levels aren't calibrated across companies.</div>` : "")
+    + (d.level_pref && d.level_pref.label ? `<div class="ppl-cov" style="border-left-color:var(--gold);">⇅ Centered on <b>${esc(d.level_pref.label)}</b> — ${d.level_pref.exact} at that level lead, ${d.level_pref.near} nearby next, ${d.level_pref.unstated} with no stated level stay neutral, ${d.level_pref.far} further away rank last. Nothing is dropped — levels aren't calibrated across companies.</div>` : "")
     + (d.note && ((q.company||[]).length || d.linkedin_profile) ? `<div class="ppl-cov">◔ ${esc(d.note)}</div>` : "")
     + ((q.company||[]).length ? "" : scopeChip(d.geo_scope))   // a company search: the scope only shapes the RELATED list
     + (st.jobs ? `<div class="ppl-cov">◔ Aggregated from public ATS boards — ${st.jobs} jobs across ${st.companies||0} companies indexed. Each links to the company's apply page.</div>`
@@ -6018,7 +6023,7 @@ async function askQuestion(question, opts){
   // Person-lookup conversation: "which <name>?" was asked — this utterance is context for that name.
   if(SEARCH_MODE === "people" && PENDING_PERSON){ payload.prior_person = PENDING_PERSON; payload.prior_context = PENDING_CTX; }
   if(SEARCH_MODE === "people" && evFilterActive()) payload.evidence_kinds = [...EVIDENCE_KINDS];
-  if(SEARCH_MODE === "people" && LEVEL) payload.levels = [LEVEL];
+  if(SEARCH_MODE === "people" && LEVEL){ payload.levels = [LEVEL]; payload.level_span = LEVEL_SPAN; }
   if(EFFORT_ENABLED && EFFORT > 1) payload.effort = EFFORT;
   if(ATTACHMENTS.length) payload.attachments = ATTACHMENTS.slice();
   if(PENDING_INTAKE_TRANSCRIPT && PENDING_INTAKE_TRANSCRIPT.length && !THREAD.turns.length){
@@ -6556,7 +6561,7 @@ function newConversation(){
   THREAD = {session_id:null, turns:[]};
   MODE_VIEWS = {}; TAB_THREADS = {};   // "＋ New search" wipes every tab's remembered result/thread
   window.ACTIVE_MAP = null;            // …and leaves any saved-map view
-  PEOPLE_CTX = null; JOBS_CTX = null; PENDING_PERSON = null; PENDING_CTX = ""; EVIDENCE_KINDS = new Set(); JOB_MUST = new Set(); LEVEL = ""; renderEvFilters();  // …and both tabs' refinement conversations start fresh
+  PEOPLE_CTX = null; JOBS_CTX = null; PENDING_PERSON = null; PENDING_CTX = ""; EVIDENCE_KINDS = new Set(); JOB_MUST = new Set(); LEVEL = ""; LEVEL_SPAN = 1; renderEvFilters();  // …and both tabs' refinement conversations start fresh
   GUIDED_REFINED = false;
   document.body.classList.remove("chatting"); out.style.paddingBottom = "";   // back to landing layout
   out.innerHTML = "";
