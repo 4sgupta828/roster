@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import base64
 import os
 import sys
 import urllib.parse
