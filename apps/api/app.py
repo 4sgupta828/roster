@@ -2676,8 +2676,9 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 _on_file = " ".join(str(x) for x in [_parsed.get("_resume_text", ""), _saved.get("summary", ""), _saved.get("current_title", "")] if x).strip()
                 if len(_on_file) >= 40:
                     cv_text, matched_on = (body.question or "") + "\n\n" + _on_file, "resume"
-                elif len((body.question or "").strip()) >= 60:
-                    cv_text, matched_on = (body.question or ""), "description"
+                elif len(_qs) >= 60 and re.search(r"(?i)\b(i(?:'|’)?m an?|i am an?|\d+\+? ?years?|skilled|experience (?:in|with)|worked (?:at|on|with)|proficient)\b", _qs) \
+                        and not re.search(r"(?i)\b(can i|could i|how do i|where do i|give you|upload|attach|send you)\b", _qs):
+                    cv_text, matched_on = _qs, "description"      # it DESCRIBES a person (role / years / skills), not a meta-question
             if not cv_text:
                 return {"jobs": [], "count": 0, "query": {}, "stats": await store.jobs_stats(), "needs_profile": True,
                         "note": "To match roles to you, attach your résumé (📎, PDF or text) or describe your background in a "

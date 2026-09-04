@@ -135,6 +135,34 @@ def _title_level(title: str) -> tuple[str, bool]:
     return "mid", False
 
 
+# ENGINEERING FAMILIES a title or a profile can STATE explicitly. Used only for a soft demotion when a
+# title names a family the profile never mentions — never as a gate (titles vary by company).
+_FAMILY_RX = {
+    "backend / infra": re.compile(r"\b(backend|back-end|back end|server-side|infra|infrastructure|platform|sre|site reliability|devops|reliability|distributed systems|systems engineer|cloud engineer)\b", re.I),
+    "frontend": re.compile(r"\b(frontend|front-end|front end|ui engineer|web developer|react|angular|vue)\b", re.I),
+    "mobile": re.compile(r"\b(mobile|ios|android|flutter|react native)\b", re.I),
+    "security": re.compile(r"\b(security|appsec|infosec|penetration|threat)\b", re.I),
+    "data / ML": re.compile(r"\b(data scientist|data science|data analyst|analytics engineer|machine learning|ml engineer|ai engineer|research scientist)\b", re.I),
+    "QA / test": re.compile(r"\b(qa engineer|quality assurance|test engineer|sdet|automation engineer)\b", re.I),
+    "hardware": re.compile(r"\b(hardware|firmware|embedded|fpga|asic|silicon)\b", re.I),
+}
+
+
+def text_families(text: str) -> set[str]:
+    return {fam for fam, rx in _FAMILY_RX.items() if rx.search(text or "")}
+
+
+def family_mismatch(profile_families: set[str], title: str) -> str:
+    """The family a TITLE states that the profile does not — '' when the title states none, the
+    profile states none, or they overlap (a full-stack profile is never demoted either way)."""
+    if not profile_families:
+        return ""
+    stated = text_families(title)
+    if not stated or stated & profile_families:
+        return ""
+    return sorted(stated)[0]
+
+
 _WANT_LEVELS = {"intern": {"intern"}, "junior": {"junior"}, "entry": {"junior"}, "new grad": {"junior"},
                 "mid": {"mid"}, "senior": {"senior"}, "staff": {"staff_plus"}, "principal": {"staff_plus"},
                 "lead": {"senior", "leadership"}, "leadership": {"leadership"}, "manager": {"leadership"},
@@ -332,6 +360,7 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
         qtext = (brief_text + "\n\n" + qtext).strip() if qtext else brief_text
     if not qtext:
         return {"jobs": [], "note": "Add or parse a résumé first — no profile content to match on."}
+    _prof_fams = text_families(qtext)          # the disciplines the profile itself names (for the soft family demotion)
     qvec = embed_query(qtext)
     if not qvec:
         return {"jobs": [], "note": "Matching is unavailable right now."}
@@ -404,9 +433,15 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
             score += 0.15; reasons.append("remote")
         if locs and any(l in loc for l in locs):
             score += 0.15; reasons.append("location")
-        jsen = _title_seniority(title)
-        if want_sens and jsen in want_sens:
+        jsen, _jsen_known = _title_level(title)
+        if want_sens and _jsen_known and jsen in want_sens:
             score += 0.12; reasons.append(f"{jsen.replace('_', ' ')} level")
+        # SOFT family demotion (never a gate): a title that STATES a different discipline from the
+        # profile's ("SDE I - Frontend", "Security Engineer" for a backend/SRE profile) moves down with
+        # the reason shown; unstated titles ("Software Engineer") are left alone — titles vary by company.
+        _fam_off = family_mismatch(_prof_fams, title)
+        if _fam_off:
+            score -= 0.10; reasons.append(f"title says {_fam_off}")
         if role_kw and any(k in title.lower() for k in role_kw):
             score += 0.10; reasons.append("role match")
         if "f500" in want and is_f500:

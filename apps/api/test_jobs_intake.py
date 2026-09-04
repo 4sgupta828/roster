@@ -60,3 +60,16 @@ def test_agentic_search_ranks_the_stated_level_and_demotes_a_far_one(monkeypatch
     by = {j["id"]: j for j in res["jobs"]}
     assert by["a"]["seniority"] == "senior" and by["a"]["level_source"] == "title"
     assert by["c"]["seniority"] == "" and by["c"]["level_source"] == "unknown"
+
+
+def test_family_mismatch_is_soft_and_only_fires_on_stated_families():
+    from api.people_population import family_mismatch, text_families
+    prof = text_families("software engineer, 5 years, Java, Kubernetes, SRE, databases, linux")
+    assert prof == {"backend / infra"}
+    assert family_mismatch(prof, "SDE I - Frontend") == "frontend"
+    assert family_mismatch(prof, "Security Engineer") == "security"
+    assert family_mismatch(prof, "Software Engineer") == ""                  # unstated title: left alone
+    assert family_mismatch(prof, "Infrastructure Software Engineer") == ""   # same family
+    assert family_mismatch(set(), "SDE I - Frontend") == ""                  # profile names nothing: no demotion
+    full = text_families("full-stack: React frontend and Go backend")
+    assert family_mismatch(full, "Frontend Engineer") == "" and family_mismatch(full, "Backend Engineer") == ""
