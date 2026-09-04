@@ -125,6 +125,58 @@ def _title_seniority(title: str) -> str:
             return lvl
     return "mid"
 
+
+def _title_level(title: str) -> tuple[str, bool]:
+    """(level, known): the level a TITLE states, and whether it states one at all. An unmarked
+    'Software Engineer' is UNKNOWN — never a confident 'mid' (wrong level is worse than no level)."""
+    for rx, lvl in _SEN_RE:
+        if rx.search(title or ""):
+            return lvl, True
+    return "mid", False
+
+
+_WANT_LEVELS = {"intern": {"intern"}, "junior": {"junior"}, "entry": {"junior"}, "new grad": {"junior"},
+                "mid": {"mid"}, "senior": {"senior"}, "staff": {"staff_plus"}, "principal": {"staff_plus"},
+                "lead": {"senior", "leadership"}, "leadership": {"leadership"}, "manager": {"leadership"},
+                "director": {"leadership"}, "vp": {"leadership"}, "executive": {"leadership"}}
+
+
+def wanted_levels(seniority: str) -> set[str]:
+    """The title levels a seeker's stated seniority accepts ('senior' → senior; 'staff' → staff_plus…)."""
+    s = (seniority or "").strip().lower()
+    out: set[str] = set()
+    for k, v in _WANT_LEVELS.items():
+        if k in s:
+            out |= v
+    return out
+
+
+# A SELF-DESCRIPTION typed into a search box ("SDE/SRE roles for me. I'm a software engineer with 5
+# years…", "my resume…") is a PROFILE, not a query: it goes to résumé matching, never to free-text search.
+_SELF_DESC_RX = re.compile(
+    r"(?i)(\bfor me\b|\bmy (?:r[ée]sum[ée]|cv|background|profile|experience|skills)\b|\bi(?:'|’)?m an?\b|"
+    r"\bi am an?\b|\bi have \d+\+? years|\b\d+\+? years of experience\b|\bi(?:'|’)?ve (?:been|worked|built)\b|"
+    r"\bmy current (?:role|title|company|job)\b|\bbased on my\b)")
+
+
+def is_self_description(question: str) -> bool:
+    return bool(_SELF_DESC_RX.search(question or ""))
+
+
+def years_to_levels(text: str) -> set[str]:
+    """Stated years of experience → the title levels worth ranking up (a ranking preference)."""
+    m = re.search(r"(?i)\b(\d{1,2})\+?\s*(?:\+\s*)?years?\b", text or "")
+    if not m:
+        return set()
+    y = int(m.group(1))
+    if y < 2:
+        return {"junior"}
+    if y < 5:
+        return {"mid"}
+    if y < 8:
+        return {"mid", "senior"}
+    return {"senior", "staff_plus"}
+
 # job-location → country, from explicit geography tokens (parse, not semantic inference). Used to
 # honor the country scope in match; a location we can't place stays ambiguous and is NOT dropped.
 _COUNTRY_RX = {
@@ -1715,6 +1767,11 @@ async def agentic_job_search(store, question: str, llm, country: str = "us") -> 
                 if sim > e["best"]:
                     e["best"] = sim; e["job"] = j
     want_country = (country or "").lower()
+    # SENIORITY the seeker stated ("senior", "staff", "new grad") RANKS: a title that states the wanted
+    # level moves up; a title that states a clearly different level moves down; an unmarked title is
+    # unknown and moves nowhere (never a confident 'mid').
+    want_lv = wanted_levels(plan.get("seniority") or "")
+    _ORDER = {"intern": 0, "junior": 1, "mid": 2, "senior": 3, "staff_plus": 4, "leadership": 5}
     out, dropped = [], 0
     for e in pool.values():
         j = e["job"]; loc = (j.get("location") or "").lower(); title_l = (j.get("title") or "").lower()
@@ -1727,8 +1784,15 @@ async def agentic_job_search(store, question: str, llm, country: str = "us") -> 
             score += 0.08 * len(hits); reasons.append("matches " + ", ".join(hits))
         if e["legs"] > 1:
             reasons.append(f"{e['legs']} search angles")
+        lvl, known = _title_level(j.get("title") or "")
+        if want_lv and known:
+            if lvl in want_lv:
+                score += 0.06; reasons.append(f"{lvl.replace('_', ' ')} level")
+            elif min(abs(_ORDER.get(lvl, 2) - _ORDER.get(w, 2)) for w in want_lv) >= 2:
+                score -= 0.08; reasons.append(f"title says {lvl.replace('_', ' ')}")
         out.append({**{k: j.get(k) for k in ("id", "company", "title", "location", "url", "source")},
-                    "score": round(score, 4), "match_pct": min(99, round(e["best"] * 100)), "reasons": reasons})
+                    "score": round(score, 4), "match_pct": min(99, round(e["best"] * 100)), "reasons": reasons,
+                    "seniority": (lvl if known else ""), "level_source": ("title" if known else "unknown")})
     out.sort(key=lambda x: -x["score"])
     note = ((f"{want_country.upper()} only · " if want_country else "")
             + f"agentic — {len(legs)} angles, {len(pool)} candidates")

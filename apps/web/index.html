@@ -2290,7 +2290,7 @@ let ACCOUNTS_ENABLED = false;   // accounts + per-answer feedback (W-taxonomy)
 let SEARCH_MODE = "people";     // People/Jobs toggle — explicit routing, no keyword guessing
 const PJ_COPY = {
   people: {h:"Describe the search brief",  ph:"Talent Map brief — e.g. senior infra engineers with vector DB evidence"},
-  jobs:   {h:"What role are you looking for?", ph:"Search jobs — e.g. remote backend roles at big tech, or “design jobs that involve research” · or paste your LinkedIn profile URL to find jobs for you"},
+  jobs:   {h:"What role are you looking for?", ph:"Search jobs — e.g. remote backend roles at big tech · or describe yourself (“backend engineer, 5 years, Java, Kubernetes”), attach your résumé (📎), or paste your LinkedIn URL to find roles for you"},
   qa:     {h:"Ask about the people & jobs data", ph:"Ask about patterns — e.g. “which companies hire the most ML engineers?”, “where are data scientists concentrated?”, “seniority mix for AI roles?”"},
 };
 let PEOPLE_CTX = null;          // People-tab conversation: accumulated facet filter — follow-ups NARROW it
@@ -2556,15 +2556,23 @@ function esc(s){const d=document.createElement("div");d.textContent=s??"";return
 // even for a stale cached config: /jobs 404s when the flag is off, and we fall through to research.
 async function runJobs(question){
   let r;
+  // LOADING STATE: the button disables and the panel says what is happening (a cold model call
+  // takes seconds; a silent wait invited repeated clicks — tester report).
+  const goBtn = $("#go"); if(goBtn){ goBtn.disabled = true; goBtn.classList.add("loading"); }
+  const out0 = $("#out"); if(out0 && !THREAD.turns.length){ out0.hidden = false; out0.innerHTML = `<div class="status">${ATTACHMENTS.length ? "Reading your résumé and matching open roles…" : "Searching open roles…"}</div>`; }
+  const sent = ATTACHMENTS.slice();          // a résumé attached in Jobs mode rides with the search (PDF / text)
   try{ r = await fetch("/jobs", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
       body: JSON.stringify({question, tenant_id:"demo", refine_query: (JOBS_CTX||undefined),
         ...geoPayload(),   // the top-right scope applies to jobs too
         job_must: JOB_MUST.size ? [...JOB_MUST] : undefined,   // the pre-search "must have" toggles
+        attachments: sent.length ? sent.map(a => ({data:a.data, media_type:a.media_type||"", name:a.name||""})) : undefined,
         user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""})}); }
-  catch(e){ return false; }
+  catch(e){ if(goBtn){ goBtn.disabled = false; goBtn.classList.remove("loading"); } return false; }
+  finally{ if(goBtn){ goBtn.disabled = false; goBtn.classList.remove("loading"); } }
   if(!r || r.status === 404) return false;
   try{
     const d = await r.json();
+    if(sent.length && d.matched_on){ ATTACHMENTS.length = 0; if(typeof renderAttachments === "function") renderAttachments(); }
     // Jobs is a CONVERSATION like the other tabs: each search/refinement is a turn on the jobs
     // thread. The merged query behind THIS result set is what the next utterance refines
     // (New search clears it). Redirects don't advance the conversation.
@@ -2574,7 +2582,7 @@ async function runJobs(question){
                        stats: d.stats||{}, semantic: d.semantic, geo_scope: d.geo_scope||null,
                        related_jobs: d.related_jobs||[], company_indexed: d.company_indexed,
                        agentic: !!d.agentic, intent: d.intent||"", query_angles: d.query_angles||[],
-                       redirect_to_qa: !!d.redirect_to_qa, note: d.note||"", must: d.must||null, linkedin_profile: d.linkedin_profile||null, answer: ""});
+                       redirect_to_qa: !!d.redirect_to_qa, note: d.note||"", must: d.must||null, linkedin_profile: d.linkedin_profile||null, matched_on: d.matched_on||"", needs_profile: !!d.needs_profile, answer: ""});
     renderThread();
   }
   catch(e){ const out = $("#out"); if(out){ out.hidden = false;
@@ -4704,8 +4712,8 @@ function renderAttachments(){
                            : esc(a.name||"file");
       return `<span class="chip">${isText?"📄":"📎"} ${label}<button class="x" data-i="${i}" title="Remove" aria-label="Remove">×</button></span>`;
     }).join("") +
-    `<label class="consent" title="Images/documents are sent to the AI model for analysis. By checking, you confirm they contain no confidential or identifying information — names, IDs, secrets.">
-       <input type="checkbox" id="consent"> No confidential info <span class="consent-q">ⓘ</span></label>`;
+    `<label class="consent" title="Files are sent to the AI model to read (a résumé or a job description is fine). Don't attach secrets — passwords, keys, card or account numbers.">
+       <input type="checkbox" id="consent"> OK to send to the AI · no secrets <span class="consent-q">ⓘ</span></label>`;
   box.querySelectorAll(".x").forEach(b=>b.addEventListener("click",()=>{ ATTACHMENTS.splice(+b.dataset.i,1); renderAttachments(); }));
 }
 $("#attach").addEventListener("click", ()=>$("#file").click());

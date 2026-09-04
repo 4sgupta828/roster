@@ -86,6 +86,28 @@ def _pdf_text(att: dict) -> str:
     return "\n".join(chunks).strip()[:_MAX_DOC_CHARS]
 
 
+def attachment_texts(attachments: list[dict] | None) -> list[tuple[str, str]]:
+    """The TEXT of each attachment a résumé could ride in — PDFs (text layer) and text/* files —
+    as (name, text). No vision, no model: a résumé upload must work whether or not the vision
+    pipeline is on. Unreadable / scanned files yield nothing (the caller says so)."""
+    out: list[tuple[str, str]] = []
+    for att in attachments or []:
+        mt = str(att.get("media_type") or "").lower()
+        name = str(att.get("name") or "")
+        try:
+            if mt == "application/pdf" or name.lower().endswith(".pdf"):
+                txt = _pdf_text(att)
+            elif mt.startswith("text/") or not mt:
+                txt = base64.b64decode(att.get("data") or "", validate=False).decode("utf-8", "ignore")[:_MAX_DOC_CHARS]
+            else:
+                continue
+        except Exception:  # noqa: BLE001 — a bad file is a note, never a failure
+            continue
+        if txt and txt.strip():
+            out.append((name or mt or "file", txt.strip()))
+    return out
+
+
 def _pdf_images(att: dict) -> list[dict]:
     """Render the first pages of a (scanned/image) PDF to vision images."""
     import fitz  # PyMuPDF

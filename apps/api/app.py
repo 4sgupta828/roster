@@ -2649,6 +2649,56 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             res["session_id"] = await _save_job_session(jobs, res["query"])
             return res
 
+        # A RÉSUMÉ (attached PDF / text file, or pasted) or a SELF-DESCRIPTION ("SDE/SRE roles for me,
+        # I'm a software engineer with 5 years…") is a PROFILE, not a query: it goes to résumé matching
+        # (title / skills / level), never to free-text vector search over posting titles. Signed-in
+        # users with a parsed résumé on file get it used when they say "for me" / "my résumé".
+        from api.media import attachment_texts
+        from api.people_population import is_self_description, years_to_levels
+        from api.qa_router import extract_resume_text
+        _att_texts = attachment_texts([a.model_dump() for a in (body.attachments or [])])
+        _ask, _pasted_cv = extract_resume_text(body.question or "")
+        _qs = (body.question or "").strip()
+        # a bare "jobs for me" stays a search; a description of oneself (or an explicit résumé mention) is a profile
+        _self = is_self_description(_qs) and (len(_qs) >= 60 or bool(re.search(r"(?i)\b(my r[ée]sum[ée]|my cv|based on my|my background|my profile)\b", _qs)))
+        if _att_texts or _pasted_cv or _self:
+            from api.people_population import apply_job_must, match_resume_jobs
+            cv_text, matched_on = "", ""
+            if _att_texts:
+                cv_text, matched_on = "\n\n".join(t for _, t in _att_texts)[:20000], "attachment"
+            elif _pasted_cv:
+                cv_text, matched_on = _pasted_cv, "pasted"
+            else:
+                _user = await _optional_user(x_roster_token)
+                _acc = _accounts() if _user else None
+                _parsed = ((await _acc.get_parse(_user["id"])).get("profile") or {}) if _acc else {}
+                _saved = ((await _acc.get_profile(_user["id"])).get("profile") or {}) if _acc else {}
+                _on_file = " ".join(str(x) for x in [_parsed.get("_resume_text", ""), _saved.get("summary", ""), _saved.get("current_title", "")] if x).strip()
+                if len(_on_file) >= 40:
+                    cv_text, matched_on = (body.question or "") + "\n\n" + _on_file, "resume"
+                elif len((body.question or "").strip()) >= 60:
+                    cv_text, matched_on = (body.question or ""), "description"
+            if not cv_text:
+                return {"jobs": [], "count": 0, "query": {}, "stats": await store.jobs_stats(), "needs_profile": True,
+                        "note": "To match roles to you, attach your résumé (📎, PDF or text) or describe your background in a "
+                                "sentence — role, years, main skills — e.g. “backend engineer, 5 years, Java, Kubernetes, Postgres”."}
+            prefs = {"limit": 40, "country": (body.country or "us"), "metro": (body.metro or ""), "state": (body.state or ""),
+                     "seniorities": sorted(years_to_levels(cv_text if matched_on != "resume" else (body.question or "")) or years_to_levels(cv_text))}
+            res = await match_resume_jobs(store, {"_resume_text": cv_text, "summary": (_ask if _pasted_cv else "")}, prefs)
+            jobs = res.get("jobs") or []
+            if body.job_must:
+                jobs, res["must"] = await apply_job_must(store, jobs, body.job_must)
+            _names = ", ".join(n for n, _ in _att_texts)
+            res.update({"jobs": jobs, "count": len(jobs), "query": {"company": [], "title_keywords": [], "location": ""},
+                        "matched_on": matched_on,
+                        "note": {"attachment": f"Matched to your attached résumé ({_names}) — title, skills and level first, wording second.",
+                                 "pasted": "Matched to the résumé you pasted — title, skills and level first, wording second.",
+                                 "resume": "Matched to the résumé on your account plus what you wrote — title, skills and level first.",
+                                 "description": "Matched to your description — title, skills and level first. Attach a résumé (📎) for a deeper match."}[matched_on],
+                        "stats": await store.jobs_stats()})
+            res["session_id"] = await _save_job_session(jobs, res["query"])
+            return res
+
         # AGENTIC mode (flag): LLM expands the query into multiple angles → multi-leg retrieval → rerank
         if agentic_jobs_enabled():
             from api.people_population import agentic_job_search, parse_job_query
@@ -3992,6 +4042,13 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 # CONNECT THE DOTS: résumé → ranked open roles from the jobs index, then a critical
                 # fit analysis (technical gems, ideal roles) over BOTH as citable documents.
                 _ask_q, _cv = _qr.extract_resume_text(body.question)
+                if not _cv:
+                    # an ATTACHED résumé (PDF / text) is the profile — read it before asking to paste
+                    from api.media import attachment_texts
+                    _att = attachment_texts([a.model_dump() for a in (body.attachments or [])])
+                    if _att:
+                        _cv = "\n\n".join(t for _, t in _att)[:20000]
+                        _ask_q = (body.question or "").strip()
                 if not _cv and len(body.question) > 200:
                     _cv = body.question
                 if not _cv:
