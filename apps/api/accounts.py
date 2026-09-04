@@ -137,10 +137,35 @@ CREATE INDEX IF NOT EXISTS idx_ro_user ON roster_outreach (user_id, created_at D
 ALTER TABLE roster_candidate_profile ADD COLUMN IF NOT EXISTS parse_status TEXT;      -- pending|done|failed
 ALTER TABLE roster_candidate_profile ADD COLUMN IF NOT EXISTS parsed_profile JSONB;
 ALTER TABLE roster_candidate_profile ADD COLUMN IF NOT EXISTS parsed_at TIMESTAMPTZ;
+-- LINKEDIN CONNECTIONS (intro path): the user's OWN export (LinkedIn → Settings → Data privacy → Get a
+-- copy of your data → Connections.csv), uploaded once, private to the account, deletable. Used only
+-- to answer "who do I know at <company>" on a job card. Never scraped, never shared, never a search
+-- signal for other users.
+CREATE TABLE IF NOT EXISTS roster_connection (
+    id            BIGSERIAL PRIMARY KEY,
+    user_id       TEXT NOT NULL,
+    first_name    TEXT NOT NULL DEFAULT '',
+    last_name     TEXT NOT NULL DEFAULT '',
+    url           TEXT NOT NULL DEFAULT '',
+    company       TEXT NOT NULL DEFAULT '',
+    company_norm  TEXT NOT NULL DEFAULT '',
+    position      TEXT NOT NULL DEFAULT '',
+    connected_on  TEXT NOT NULL DEFAULT '',
+    uploaded_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_rc_user_co ON roster_connection (user_id, company_norm);
 """
 
 _MAX_TOKENS_PER_USER = 10   # prune oldest beyond this (a lost device's token eventually ages out)
 
+
+
+def _norm_company(name: str) -> str:
+    """'Stripe, Inc.' / 'STRIPE' / 'Stripe Inc' → 'stripe' — the same loose key the job index uses for companies."""
+    import re as _re
+    s = _re.sub(r"[^a-z0-9 ]+", " ", (name or "").lower())
+    s = _re.sub(r"\b(inc|llc|ltd|limited|corp|corporation|co|company|plc|gmbh|sa|ag|the)\b", " ", s)
+    return _re.sub(r"\s+", " ", s).strip().replace(" ", "_")
 
 
 def _hash(token: str) -> str:
@@ -566,6 +591,58 @@ class AccountStore:
                 bytes(row["resume_bytes"]))
 
     # ---- résumé→profile parse status (the docling+LLM work runs in a SEPARATE process) ----
+    # ---- LinkedIn connections (the user's own export; intro path) ----
+    async def replace_connections(self, user_id: str, rows: list[dict]) -> int:
+        """Replace the user's connections with a fresh export (idempotent re-upload). Returns rows kept."""
+        await self._ensure()
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("DELETE FROM roster_connection WHERE user_id = $1", user_id)
+                n = 0
+                for r in rows[:20000]:
+                    co = (r.get("company") or "").strip()
+                    if not (r.get("first_name") or r.get("last_name")):
+                        continue
+                    await conn.execute(
+                        """INSERT INTO roster_connection (user_id, first_name, last_name, url, company, company_norm, position, connected_on)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)""",
+                        user_id, (r.get("first_name") or "")[:80], (r.get("last_name") or "")[:80], (r.get("url") or "")[:300],
+                        co[:160], _norm_company(co), (r.get("position") or "")[:160], (r.get("connected_on") or "")[:40])
+                    n += 1
+        return n
+
+    async def connections_summary(self, user_id: str) -> dict:
+        await self._ensure()
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            r = await conn.fetchrow("SELECT count(*) n, count(DISTINCT company_norm) cos, max(uploaded_at) at FROM roster_connection WHERE user_id = $1", user_id)
+        return {"count": int(r["n"] or 0), "companies": int(r["cos"] or 0), "uploaded_at": (str(r["at"]) if r["at"] else None)}
+
+    async def connections_at(self, user_id: str, company: str, *, limit: int = 25) -> list[dict]:
+        """The user's connections whose CURRENT company (as exported) is this company — exact normalized
+        match first, then a contains-match for suffix variants ('Stripe' vs 'Stripe, Inc.')."""
+        await self._ensure()
+        n = _norm_company(company)
+        if not n:
+            return []
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT first_name, last_name, url, company, position, connected_on,
+                          (company_norm = $2) AS exact
+                   FROM roster_connection WHERE user_id = $1
+                     AND (company_norm = $2 OR (length($2) >= 4 AND company_norm LIKE $2 || '%'))
+                   ORDER BY exact DESC, connected_on DESC LIMIT $3""", user_id, n, int(limit))
+        return [{"name": (r["first_name"] + " " + r["last_name"]).strip(), "url": r["url"], "company": r["company"],
+                 "position": r["position"], "connected_on": r["connected_on"], "exact": bool(r["exact"])} for r in rows]
+
+    async def delete_connections(self, user_id: str) -> None:
+        await self._ensure()
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM roster_connection WHERE user_id = $1", user_id)
+
     async def set_parse_pending(self, user_id: str) -> None:
         await self._ensure()
         async with (await self._get_pool()).acquire() as conn:

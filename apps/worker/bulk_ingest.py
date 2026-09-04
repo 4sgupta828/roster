@@ -96,6 +96,9 @@ def run_bulk_ingest_loop() -> None:
         # self-heal: jobs written without a vector (embed hiccups during big sweeps) are invisible to
         # résumé matching — give them their embedding (~$0.0004 / 1k jobs)
         _run_chunk(["scripts/ingest_jobs.py", "--backfill", str(embed_backfill)])
+    body_boards = int(os.environ.get("ROSTER_BULK_BODY_BACKFILL", "0") or 0)
+    if body_boards:      # POSTING BODIES: refetch N already-done ATS boards with content, store body + skills, re-embed
+        _run_chunk(["scripts/ingest_jobs.py", "--bodies", str(body_boards)])
         if people_on:
             _run_chunk(["scripts/ingest_people.py", "--live", "--limit", str(people_chunk),
                         "--per-window", str(per_window)])

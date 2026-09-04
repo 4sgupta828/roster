@@ -334,6 +334,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS rs_job_company_title_location_source_key ON rs
 CREATE INDEX IF NOT EXISTS idx_rs_job_company   ON rs_job (company);
 CREATE INDEX IF NOT EXISTS idx_rs_job_titlenorm ON rs_job (title_norm);
 CREATE INDEX IF NOT EXISTS idx_job_vec ON rs_job USING hnsw (embedding vector_cosine_ops);
+-- POSTING BODIES (2026-09-04, panel root cause: titles-only embeddings): the description text the ATS
+-- API returns with the board (Greenhouse / Ashby / Lever), capped; `skills` = lexicon hits over the
+-- body (code-owned); rows embed title + company + body excerpt once a body is known.
+ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS body text;
+ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS skills text[];
+ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS body_at timestamptz;
 
 CREATE TABLE IF NOT EXISTS rs_person_vec (
     entity_id text PRIMARY KEY,
@@ -350,6 +356,7 @@ CREATE TABLE IF NOT EXISTS rs_ingest_checkpoint (
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (source, cursor_key)
 );
+ALTER TABLE rs_ingest_checkpoint ADD COLUMN IF NOT EXISTS error text;   -- fetch failure / 'body_done: n' marker
 """
 
 # Whitelisted numeric counters finish_run() may update (guards the dynamic SET).
@@ -1892,7 +1899,7 @@ class ClaimGraphStore:
                 args.append("%" + t + "%"); conds.append(f"title_norm ILIKE ${len(args)}")
         if qvec:
             args.append(qvec)
-            sql = (f"SELECT id, company, title, location, department, url, source, "
+            sql = (f"SELECT id, company, title, location, department, url, source, skills, "
                    f"1 - (embedding <=> ${len(args)}::vector) AS sim FROM rs_job "
                    f"WHERE embedding IS NOT NULL AND {' AND '.join(conds)} "
                    f"ORDER BY embedding <=> ${len(args)}::vector LIMIT {int(cap)}")
@@ -1912,7 +1919,7 @@ class ClaimGraphStore:
         """Top `cap` jobs by cosine similarity to the résumé embedding, WITH the similarity score and
         id, so the caller can re-rank by user preferences (location/seniority/company-type/…)."""
         pool = await self._get_pool()
-        sql = ("SELECT id, company, title, location, department, url, source, "
+        sql = ("SELECT id, company, title, location, department, url, source, skills, "
                "1 - (embedding <=> $1::vector) AS sim "
                "FROM rs_job WHERE embedding IS NOT NULL ORDER BY embedding <=> $1::vector LIMIT $2")
         try:

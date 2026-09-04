@@ -5895,6 +5895,80 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         await store.set_profile(user["id"], body.profile or {})
         return {"ok": True}
 
+    # ---- LinkedIn connections + the INTRO PATH on a job card ----
+    @app.post("/me/connections")
+    async def me_connections_upload(body: ResumeIn, x_roster_token: str = Header(default="")) -> dict:
+        """Upload the user's OWN LinkedIn connections export (Connections.csv from 'Get a copy of your
+        data'). Parsed in code; stored private to the account; replaces the previous upload."""
+        store, user = await _require_user(x_roster_token)
+        import base64
+        import csv
+        import io
+        try:
+            data = base64.b64decode(body.data_b64 or "", validate=True)
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid file encoding")
+        if not data or len(data) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="the connections file must be a CSV under 20 MB")
+        text = data.decode("utf-8-sig", "ignore")
+        # LinkedIn's export starts with a 'Notes:' preamble; the header row is the first line that names the columns
+        lines = text.splitlines()
+        start = next((i for i, ln in enumerate(lines) if "First Name" in ln and "Company" in ln), None)
+        if start is None:
+            raise HTTPException(status_code=400, detail="that doesn't look like LinkedIn's Connections.csv (no 'First Name … Company' header)")
+        rdr = csv.DictReader(io.StringIO("\n".join(lines[start:])))
+        rows = []
+        for r in rdr:
+            g = lambda k: str((r.get(k) or "")).strip()  # noqa: E731
+            rows.append({"first_name": g("First Name"), "last_name": g("Last Name"), "url": g("URL"), "company": g("Company"),
+                         "position": g("Position"), "connected_on": g("Connected On")})
+        n = await store.replace_connections(user["id"], rows)
+        return {"ok": True, **(await store.connections_summary(user["id"])), "parsed": len(rows), "kept": n}
+
+    @app.get("/me/connections")
+    async def me_connections(x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return await store.connections_summary(user["id"])
+
+    @app.delete("/me/connections")
+    async def me_connections_delete(x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        await store.delete_connections(user["id"])
+        return {"ok": True}
+
+    @app.get("/me/intro")
+    async def me_intro(company: str = "", title: str = "", department: str = "",
+                       x_roster_token: str = Header(default="")) -> dict:
+        """WHO CAN INTRO ME for a posting: (1) the user's own connections at the company (their export;
+        private), (2) likely hiring managers from Roster's PUBLIC index — people at the company whose
+        level/title reads as a manager, ranked by discipline match to the posting and evidence
+        strength, each with its evidence. Honest empty states; nothing is sent by Roster."""
+        store, user = await _require_user(x_roster_token)
+        co = (company or "").strip()
+        if not co:
+            raise HTTPException(status_code=400, detail="company required")
+        conns = await store.connections_at(user["id"], co)
+        summ = await store.connections_summary(user["id"])
+        cstore = _claim_store_cached()
+        mgrs = {"managers": [], "n_at_company": 0, "discipline": []}
+        if cstore is not None:
+            from api.people_population import hiring_managers_at
+            try:
+                mgrs = await asyncio.wait_for(hiring_managers_at(cstore, tenant_id="demo", company=co, title=title, department=department), 25)
+            except Exception:  # noqa: BLE001
+                pass
+        note = []
+        if not summ.get("count"):
+            note.append("No connections uploaded yet — add your LinkedIn export under Account to see who you know here.")
+        elif not conns:
+            note.append(f"None of your {summ['count']} connections list {co} as their current company.")
+        if not mgrs.get("managers"):
+            note.append(f"No likely hiring manager for this role found in public data at {co}"
+                        + (f" ({mgrs.get('n_at_company')} people indexed there)." if mgrs.get("n_at_company") else " (no one from this company is indexed yet)."))
+        return {"company": co, "connections": conns, "connections_total": summ.get("count", 0),
+                "managers": mgrs.get("managers") or [], "n_at_company": mgrs.get("n_at_company", 0),
+                "discipline": mgrs.get("discipline") or [], "note": " ".join(note)}
+
     @app.post("/me/resume")
     async def me_upload_resume(body: ResumeIn, x_roster_token: str = Header(default="")) -> dict:
         store, user = await _require_user(x_roster_token)

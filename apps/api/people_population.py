@@ -448,6 +448,7 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
     if not qtext:
         return {"jobs": [], "note": "Add or parse a résumé first — no profile content to match on."}
     _prof_fams = text_families(qtext)          # the disciplines the profile itself names (for the soft family demotion)
+    _prof_skills = set(profile_skills(qtext, limit=30))   # the skills the profile names (matched against posting bodies)
     qvec = embed_query(qtext)
     if not qvec:
         return {"jobs": [], "note": "Matching is unavailable right now."}
@@ -540,6 +541,10 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
         _fam_off = family_mismatch(_prof_fams, title)
         if _fam_off:
             score -= 0.10; reasons.append(f"title says {_fam_off}")
+        _jsk = [str(x) for x in (j.get("skills") or []) if x]
+        _hit = [x for x in _jsk if x in _prof_skills][:4]
+        if _hit:                                        # the POSTING BODY names skills the profile has
+            score += min(0.20, 0.05 * len(_hit)); reasons.append("skills: " + ", ".join(_hit))
         if pref_co and _norm_co(co) in pref_co:
             score += 0.15; reasons.append("preferred company")
         if avoid_lv and _jsen_known and jsen in avoid_lv:
@@ -2524,6 +2529,84 @@ class _Narrative(BaseModel):
     text: str = ""
 
 
+def rows_to_people(rows: list[dict]) -> list[dict]:
+    """Store rows (entity + facets) → people CARDS: attributes, links (with the LinkedIn search aid),
+    one grounded citation, and the code-derived evidence packet. Shared by the population search and
+    the intro path (hiring managers at a company)."""
+    from api.evidence import evidence_packet
+    people_rows = []
+    for r in rows:
+        # one representative grounded citation per person (first facet carrying a source)
+        cite = next(({"document_id": f["document_id"], "block_id": f["block_id"]}
+                     for f in r["facets"] if f.get("document_id")), None)
+        # `link_*` facets are the person's OTHER profiles (linkedin/x/website/medium/email), enriched
+        # from the source profile — surfaced as clickable links on the card, not filter attributes.
+        links, attrs = [], []
+        for f in r["facets"]:
+            if f["facet_key"].startswith("link_"):
+                links.append({"kind": f["facet_key"][5:], "url": f["display_value"]})
+            else:
+                attrs.append({"key": f["facet_key"], "display": _attr_display(f),
+                              "document_id": f["document_id"], "block_id": f["block_id"]})
+        links, attrs = _dedupe_links(links), _dedupe_attrs(attrs)
+        # LinkedIn PROXY: when we have no direct LinkedIn link, synthesize a Google search over the
+        # person's name + role + company that reliably lands on their LinkedIn — a navigation aid
+        # (clearly a SEARCH, not grounded evidence). Skipped when a real LinkedIn link exists.
+        if not any(l["kind"] == "linkedin" for l in links):
+            links.append(linkedin_search_link(r["name"], attrs))
+        people_rows.append({
+            "entity_id": r["entity_id"], "name": r["name"], "blurb": _person_blurb(attrs),
+            "attributes": attrs, "links": links, "citation": cite,
+            "evidence": evidence_packet(r["facets"], r["entity_id"])})
+    return people_rows
+
+
+_MANAGER_LEVELS = {"engineering_manager", "senior_manager", "director", "head", "vp", "lead", "c_level", "cto"}
+_MANAGER_TITLE_RX = re.compile(r"(?i)\b(manager|director|head of|vp\b|vice president|lead\b|chief|cto|ceo|founder|principal)\b")
+
+
+async def hiring_managers_at(store, *, tenant_id: str, company: str, title: str = "", department: str = "",
+                             cap: int = 300, limit: int = 8) -> dict:
+    """PUBLIC hiring-manager map for one company + one posting: people in Roster's index at that
+    company whose level / title reads as a manager, ranked by (a) discipline match between their
+    role / function / title and the posting's title + department, then (b) evidence strength. Every
+    row carries its evidence packet; the caller shows WHY each person is suggested. Code-owned."""
+    co = _norm_co(company)
+    if not co:
+        return {"managers": [], "n_at_company": 0}
+    try:
+        rows = await store.enumerate_by_facets({"company": [co]}, tenant_id=tenant_id, cap=cap)
+    except Exception:  # noqa: BLE001
+        rows = []
+    people = rows_to_people(rows)
+    want = text_families((title or "") + " " + (department or ""))
+    _EV_RANK = {"strong": 3, "corroborated": 3, "mixed": 2, "weak": 1, "self-stated": 1, "": 0}
+
+    def _a(p, key):
+        return " ".join(str(a.get("display") or "") for a in p.get("attributes") or [] if a.get("key") == key)
+
+    out = []
+    for p in people:
+        sen = _a(p, "seniority").lower().replace(" ", "_")
+        title_txt = " ".join([_a(p, "title"), _a(p, "role"), _a(p, "function")])
+        is_mgr = sen in _MANAGER_LEVELS or bool(_MANAGER_TITLE_RX.search(title_txt)) or bool(_MANAGER_TITLE_RX.search(p.get("blurb") or ""))
+        if not is_mgr:
+            continue
+        fams = text_families(title_txt + " " + (p.get("blurb") or ""))
+        disc = 2 if (want and fams & want) else (1 if not want or not fams else 0)
+        ev = (p.get("evidence") or {}).get("strength") or ""
+        why = []
+        if disc == 2:
+            why.append("leads " + ", ".join(sorted(fams & want)))
+        if sen:
+            why.append(sen.replace("_", " "))
+        why.append(f"evidence: {ev or 'unstated'}")
+        out.append((disc, _EV_RANK.get(ev, 0), {**p, "why": why}))
+    out.sort(key=lambda t: (-t[0], -t[1], t[2].get("name") or ""))
+    managers = [t[2] for t in out if t[0] > 0][:limit] or [t[2] for t in out][:limit]
+    return {"managers": managers, "n_at_company": len(people), "discipline": sorted(want)}
+
+
 async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                                    scope_country: str = "",
                                    prior_facets: dict | None = None,
@@ -2881,31 +2964,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     coverage["semantic_used"] = semantic_used   # observability: did embedding ranking engage?
     coverage["semantic_first"] = semantic_first  # observability: semantic-first (facets soft) vs facet-gated
 
-    people_rows = []
-    for r in rows:
-        # one representative grounded citation per person (first facet carrying a source)
-        cite = next(({"document_id": f["document_id"], "block_id": f["block_id"]}
-                     for f in r["facets"] if f.get("document_id")), None)
-        # `link_*` facets are the person's OTHER profiles (linkedin/x/website/medium/email), enriched
-        # from the source profile — surfaced as clickable links on the card, not filter attributes.
-        links, attrs = [], []
-        for f in r["facets"]:
-            if f["facet_key"].startswith("link_"):
-                links.append({"kind": f["facet_key"][5:], "url": f["display_value"]})
-            else:
-                attrs.append({"key": f["facet_key"], "display": _attr_display(f),
-                              "document_id": f["document_id"], "block_id": f["block_id"]})
-        links, attrs = _dedupe_links(links), _dedupe_attrs(attrs)
-        # LinkedIn PROXY: when we have no direct LinkedIn link, synthesize a Google search over the
-        # person's name + role + company that reliably lands on their LinkedIn — a navigation aid
-        # (clearly a SEARCH, not grounded evidence). Skipped when a real LinkedIn link exists.
-        if not any(l["kind"] == "linkedin" for l in links):
-            links.append(linkedin_search_link(r["name"], attrs))
-        from api.evidence import evidence_packet
-        people_rows.append({
-            "entity_id": r["entity_id"], "name": r["name"], "blurb": _person_blurb(attrs),
-            "attributes": attrs, "links": links, "citation": cite,
-            "evidence": evidence_packet(r["facets"], r["entity_id"])})
+    people_rows = rows_to_people(rows)
 
     _seen_ids: set = set()
     people_rows = [p for p in people_rows if not (p["entity_id"] in _seen_ids or _seen_ids.add(p["entity_id"]))]

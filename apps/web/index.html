@@ -1944,6 +1944,15 @@
           <button type="button" class="idgo" id="acctapply" style="width:auto;">⚑ Edit apply profile</button>
         </div>
       </section>
+      <section class="acctcard">
+        <h3>LinkedIn connections <span class="acctmuted">intro path</span></h3>
+        <p class="acctcardsub">Upload your own LinkedIn export once and every job card can show who you know at that company. LinkedIn → Settings → Data privacy → Get a copy of your data → Connections. Private to your account; delete any time.</p>
+        <div class="acctcardbtns" style="align-items:center;gap:.5rem;flex-wrap:wrap;">
+          <label class="mfile"><input type="file" id="connfile" accept=".csv,text/csv"/>⬆ Upload Connections.csv</label>
+          <span id="connstatus" class="acctmuted">not uploaded</span>
+          <button type="button" class="histbtn" id="conndel" hidden>✕ Delete</button>
+        </div>
+      </section>
       <section class="acctcard acctwide">
         <h3>Shortlists <span class="acctmuted">saved people &amp; jobs</span></h3>
         <div class="acctrow">
@@ -2777,6 +2786,7 @@ function jobsMarkup(d){
     const jref = j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||""));
     window.JOBS_INDEX = window.JOBS_INDEX || {}; window.JOBS_INDEX[String(jref)] = j;
     const apply = j.url?`<button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="Analyze your fit, then draft the application with the Apply Assistant">✨ Apply with assistant</button><a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer" title="Go straight to the company's apply page">Apply directly ↗</a>`:"";
+    const intro = j.company ? `<button type="button" class="ppl-lnk job-intro" data-ref="${esc(String(jref))}" title="Who you know at this company (your LinkedIn export) and likely hiring managers from public data">🤝 Intro path</button>` : "";
     const jsave = `<div class="ppl-acts"><button type="button" class="rsave" data-kind="job" data-ref="${esc(String(jref))}" data-label="${esc(j.title||"")}" data-sub="${esc(((j.company||"").replace(/_/g," "))+(j.location?" · "+j.location:""))}" data-url="${esc(j.url||"")}" title="Save to a shortlist">☆</button></div>`;
     const pct = j.match_pct ? ` <span style="color:var(--gold);font-weight:700;font-size:.76rem;">${j.match_pct}% match</span>` : "";
     const jr = (j.reasons&&j.reasons.length) ? ` <span style="color:var(--muted);font-size:.74rem;">· ${j.reasons.map(esc).join(" · ")}</span>` : "";
@@ -2784,7 +2794,7 @@ function jobsMarkup(d){
       <span class="ppl-name">${esc(j.title)}${pct}</span>
       <span class="ppl-blurb">${co}${j.source?` · via ${esc(j.source)}`:""}${jr}</span>
       ${loc||dept?`<span class="ppl-tags">${loc}${dept}</span>`:""}
-      ${apply?`<span class="ppl-links">${apply}</span>`:""}${typeof jobFeedbackMarkup==="function" ? jobFeedbackMarkup(String(jref), j) : ""}<span class="js-sumbox" data-ref="${esc(String(jref))}">${typeof openSummaryMarkup==="function"?openSummaryMarkup(jref, j):""}</span></span></div>`;
+      ${apply||intro?`<span class="ppl-links">${apply}${intro}</span>`:""}<span class="js-introbox" data-ref="${esc(String(jref))}"></span>${typeof jobFeedbackMarkup==="function" ? jobFeedbackMarkup(String(jref), j) : ""}<span class="js-sumbox" data-ref="${esc(String(jref))}">${typeof openSummaryMarkup==="function"?openSummaryMarkup(jref, j):""}</span></span></div>`;
   }).join("");
   const at = (q.company&&q.company.length)?` at ${esc(q.company.join(", ").replace(/_/g," "))}`:"";
   const bcJ = d.brief_contract || null;
@@ -7162,7 +7172,29 @@ async function openAccount(){
   const em = $("#acctemail"); if(em) em.textContent = (USER && USER.email) || "";
   const av = $("#acctavatar"); if(av) av.textContent = ((USER && USER.email) || "◈").slice(0,1);
   await openSaved();
+  refreshConnStatus();
 }
+// LinkedIn connections (the user's own export) — the intro path's private half
+async function refreshConnStatus(){
+  const st = $("#connstatus"), del = $("#conndel"); if(!st) return;
+  try{ const d = await (await fetch("/me/connections", {headers: authHeaders()})).json();
+    if(d.count){ st.textContent = `${d.count.toLocaleString()} connections · ${d.companies.toLocaleString()} companies · uploaded ${String(d.uploaded_at||"").slice(0,10)}`; if(del) del.hidden = false; }
+    else { st.textContent = "not uploaded"; if(del) del.hidden = true; }
+  }catch(e){ st.textContent = "not uploaded"; }
+}
+async function uploadConnections(file){
+  const st = $("#connstatus"); if(st) st.textContent = "Uploading…";
+  try{
+    const b64 = await readAsBase64(file);
+    const r = await fetch("/me/connections", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({name:file.name, content_type:file.type||"text/csv", data_b64:b64})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ if(st) st.textContent = d.detail || "Upload failed."; return; }
+    if(st) st.textContent = `${(d.kept||0).toLocaleString()} connections saved (${(d.companies||0).toLocaleString()} companies)`;
+    const del = $("#conndel"); if(del) del.hidden = false;
+  }catch(e){ if(st) st.textContent = "Upload failed — try again."; }
+}
+$("#connfile") && $("#connfile").addEventListener("change", e => { if(e.target.files && e.target.files[0]) uploadConnections(e.target.files[0]); e.target.value = ""; });
+$("#conndel") && $("#conndel").addEventListener("click", async () => { try{ await fetch("/me/connections", {method:"DELETE", headers: authHeaders()}); }catch(e){} refreshConnStatus(); });
 async function logout(){
   try{ await fetch("/auth/logout", {method:"POST", headers: authHeaders()}); }catch(e){}
   USER = null;
@@ -7343,7 +7375,52 @@ async function doReach(ch){
   try{ await fetch("/me/outreach", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
     body: JSON.stringify({person_ref:REACH_REF, person_name:(REACH_PERSON||{}).name||"", channel:ch.kind, message:msg})}); }catch(e){}
 }
+// INTRO PATH on a job card: who you know at the company (your own export) + likely hiring managers
+// from Roster's public index, each with its evidence label. Roster never sends anything.
+async function showIntroPath(ref){
+  if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
+  const j = (window.JOBS_INDEX||{})[ref] || (window.MATCH_JOBS||{})[ref]; if(!j) return;
+  const boxes = document.querySelectorAll(`.js-introbox[data-ref="${CSS.escape(String(ref))}"]`);
+  const set = html => boxes.forEach(b => { b.innerHTML = html; });
+  if(boxes.length && boxes[0].innerHTML && boxes[0].dataset.open === "1"){ set(""); boxes.forEach(b => b.dataset.open = "0"); return; }
+  boxes.forEach(b => b.dataset.open = "1");
+  set(`<div class="sethint" style="margin-top:.4rem;">🤝 Looking for a path in…</div>`);
+  try{
+    const qs = new URLSearchParams({company: (j.company||"").replace(/_/g," "), title: j.title||"", department: j.department||""});
+    const r = await fetch("/me/intro?" + qs.toString(), {headers: authHeaders()});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ set(`<div class="sethint" style="margin-top:.4rem;">${esc(d.detail||"Couldn't look that up.")}</div>`); return; }
+    const co = esc(d.company||"");
+    const conns = (d.connections||[]).map(c => `<li><b>${esc(c.name)}</b>${c.position?` — ${esc(c.position)}`:""}${c.exact?"":` <span class="ppl-fc" style="text-transform:none;">(listed as ${esc(c.company)})</span>`}${c.url?` <a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">LinkedIn ↗</a>`:""} <button type="button" class="ppl-lnk intro-draft" data-name="${esc(c.name)}" data-co="${co}" data-title="${esc(j.title||"")}" data-kind="connection">✉ Draft note</button></li>`).join("");
+    const mgrs = (d.managers||[]).map(p => { const li = (p.links||[]).find(l => l.kind === "linkedin") || (p.links||[]).find(l => l.kind === "linkedin_search"); const role = (p.attributes||[]).filter(a => a.key === "title" || a.key === "role").map(a => a.display).slice(0,1).join("");
+      return `<li><b>${esc(p.name)}</b>${role?` — ${esc(role)}`:""} <span class="ppl-fc" style="text-transform:none;">${esc((p.why||[]).join(" · "))}</span>${li?` <a href="${esc(li.url)}" target="_blank" rel="noopener noreferrer">${li.kind==="linkedin"?"LinkedIn ↗":"find on LinkedIn ↗"}</a>`:""} <button type="button" class="ppl-lnk intro-draft" data-name="${esc(p.name)}" data-co="${co}" data-title="${esc(j.title||"")}" data-kind="manager">✉ Draft note</button></li>`; }).join("");
+    set(`<div class="ppl-cov" style="margin-top:.45rem;border-left-color:var(--gold);">
+      <div><b>You know at ${co}</b> ${d.connections_total?`<span class="ppl-fc" style="text-transform:none;">· ${(d.connections||[]).length} of your ${d.connections_total} connections</span>`:""}</div>
+      ${conns?`<ul style="margin:.25rem 0 .5rem 1.1rem;padding:0;">${conns}</ul>`:`<div class="ppl-fc" style="text-transform:none;margin:.2rem 0 .5rem;">${d.connections_total?"none listed at this company":"no connections uploaded — add your LinkedIn export under Account"}</div>`}
+      <div><b>Likely hiring managers</b> <span class="ppl-fc" style="text-transform:none;">· public data, Roster's index${(d.discipline||[]).length?` · matched on ${esc(d.discipline.join(", "))}`:""}</span></div>
+      ${mgrs?`<ul style="margin:.25rem 0 .2rem 1.1rem;padding:0;">${mgrs}</ul>`:`<div class="ppl-fc" style="text-transform:none;margin:.2rem 0;">${esc(d.note||"none found")}</div>`}
+      <div class="ppl-fc" style="text-transform:none;margin-top:.35rem;">Roster drafts; you send. Suggested people carry their evidence label — a self-stated profile is a lead, not a fact.</div>
+    </div>`);
+  }catch(e){ set(`<div class="sethint" style="margin-top:.4rem;">Couldn't look that up — try again.</div>`); }
+}
+function introDraft(name, co, title, kind){
+  const first = (name||"").trim().split(/\s+/)[0] || "there";
+  const me = (USER&&USER.name)?USER.name:"";
+  const body = kind === "connection"
+    ? `Hi ${first},\n\nI saw ${co} is hiring for ${title}. I'm interested and think it's a strong fit — would you be open to a quick intro to the hiring team, or a word on who owns the role?\n\nHappy to send my résumé or a short summary.\n\n${me?`Thanks,\n${me}`:""}`
+    : `Hi ${first},\n\nI came across the ${title} opening at ${co} and wanted to reach out directly. My background is a close match — I'd welcome a short conversation about the role and the team.\n\n${me?`Best,\n${me}`:""}`;
+  REACH_REF = "intro:" + co; REACH_PERSON = {name, links: []};
+  $("#reachname").textContent = name || "this person";
+  $("#reachmsg").value = body; $("#reachnote").textContent = "";
+  const box = $("#reachchannels"); REACH_CHANNELS = [];
+  box.innerHTML = "<div style='color:var(--muted);font-size:.82rem;'>Copy the note and send it on LinkedIn (or email) yourself — Roster never sends.</div><button type=\"button\" class=\"idgo\" style=\"width:auto;padding:.35rem .7rem;margin-top:.3rem;\" onclick=\"navigator.clipboard.writeText($('#reachmsg').value); $('#reachnote').textContent='Copied.';\">Copy note</button>";
+  $("#reachmodal").hidden = false;
+}
 document.addEventListener("click", (e)=>{
+  const ib = e.target.closest(".job-intro");
+  if(ib){ e.preventDefault(); e.stopPropagation(); showIntroPath(ib.dataset.ref); return; }
+  const dr = e.target.closest(".intro-draft");
+  if(dr){ e.preventDefault(); e.stopPropagation(); introDraft(dr.dataset.name, dr.dataset.co, dr.dataset.title, dr.dataset.kind); return; }
   const rb = e.target.closest(".rmsg");
   if(rb){ e.preventDefault(); e.stopPropagation(); openReach(rb.dataset.ref); return; }
   const cb = e.target.closest(".reach-ch");

@@ -82,14 +82,57 @@ def _norm_title(t: str) -> str:
 
 
 # ---- ATS fetchers: each returns a list of normalized dicts {title, location, department, url} ----
+BODY_CAP = 6000     # chars of posting body kept per row (the requirements live in the first few thousand)
+
+
+def _html_text(h: str) -> str:
+    import html as _html
+    t = _html.unescape(h or "")
+    t = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", t)
+    t = re.sub(r"(?i)<br\s*/?>|</p>|</li>|</div>|</h\d>", "\n", t)
+    t = re.sub(r"<[^>]+>", " ", t)
+    t = re.sub(r"[ \t]+", " ", t)
+    return re.sub(r"\n\s*\n+", "\n", t).strip()[:BODY_CAP]
+
+
+# SKILLS the body names — lexicon match (code-owned; mirrors api.people_population.profile_skills)
+_SKILL_LEXICON = ("java", "kotlin", "scala", "python", "go", "golang", "rust", "c++", "c#", ".net", "ruby", "php", "swift",
+                  "typescript", "javascript", "node", "react", "angular", "vue", "next.js", "graphql", "rest", "grpc",
+                  "kubernetes", "k8s", "docker", "terraform", "ansible", "helm", "linux", "aws", "gcp", "azure",
+                  "postgres", "postgresql", "mysql", "mongodb", "redis", "cassandra", "dynamodb", "elasticsearch",
+                  "kafka", "rabbitmq", "spark", "flink", "airflow", "snowflake", "dbt", "sql", "nosql",
+                  "pytorch", "tensorflow", "jax", "llm", "langchain", "spring", "django", "flask", "fastapi", "rails",
+                  "microservices", "distributed systems", "ci/cd", "observability", "prometheus", "grafana", "datadog",
+                  "sre", "devops", "security", "ios", "android", "flutter", "react native", "figma")
+
+
+def body_skills(text: str, limit: int = 12) -> list[str]:
+    t = " " + re.sub(r"[^a-z0-9+#./ ]+", " ", (text or "").lower()) + " "
+    out = []
+    for sk in _SKILL_LEXICON:
+        if f" {sk} " in t or f" {sk}," in t or f" {sk}." in t:
+            if sk not in out:
+                out.append(sk)
+    return out[:limit]
+
+
+def blurb(r: dict, company: str) -> str:
+    """The embedding text: title + company + location + department, PLUS the body's first ~1200 chars
+    when the row carries one — so a résumé's skills can meet the posting's requirements in vector space."""
+    head = f"{r.get('title','')} at {company}. {r.get('location','')}. {r.get('department','')}".replace("..", ".")
+    b = (r.get("body") or "").strip()
+    return head + (("\n" + b[:1200]) if b else "")
+
+
 def fetch_greenhouse(token: str) -> list[dict]:
-    d = _http_json(f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=false")
+    d = _http_json(f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true")
     out = []
     for j in d.get("jobs", []):
         out.append({"title": j.get("title") or "",
                     "location": ((j.get("location") or {}).get("name") or ""),
                     "department": (", ".join(x.get("name", "") for x in (j.get("departments") or [])) or ""),
-                    "url": j.get("absolute_url") or ""})
+                    "url": j.get("absolute_url") or "",
+                    "body": _html_text(j.get("content") or "")})
     return out
 
 
@@ -98,10 +141,13 @@ def fetch_lever(token: str) -> list[dict]:
     out = []
     for j in (d if isinstance(d, list) else []):
         cat = j.get("categories") or {}
+        parts = [j.get("descriptionPlain") or ""] + [
+            (l.get("text") or "") + "\n" + _html_text(l.get("content") or "") for l in (j.get("lists") or [])]
         out.append({"title": j.get("text") or "",
                     "location": cat.get("location") or "",
                     "department": cat.get("team") or cat.get("department") or "",
-                    "url": j.get("hostedUrl") or ""})
+                    "url": j.get("hostedUrl") or "",
+                    "body": "\n".join(p for p in parts if p.strip())[:BODY_CAP]})
     return out
 
 
@@ -111,8 +157,9 @@ def fetch_ashby(token: str) -> list[dict]:
     for j in d.get("jobs", []):
         out.append({"title": j.get("title") or "",
                     "location": j.get("location") or "",
-                    "department": j.get("departmentName") or j.get("teamName") or "",
-                    "url": j.get("jobUrl") or ""})
+                    "department": j.get("departmentName") or j.get("teamName") or j.get("department") or "",
+                    "url": j.get("jobUrl") or "",
+                    "body": (j.get("descriptionPlain") or _html_text(j.get("descriptionHtml") or ""))[:BODY_CAP]})
     return out
 
 
@@ -253,6 +300,10 @@ async def ensure_checkpoint(conn) -> None:
              updated_at timestamptz NOT NULL DEFAULT now(),
              PRIMARY KEY (source, cursor_key)
            )""")
+    await conn.execute("ALTER TABLE rs_ingest_checkpoint ADD COLUMN IF NOT EXISTS error text")
+    await conn.execute("ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS body text")
+    await conn.execute("ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS skills text[]")
+    await conn.execute("ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS body_at timestamptz")
 
 
 async def done_boards(conn) -> set[str]:
@@ -302,16 +353,65 @@ async def upsert_jobs(conn, source: str, rows: list[dict], vecs: list[str | None
         company = (r.get("company") or company_default or "").strip()
         if not title or not company:
             continue
+        body = (r.get("body") or "").strip()[:BODY_CAP] or None
         await conn.execute(
-            """INSERT INTO rs_job (company, title, location, department, url, source, title_norm, embedding, updated_at)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8::vector,now())
+            """INSERT INTO rs_job (company, title, location, department, url, source, title_norm, embedding, updated_at,
+                                   body, skills, body_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8::vector,now(),$9,$10::text[], CASE WHEN $9 IS NULL THEN NULL ELSE now() END)
                ON CONFLICT (company, title, location, source) DO UPDATE SET
                  department = EXCLUDED.department, url = EXCLUDED.url, title_norm = EXCLUDED.title_norm,
-                 embedding  = COALESCE(EXCLUDED.embedding, rs_job.embedding), updated_at = now()""",
+                 embedding  = CASE WHEN EXCLUDED.body IS NOT NULL THEN COALESCE(EXCLUDED.embedding, rs_job.embedding)
+                                   ELSE COALESCE(rs_job.embedding, EXCLUDED.embedding) END,
+                 body       = COALESCE(EXCLUDED.body, rs_job.body),
+                 skills     = COALESCE(EXCLUDED.skills, rs_job.skills),
+                 body_at    = COALESCE(EXCLUDED.body_at, rs_job.body_at),
+                 updated_at = now()""",
             company, title, (r.get("location") or ""), (r.get("department") or ""),
-            (r.get("url") or ""), source, _norm_title(title), vec)
+            (r.get("url") or ""), source, _norm_title(title), vec, body, (body_skills(body) if body else None))
         n += 1
     return n
+
+
+async def backfill_bodies(conn, boards: int, *, live: bool) -> tuple[int, int]:
+    """POSTING-BODY backfill: pick ATS boards (from the jobs checkpoint) that still have rows without a
+    body, refetch each board WITH content, upsert body + skills + a fresh embedding. One board = one
+    HTTP call; the checkpoint row records `body_done`. Returns (boards, postings)."""
+    rows = await conn.fetch(
+        """SELECT c.cursor_key FROM rs_ingest_checkpoint c
+           WHERE c.source = 'jobs' AND c.status = 'done'
+             AND split_part(c.cursor_key, ':', 1) IN ('greenhouse', 'ashby', 'lever')
+             AND COALESCE(c.error, '') NOT LIKE 'body_done%'
+           ORDER BY c.updated_at LIMIT $1""", int(boards))
+    nb = nj = 0
+    for r in rows:
+        key = r["cursor_key"]
+        ats, token = key.split(":", 1)
+        company = await conn.fetchval("SELECT company FROM rs_job WHERE source = $1 AND url ILIKE '%' || $2 || '%' LIMIT 1", ats, token) or ""
+        try:
+            jobs = _FETCHERS[ats](token)
+        except Exception as e:   # noqa: BLE001
+            print(f"[skip] {key}: {e}", file=sys.stderr)
+            if live:
+                await conn.execute("UPDATE rs_ingest_checkpoint SET error = $2, updated_at = now() WHERE source='jobs' AND cursor_key = $1",
+                                   key, f"body_done: fetch failed {str(e)[:80]}")
+            continue
+        with_body = [j for j in jobs if (j.get("body") or "").strip()]
+        nb += 1; nj += len(with_body)
+        if not live:
+            print(f"[dry ] {key:28s} {len(jobs):4d} jobs, {len(with_body):4d} with a body")
+            continue
+        if not company:
+            company = with_body[0].get("company") if with_body and with_body[0].get("company") else ""
+        vecs = [None] * len(with_body)
+        texts = [blurb(j, company) for j in with_body]
+        for i in range(0, len(texts), 100):
+            vecs[i:i + 100] = embed_batch(texts[i:i + 100])
+        async with conn.transaction():
+            w = await upsert_jobs(conn, ats, with_body, vecs, company_default=company)
+            await conn.execute("UPDATE rs_ingest_checkpoint SET error = $2, updated_at = now() WHERE source='jobs' AND cursor_key = $1",
+                               key, f"body_done: {w} postings")
+        print(f"[live] {key:28s} {company:20s} {len(with_body):4d} bodies → {w} upserted")
+    return nb, nj
 
 
 async def backfill_embeddings(conn, limit: int) -> int:
@@ -345,6 +445,10 @@ async def main() -> None:
     ap.add_argument("--no-aggregators", action="store_true", help="skip the aggregator feeds (RemoteOK/Remotive/…)")
     ap.add_argument("--no-workday", action="store_true", help="skip the Workday tenant sweep")
     ap.add_argument("--workday-file", default="", help="TSV company<TAB>host<TAB>wd<TAB>tenant<TAB>site to use instead of WORKDAY_TENANTS")
+    ap.add_argument("--bodies", type=int, default=0,
+                    help="BODY mode: refetch up to N already-done Greenhouse/Ashby/Lever boards WITH posting "
+                         "content, store body + skills, re-embed those rows (title + body excerpt). Resumable: "
+                         "boards whose rows all carry a body are skipped.")
     ap.add_argument("--backfill", type=int, default=0,
                     help="EMBED-ONLY mode: give up to N rs_job rows written without a vector their embedding "
                          "(rows a sweep wrote during an embed hiccup are invisible to résumé matching until then)")
@@ -382,6 +486,15 @@ async def main() -> None:
             await conn.close()
         print(f"backfill: embedded {n} jobs (~${n * 20 / 1_000_000 * 0.02:.4f})")
         return
+    if args.bodies:
+        try:
+            await ensure_checkpoint(conn)
+            nb, nj = await backfill_bodies(conn, args.bodies, live=live)
+        finally:
+            await conn.close()
+        print(f"bodies: {nb} boards, {nj} postings given a body{' (dry — nothing written)' if not live else ''} "
+              f"(~${nj * 350 / 1_000_000 * 0.02:.3f} embeddings)")
+        return
     await ensure_checkpoint(conn)
     already = set() if args.refresh else await done_boards(conn)
 
@@ -406,8 +519,7 @@ async def main() -> None:
                 continue
             if live:
                 vecs = [None] * len(rows)
-                texts = [f"{r.get('title','')} at {company}. {r.get('location','')}. {r.get('department','')}"
-                         for r in rows]
+                texts = [blurb(r, company) for r in rows]
                 for i in range(0, len(texts), 100):     # embed in batches of 100
                     vecs[i:i + 100] = embed_batch(texts[i:i + 100])
                 total_embedded += sum(1 for v in vecs if v is not None)
