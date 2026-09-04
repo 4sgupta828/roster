@@ -6222,10 +6222,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=404, detail="extension not bundled")
         buf = _io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-            for fn in sorted(os.listdir(root)):
-                fp = os.path.join(root, fn)
-                if os.path.isfile(fp):
-                    z.write(fp, arcname=f"roster-apply/{fn}")
+            for dp, _dirs, files in os.walk(root):     # icons/ included
+                for fn in sorted(files):
+                    fp = os.path.join(dp, fn)
+                    z.write(fp, arcname="roster-apply/" + os.path.relpath(fp, root))
         return _Resp(content=buf.getvalue(), media_type="application/zip", headers={"Content-Disposition": 'attachment; filename="roster-apply-extension.zip"'})
 
     @app.post("/me/resume")

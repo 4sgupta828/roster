@@ -10,6 +10,7 @@
     "https://jobs.ashbyhq.com/*",
     "https://roster-api-production-3405.up.railway.app/*"
   ],
+  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
@@ -19,5 +20,6 @@
       "run_at": "document_idle"
     }
   ],
-  "action": { "default_popup": "popup.html", "default_title": "Roster Apply" }
+  "action": { "default_popup": "popup.html", "default_title": "Roster Apply",
+              "default_icon": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png" } }
 }
