@@ -276,8 +276,9 @@ def _llm_json(system: str, user: str) -> dict:
 async def backfill_person_facets(conn, limit: int, *, live: bool, batch_size: int = 20) -> dict:
     """SCHEMA-DRIVEN person facets (docs/specs/facet-contract-evaluator.md §3, step 4): the model reads the
     profile text with the vocabulary supplied; the envelope lands on rs_entity.facet_env; rows are projected
-    into the facet read model. Priority: people on saved maps first, then newest. Legacy facet rows (role /
-    seniority / function …) are left in place; the new keys sit beside them."""
+    into the facet read model. Priority: people on saved maps first, then newest. The old-vocabulary rows (role /
+    seniority / function …) stay for the old engine; the BRIDGED rows (provenance `legacy`, facet_legacy.py) are
+    replaced by this extraction in full."""
     from roster_vertical.facet_schema import FACET_SCHEMA
     from api.facets_engine import extract_envelopes
     from api.facet_store import FacetSQLStore
@@ -318,6 +319,9 @@ async def backfill_person_facets(conn, limit: int, *, live: bool, batch_size: in
             async with conn.transaction():
                 await conn.execute("UPDATE rs_entity SET facet_env = $2::jsonb WHERE entity_id = $1", r["entity_id"], json.dumps(env))
                 await store.project("person", r["entity_id"], env)
+                # the real extraction supersedes the WHOLE legacy bridge for this person: a key the model left
+                # unknown stays unknown (spec §2.1), never the bridged guess. Derived rows (evidence) stay.
+                await conn.execute("DELETE FROM roster_entity_facet WHERE entity_id = $1 AND provenance = 'legacy'", r["entity_id"])
             st["written"] += 1
         if (i // batch_size) % 20 == 19:
             print(f"  person facets: {st['written']}/{len(rows)}", flush=True)
