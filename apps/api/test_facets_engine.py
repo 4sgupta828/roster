@@ -97,3 +97,34 @@ def test_in_memory_and_sql_semantics_agree_on_the_reference_rows():
     out = asyncio.new_event_loop().run_until_complete(evaluate(c, InMemoryFacetStore(rows, FACET_SCHEMA), FACET_SCHEMA, FacetWeights(), noise_floor=0.4))
     assert [r["id"] for r in out["rows"]] == ["j1", "j2"] and out["counts"]["field"] == {"software": 1, "sales": 1}
     assert out["counts"]["company_type"] == {"startup": 1, UNKNOWN: 1} and out["counts"]["comp"] == {UNKNOWN: 2}
+
+
+def test_counts_query_parameters_line_up(monkeypatch):
+    """Every $n in the counts SQL must be backed by an argument (prod 2026-09-05: 'could not determine data
+    type of parameter $4' — the via-key query referenced params it never passed)."""
+    import re as _re
+
+    class _Conn:
+        def __init__(self): self.calls = []
+        async def fetchval(self, sql, *args): self.calls.append((sql, args)); return 0
+        async def fetch(self, sql, *args): self.calls.append((sql, args)); return []
+        async def execute(self, sql, *args): return None
+
+    class _Acq:
+        def __init__(self, c): self.c = c
+        async def __aenter__(self): return self.c
+        async def __aexit__(self, *a): return False
+
+    class _Pool:
+        def __init__(self): self.c = _Conn()
+        def acquire(self): return _Acq(self.c)
+
+    pool = _Pool()
+
+    async def getter(): return pool
+    store = FacetSQLStore(getter, FACET_SCHEMA); store._ready = True
+    asyncio.new_event_loop().run_until_complete(store.counts("job", {"level": ["leadership"], "company_type": ["startup"]}, FACET_SCHEMA))
+    assert pool.c.calls
+    for sql, args in pool.c.calls:
+        refs = {int(m) for m in _re.findall(r"\$(\d+)", sql)}
+        assert refs and max(refs) == len(args) and refs == set(range(1, len(args) + 1)), (sorted(refs), len(args), sql[:120])

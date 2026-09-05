@@ -222,12 +222,13 @@ class FacetSQLStore:
             for k in nav:
                 if k.via:
                     tkey = via_target_key(k.key, k.via)
+                    vargs = list(args[: ki - 1]) + [tkey, k.via]          # the slice's params, then the two of ours
                     vr = await conn.fetch(f"""WITH s AS ({slice_sql})
                                               SELECT c.facet_value_norm AS v, count(DISTINCT f.entity_id) AS n
                                               FROM roster_entity_facet f JOIN s ON s.entity_id = f.entity_id
                                               JOIN roster_entity_facet c ON c.tenant_id = f.tenant_id AND c.entity_kind = 'company'
-                                                   AND c.entity_id = 'company:' || f.facet_value_norm AND c.facet_key = ${len(args) + 1}
-                                              WHERE f.facet_key = ${len(args) + 2} GROUP BY 1""", *args[: ki - 1], tkey, k.via)
+                                                   AND c.entity_id = 'company:' || f.facet_value_norm AND c.facet_key = ${len(vargs) - 1}
+                                              WHERE f.facet_key = ${len(vargs)} GROUP BY 1""", *vargs)
                     d = {r["v"]: int(r["n"]) for r in vr}
                     known = sum(d.values())
                     if total - known > 0:
