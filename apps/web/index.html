@@ -148,8 +148,8 @@
   .matchresume{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;padding:.6rem .7rem;border:1px solid var(--hair);border-radius:10px;background:var(--panel2);margin:.4rem 0 .2rem;}
   /* Find jobs — stepped layout */
   .msub{font-size:.84rem;color:var(--muted);margin:.35rem 0 .9rem;line-height:1.45;}
-  #matchmodal section.mstep,#jdmodal section.mstep,#applyassist section.mstep{display:block;flex-direction:initial;align-items:initial;gap:0;}
-  #jdmodal .msub,#applyassist .msub{text-align:left;}
+  #matchmodal section.mstep,#jdmodal section.mstep{display:block;flex-direction:initial;align-items:initial;gap:0;}
+  #jdmodal .msub{text-align:left;}
   .mstep{display:block;border:1px solid var(--hair);border-radius:12px;background:var(--panel);padding:.85rem 1rem 1rem;margin:.7rem 0;text-align:left;}   /* a global section{display:flex;align-items:center} rule centred everything */
   #matchmodal .msub{text-align:left;}
   .mstep-h{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;font-weight:700;font-size:.98rem;margin-bottom:.35rem;}
@@ -646,6 +646,17 @@
   .mapbar .mb-btn:hover{border-color:var(--gold);}
   .mapbar .mb-meta{flex-basis:100%;font-size:.74rem;color:var(--muted);}
   .appqrow{display:flex;flex-direction:column;gap:.2rem;margin:.4rem 0;font-size:.84rem;}
+  /* 🚀 Apply — one modal, four steps */
+  .aptabs{display:flex;gap:.3rem;flex-wrap:wrap;margin:.6rem 0 .5rem;border-bottom:1px solid var(--hair);padding-bottom:.45rem;}
+  .aptab{font:inherit;font-size:.78rem;padding:.35rem .75rem;min-height:38px;border:1px solid var(--hair);border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;}
+  .aptab:hover{color:var(--ink);}
+  .aptab.on{background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);border-color:var(--gold);font-weight:600;}
+  .aptab .apdot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--verified);margin-left:.35rem;vertical-align:middle;}
+  .aptab .apdot.busy{background:var(--gold);animation:appulse 1s infinite alternate;}
+  @keyframes appulse{from{opacity:.35}to{opacity:1}}
+  .aa-tblwrap{overflow-x:auto;}
+  .apnext{margin-top:.8rem;}
+  @media (max-width:560px){ .aptab{font-size:.72rem;padding:.3rem .55rem;} .aa-score{gap:.6rem;} .aa-tbl{font-size:.78rem;} }
   .appqrow.appq-block{border-left:3px solid var(--gap);padding-left:.4rem;}
   .appqrow .appq{font:inherit;font-size:.84rem;border:1px solid var(--hair);border-radius:6px;padding:.35rem .5rem;background:var(--panel);color:var(--ink);}
   .rev-box{flex-basis:100%;border:1px solid var(--hair);border-left:3px solid var(--gold);border-radius:8px;padding:.5rem .7rem;background:var(--panel);font-size:.82rem;color:var(--ink);}
@@ -1701,7 +1712,7 @@
     <button type="button" class="histbtn newbtn" id="newbtn" style="margin-left:12px;">＋ New search</button>
     <button type="button" class="histbtn" id="matchhdr" style="margin-left:0;" title="Upload your résumé → get ranked matching jobs">🎯 Find jobs</button>
     <button type="button" class="histbtn" id="candhdr" style="margin-left:0;" title="Recruiter: paste a job description → ranked candidate people">🧲 Find candidates</button>
-    <button type="button" class="histbtn" id="applyhdr" hidden style="margin-left:0;" title="Paste a job → see how you fit, how to apply, and draft a cover letter">🎯 Apply Assistant</button>
+    <button type="button" class="histbtn" id="applyhdr" hidden style="margin-left:0;" title="Paste any job link → your fit, every application answer, résumé & cover letter, then fill it in your browser">🎯 Apply to a job link</button>
     <button type="button" class="histbtn" id="signinbtn" style="margin-left:0;" title="Sign in or create an account">Sign in</button>
     <button type="button" class="histbtn" id="histbtn2" style="margin-left:0;" hidden title="Your search history — private to your account">⧗ History</button>
     <button type="button" class="histbtn" id="mapsbtn" style="margin-left:0;" title="Your saved Talent Maps" onclick="location.hash='#maps'">🗺 Maps</button>
@@ -1975,7 +1986,7 @@
       </section>
       <section class="acctcard acctwide">
         <h3>Applications <span class="acctmuted">planned by the agent · you review · you submit</span></h3>
-        <p class="acctcardsub">"📨 Prepare application" on a job card reads the job site's own form definition and plans every answer from your Apply profile, your saved answers, and the agent's best drafts. Review the plan here, then fill the live form with the extension and submit it yourself. Sign-in portals (Workday) can't be planned.</p>
+        <p class="acctcardsub">"🚀 Apply" on a job card shows your fit, reads the job site's own form definition and plans every answer from your Apply profile, your saved answers, and the agent's best drafts. Review the plan here, then fill the live form with the extension and submit it yourself. Sign-in portals (Workday) can't be planned.</p>
         <div id="applist"><span class="acctmuted">none yet</span></div>
       </section>
       <section class="acctcard acctwide">
@@ -2014,32 +2025,6 @@
       <button type="button" class="histbtn" id="matchbtn2" style="margin-left:0;">🎯 Match jobs to my résumé</button>
       <span id="applysaved" style="font-size:.8rem;color:var(--gold);"></span>
     </div>
-  </div>
-</div>
-<!-- Apply Assistant: grounded JD × résumé fit table + how-to-apply + cover letter -->
-<div class="acctpage" id="applyassist" hidden aria-label="Apply Assistant">
-  <div class="acctwrap" style="max-width:860px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:.6rem;">
-      <h2 style="margin:0;">🎯 Apply Assistant</h2>
-      <button type="button" class="histbtn" id="aaClose">← Back</button>
-    </div>
-    <p class="msub">Two steps: the job, then your fit — how you match, what to lead with, honest gaps, and how to apply, grounded in your saved résumé. Nothing is fabricated; a cover letter is drafted only with your approval.</p>
-    <div id="aaJobCtx" class="ppl-cov" hidden style="border-left-color:var(--gold);"></div>
-
-    <section class="mstep">
-      <div class="mstep-h"><span class="mstep-n">1</span> The job</div>
-      <span class="mlabel">Job link <span class="mhint">Greenhouse, Lever, Ashby or company careers URL — we read the posting for you</span></span>
-      <input id="aaUrl" type="url" style="width:100%;font-size:.86rem;" placeholder="https://…" />
-      <span class="mlabel">…or the job description</span>
-      <textarea id="aaText" rows="6" style="width:100%;font-size:.9rem;" placeholder="Paste the full job description"></textarea>
-    </section>
-
-    <section class="mstep">
-      <div class="mstep-h"><span class="mstep-n">2</span> Your fit</div>
-      <button type="button" class="idgo mgo" id="aaGo">🎯 Analyze my fit</button>
-      <div id="aaNote" style="font-size:.8rem;color:var(--muted);margin-top:.5rem;"></div>
-      <div id="aaResults" style="margin-top:.6rem;"></div>
-    </section>
   </div>
 </div>
 <!-- Match jobs to résumé: on-demand, preference-ranked -->
@@ -2154,10 +2139,28 @@
   </div>
 </div>
 <!-- Reach out: draft a message → hand off to whatever channel the person shared (no auto-send) -->
+<!-- 🚀 APPLY — one integrated flow from the job card: your fit → every answer → résumé & letter → fill & submit -->
 <div class="idmodal" id="appmodal" hidden style="overflow:auto;">
-  <div class="idcard" style="max-width:820px;width:min(96vw,820px);max-height:92vh;overflow:auto;">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;"><h2 style="margin:0;font-size:1.05rem;">Review application</h2><button type="button" class="histbtn" id="appclose">✕ Close</button></div>
-    <div id="appbody" style="margin-top:.6rem;"></div>
+  <div class="idcard" style="max-width:860px;width:min(96vw,860px);max-height:92vh;overflow:auto;text-align:left;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;"><h2 style="margin:0;font-size:1.05rem;">🚀 Apply</h2><button type="button" class="histbtn" id="appclose">✕ Close</button></div>
+    <div id="aphead" style="margin-top:.5rem;font-size:.9rem;"></div>
+    <div id="apsource" hidden style="margin-top:.5rem;">
+      <span class="mlabel">Job link <span class="mhint">Greenhouse, Lever, Ashby or a company careers URL</span></span>
+      <input id="apUrl" type="url" style="width:100%;font-size:.86rem;" placeholder="https://…" />
+      <span class="mlabel">…or paste the job description <span class="mhint">fit + documents only; the form itself needs the link</span></span>
+      <textarea id="apText" rows="4" style="width:100%;font-size:.88rem;" placeholder="Paste the full job description"></textarea>
+      <button type="button" class="idgo" id="apGo" style="width:auto;margin-top:.4rem;">🎯 Analyze & plan</button>
+    </div>
+    <div class="aptabs" id="aptabs" role="tablist">
+      <button type="button" class="aptab on" data-pane="fit" role="tab">1 · Your fit<span class="apdot" hidden></span></button>
+      <button type="button" class="aptab" data-pane="plan" role="tab">2 · Answers<span class="apdot" hidden></span></button>
+      <button type="button" class="aptab" data-pane="docs" role="tab">3 · Résumé &amp; letter<span class="apdot" hidden></span></button>
+      <button type="button" class="aptab" data-pane="submit" role="tab">4 · Fill &amp; submit<span class="apdot" hidden></span></button>
+    </div>
+    <div class="appane" id="apFit"></div>
+    <div class="appane" id="apPlan" hidden></div>
+    <div class="appane" id="apDocs" hidden></div>
+    <div class="appane" id="apSubmit" hidden></div>
   </div>
 </div>
 <div class="idmodal" id="reachmodal" hidden>
@@ -2822,9 +2825,9 @@ function jobsMarkup(d){
     const dept = j.department?`<span class="ppl-tag">${esc(j.department)}</span>`:"";
     const jref = j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||""));
     window.JOBS_INDEX = window.JOBS_INDEX || {}; window.JOBS_INDEX[String(jref)] = j;
-    const apply = j.url?`<button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="Analyze your fit, then draft the application with the Apply Assistant">✨ Apply with assistant</button><a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer" title="Go straight to the company's apply page">Apply directly ↗</a>`:"";
+    const apply = j.url?`<button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="One flow, right here: your fit, every application answer planned from your profile, résumé & cover letter, then fill it in your browser — you submit">🚀 Apply</button><a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer" title="Go straight to the company's apply page">Apply directly ↗</a>`:"";
     const intro = j.company ? `<button type="button" class="ppl-lnk job-intro" data-ref="${esc(String(jref))}" title="Who you know at this company (your LinkedIn export) and likely hiring managers from public data">🤝 Intro path</button>` : "";
-    const prep = j.url ? `<button type="button" class="ppl-lnk job-prep" data-ref="${esc(String(jref))}" title="The agent opens the apply page, fills it from your Apply profile + résumé, screenshots it and stops — you approve before anything is submitted">📨 Prepare application</button>` : "";
+    const prep = "";   // folded into 🚀 Apply
     const jsave = `<div class="ppl-acts"><button type="button" class="rsave" data-kind="job" data-ref="${esc(String(jref))}" data-label="${esc(j.title||"")}" data-sub="${esc(((j.company||"").replace(/_/g," "))+(j.location?" · "+j.location:""))}" data-url="${esc(j.url||"")}" title="Save to a shortlist">☆</button></div>`;
     const pct = j.match_pct ? ` <span style="color:var(--gold);font-weight:700;font-size:.76rem;">${j.match_pct}% match</span>` : "";
     const jr = (j.reasons&&j.reasons.length) ? ` <span style="color:var(--muted);font-size:.74rem;">· ${j.reasons.map(esc).join(" · ")}</span>` : "";
@@ -7419,40 +7422,118 @@ async function doReach(ch){
 }
 // CONTROLLED AUTO-APPLY: prepare (fill + screenshot, stop) → review → approve (the only submit path)
 const APP_STATUS = {queued:"planning…", planned:"plan ready — review", filled:"filled in your browser — submit it", needs_you:"needs you", submitted:"submitted ✓", failed:"failed"};
-async function prepareApplication(ref){
+// ===== 🚀 APPLY — one integrated flow on the job card: fit → answers → résumé & letter → fill & submit =====
+// The two former surfaces ("Apply with assistant" = JD × résumé fit; "Prepare application" = the form
+// plan) are ONE modal now. Fit and plan load together; a drafted cover letter drops into the plan's
+// cover-letter question; the card itself shows where the application stands. Roster never submits.
+const APPLY = {ref:"", url:"", text:"", job:null, appId:0, app:null, fit:null, manual:false};
+window.APPLY_FITS = window.APPLY_FITS || {};   // url → fit analysis this page load (reopening never re-spends)
+function apPane(p){ return $("#ap" + p[0].toUpperCase() + p.slice(1)); }
+function apShow(pane){
+  document.querySelectorAll("#aptabs .aptab").forEach(b => b.classList.toggle("on", b.dataset.pane === pane));
+  ["fit","plan","docs","submit"].forEach(p => { const el = apPane(p); if(el) el.hidden = p !== pane; });
+}
+function apMark(pane, state){   // tab dot: "busy" while loading, on when ready, off otherwise
+  const d = document.querySelector(`#aptabs .aptab[data-pane="${pane}"] .apdot`); if(!d) return;
+  d.hidden = !state; d.classList.toggle("busy", state === "busy");
+}
+function apHeader(){
+  const j = APPLY.job || {}, ap = APPLY.app || {}, url = APPLY.url;
+  const title = j.title || ap.title || "", company = ((j.company || ap.company || "")).replace(/_/g," ");
+  const st = ap.status ? `<span class="ppl-tag">${esc(APP_STATUS[ap.status]||ap.status)}${ap.submitted_by==="user"?" (by you)":""}</span>` : "";
+  const sm = url ? (window.JOB_SUMMARIES||{})[url] : null;
+  $("#aphead").innerHTML = (title || company || url) ? `<div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;">
+      <b>${esc(title||"this role")}</b>${company?`<span style="color:var(--muted)">@ ${esc(company)}</span>`:""}${j.location?`<span class="ppl-tag">${esc(j.location)}</span>`:""}${j.match_pct?`<span style="color:var(--gold);font-weight:700;font-size:.8rem;">${j.match_pct}% match</span>`:""}${st}
+      ${url?`<a class="ppl-lnk lnk-linkedin" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Apply directly ↗</a>`:""}</div>
+      ${sm ? jobSummaryMarkup(sm, {url}, {noLinks:true, noReqs:true}) : ""}` : "";
+}
+function openApplyFlow(o){
+  o = o || {};
   if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
-  const j = (window.JOBS_INDEX||{})[ref] || (window.MATCH_JOBS||{})[ref]; if(!j || !j.url) return;
-  const boxes = document.querySelectorAll(`.js-prepbox[data-ref="${CSS.escape(String(ref))}"]`);
-  const set = html => boxes.forEach(b => { b.innerHTML = html; });
-  set(`<div class="sethint" style="margin-top:.4rem;">📨 Reading the form and planning every answer from your profile… (≈10s; nothing is sent)</div>`);
+  const j = o.ref ? ((window.JOBS_INDEX||{})[o.ref] || (window.MATCH_JOBS||{})[o.ref] || null) : (o.job || null);
+  Object.assign(APPLY, {ref: o.ref||"", url: (j && j.url) || o.url || "", text: "", job: j, appId: o.appId||0, app: null, fit: null, manual: !!o.manual});
+  $("#appmodal").hidden = false;
+  $("#apsource").hidden = !APPLY.manual;
+  ["fit","plan","docs","submit"].forEach(p => { apPane(p).innerHTML = ""; apMark(p, false); });
+  apHeader(); apShow(o.pane || "fit");
+  if(APPLY.manual){ $("#apUrl").value = ""; $("#apText").value = ""; $("#apFit").innerHTML = `<div class="sethint">Paste a job link (or its description) above, then press <b>Analyze &amp; plan</b>.</div>`; return; }
+  apStart();
+}
+async function apStart(){
+  renderDocsPane();
+  if(APPLY.appId && !APPLY.url){          // opened from the Applications list: the plan carries the job
+    await apLoadPlan(); APPLY.url = (APPLY.app && (APPLY.app.url || APPLY.app.form_url)) || ""; apHeader(); apLoadFit(); return;
+  }
+  apLoadFit(); apLoadPlan();               // fit and plan run TOGETHER — one wait, one integrated view
+}
+async function apLoadFit(){
+  const url = APPLY.url, text = APPLY.text; const box = $("#apFit");
+  if(!url && text.length < 40){ box.innerHTML = `<div class="sethint">No readable job link for this posting — use 🎯 Apply to a job link in the top bar to paste its description.</div>`; return; }
+  const have = (url && !text) ? window.APPLY_FITS[url] : null;
+  if(have){ APPLY.fit = have; renderFitPane(have); apMark("fit", true); return; }
+  box.innerHTML = `<div class="sethint">🎯 Reading the posting and matching it to your résumé… (≈15s)</div>`; apMark("fit", "busy");
   try{
-    const r = await fetch("/me/applications", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({job_url: j.url, job_ref: String(ref), company: (j.company||"").replace(/_/g," "), title: j.title||""})});
+    const r = await fetch("/me/apply-analysis", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({job_url:url, job_description:text})});
     const d = await r.json().catch(()=>({}));
-    if(!r.ok){ set(`<div class="sethint" style="margin-top:.4rem;">${esc(d.detail||"Couldn't prepare that application.")}</div>`); return; }
-    const st = APP_STATUS[d.status] || d.status; const sm = d.summary || {};
-    set(`<div class="ppl-cov" style="margin-top:.45rem;border-left-color:var(--gold);"><b>${esc(st)}</b>${d.reason?` — ${esc(d.reason)}`:""}<br>
-      <span class="ppl-fc" style="text-transform:none;">${d.n_questions?`${sm.answered||0} of ${d.n_questions} questions answered${(d.blocking||[]).length?` · ${(d.blocking||[]).length} required need you`:""}`:""}</span><br>
-      <button type="button" class="ppl-lnk" onclick="event.stopPropagation(); openApplication(${Number(d.id)})">Review the plan</button></div>`);
-  }catch(e){ set(`<div class="sethint" style="margin-top:.4rem;">Couldn't prepare that application — try again.</div>`); }
+    if(!r.ok){ apMark("fit", false); box.innerHTML = `<div class="sethint">${esc(d.detail||"Couldn't analyze your fit.")}${/résumé|resume/i.test(d.detail||"")?` <a href="#" onclick="event.preventDefault(); $('#appmodal').hidden=true; openMatch();">Add your résumé</a>`:""}</div>`; return; }
+    APPLY.fit = d; if(url && !text) window.APPLY_FITS[url] = d;
+    if(d.summary && url && !window.JOB_SUMMARIES[url]){ window.JOB_SUMMARIES[url] = d.summary; apHeader(); }
+    renderFitPane(d); apMark("fit", true);
+  }catch(e){ apMark("fit", false); box.innerHTML = `<div class="sethint">Analysis failed — <button type="button" class="ppl-lnk" onclick="apLoadFit()">↻ Retry</button></div>`; }
 }
-async function renderApplications(){
-  const el = $("#applist"); if(!el) return;
+async function apLoadPlan(){
+  const url = APPLY.url, box = $("#apPlan");
+  if(!url && !APPLY.appId){ box.innerHTML = `<div class="sethint">The application form can only be read from a job link.</div>`; renderSubmitPane(null); return; }
+  box.innerHTML = `<div class="sethint">📨 Reading the application form and planning every answer from your profile… (≈10s; nothing is sent)</div>`; apMark("plan", "busy");
   try{
-    const d = await (await fetch("/me/applications", {headers: authHeaders()})).json(); const apps = d.applications||[];
-    if(!apps.length){ el.innerHTML = "<span class='acctmuted'>none yet — use 📨 Prepare application on a job card</span>"; return; }
-    el.innerHTML = apps.map(a => `<div class="bkt" style="border:1px solid var(--hair);border-radius:8px;padding:.5rem;margin:.35rem 0;display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;">
-      <b style="flex:1 1 240px;">${esc(a.title||"role")} <span style="font-weight:400;color:var(--muted);">@ ${esc(a.company||"")}</span></b>
-      <span class="ppl-tag" style="${a.status==="submitted"?"background:rgba(19,122,84,.12);color:var(--verified);":a.status==="needs_you"?"background:rgba(var(--gold-rgb),.14);color:var(--gold-strong);":""}">${esc(APP_STATUS[a.status]||a.status)}</span>
-      <span class="acctmuted">${esc(String(a.submitted_at||a.created_at||"").slice(0,16))}${a.n_open?` · ${a.n_open} question${a.n_open===1?"":"s"}`:""}</span>
-      <button type="button" class="histbtn" onclick="openApplication(${Number(a.id)})">Review</button>
-      <a class="histbtn" href="${esc(a.url)}" target="_blank" rel="noopener noreferrer">Open ↗</a>
-      <button type="button" class="histbtn" onclick="deleteApplication(${Number(a.id)})" title="Remove from the list">✕</button></div>`).join("");
-  }catch(e){ el.innerHTML = "<span class='acctmuted'>couldn't load</span>"; }
+    if(!APPLY.appId){   // reuse this job's existing, unsubmitted plan rather than planning it twice
+      try{ const L = await (await fetch("/me/applications", {headers: authHeaders()})).json();
+        const ex = (L.applications||[]).find(a => a.url === url && a.status !== "submitted"); if(ex) APPLY.appId = ex.id; }catch(e){}
+    }
+    if(!APPLY.appId){
+      const j = APPLY.job || {};
+      const r = await fetch("/me/applications", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({job_url:url, job_ref:String(APPLY.ref||""), company:(j.company||"").replace(/_/g," "), title:j.title||""})});
+      const d = await r.json().catch(()=>({}));
+      if(!r.ok){ apMark("plan", false); box.innerHTML = `<div class="sethint">${esc(d.detail||"Couldn't plan that application.")}${/profile/i.test(d.detail||"")?` <a href="#" onclick="event.preventDefault(); $('#appmodal').hidden=true; openApply();">Open your Apply profile</a>`:""}</div>`; renderSubmitPane(null); return; }
+      APPLY.appId = d.id;
+    }
+    const r2 = await fetch(`/me/applications/${APPLY.appId}`, {headers: authHeaders()}); if(!r2.ok) throw new Error("load");
+    const d2 = await r2.json(); APPLY.app = d2;
+    apHeader(); renderPlanPane(d2); renderSubmitPane(d2); apCardStatus(d2); apMark("plan", true); apMark("submit", d2.status === "submitted");
+    renderApplications();
+  }catch(e){ apMark("plan", false); box.innerHTML = `<div class="sethint">Couldn't plan that application — <button type="button" class="ppl-lnk" onclick="apLoadPlan()">↻ Retry</button></div>`; }
 }
-async function deleteApplication(id){ try{ await fetch(`/me/applications/${id}`, {method:"DELETE", headers: authHeaders()}); }catch(e){} renderApplications(); }
-async function openApplication(id){
-  let d; try{ const r = await fetch(`/me/applications/${id}`, {headers: authHeaders()}); if(!r.ok) return; d = await r.json(); }catch(e){ return; }
-  const m = $("#appmodal"); if(!m) return;
+function apCardStatus(d){   // the job card itself shows where this application stands
+  if(!APPLY.ref || !d) return;
+  const live = (d.plan||[]).filter(p => p.policy !== "never" && p.policy !== "skip");
+  const n = live.length, k = live.filter(p => p.answer).length;
+  document.querySelectorAll(`.js-prepbox[data-ref="${CSS.escape(String(APPLY.ref))}"]`).forEach(b => {
+    b.innerHTML = `<div class="ppl-cov" style="margin-top:.45rem;border-left-color:var(--gold);"><b>${esc(APP_STATUS[d.status]||d.status)}</b>${n?` · ${k} of ${n} answers ready`:""} · <button type="button" class="ppl-lnk" onclick="event.stopPropagation(); openApplyFlow({appId:${Number(d.id)}, ref:'${esc(String(APPLY.ref))}', pane:'plan'})">Open</button></div>`; });
+}
+function renderFitPane(a){
+  a = a || {};
+  const V = {strong:"strong", partial:"partial", gap:"gap"};
+  const rows = (a.requirements||[]).map(q=>{
+    const v = V[q.verdict]||"gap";
+    const imp = q.importance === "nice" ? `<span class="ppl-tag" title="Preferred / bonus — weighs half a must-have">nice-to-have</span>` : `<span class="ppl-tag" style="background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);" title="Required / core — weighs twice a nice-to-have">must-have</span>`;
+    const ev = q.evidence ? esc(q.evidence) + (q.evidence_quote && q.evidence_quote !== q.evidence ? `<div style="color:var(--muted);font-size:.74rem;margin-top:.15rem;">“${esc(q.evidence_quote)}”${q.verified?" ✓ verified in your résumé":""}</div>` : (q.verified?` <span style="color:var(--muted);font-size:.74rem;">✓ verified</span>`:"")) : '<span style="color:var(--muted)">—</span>';
+    return `<tr><td>${esc(q.requirement)} ${imp}</td><td>${ev}</td><td><span class="aa-v ${v}">${v}</span></td></tr>`;
+  }).join("");
+  const b = a.score_basis || null;
+  const basisLine = b ? (()=>{
+    const m = b.must||{}, n = b.nice||{};
+    const nm = (m.strong||0)+(m.partial||0)+(m.gap||0), nn = (n.strong||0)+(n.partial||0)+(n.gap||0);
+    const part = (lbl, o, k) => k ? `${k} ${lbl}${k===1?"":"s"} (${o.strong||0} strong · ${o.partial||0} partial · ${o.gap||0} gap)` : "";
+    return `<div class="ppl-cov" style="margin:.2rem 0 .8rem;">◔ Score = share of the fit table your résumé evidences: strong counts fully, partial half, a gap nothing; must-haves weigh twice nice-to-haves. ${[part("must-have", m, nm), part("nice-to-have", n, nn)].filter(Boolean).join(" · ")}. Every strong/partial verdict is backed by a verbatim résumé quote that we verify; an unverifiable claim counts as a gap.</div>`;
+  })() : "";
+  const sec = (title, arr) => (arr&&arr.length) ? `<div class="aa-sec"><h4>${esc(title)}</h4><ul>${arr.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>` : "";
+  $("#apFit").innerHTML = `<div class="aa-score"><div class="aa-ring" style="--pct:${a.fit_score||0}"><b>${a.fit_score||0}</b></div><div class="aa-sum">${esc(a.fit_summary||"")}</div></div>`
+    + basisLine
+    + (rows ? `<div class="aa-tblwrap"><table class="aa-tbl"><thead><tr><th>What the role needs</th><th>Your evidence</th><th>Fit</th></tr></thead><tbody>${rows}</tbody></table></div>` : "")
+    + sec("Lead with", a.lead_with) + sec("Honest gaps to address", a.gaps) + sec("How to apply best", a.how_to_apply) + sec("Résumé tips (nothing fabricated)", a.resume_tips)
+    + `<div class="apnext"><button type="button" class="idgo" style="width:auto;" onclick="apShow('plan')">Next: your answers →</button></div>`;
+}
+function renderPlanPane(d){
   const plan = (d.plan||[]).filter(p => p.policy !== "never" && p.policy !== "skip");
   const SRC = {"profile":"from your profile","saved answer":"your saved answer","agent draft":"agent's best answer — correct if needed","your answer":"your answer","declined by default":"declined by default — change if you wish"};
   const POL = {identity_sensitive:"self-identification", legal:"acknowledgement", file:"file"};
@@ -7469,37 +7550,97 @@ async function openApplication(id){
   const main = plan.filter(p => p.policy !== "identity_sensitive").map(row).join("");
   const vol = plan.filter(p => p.policy === "identity_sensitive").map(row).join("");
   const sm = {total: plan.length, answered: plan.filter(p=>p.answer).length, blocking: plan.filter(p=>p.blocking).length};
-  const formUrl = d.form_url || d.url;
-  $("#appbody").innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;"><b>${esc(d.title||"role")}</b> <span style="color:var(--muted)">@ ${esc(d.company||"")}</span> <span class="ppl-tag">${esc(APP_STATUS[d.status]||d.status)}${d.submitted_by==="user"?" (by you)":""}</span> <a class="histbtn" href="${esc(formUrl)}" target="_blank" rel="noopener noreferrer">Open the application form ↗</a></div>
-    ${d.reason?`<div class="ppl-cov" style="margin-top:.5rem;border-left-color:var(--gold);">${esc(d.reason)}</div>`:""}
-    ${plan.length?`<div class="ppl-fc" style="text-transform:none;margin:.5rem 0 .2rem;">The application plan — every question the form asks, read from the job site's own form definition: ${sm.answered} of ${sm.total} answered${sm.blocking?`, <b style="color:var(--gap)">${sm.blocking} required still need you</b>`:""}. Edit anything; your edits win.</div>
+  $("#apPlan").innerHTML = `${d.reason?`<div class="ppl-cov" style="margin-top:.2rem;border-left-color:var(--gold);">${esc(d.reason)}</div>`:""}
+    ${plan.length?`<div class="ppl-fc" style="text-transform:none;margin:.3rem 0 .2rem;">Every question the form asks, read from the job site's own form definition: ${sm.answered} of ${sm.total} answered${sm.blocking?`, <b style="color:var(--gap)">${sm.blocking} required still need you</b>`:""}. Edit anything; your edits win.</div>
     <div style="margin:.2rem 0;">${main}</div>
-    ${vol?`<details style="margin-top:.5rem;"><summary class="ppl-fc" style="text-transform:none;cursor:pointer;">Voluntary self-identification (${plan.filter(p=>p.policy==="identity_sensitive").length}) — from your profile or declined by default; never guessed</summary>${vol}</details>`:""}`:""}
-    ${d.status!=="submitted"?`<div class="ppl-cov" style="margin-top:.8rem;border-left-color:var(--gold);">
-      <b>Fill it in your browser, then submit</b><br>
-      <span style="font-size:.82rem;">1. <a href="${esc(formUrl)}" target="_blank" rel="noopener noreferrer">Open the application form ↗</a> &nbsp;2. Click the <b>Roster Apply</b> extension and press <b>Fill this page</b> — it fills every answer above and attaches your résumé, then highlights what it set. &nbsp;3. Review on the page and click the site's submit. Roster records it when it sees the confirmation, or mark it: <button type="button" class="histbtn" onclick="markSubmitted(${Number(d.id)})">✓ I submitted it</button></span>
-      <div class="ppl-fc" style="text-transform:none;margin-top:.3rem;">No extension yet? <a href="#" onclick="event.preventDefault(); $('#appmodal').hidden=true; openAccount();">Set it up under Account</a> (one minute).</div>
-    </div>`:""}
+    ${vol?`<details style="margin-top:.5rem;"><summary class="ppl-fc" style="text-transform:none;cursor:pointer;">Voluntary self-identification (${plan.filter(p=>p.policy==="identity_sensitive").length}) — from your profile or declined by default; never guessed</summary>${vol}</details>`:""}
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.7rem;align-items:center;">
-      ${plan.length?`<button type="button" class="idgo" style="width:auto;" onclick="saveApplicationAnswers(${Number(d.id)})">Save my answers</button>`:""}
-      <span class="acctmuted" id="appnote">${d.status==="submitted"?"Submitted "+esc(String(d.submitted_at||"").slice(0,16)):"Roster never submits an application. You do, on the job site."}</span>
-    </div>`;
-  m.dataset.id = String(d.id); m.hidden = false;
+      <button type="button" class="idgo" style="width:auto;" onclick="saveApplicationAnswers(${Number(d.id)})">Save my answers</button>
+      <button type="button" class="histbtn" onclick="apShow('submit')">Next: fill &amp; submit →</button>
+      <span class="acctmuted" id="appnote"></span></div>`
+    : `<div style="margin-top:.6rem;"><a class="histbtn" href="${esc(d.form_url||d.url)}" target="_blank" rel="noopener noreferrer">Open the application form ↗</a></div>`}`;
 }
+function renderDocsPane(){
+  $("#apDocs").innerHTML = `<div class="aa-sec"><h4>Grounded in your résumé — yours to edit</h4>
+      <div style="font-size:.84rem;color:var(--muted);margin-bottom:.5rem;">Drafted only when you ask; nothing is fabricated. A drafted cover letter drops straight into the application's cover-letter question.</div>
+      <button type="button" class="idgo" id="apResumeBtn" style="width:auto;padding:.5rem 1rem;">📄 Tailor my résumé</button>
+      <button type="button" class="idgo" id="apCoverBtn" style="width:auto;padding:.5rem 1rem;margin-left:.4rem;">✍️ Draft cover letter</button>
+      <div id="apResumeBox"></div><div id="apCoverBox"></div></div>`;
+  $("#apResumeBtn").addEventListener("click", ()=>apDoc("tailored-resume"));
+  $("#apCoverBtn").addEventListener("click", ()=>apDoc("cover-letter"));
+}
+async function apDoc(kind){                 // kind: 'cover-letter' | 'tailored-resume'
+  const isResume = kind === "tailored-resume";
+  const box = $(isResume ? "#apResumeBox" : "#apCoverBox"), btn = $(isResume ? "#apResumeBtn" : "#apCoverBtn");
+  if(!APPLY.url && APPLY.text.length < 40){ box.innerHTML = `<div class="pitem-empty">Needs the job link or its description.</div>`; return; }
+  const label = btn.textContent; btn.disabled = true; btn.textContent = isResume ? "📄 Tailoring…" : "✍️ Drafting…"; apMark("docs", "busy");
+  try{
+    const r = await fetch("/me/apply-analysis/"+kind, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({job_url:APPLY.url, job_description:APPLY.text})});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); box.innerHTML = `<div class="pitem-empty">${esc(e.detail||"Couldn't generate that.")}</div>`; apMark("docs", false); return; }
+    const d = await r.json();
+    if(isResume) renderEditableDoc(box, "Résumé", d.resume||"", "resume.pdf", true);
+    else {
+      renderEditableDoc(box, "Cover letter", d.cover_letter||"", "cover-letter.pdf", false);
+      // the letter goes where the form wants it: an empty cover-letter question in the plan
+      const q = [...document.querySelectorAll("#apPlan textarea.appq")].find(t => /cover letter/i.test(t.dataset.q||"") && !t.value.trim());
+      if(q){ q.value = d.cover_letter||""; q.rows = 6; box.insertAdjacentHTML("beforeend", `<div class="sethint" style="margin-top:.3rem;">Added to the application's cover-letter question — <a href="#" onclick="event.preventDefault(); apShow('plan')">review it in Answers</a> and Save my answers.</div>`); }
+    }
+    apMark("docs", true);
+  }catch(e){ box.innerHTML = `<div class="pitem-empty">Generation failed — try again.</div>`; apMark("docs", false); }
+  finally{ btn.disabled = false; btn.textContent = label; }
+}
+function renderSubmitPane(d){
+  const box = $("#apSubmit");
+  if(!d){ box.innerHTML = `<div class="sethint">Once the answers are planned, this step fills the live form in your browser.</div>`; return; }
+  const formUrl = d.form_url || d.url;
+  box.innerHTML = d.status === "submitted"
+    ? `<div class="ppl-cov" style="border-left-color:var(--verified);"><b>Submitted ✓</b> ${esc(String(d.submitted_at||"").slice(0,16))}${d.submitted_by==="user"?" (marked by you)":""}</div>`
+    : `<div class="ppl-cov" style="border-left-color:var(--gold);">
+      <b>Fill it in your browser, then submit</b><br>
+      <span style="font-size:.84rem;line-height:1.6;">1. <a href="${esc(formUrl)}" target="_blank" rel="noopener noreferrer">Open the application form ↗</a><br>2. Click the <b>Roster Apply</b> extension and press <b>Fill this page</b> — it fills every answer from step 2 and attaches your résumé, then highlights what it set.<br>3. Review on the page and click the site's submit. Roster records it when it sees the confirmation, or mark it: <button type="button" class="histbtn" onclick="markSubmitted(${Number(d.id)})">✓ I submitted it</button></span>
+      <div class="ppl-fc" style="text-transform:none;margin-top:.4rem;">No extension yet? <a href="#" onclick="event.preventDefault(); $('#appmodal').hidden=true; openAccount();">Set it up under Account</a> (one minute). Roster never submits an application — you do, on the job site.</div>
+      <div class="acctmuted" id="apsubnote" style="margin-top:.3rem;"></div></div>`;
+}
+function prepareApplication(ref){ openApplyFlow({ref}); }
+function applyWithAssistant(ref){ openApplyFlow({ref}); }
+async function openApplication(id){ openApplyFlow({appId: Number(id), pane: "plan"}); }
+async function renderApplications(){
+  const el = $("#applist"); if(!el) return;
+  try{
+    const d = await (await fetch("/me/applications", {headers: authHeaders()})).json(); const apps = d.applications||[];
+    if(!apps.length){ el.innerHTML = "<span class='acctmuted'>none yet — press 🚀 Apply on a job card</span>"; return; }
+    el.innerHTML = apps.map(a => `<div class="bkt" style="border:1px solid var(--hair);border-radius:8px;padding:.5rem;margin:.35rem 0;display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;">
+      <b style="flex:1 1 240px;">${esc(a.title||"role")} <span style="font-weight:400;color:var(--muted);">@ ${esc(a.company||"")}</span></b>
+      <span class="ppl-tag" style="${a.status==="submitted"?"background:rgba(19,122,84,.12);color:var(--verified);":a.status==="needs_you"?"background:rgba(var(--gold-rgb),.14);color:var(--gold-strong);":""}">${esc(APP_STATUS[a.status]||a.status)}</span>
+      <span class="acctmuted">${esc(String(a.submitted_at||a.created_at||"").slice(0,16))}${a.n_open?` · ${a.n_open} question${a.n_open===1?"":"s"}`:""}</span>
+      <button type="button" class="histbtn" onclick="openApplication(${Number(a.id)})">Review</button>
+      <a class="histbtn" href="${esc(a.url)}" target="_blank" rel="noopener noreferrer">Open ↗</a>
+      <button type="button" class="histbtn" onclick="deleteApplication(${Number(a.id)})" title="Remove from the list">✕</button></div>`).join("");
+  }catch(e){ el.innerHTML = "<span class='acctmuted'>couldn't load</span>"; }
+}
+async function deleteApplication(id){ try{ await fetch(`/me/applications/${id}`, {method:"DELETE", headers: authHeaders()}); }catch(e){} renderApplications(); }
 async function markSubmitted(id){
-  try{ const r = await fetch(`/me/applications/${id}/mark-submitted`, {method:"POST", headers: authHeaders()}); if(r.ok){ $("#appnote").textContent = "Recorded as submitted by you."; renderApplications(); setTimeout(()=>openApplication(id), 300); } }catch(e){}
+  try{ const r = await fetch(`/me/applications/${id}/mark-submitted`, {method:"POST", headers: authHeaders()}); if(r.ok){ const n = $("#apsubnote"); if(n) n.textContent = "Recorded as submitted by you."; renderApplications(); APPLY.appId = id; setTimeout(apLoadPlan, 300); } }catch(e){}
 }
 async function saveApplicationAnswers(id){
-  const answers = {}; document.querySelectorAll("#appbody .appq").forEach(el => { if(el.value) answers[el.dataset.q] = el.value; });
-  $("#appnote").textContent = "Saving…";
+  const answers = {}; document.querySelectorAll("#apPlan .appq").forEach(el => { if(el.value) answers[el.dataset.q] = el.value; });
+  const note = $("#appnote"); if(note) note.textContent = "Saving…";
   try{ const r = await fetch(`/me/applications/${id}/answers`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({answers})}); const d = await r.json().catch(()=>({}));
-    $("#appnote").textContent = r.ok ? `Saved — ${(d.summary||{}).answered||0} of ${(d.summary||{}).total||0} answered.` : (d.detail||"Couldn't save."); if(r.ok) setTimeout(()=>openApplication(id), 400); }catch(e){ $("#appnote").textContent = "Couldn't save."; }
+    if(note) note.textContent = r.ok ? `Saved — ${(d.summary||{}).answered||0} of ${(d.summary||{}).total||0} answered.` : (d.detail||"Couldn't save.");
+    if(r.ok){ APPLY.appId = id; setTimeout(apLoadPlan, 400); } }catch(e){ if(note) note.textContent = "Couldn't save."; }
 }
 document.addEventListener("click", (e)=>{
-  const pb = e.target.closest(".job-prep");
-  if(pb){ e.preventDefault(); e.stopPropagation(); prepareApplication(pb.dataset.ref); return; }
+  const pb = e.target.closest(".job-prep, .job-apply");
+  if(pb){ e.preventDefault(); e.stopPropagation(); openApplyFlow({ref: pb.dataset.ref}); return; }
+  const tb = e.target.closest("#aptabs .aptab");
+  if(tb){ e.preventDefault(); apShow(tb.dataset.pane); return; }
 });
 $("#appclose") && $("#appclose").addEventListener("click", ()=>{ $("#appmodal").hidden = true; });
+$("#apGo") && $("#apGo").addEventListener("click", ()=>{
+  APPLY.url = ($("#apUrl").value||"").trim(); APPLY.text = ($("#apText").value||"").trim(); APPLY.job = null; APPLY.appId = 0; APPLY.app = null; APPLY.fit = null;
+  if(!APPLY.url && APPLY.text.length < 40){ $("#apFit").innerHTML = `<div class="sethint">Paste a job link or its description first.</div>`; return; }
+  apHeader(); apShow("fit"); apStart();
+});
 // INTRO PATH on a job card: who you know at the company (your own export) + likely hiring managers
 // from Roster's public index, each with its evidence label. Roster never sends anything.
 async function showIntroPath(ref){
@@ -7868,8 +8009,8 @@ function renderMatchResults(d){
     ? ` · <a href="#" onclick="resetJobRotation();return false;" style="color:var(--gold);">start over</a>` : "")
     + scopeChip(d.geo_scope);
   rememberSeenJobs(jobs);   // what's on screen now rotates DOWN next run (never removed)
-  // SAME CARDS as the Jobs tab (summary on click, Apply with assistant, Apply directly, Intro path,
-  // Prepare application, feedback) and the same Save-as-Job-Map bar.
+  // SAME CARDS as the Jobs tab (summary on click, 🚀 Apply, Apply directly, Intro path, feedback) and
+  // the same Save-as-Job-Map bar.
   const view = {jobs, query: {}, stats: {}, geo_scope: d.geo_scope||null, note: "", matched_on: "resume", brief_contract: d.brief_contract||null, _noScope: true};
   window.MATCH_JOBS = window.MATCH_JOBS || {};
   jobs.forEach(j => { const jref = j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||"")); window.MATCH_JOBS[String(jref)] = {...j, from: "match"}; });
@@ -7880,42 +8021,6 @@ $("#matchclose") && $("#matchclose").addEventListener("click", ()=>{ $("#matchmo
 $("#mGo") && $("#mGo").addEventListener("click", runMatch);
 $("#mFineTune") && $("#mFineTune").addEventListener("click", runFineTune);
 
-// ===== Apply Assistant: grounded JD × résumé fit table + how-to-apply + cover letter =====
-let AA_FROM = "";   // where the assistant was opened from ("match" = Find jobs) so "Back" returns there
-function openApplyAssist(url, job){
-  if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
-  $("#applyassist").hidden = false;
-  AA_FROM = (job && job.from) || "";
-  if(AA_FROM === "match"){ $("#matchmodal").hidden = true; }
-  if(url){ $("#aaUrl").value = url; }
-  $("#aaResults").innerHTML = ""; $("#aaNote").textContent = "";
-  const ctx = $("#aaJobCtx");
-  if(ctx){
-    ctx.hidden = !(job && (job.title || job.company));
-    if(!ctx.hidden){
-      ctx.innerHTML = `<b>${esc(job.title||"")}</b>${job.company?` · ${esc((job.company||"").replace(/_/g," "))}`:""}${job.location?` · ${esc(job.location)}`:""}`
-        + (job.match_pct?` <span style="color:var(--gold);font-weight:700;">${job.match_pct}% match</span>`:"")
-        + (url?` <a class="ppl-lnk lnk-linkedin" href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="margin-left:.4rem;">Apply directly ↗</a>`:"")
-        + (AA_FROM==="match"?` <a href="#" id="aaBackMatches" style="margin-left:.5rem;color:var(--gold);">← back to your matches</a>`:"")
-        + `<div id="aaJobSum"></div>`;
-      const b = $("#aaBackMatches"); if(b) b.addEventListener("click", e=>{ e.preventDefault(); $("#applyassist").hidden = true; $("#matchmodal").hidden = false; });
-      // JOB AT A GLANCE: the summary the seeker already saw travels with them; fetched here when they skipped it
-      const sumBox = $("#aaJobSum");
-      const sm = job.summary || (url ? window.JOB_SUMMARIES[url] : null);
-      // the summary the seeker already saw travels with them; otherwise the fit analysis (which reads
-      // the same posting) brings it back — one read, no second fetch
-      sumBox.innerHTML = sm ? jobSummaryMarkup(sm, job, {noLinks:true, noReqs:true}) : "";
-    }
-  }
-  $("#aaClose").textContent = AA_FROM==="match" ? "← Back to matches" : "← Back";
-  // ONE-CLICK from a match card: the job is known, so the fit analysis starts right away
-  if(url && job && job.autorun){ $("#aaText").value = ""; runApplyAnalysis(); }
-}
-function applyWithAssistant(ref){
-  const j = (window.MATCH_JOBS||{})[ref] || (window.JOBS_INDEX||{})[ref];
-  if(!j) return;
-  openApplyAssist(j.url||"", {...j, from: j.from||"", autorun: !!j.url, summary: (window.JOB_SUMMARIES||{})[j.url||""] || null});
-}
 // ===== ✨ Job summary: AI reads the posting so the job seeker doesn't have to =====
 window.JOB_SUMMARIES = window.JOB_SUMMARIES || {};      // url → summary (this page load)
 window.OPEN_JOB_SUMS = window.OPEN_JOB_SUMS || new Set();  // refs whose summary is open — survives repaints
@@ -7929,7 +8034,7 @@ function jobSummaryMarkup(sm, j, opts){
   const chip = (k, v) => `<span class="ppl-tag" title="${esc(k)}"><b style="font-weight:600;">${esc(k)}:</b> ${v ? esc(v) : ns}</span>`;
   const wm = sm.work_mode ? ({remote:"Remote", hybrid:"Hybrid", onsite:"On-site"}[sm.work_mode] || sm.work_mode) : "";
   const li = a => (a||[]).map(x=>`<li>${esc(x)}</li>`).join("");
-  const links = opts.noLinks ? "" : `<div class="ppl-links" style="margin-top:.45rem;">${j && j.url ? `<a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer">Apply directly ↗</a>` : ""}${opts.assist && j ? `<button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(opts.ref||""))}">Apply with assistant</button>` : ""}</div>`;
+  const links = opts.noLinks ? "" : `<div class="ppl-links" style="margin-top:.45rem;">${j && j.url ? `<a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer">Apply directly ↗</a>` : ""}${opts.assist && j ? `<button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(opts.ref||""))}">🚀 Apply</button>` : ""}</div>`;
   return `<div class="js-summary" style="margin-top:.5rem;padding:.55rem .7rem;border:1px solid var(--hair);border-left:3px solid var(--gold);border-radius:8px;background:var(--panel);font-size:.8rem;line-height:1.45;">
     ${sm.one_liner ? `<div style="margin-bottom:.35rem;">${esc(sm.one_liner)}</div>` : ""}
     <div class="ppl-tags" style="gap:.3rem;">${chip("Location", sm.location)}${chip("Work", wm)}${chip("Pay", sm.compensation)}${chip("Type", sm.employment_type)}${sm.seniority ? chip("Level", sm.seniority) : ""}${sm.team ? chip("Team", sm.team) : ""}</div>
@@ -7963,62 +8068,6 @@ async function summarizeJob(ref){
     window.JOB_SUMMARIES[j.url] = d.summary;
     set(jobSummaryMarkup(d.summary, j, {ref, assist:true, cached: !!d.cached}));
   }catch(e){ set(`<div class="sethint" style="margin-top:.4rem;">Summary failed (network) — <button type="button" class="ppl-lnk" onclick="event.stopPropagation(); summarizeJob('${esc(String(ref))}')">↻ Retry</button> or open the apply link.</div>`); }
-}
-async function runApplyAnalysis(){
-  const url = ($("#aaUrl").value||"").trim(), text = ($("#aaText").value||"").trim();
-  if(!url && text.length < 40){ $("#aaNote").textContent = "Step 1: paste a job link or its description."; return; }
-  $("#aaNote").textContent = url && text.length<40 ? "Reading the job posting…" : "Analyzing your fit…";
-  $("#aaResults").innerHTML = "";
-  try{
-    const r = await fetch("/me/apply-analysis", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
-      body: JSON.stringify({job_url:url, job_description:text})});
-    if(!r.ok){ const e = await r.json().catch(()=>({})); $("#aaNote").textContent = e.detail || "Couldn't analyze — try pasting the description."; return; }
-    $("#aaNote").textContent = "";
-    renderApplyAnalysis(await r.json());
-  }catch(e){ $("#aaNote").textContent = "Analysis failed — try again."; }
-}
-function renderApplyAnalysis(a){
-  a = a || {};
-  // JOB AT A GLANCE from the same read: fill the context box when the seeker didn't summarize first
-  const sumBox = $("#aaJobSum");
-  if(sumBox && a.summary && !sumBox.innerHTML){
-    const url = ($("#aaUrl").value||"").trim(); if(url) window.JOB_SUMMARIES[url] = a.summary;
-    sumBox.innerHTML = jobSummaryMarkup(a.summary, {url}, {noLinks:true, noReqs:true});
-  }
-  const V = {strong:"strong", partial:"partial", gap:"gap"};
-  const rows = (a.requirements||[]).map(q=>{
-    const v = V[q.verdict]||"gap";
-    const imp = q.importance === "nice" ? `<span class="ppl-tag" title="Preferred / bonus — weighs half a must-have">nice-to-have</span>` : `<span class="ppl-tag" style="background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);" title="Required / core — weighs twice a nice-to-have">must-have</span>`;
-    const ev = q.evidence ? esc(q.evidence) + (q.evidence_quote && q.evidence_quote !== q.evidence ? `<div style="color:var(--muted);font-size:.74rem;margin-top:.15rem;">“${esc(q.evidence_quote)}”${q.verified?" ✓ verified in your résumé":""}</div>` : (q.verified?` <span style="color:var(--muted);font-size:.74rem;">✓ verified</span>`:"")) : '<span style="color:var(--muted)">—</span>';
-    return `<tr><td>${esc(q.requirement)} ${imp}</td><td>${ev}</td>`
-      + `<td><span class="aa-v ${v}">${v}</span></td></tr>`;
-  }).join("");
-  // HOW THE SCORE IS MADE (code-computed from the table; the same table always gives the same number)
-  const b = a.score_basis || null;
-  const basisLine = b ? (()=>{
-    const m = b.must||{}, n = b.nice||{};
-    const nm = (m.strong||0)+(m.partial||0)+(m.gap||0), nn = (n.strong||0)+(n.partial||0)+(n.gap||0);
-    const part = (lbl, o, k) => k ? `${k} ${lbl}${k===1?"":"s"} (${o.strong||0} strong · ${o.partial||0} partial · ${o.gap||0} gap)` : "";
-    return `<div class="ppl-cov" style="margin:.2rem 0 .8rem;">◔ Score = share of the fit table your résumé evidences: strong counts fully, partial half, a gap nothing; must-haves weigh twice nice-to-haves. ${[part("must-have", m, nm), part("nice-to-have", n, nn)].filter(Boolean).join(" · ")}. `
-      + `Every strong/partial verdict is backed by a verbatim résumé quote that we verify; an unverifiable claim counts as a gap.</div>`;
-  })() : "";
-  const sec = (title, arr) => (arr&&arr.length) ? `<div class="aa-sec"><h4>${esc(title)}</h4><ul>${arr.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>` : "";
-  const head = (a.role_title||a.company) ? `<div style="font-weight:600;font-size:.95rem;margin-bottom:.2rem;">${esc(a.role_title||"")}${a.company?` · ${esc(a.company)}`:""}</div>` : "";
-  $("#aaResults").innerHTML = head
-    + `<div class="aa-score"><div class="aa-ring" style="--pct:${a.fit_score||0}"><b>${a.fit_score||0}</b></div>`
-    + `<div class="aa-sum">${esc(a.fit_summary||"")}</div></div>`
-    + basisLine
-    + (rows ? `<table class="aa-tbl"><thead><tr><th>What the role needs</th><th>Your evidence</th><th>Fit</th></tr></thead><tbody>${rows}</tbody></table>` : "")
-    + sec("Lead with", a.lead_with)
-    + sec("Honest gaps to address", a.gaps)
-    + sec("How to apply best", a.how_to_apply)
-    + sec("Résumé tips (nothing fabricated)", a.resume_tips)
-    + `<div class="aa-sec"><h4>Apply with confidence — grounded in your résumé, yours to edit</h4>
-        <button type="button" class="idgo" id="aaResume" style="padding:.5rem 1rem;">📄 Tailor my résumé</button>
-        <button type="button" class="idgo" id="aaCover" style="padding:.5rem 1rem;margin-left:.4rem;">✍️ Draft cover letter</button>
-        <div id="aaResumeBox"></div><div id="aaCoverBox"></div></div>`;
-  const rb = $("#aaResume"); if(rb) rb.addEventListener("click", runTailoredResume);
-  const cb = $("#aaCover"); if(cb) cb.addEventListener("click", runCoverLetter);
 }
 // Render a generated document as an EDITABLE textarea + Save-as-PDF + Copy (résumé & cover letter).
 function renderEditableDoc(box, title, text, filename, isResume){
@@ -8057,28 +8106,7 @@ function saveAsPdf(title, text, filename, isResume){
     <script>window.onload=function(){setTimeout(function(){window.print();},200);};<\/script></body></html>`);
   w.document.close(); w.focus();
 }
-async function runAaDoc(kind){                 // kind: 'cover-letter' | 'tailored-resume'
-  const url = ($("#aaUrl").value||"").trim(), text = ($("#aaText").value||"").trim();
-  const isResume = kind === "tailored-resume";
-  const box = $(isResume ? "#aaResumeBox" : "#aaCoverBox");
-  const btn = $(isResume ? "#aaResume" : "#aaCover");
-  const label = btn ? btn.textContent : "";
-  if(btn){ btn.disabled = true; btn.textContent = isResume ? "📄 Tailoring…" : "✍️ Drafting…"; }
-  try{
-    const r = await fetch("/me/apply-analysis/"+kind, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
-      body: JSON.stringify({job_url:url, job_description:text})});
-    if(!r.ok){ const e = await r.json().catch(()=>({})); if(box) box.innerHTML = `<div class="pitem-empty">${esc(e.detail||"Couldn't generate that.")}</div>`; return; }
-    const d = await r.json();
-    if(isResume) renderEditableDoc(box, "Résumé", d.resume||"", "resume.pdf", true);
-    else renderEditableDoc(box, "Cover letter", d.cover_letter||"", "cover-letter.pdf", false);
-  }catch(e){ if(box) box.innerHTML = `<div class="pitem-empty">Generation failed — try again.</div>`; }
-  finally{ if(btn){ btn.disabled = false; btn.textContent = label; } }
-}
-function runCoverLetter(){ return runAaDoc("cover-letter"); }
-function runTailoredResume(){ return runAaDoc("tailored-resume"); }
-$("#applyhdr") && $("#applyhdr").addEventListener("click", ()=>openApplyAssist());
-$("#aaClose") && $("#aaClose").addEventListener("click", ()=>{ $("#applyassist").hidden = true; if(AA_FROM==="match"){ $("#matchmodal").hidden = false; } AA_FROM = ""; });
-$("#aaGo") && $("#aaGo").addEventListener("click", ()=>runApplyAnalysis());
+$("#applyhdr") && $("#applyhdr").addEventListener("click", ()=>openApplyFlow({manual:true}));
 $("#matchbtn2") && $("#matchbtn2").addEventListener("click", ()=>{ $("#applymodal").hidden=true; openMatch(); });
 $("#mSenBox") && $("#mSenBox").addEventListener("click",(e)=>{ const t=e.target.closest(".sentog"); if(!t) return;
   const k=t.dataset.sen; MATCH_SENS.has(k)?MATCH_SENS.delete(k):MATCH_SENS.add(k); renderSenToggles(); });
