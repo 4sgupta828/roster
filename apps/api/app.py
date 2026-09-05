@@ -1303,6 +1303,16 @@ class IntakeIn(BaseModel):                 # one Guided-intake turn (docs/specs/
     country: str = "us"
 
 
+class BriefIn(BaseModel):                  # a saved JD / résumé version (docs/specs/guided-intake.md §2.2)
+    kind: str = "jd"
+    title: str = Field(default="", max_length=300)
+    role_key: str = Field(default="", max_length=200)
+    text: str = Field(default="", min_length=1, max_length=60000)
+    structured: dict | None = None
+    sources: dict | None = None
+    make_active: bool = True             # résumé: also becomes the résumé on file
+
+
 class CompileIn(BaseModel):                # brief → contract (docs/specs/facet-contract-evaluator.md §4)
     kind: str = "job"
     text: str = Field(default="", max_length=4000)
@@ -6043,6 +6053,119 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                          "order": [k.key for k in sch.for_kind(c.kind) if k.navigable]}
         return out
 
+    def _briefs_fn_for(acc):
+        async def briefs_fn(u: dict | None):
+            if acc is None or not u:
+                return []
+            out = []
+            for b in await acc.list_briefs(u["id"], kind="jd"):
+                full = await acc.get_brief(u["id"], b["id"])
+                if full:
+                    out.append(full)
+            return out
+        return briefs_fn
+
+    async def _peer_summaries(peers: list[dict]) -> dict:
+        """The per-posting summaries the JD centre reads: cached by url (`rs_job_summary`), built for peers that
+        have none (≈ $0.002 each; they serve the job cards afterwards)."""
+        from api.people_population import build_job_summary, cached_job_summary, store_job_summary
+        cs = _claim_store_cached()
+        if cs is None:
+            return {}
+        pool = await cs._get_pool()
+        out: dict = {}
+        missing = []
+        for p in peers:
+            url = str(p.get("url") or "")
+            sm = await cached_job_summary(pool, url) if url else None
+            if sm:
+                out[str(p.get("id"))] = sm
+            else:
+                missing.append(p)
+        if missing:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch("SELECT id, body FROM rs_job WHERE id = ANY($1::bigint[])", [int(p["id"]) for p in missing if str(p.get("id")).isdigit()])
+            bodies = {int(r["id"]): str(r["body"] or "") for r in rows}
+            llm = build_llm(mode=resolve_mode())
+            for p in missing:
+                body = bodies.get(int(p["id"])) if str(p.get("id")).isdigit() else ""
+                if not body or len(body) < 200:
+                    continue
+                try:
+                    sm = await build_job_summary(body, llm, title=str(p.get("title") or ""), company=str(p.get("company") or ""))
+                except Exception:   # noqa: BLE001
+                    sm = None
+                if sm:
+                    out[str(p.get("id"))] = sm
+                    try:
+                        await store_job_summary(pool, str(p.get("url") or ""), sm)
+                    except Exception:   # noqa: BLE001
+                        pass
+        return out
+
+    def _draft_fn(compile_fn):
+        from api.jd_draft import build_jd_draft
+        async def draft_fn(role_text: str, context: dict) -> dict:
+            return await build_jd_draft(role_text=role_text, context=context or {}, evaluate_fn=_evaluate_contract, summaries_fn=_peer_summaries,
+                                        compile_fn=compile_fn, llm_json=getattr(app.state, "intake_llm", None) or _llm_json)
+        return draft_fn
+
+    def _redraft_fn():
+        from api.jd_draft import redraft
+        async def redraft_fn(draft: dict, change: str) -> dict:
+            return await redraft(draft, change, getattr(app.state, "intake_llm", None) or _llm_json)
+        return redraft_fn
+
+    @app.post("/intake/improve")
+    async def intake_improve(body: IntakeIn, x_roster_token: str = Header(default="")) -> dict:
+        """A fuller résumé / JD from ONLY the original text + the conversation (spec §2.2). Nothing is saved here —
+        the user reads the diff and taps Save (POST /me/briefs)."""
+        if not guided_intake_enabled():
+            raise HTTPException(status_code=404, detail="guided intake is not enabled")
+        from api.intake import IntakeService
+        svc = IntakeService(schema=_facet_schema(), llm_json=getattr(app.state, "intake_llm", None) or _llm_json, counts_fn=None, compile_fn=None)
+        return await svc.improve(state=body.state or {})
+
+    @app.get("/me/briefs")
+    async def me_briefs(kind: str = "", x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return {"briefs": await store.list_briefs(user["id"], kind=(kind or None))}
+
+    @app.get("/me/briefs/{brief_id}")
+    async def me_brief(brief_id: int, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        b = await store.get_brief(user["id"], brief_id)
+        if b is None:
+            raise HTTPException(status_code=404, detail="brief not found")
+        return {"brief": b}
+
+    @app.post("/me/briefs")
+    async def me_save_brief(body: BriefIn, x_roster_token: str = Header(default="")) -> dict:
+        """Save a JD or an improved résumé (explicit tap). A JD is keyed by role: the same key becomes the next
+        version; a different key is a new hire. An improved résumé can also become the résumé on file."""
+        from roster_vertical.intake import role_key as _role_key
+        store, user = await _require_user(x_roster_token)
+        kind = body.kind if body.kind in ("jd", "resume") else "jd"
+        facets = dict((body.structured or {}).get("facets") or {})
+        if kind == "jd" and not facets:
+            try:   # the JD's own facets name its key (field / function / level) — one small extraction over the text
+                from api.facets_engine import extract_envelopes
+                envs = await asyncio.to_thread(extract_envelopes, "job", [{"title": body.title or "", "text": (body.text or "")[:1500]}], _facet_schema(), _llm_json, provenance="brief")
+                facets = {k: [x.get("value") for x in v] for k, v in ((envs[0] or {}).get("facets") or {}).items()} if envs else {}
+            except Exception:   # noqa: BLE001
+                facets = {}
+        rk = "resume" if kind == "resume" else (body.role_key or _role_key(body.title or "", facets))
+        rec = await store.save_brief(user["id"], kind=kind, title=(body.title or "")[:300], role_key=rk, text=body.text,
+                                     structured={**(body.structured or {}), "facets": facets}, sources=body.sources or {})
+        if kind == "resume" and body.make_active:
+            await store.set_resume_text(user["id"], body.text)
+        return {"ok": True, **rec}
+
+    @app.delete("/me/briefs/{brief_id}")
+    async def me_delete_brief(brief_id: int, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return {"deleted": await store.delete_brief(user["id"], brief_id)}
+
     @app.post("/intake/step")
     async def intake_step(body: IntakeIn, x_roster_token: str = Header(default="")) -> dict:
         """One Guided-intake turn (docs/specs/guided-intake.md §3). Stateless: the FE returns `state` each turn.
@@ -6071,7 +6194,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             return ((await acc.get_parse(u["id"])).get("profile") or {}) or None
 
         svc = getattr(app.state, "intake_service", None) or IntakeService(schema=_facet_schema(), llm_json=getattr(app.state, "intake_llm", None) or _llm_json,
-                                                                              counts_fn=counts_fn, compile_fn=compile_fn, profile_fn=profile_fn, jd_fetch_fn=_fetch_jd_text)
+                                                                              counts_fn=counts_fn, compile_fn=compile_fn, profile_fn=profile_fn, jd_fetch_fn=_fetch_jd_text,
+                                                                              briefs_fn=_briefs_fn_for(acc), draft_fn=_draft_fn(compile_fn), redraft_fn=_redraft_fn())
         att_texts = []
         if body.attachments:
             try:

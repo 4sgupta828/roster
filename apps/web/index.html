@@ -914,6 +914,20 @@
   .tgt-opt:hover{border-color:var(--gold);}
   .tgt-opt.quiet{color:var(--muted);}
   .tgt-advice{margin:.2rem 0 .9rem;padding-left:1.1rem;font-size:.82rem;color:var(--muted);line-height:1.5;}
+  .tgt-opt.sel{border-color:var(--gold);background:rgba(var(--gold-rgb),.14);color:var(--gold-strong);font-weight:600;}
+  .tgt-answer{width:auto;min-height:40px;padding:.4rem 1rem;}
+  .tgt-draft{background:var(--panel);border:1px solid var(--hair);border-radius:12px;padding:.8rem .95rem;margin:.6rem 0;}
+  .tgt-draft-t{font-family:var(--serif);font-size:1.08rem;color:var(--ink);margin-bottom:.35rem;}
+  .tgt-draft-s{font-size:.88rem;line-height:1.5;color:var(--ink);margin:0 0 .5rem;}
+  .tgt-draft-h{font-family:var(--mono);font-size:.62rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin:.6rem 0 .25rem;}
+  .tgt-draft-l{margin:0;padding-left:1.1rem;font-size:.86rem;line-height:1.5;}
+  .tgt-sup{font-family:var(--mono);font-size:.58rem;color:var(--muted);border:1px solid var(--hair);border-radius:999px;padding:.05rem .4rem;margin-left:.3rem;white-space:nowrap;}
+  .tgt-sup.you{color:var(--gold);border-color:rgba(var(--gold-rgb),.5);}
+  .tgt-peers{font-size:.76rem;color:var(--muted);margin-top:.5rem;} .tgt-peers div{padding:.1rem 0;}
+  .tgt-pre{white-space:pre-wrap;font:inherit;font-size:.84rem;line-height:1.5;margin:.3rem 0 .6rem;max-height:60vh;overflow:auto;}
+  .tgt-added{background:rgba(var(--gold-rgb),.16);border-radius:4px;}
+  .tgt-improve-offer{margin-top:.7rem;}
+  .briefrow{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.4rem 0;border-bottom:1px solid var(--hair);font-size:.86rem;}
   @media (max-width:560px){ .tgt-route{min-width:100%;} .tgt-opt{flex:1 1 auto;text-align:center;} }
   /* Intake v2: retrieval-vocabulary chips on the ready card */
   .tgt-chips{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1rem;}
@@ -2037,6 +2051,11 @@
         <h3>Applications <span class="acctmuted">planned by the agent · you review · you submit</span></h3>
         <p class="acctcardsub">"🚀 Apply" on a job card shows your fit, reads the job site's own form definition and plans every answer from your Apply profile, your saved answers, and the agent's best drafts. Review the plan here, then fill the live form with the extension and submit it yourself. Sign-in portals (Workday) can't be planned.</p>
         <div id="applist"><span class="acctmuted">none yet</span></div>
+      </section>
+      <section class="acctcard acctwide">
+        <h3>Saved briefs <span class="acctmuted">job descriptions by hire · résumé versions</span></h3>
+        <p class="acctcardsub">Saved from ◍ Guided. A JD is filed by role; saving the same role again makes a new version. "Find candidates" runs Guided from that JD.</p>
+        <div id="brieflist"><span class="acctmuted">none yet</span></div>
       </section>
       <section class="acctcard acctwide">
         <h3>Shortlists <span class="acctmuted">saved people &amp; jobs</span></h3>
@@ -5345,31 +5364,78 @@ function renderTriage(fresh){
   const transcript = (INTAKE.state && INTAKE.state.transcript) || [];
   document.body.classList.toggle("triage-live", transcript.length > 0);
   const pending = INTAKE.last && INTAKE.last.question;
-  q.setAttribute("placeholder", pending ? (pending.kind === "artifact" ? "Paste or describe here…" : "Type your answer, or tap a chip…")
+  q.setAttribute("placeholder", pending ? (pending.kind === "artifact" ? "Paste or describe here…" : pending.kind === "draft" ? "Ask for changes in words — e.g. “make it staff level, add Kafka”…"
+                                        : pending.kind === "draft_context" ? "Describe the role — title & level, where, your must-haves…" : "Type your answer, or tap chips…")
                                         : "Tell me what you're after — a role for you, or a hire for your team…");
   const lead = transcript.length ? "" :
     `<div class="tgt-lead">Guided search. I'll ask only what changes the results — then hand you a search you can adjust.
      Attach a résumé or paste a job description any time with 📎.</div>`;
   const qcard = pending ? intakeQuestionHtml(pending) : "";
-  const wrap = transcript.length && !INTAKE.ready ?
+  const wrap = transcript.length && !INTAKE.ready && (INTAKE.state && INTAKE.state.kernel && INTAKE.state.kernel.artifact && INTAKE.state.kernel.artifact.status === "present") ?
     `<div class="tgt-wrapline"><button type="button" class="tgt-wrapup" id="tgt-wrapup">✓ Search now with what I have</button></div>` : "";
-  tbody().innerHTML = lead + `<div class="tgt-thread" id="tgt-thread">${transcript.map(triageMsgHtml).join("")}</div>` + qcard + wrap;
+  // the pending question's words render on the card, not again as the last bubble
+  const shown = (pending && transcript.length && transcript[transcript.length-1].role === "assistant" && transcript[transcript.length-1].text === pending.words) ? transcript.slice(0, -1) : transcript;
+  tbody().innerHTML = lead + `<div class="tgt-thread" id="tgt-thread">${shown.map(triageMsgHtml).join("")}</div>` + qcard + wrap;
   const w = $("#tgt-wrapup"); if(w) w.addEventListener("click", wrapUpTriage);
-  tbody().querySelectorAll(".tgt-opt").forEach(b => b.addEventListener("click", () => {
+  const SEL = new Set();
+  const answerBtn = tbody().querySelector(".tgt-answer");
+  const syncAnswer = () => { if(answerBtn){ answerBtn.hidden = !SEL.size; answerBtn.textContent = SEL.size > 1 ? `Answer with ${SEL.size} ✓` : "Answer ✓"; } };
+  tbody().querySelectorAll(".tgt-opt").forEach(b => b.addEventListener("click", async () => {
     const name = b.dataset.name, val = b.dataset.value;
     if(pending && pending.kind === "direction"){ submitTriage("", {direction: val}); return; }
     if(pending && pending.kind === "artifact"){
       if(val === "attach"){ const a = $("#attach"); if(a && !a.hidden) a.click(); else q.focus(); return; }
+      if(val === "draft" || val === "new" || val.indexOf("brief:") === 0){ submitTriage("", {answer: {name, value: val}}); return; }
       q.focus(); return;                                   // paste / describe / link: type into the composer
     }
-    submitTriage("", {answer: {name, value: val}});
+    if(pending && pending.kind === "draft"){
+      if(val === "accept"){ submitTriage("", {answer: {name: "jd", value: "accept"}}); return; }
+      if(val === "save"){ await intakeSaveDraft(pending.draft); return; }
+      return;
+    }
+    if(val === "__decline__"){ submitTriage("", {answer: {name, value: "__decline__"}}); return; }
+    // MULTI-SELECT (owner, 2026-09-05): chips toggle; "Answer" sends them together
+    if(SEL.has(val)) SEL.delete(val); else SEL.add(val);
+    b.classList.toggle("sel", SEL.has(val)); syncAnswer();
   }));
+  if(answerBtn) answerBtn.addEventListener("click", () => { const vals = [...SEL]; if(!vals.length) return; submitTriage("", {answer: {name: pending.name, value: vals.length > 1 ? vals : vals[0]}}); });
   triageScroll();
 }
+function intakeSupportHtml(sup){
+  sup = sup || {};
+  if(sup.you) return `<span class="tgt-sup you" title="From what you told me">you said</span>`;
+  if(sup.count != null) return `<span class="tgt-sup" title="Peer postings for this role that ask for this">asked by ${sup.count} peer${sup.count===1?"":"s"}</span>`;
+  return "";
+}
+function intakeDraftHtml(d){
+  d = d || {};
+  const sec = (key, head) => (d[key] && d[key].length) ? `<div class="tgt-draft-h">${head}</div><ul class="tgt-draft-l">${d[key].map(x => `<li>${esc(x.text)} ${intakeSupportHtml(x.support)}</li>`).join("")}</ul>` : "";
+  const ms = d.market || {};
+  const bands = ms.comp ? Object.entries(ms.comp).sort((a,b)=>b[1]-a[1]).map(([b,n]) => `${esc((ms.comp_display||{})[b] || b.replace(/_/g," "))} (${n})`).join(", ") : "";
+  const market = (ms.stated_pay ? `<div class="tgt-q-hint">Market signal: ${ms.stated_pay} of ${ms.peers} peer postings state pay — ${bands}.</div>` : "")
+    + (ms.work_mode && Object.keys(ms.work_mode).length ? `<div class="tgt-q-hint">Peers' work mode: ${Object.entries(ms.work_mode).sort((a,b)=>b[1]-a[1]).map(([m,n])=>`${esc(m)} (${n})`).join(", ")}.</div>` : "");
+  const peers = (d.peers||[]).length ? `<details class="tgt-peers"><summary>${d.peers.length} peer postings read</summary>${d.peers.map(p => `<div>${esc(String(p.company||"").replace(/_/g," "))} — ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title||"posting")} ↗</a>` : esc(p.title||"")}</div>`).join("")}</details>` : "";
+  return `<div class="tgt-draft"><div class="tgt-draft-t">${esc(d.title||"Draft")}</div>${d.summary ? `<p class="tgt-draft-s">${esc(d.summary)}</p>` : ""}${sec("responsibilities","Responsibilities")}${sec("must_have","Must have")}${sec("nice_to_have","Nice to have")}${market}${peers}</div>`;
+}
+async function intakeSaveDraft(draft){
+  if(!loggedIn()){ AUTH_MODE = "login"; if(typeof updateAuthUI === "function") updateAuthUI(); $("#idmodal").hidden = false; return; }
+  try{
+    const r = await fetch("/me/briefs", {method: "POST", headers: {"content-type": "application/json", ...authHeaders()},
+      body: JSON.stringify({kind: "jd", title: draft.title || "", text: draft.text || "", structured: {draft: {centre: draft.centre, optional: draft.optional, market: draft.market}}, sources: draft.sources || {}})});
+    if(r.status === 401){ handleAuthExpired(); return; }
+    const d = await r.json();
+    if(!r.ok){ alert(d.detail || "Couldn't save the JD."); return; }
+    submitTriage("", {answer: {name: "jd", value: "accept", brief_id: d.id}});
+  }catch(e){ alert("Couldn't save the JD — try again."); }
+}
 function intakeQuestionHtml(p){
+  const multi = p.kind === "item" || p.kind === "key";
   const opts = (p.options || []).map(o => `<button type="button" class="tgt-opt" data-name="${esc(p.name)}" data-value="${esc(String(o[0]))}">${esc(String(o[1]||o[0]))}${o[2] ? `<b>${o[2]}</b>` : ""}</button>`).join("")
     + (p.decline ? `<button type="button" class="tgt-opt quiet" data-name="${esc(p.name)}" data-value="__decline__">${esc(p.decline)}</button>` : "");
-  return `<div class="tgt-q"><div class="tgt-q-words">${esc(p.words||"")}</div>${p.hint ? `<div class="tgt-q-hint">${esc(p.hint)}</div>` : ""}${opts ? `<div class="tgt-opts">${opts}</div>` : ""}</div>`;
+  const answer = multi && (p.options||[]).length ? `<button type="button" class="idgo tgt-answer" hidden>Answer ✓</button>` : "";
+  const hint = p.hint || (multi && (p.options||[]).length ? "tap one or more, then Answer — or type" : "");
+  const draft = p.kind === "draft" && p.draft ? intakeDraftHtml(p.draft) : "";
+  return `<div class="tgt-q"><div class="tgt-q-words">${esc(p.words||"")}</div>${hint ? `<div class="tgt-q-hint">${esc(hint)}</div>` : ""}${draft}${opts ? `<div class="tgt-opts">${opts}${answer}</div>` : ""}</div>`;
 }
 function triageScroll(){
   const transcript = (INTAKE.state && INTAKE.state.transcript) || [];
@@ -5443,7 +5509,7 @@ function renderTriageReady(rd){
     ? `<button type="button" class="tgt-route rec" data-route="jobs"><div class="tgt-route-t">💼 Find roles <span class="rec-badge">${rd.pool || 0} in the pool</span></div><div class="tgt-route-why">Runs this contract in Jobs — the rail lets you adjust it.</div></button>`
     : `<button type="button" class="tgt-route rec" data-route="people"><div class="tgt-route-t">🗺 Find candidates <span class="rec-badge">${rd.pool || 0} in the pool</span></div><div class="tgt-route-why">Runs this contract in the Talent Map — the rail lets you adjust it.</div></button>`;
   const advice = (rd.advice || []).map(a => `<li>${esc(a)}</li>`).join("");
-  const improve = rd.offer_improve ? `<div class="tgt-q-hint" style="margin-top:.6rem;">You told me things your ${art.kind === "profile" ? "résumé" : "JD"} doesn't say — a fuller version you can save to your account comes next release.</div>` : "";
+  const improve = rd.offer_improve ? `<div class="tgt-improve-offer"><button type="button" class="histbtn" id="tgt-improve">✍ Save a fuller ${art.kind === "profile" ? "résumé" : "JD"} with what you told me</button><div id="tgt-improve-box"></div></div>` : "";
   tbody().innerHTML = `<div class="tgt-thread">${transcript.map(triageMsgHtml).join("")}</div>
     ${rd.note ? `<div class="tgt-urgent">${esc(rd.note)}</div>` : ""}
     <div class="tgt-ready">
@@ -5459,7 +5525,32 @@ function renderTriageReady(rd){
   q.setAttribute("placeholder", "Add a detail to refine further…");
   tbody().querySelectorAll(".tgt-route").forEach(b => b.addEventListener("click", () => routeTriage(b.dataset.route, (c.text || rd.understood || ""), rd)));
   const rs = $("#tgt-restart"); if(rs) rs.addEventListener("click", () => setMode("triage", {fresh:true}));
+  const ib = $("#tgt-improve"); if(ib) ib.addEventListener("click", () => intakeImprove(rd));
   triageScroll();
+}
+// IMPROVE & SAVE (spec §2.2): a fuller artifact from the original + the answers only; the added lines are marked;
+// nothing is saved until the tap. A résumé also becomes the résumé on file.
+async function intakeImprove(rd){
+  const box = $("#tgt-improve-box"); if(!box) return;
+  box.innerHTML = `<div class="tgt-q-hint">writing…</div>`;
+  try{
+    const r = await fetch("/intake/improve", {method: "POST", headers: {"content-type": "application/json", ...authHeaders()}, body: JSON.stringify({state: INTAKE.state})});
+    const d = await r.json();
+    if(!r.ok || !d.text){ box.innerHTML = `<div class="tgt-q-hint">Couldn't write it${d.error ? " — " + esc(d.error) : ""}.</div>`; return; }
+    const added = new Set(d.added || []);
+    const lines = d.text.split("\n").map(l => added.has(l.trim()) ? `<span class="tgt-added" title="From this conversation">${esc(l)}</span>` : esc(l)).join("\n");
+    const what = d.kind === "profile" ? "résumé" : "JD";
+    box.innerHTML = `<div class="tgt-draft"><div class="tgt-draft-h">Fuller ${what} — <span class="tgt-added">highlighted</span> lines come from this conversation; nothing else was added</div><pre class="tgt-pre">${lines}</pre>
+      <div class="tgt-opts"><button type="button" class="idgo" id="tgt-improve-save">${loggedIn() ? `Save to my account${d.kind === "profile" ? " as my résumé on file" : ""}` : "Sign in to save"}</button></div></div>`;
+    $("#tgt-improve-save").addEventListener("click", async () => {
+      if(!loggedIn()){ AUTH_MODE = "login"; if(typeof updateAuthUI === "function") updateAuthUI(); $("#idmodal").hidden = false; return; }
+      const rr = await fetch("/me/briefs", {method: "POST", headers: {"content-type": "application/json", ...authHeaders()},
+        body: JSON.stringify({kind: d.kind === "profile" ? "resume" : "jd", title: d.title || (rd.understood||"").slice(0,80), text: d.text, structured: {answers: d.answers || {}}, sources: {conversation: true}, make_active: true})});
+      if(rr.status === 401){ handleAuthExpired(); return; }
+      const dd = await rr.json().catch(()=>({}));
+      $("#tgt-improve-save").outerHTML = rr.ok ? `<span class="tgt-q-hint">Saved ✓ (version ${dd.version||1})${d.kind === "profile" ? " — it's your résumé on file now" : " — it's in Account → Saved briefs"}</span>` : `<span class="tgt-q-hint">Couldn't save: ${esc(dd.detail||rr.status)}</span>`;
+    });
+  }catch(e){ box.innerHTML = `<div class="tgt-q-hint">Couldn't write it — try again.</div>`; }
 }
 // TAKE the user to the search with the ratified contract attached; the result lands in that tab's thread with
 // the rail already reflecting the contract. The intake transcript rides the resulting turn as an audit field.
@@ -7196,8 +7287,11 @@ async function maybeNudgeApplyProfile(){
   try{ n = parseInt(localStorage.getItem(key) || "0", 10) || 0; }catch(e){}
   if(n >= 3){ el.hidden = true; return; }
   try{
-    const d = await (await fetch("/me/profile", {headers: authHeaders()})).json(); const p = d.profile || {};
-    if(p.email && (p.first_name || p.last_name) && p.us_authorized_to_work){ el.hidden = true; try{ localStorage.setItem(key, "3"); }catch(e){} return; }
+    const r = await fetch("/me/profile", {headers: authHeaders()});
+    if(!r.ok){ el.hidden = true; return; }                       // an expired session is not "no profile"
+    const d = await r.json(); const p = d.profile || {};
+    const named = !!(p.first_name || p.last_name || p.full_name);
+    if(d.resume || (p.email && named && p.us_authorized_to_work) || (named && p.email && p.phone)){ el.hidden = true; try{ localStorage.setItem(key, "3"); }catch(e){} return; }
   }catch(e){ return; }
   el.hidden = false;
   try{ localStorage.setItem(key, String(n + 1)); }catch(e){}
@@ -7275,7 +7369,23 @@ async function openAccount(){
   const em = $("#acctemail"); if(em) em.textContent = (USER && USER.email) || "";
   const av = $("#acctavatar"); if(av) av.textContent = ((USER && USER.email) || "◈").slice(0,1);
   await openSaved();
-  refreshConnStatus(); renderApplications(); refreshExtToken();
+  refreshConnStatus(); renderApplications(); refreshExtToken(); renderBriefs();
+}
+async function renderBriefs(){
+  const el = $("#brieflist"); if(!el) return;
+  try{
+    const r = await fetch("/me/briefs", {headers: authHeaders()}); if(!r.ok){ el.innerHTML = `<span class="acctmuted">none yet</span>`; return; }
+    const bs = (await r.json()).briefs || [];
+    if(!bs.length){ el.innerHTML = `<span class="acctmuted">none yet</span>`; return; }
+    el.innerHTML = bs.map(b => `<div class="briefrow" data-id="${b.id}"><b>${esc(b.title || b.role_key)}</b> <span class="acctmuted">${b.kind === "resume" ? "résumé" : "JD"} · v${b.version} · ${esc(String(b.updated_at||"").slice(0,10))}${b.kind === "jd" ? " · " + esc(b.role_key) : ""}</span>
+      ${b.kind === "jd" ? `<button type="button" class="histbtn brief-find" data-id="${b.id}">🗺 Find candidates</button>` : ""}<button type="button" class="histbtn brief-del" data-id="${b.id}">✕</button></div>`).join("");
+    el.querySelectorAll(".brief-del").forEach(x => x.addEventListener("click", async () => { await fetch(`/me/briefs/${x.dataset.id}`, {method: "DELETE", headers: authHeaders()}); renderBriefs(); }));
+    el.querySelectorAll(".brief-find").forEach(x => x.addEventListener("click", () => {
+      const back = $("#savedclose"); if(back) back.click();
+      setSearchMode("guided"); renderTriage(true);
+      submitTriage("", {direction: "candidate", answer: {name: "jd", value: "brief:" + x.dataset.id}});
+    }));
+  }catch(e){ el.innerHTML = `<span class="acctmuted">none yet</span>`; }
 }
 // LinkedIn connections (the user's own export) — the intro path's private half
 async function refreshConnStatus(){

@@ -62,3 +62,20 @@ def test_understood_words_read_the_contract_in_plain_words():
     w = understood_words("job", c, {"comp": "150k_200k", "years": "6"})
     assert "remote" in w and "US" in w and "staff+" in w and "data / ML" in w and "senior" in w and "$150k–200k" in w
     assert w.endswith(".")
+
+
+def test_jd_draft_vocabulary_and_role_key():
+    from roster_vertical.intake import JD_PEER_SHARE, JD_PEERS, draft_prompt, group_prompt, improve_prompt, role_key
+    assert 0.2 <= JD_PEER_SHARE <= 0.5 and JD_PEERS == 10
+    assert "g<id>" in draft_prompt() and "you" in draft_prompt() and "never" in draft_prompt().lower()
+    assert "[p<n>]" in group_prompt() and "peers" in group_prompt()
+    assert "ORIGINAL" in improve_prompt("profile") and "ANSWERS" in improve_prompt("jd") and "Never add" in improve_prompt("jd")
+    assert role_key("Backend Engineer, Payments", {"field": ["software"], "function": ["engineering"], "level": ["senior"]}) == "software/engineering/senior/backend-engineer-payments"
+    assert role_key("", {}) == "_/_/_/role"
+    assert role_key("ML Platform Lead", {"field": ["data_ml"], "level": ["leadership"]}) == "data_ml/_/leadership/ml-platform-lead"
+
+
+def test_direction_prompt_treats_a_bare_title_list_as_ambiguous():
+    from roster_vertical.intake import direction_prompt
+    p = direction_prompt()
+    assert "ambiguous" in p and "Never guess" in p and "hiring" in p and "looking" in p

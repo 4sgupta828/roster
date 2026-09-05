@@ -19,13 +19,16 @@ _URL_RX = re.compile(r"https?://\S+")
 class IntakeService:
     def __init__(self, *, schema, llm_json: Callable[[str, str], dict], counts_fn: Callable[[str, dict], Awaitable[dict]],
                  compile_fn: Callable[..., Contract], profile_fn: Callable[[dict | None], Awaitable[dict | None]] | None = None,
-                 jd_fetch_fn: Callable[[str], str] | None = None):
+                 jd_fetch_fn: Callable[[str], str] | None = None, briefs_fn=None, draft_fn=None, redraft_fn=None):
         self.schema = schema
         self.llm_json = llm_json
         self.counts_fn = counts_fn
         self.compile_fn = compile_fn
         self.profile_fn = profile_fn
         self.jd_fetch_fn = jd_fetch_fn
+        self.briefs_fn = briefs_fn          # async (user) → the account's saved briefs (JDs) — the "which JD" question
+        self.draft_fn = draft_fn            # async (role_text, context) → a JD draft (api.jd_draft.build_jd_draft, app-wired)
+        self.redraft_fn = redraft_fn        # async (draft, change) → the draft with the change applied
 
     # ---------------- helpers ----------------
     def _vocab(self):
@@ -112,9 +115,13 @@ class IntakeService:
                 return apply_answer(st, q, legal, contract_key=key, mode=m)
             return apply_answer(st, q, value, contract_key=key, mode=m)
         m = mode or ("must" if q.klass == "required" else "prefer")
-        if value is not None and self.schema.validate_value(q.name, str(value)) is None:
+        if value is None:
+            return apply_answer(st, q, None)
+        vals = value if isinstance(value, (list, tuple)) else [value]
+        legal = [v for v in vals if self.schema.validate_value(q.name, str(v)) is not None]
+        if not legal:
             return apply_answer(st, q, None)                                    # an illegal value never constrains
-        return apply_answer(st, q, value, mode=m)
+        return apply_answer(st, q, legal if len(legal) > 1 else legal[0], mode=m)
 
     def _ready(self, st: IntakeState, counts: dict, transcript: list, note: str = "") -> dict:
         V = self._vocab()
@@ -138,6 +145,7 @@ class IntakeService:
         transcript = [m for m in (state.get("transcript") or []) if isinstance(m, dict)][-TRANSCRIPT_CAP:]
         pending = state.get("pending") or None
         artifact_text = str(state.get("artifact_text") or "")
+        draft = state.get("draft") or None
         message = (message or "").strip()
         if message:
             transcript.append({"role": "user", "text": message[:MSG_CAP]})
@@ -150,7 +158,7 @@ class IntakeService:
                 ready["transcript_audit"] = transcript[-TRANSCRIPT_CAP:]
             st.stage = stage if stage != "questions" else st.stage
             return {"stage": stage, "question": question, "ready": ready, "note": note,
-                    "state": {"kernel": st.to_dict(), "transcript": transcript[-TRANSCRIPT_CAP:], "pending": question, "artifact_text": artifact_text[:ARTIFACT_CAP]}}
+                    "state": {"kernel": st.to_dict(), "transcript": transcript[-TRANSCRIPT_CAP:], "pending": question, "artifact_text": artifact_text[:ARTIFACT_CAP], "draft": draft}}
 
         # SEARCH NOW: ready with what is known, from any stage
         if search_now:
@@ -178,12 +186,47 @@ class IntakeService:
 
         # 2) ARTIFACT
         if st.artifact.get("status") != "present":
-            text, source = await self._find_artifact(st, message, attachments_text or [], user, pending)
+            text, source, brief_id = "", "", None
+            av = str((answer or {}).get("value") or "") if answer and str((answer or {}).get("name") or "") in ("jd", "profile") else ""
+            if av.startswith("brief:") and self.briefs_fn is not None:
+                # a SAVED JD picked from the account (spec §2.2: several hires → "which JD?")
+                try:
+                    briefs = await self.briefs_fn(user) or []
+                except Exception:   # noqa: BLE001
+                    briefs = []
+                b = next((x for x in briefs if str(x.get("id")) == av[6:]), None)
+                if b and b.get("text"):
+                    text, source, brief_id = str(b["text"]), "saved", int(b["id"])
+            elif av == "draft" and st.artifact.get("kind") == "jd" and self.draft_fn is not None:
+                q = {"kind": "draft_context", "name": "jd", "key": "", "words": V.DRAFT_CONTEXT_WORDS, "hint": "one or two sentences is plenty",
+                     "options": [], "free_text": True, "klass": ""}
+                return pack("artifact", question=q)
+            elif av == "accept" and draft and draft.get("text"):
+                text, source = str(draft["text"]), "drafted"
+                brief_id = (answer or {}).get("brief_id")
+            elif pending and pending.get("kind") == "draft_context" and message and self.draft_fn is not None:
+                try:
+                    draft = await self.draft_fn(message, {"context": message})
+                except Exception:   # noqa: BLE001
+                    draft = None
+                if draft:
+                    return pack("artifact", question=self._draft_question(draft))
+                text, source = message, "described"                                  # no draft → the words are the JD for now
+            elif pending and pending.get("kind") == "draft" and message and draft and self.redraft_fn is not None:
+                try:
+                    draft = await self.redraft_fn(draft, message)
+                except Exception:   # noqa: BLE001
+                    pass
+                return pack("artifact", question=self._draft_question(draft))
             if not text:
-                q = self._artifact_question(st)
+                text, source = await self._find_artifact(st, message, attachments_text or [], user, pending)
+            if not text:
+                q = await self._artifact_question_for(st, user)
                 return pack("artifact", question=q)
             artifact_text = text[:ARTIFACT_CAP]
             st.artifact = {"kind": st.artifact["kind"], "status": "present", "source": source, "chars": len(artifact_text)}
+            if brief_id is not None:
+                st.artifact["brief_id"] = int(brief_id)
             await self._read_completeness(st, artifact_text)
             self._compile(st, artifact_text, message)
             st.stage = "questions"
@@ -226,6 +269,24 @@ class IntakeService:
             return pack("ready", ready=self._ready(st, counts, transcript))
         return pack("questions", question=self._question_payload(q, st))
 
+    async def improve(self, *, state: dict) -> dict:
+        """A fuller artifact from ONLY the original text + the conversation's answers (spec §2.2); `added` lists the
+        lines that came from the answers, each verified to appear in the text. Nothing is saved here."""
+        V = self._vocab()
+        st = IntakeState.from_dict((state or {}).get("kernel") or {})
+        kind = st.artifact.get("kind") or V.ARTIFACT_FOR.get(st.direction, "profile")
+        original = str((state or {}).get("artifact_text") or "")
+        answers = {k: v for k, v in (st.answers or {}).items() if v not in (None, "", []) and st.checklist.get(k) in ("answered", None)}
+        user = "ORIGINAL:\n" + original[:ARTIFACT_CAP] + "\n\nANSWERS:\n" + "\n".join(f"{k.replace('_', ' ')}: {v if not isinstance(v, list) else ', '.join(map(str, v))}" for k, v in answers.items())
+        try:
+            out = await self._model(V.improve_prompt(kind), user)
+        except Exception as e:   # noqa: BLE001
+            return {"kind": kind, "text": "", "added": [], "error": f"model: {str(e)[:120]}"}
+        text = str(out.get("text") or "").strip()
+        added = [str(a).strip() for a in (out.get("added") or []) if str(a).strip() and str(a).strip() in text]
+        title = str(answers.get("title") or answers.get("current_role") or "")[:120]
+        return {"kind": kind, "text": text, "added": added, "title": title, "answers": answers}
+
     # ---------------- artifact discovery ----------------
     async def _find_artifact(self, st: IntakeState, message: str, attachments_text: list[str], user: dict | None, pending: dict | None) -> tuple[str, str]:
         kind = st.artifact.get("kind")
@@ -262,6 +323,27 @@ class IntakeService:
         if message and len(message) >= 40 and pending and pending.get("kind") == "artifact":
             return message, "described"
         return "", ""
+
+    def _draft_question(self, draft: dict) -> dict:
+        n = len(draft.get("peers") or [])
+        words = (f"Here's a draft built from {n} peer postings and your words — every line shows where it came from. Ask for changes in words, or use it."
+                 if n and not draft.get("sparse") else "Too few peer postings for this role to find a centre, so this draft is from your words only. Ask for changes, or use it.")
+        return {"kind": "draft", "name": "jd", "key": "", "words": words, "hint": "", "draft": draft, "free_text": True, "klass": "",
+                "options": [["accept", "Use this JD", 0], ["save", "Save to my account & use", 0]]}
+
+    async def _artifact_question_for(self, st: IntakeState, user: dict | None) -> dict:
+        q = self._artifact_question(st)
+        if st.artifact.get("kind") == "jd" and self.briefs_fn is not None and user:
+            try:
+                briefs = [b for b in (await self.briefs_fn(user) or []) if b.get("kind", "jd") == "jd"]
+            except Exception:   # noqa: BLE001
+                briefs = []
+            if briefs:
+                q["words"] = "Which hire is this for? Pick a saved job description, or start a new role."
+                q["options"] = [[f"brief:{b['id']}", str(b.get("title") or b.get("role_key") or "saved JD")[:60], 0] for b in briefs[:6]] + [["new", "A new role", 0]] + q["options"]
+        if st.artifact.get("kind") == "jd" and self.draft_fn is not None and not any(o[0] == "draft" for o in q["options"]):
+            q["options"].append(["draft", "Draft one with me", 0])
+        return q
 
     def _artifact_question(self, st: IntakeState) -> dict:
         if st.artifact.get("kind") == "profile":

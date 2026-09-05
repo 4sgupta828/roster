@@ -146,6 +146,23 @@ CREATE TABLE IF NOT EXISTS roster_notification (
     read_at     TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_rn_user ON roster_notification (user_id, created_at DESC);
+-- BRIEFS (guided intake §2.2): a hiring manager's job descriptions (one row per kind of hire, keyed by role_key,
+-- versioned) and a job seeker's improved résumé versions. Saved only on an explicit tap; never invented content.
+CREATE TABLE IF NOT EXISTS roster_brief (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    kind        TEXT NOT NULL,                   -- jd | resume
+    title       TEXT NOT NULL DEFAULT '',
+    role_key    TEXT NOT NULL DEFAULT '',        -- <field>/<function>/<level>/<title-slug> for a JD; 'resume' for a résumé
+    text        TEXT NOT NULL,
+    structured  JSONB NOT NULL DEFAULT '{}'::jsonb,
+    sources     JSONB NOT NULL DEFAULT '{}'::jsonb,
+    version     INTEGER NOT NULL DEFAULT 1,
+    active      BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_rb_user ON roster_brief (user_id, kind, active, updated_at DESC);
 -- RÉSUMÉ → PROFILE autofill: docling+LLM parse runs in a SEPARATE process; these columns hold its
 -- status and the suggested fields (the FE prefills the form from parsed_profile for the user to review).
 ALTER TABLE roster_candidate_profile ADD COLUMN IF NOT EXISTS parse_status TEXT;      -- pending|done|failed
@@ -722,6 +739,65 @@ class AccountStore:
         return res.endswith("1")
 
     # ---- notifications (in-app inbox; the extension polls the same list) ----
+    # ---- briefs (guided intake §2.2): JDs keyed by role, résumé versions ----
+    async def save_brief(self, user_id: str, *, kind: str, title: str, role_key: str, text: str, structured: dict | None = None,
+                         sources: dict | None = None) -> dict:
+        """Save a brief. The same (kind, role_key) becomes the NEXT version of that hire / résumé (older versions stay,
+        inactive); a different role_key is a new row. Returns {id, version, role_key}."""
+        await self._ensure()
+        kind = kind if kind in ("jd", "resume") else "jd"
+        role_key = (role_key or ("resume" if kind == "resume" else "role"))[:200]
+        async with (await self._get_pool()).acquire() as conn:
+            async with conn.transaction():
+                prev = await conn.fetchval("SELECT COALESCE(MAX(version), 0) FROM roster_brief WHERE user_id=$1 AND kind=$2 AND role_key=$3", user_id, kind, role_key)
+                await conn.execute("UPDATE roster_brief SET active = FALSE, updated_at = now() WHERE user_id=$1 AND kind=$2 AND role_key=$3 AND active", user_id, kind, role_key)
+                bid = await conn.fetchval(
+                    "INSERT INTO roster_brief (user_id, kind, title, role_key, text, structured, sources, version, active) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,TRUE) RETURNING id",
+                    user_id, kind, (title or "")[:300], role_key, text[:60000], json.dumps(structured or {}), json.dumps(sources or {}), int(prev) + 1)
+        return {"id": int(bid), "version": int(prev) + 1, "role_key": role_key}
+
+    async def list_briefs(self, user_id: str, *, kind: str | None = None, active_only: bool = True, limit: int = 50) -> list[dict]:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, kind, title, role_key, version, active, length(text) AS chars, created_at, updated_at FROM roster_brief WHERE user_id=$1 "
+                + ("AND kind=$3 " if kind else "") + ("AND active " if active_only else "") + "ORDER BY updated_at DESC LIMIT $2",
+                *([user_id, int(limit)] + ([kind] if kind else [])))
+        return [{"id": int(r["id"]), "kind": r["kind"], "title": r["title"], "role_key": r["role_key"], "version": int(r["version"]), "active": bool(r["active"]),
+                 "chars": int(r["chars"] or 0), "created_at": r["created_at"].isoformat(), "updated_at": r["updated_at"].isoformat()} for r in rows]
+
+    async def get_brief(self, user_id: str, brief_id: int) -> dict | None:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            r = await conn.fetchrow("SELECT id, kind, title, role_key, text, structured, sources, version, active, created_at, updated_at FROM roster_brief WHERE user_id=$1 AND id=$2", user_id, int(brief_id))
+        if not r:
+            return None
+        return {"id": int(r["id"]), "kind": r["kind"], "title": r["title"], "role_key": r["role_key"], "text": r["text"],
+                "structured": json.loads(r["structured"]) if isinstance(r["structured"], str) else (r["structured"] or {}),
+                "sources": json.loads(r["sources"]) if isinstance(r["sources"], str) else (r["sources"] or {}),
+                "version": int(r["version"]), "active": bool(r["active"]), "created_at": r["created_at"].isoformat(), "updated_at": r["updated_at"].isoformat()}
+
+    async def delete_brief(self, user_id: str, brief_id: int) -> bool:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            res = await conn.execute("DELETE FROM roster_brief WHERE user_id=$1 AND id=$2", user_id, int(brief_id))
+        return res.endswith("1")
+
+    async def set_resume_text(self, user_id: str, text: str, *, name: str = "resume-improved.txt") -> None:
+        """An improved résumé becomes the résumé on file: the bytes (plain text) and the parsed profile's text."""
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow("SELECT parsed_profile FROM roster_candidate_profile WHERE user_id=$1", user_id)
+                parsed = (json.loads(row["parsed_profile"]) if row and row["parsed_profile"] else {}) if row else {}
+                parsed["_resume_text"] = text[:20000]
+                await conn.execute(
+                    """INSERT INTO roster_candidate_profile (user_id, profile, resume_name, resume_type, resume_bytes, resume_at, parsed_profile, parse_status, updated_at)
+                       VALUES ($1, '{}'::jsonb, $2, 'text/plain', $3, now(), $4::jsonb, 'done', now())
+                       ON CONFLICT (user_id) DO UPDATE SET resume_name = EXCLUDED.resume_name, resume_type = EXCLUDED.resume_type, resume_bytes = EXCLUDED.resume_bytes,
+                         resume_at = now(), parsed_profile = EXCLUDED.parsed_profile, parse_status = 'done', updated_at = now()""",
+                    user_id, name[:120], text.encode("utf-8")[:2_000_000], json.dumps(parsed))
+
     async def add_notification(self, user_id: str, *, kind: str, title: str, body: str = "", url: str = "") -> int:
         await self._ensure()
         async with (await self._get_pool()).acquire() as conn:

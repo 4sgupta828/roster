@@ -115,7 +115,10 @@ def direction_prompt() -> str:
     return ("Read the user's message and return ONLY JSON {\"direction\": \"looking\" | \"hiring\" | null}. "
             "\"looking\" = the user wants a role / job for themselves (their own next role, their résumé, jobs to apply to). "
             "\"hiring\" = the user wants to find or hire PEOPLE for a role (a job description, candidates, a team to staff). "
-            "null when the message says neither. Never guess from a bare greeting.")
+            "null when the message does not CLEARLY say which — a bare list of titles, skills or a role name (\"Founder CTO or VP "
+            "Engineering, ML infra\") is ambiguous: it could be the user's own target or a hire. Signals for looking: I'm looking, "
+            "for me, my next role, my résumé, roles I can apply to. Signals for hiring: hire, hiring, we need, our team, candidates, "
+            "a JD. Never guess.")
 
 
 DIRECTION_TOKENS = {"looking": "job", "hiring": "candidate"}
@@ -158,3 +161,50 @@ def understood_words(direction: str, contract: dict, answers: dict | None = None
     if yrs and yrs.replace("+", "").strip().isdigit():
         parts.append(f"{yrs} years in")
     return "; ".join(parts) + "."
+
+
+# ---------------- JD drafting from the centre of peer postings (spec §4) and improve-and-save (§2.2) ----------------
+JD_SECTIONS = ("summary", "responsibilities", "must_have", "nice_to_have")
+JD_PEER_SHARE = 0.30          # a requirement group is the CENTRE when it recurs in ≥ this share of peers
+JD_PEERS = 10                 # peers kept after dedupe by company
+
+DRAFT_CONTEXT_WORDS = ("Three things so the draft is yours, not generic: the title and level, where the role is (metro or remote), "
+                       "and any must-have from your side. Add team or company context if you like.")
+
+
+def group_prompt() -> str:
+    """One model call: requirement lines from several postings → groups of EQUIVALENT lines (meaning, not string
+    match). Each input line is tagged `[p<peer>] <kind>: <text>`; the output names the peers each group covers."""
+    return ("You group job-posting requirement lines that say the SAME thing in different words. Input lines are tagged "
+            "[p<n>] followed by a kind (must | nice | responsibility) and the text. Return ONLY JSON: {\"groups\": [{\"label\": a short "
+            "neutral phrasing of the requirement (≤ 14 words), \"kind\": \"must\" | \"nice\" | \"responsibility\", \"peers\": [the distinct "
+            "peer numbers whose lines belong here]}]}. A group must contain lines from at least one peer; never invent a requirement; "
+            "keep company names and product names out of labels; a line may belong to one group only.")
+
+
+def draft_prompt() -> str:
+    return ("You write a job description from (a) the CENTRE — requirement groups that recur across peer postings for this role, each "
+            "with the count of peers asking for it — (b) the hiring manager's OWN context and must-haves, and (c) optional groups some "
+            "peers also ask for. Return ONLY JSON: {\"title\": str, \"summary\": one paragraph (≤ 70 words) of what the role is, "
+            "\"responsibilities\": [{\"text\": str, \"source\": \"g<id>\" | \"you\"}], \"must_have\": [same shape], \"nice_to_have\": [same shape]}. "
+            "EVERY line cites its source: a centre / optional group id (g<id>) or \"you\" (the manager's own words). Never write a line "
+            "that has neither. Put the manager's must-haves first. Plain, specific language; no company boilerplate; no pay figures "
+            "(they are shown separately as a market signal).")
+
+
+def improve_prompt(artifact: str) -> str:
+    what = "résumé" if artifact == "profile" else "job description"
+    return (f"You produce a fuller {what} from ONLY two sources: the ORIGINAL text and the ANSWERS the person gave in a short conversation. "
+            "Return ONLY JSON: {\"text\": the improved document in plain text with short section headings, \"added\": [each sentence or bullet "
+            "that comes from the ANSWERS rather than the original, verbatim as it appears in `text`]}. Never add an employer, a date, a "
+            "number, a skill, a location or a credential that appears in neither source. Keep the original's facts and order; tighten wording; "
+            "do not flatter.")
+
+
+def role_key(title: str, facets: dict | None) -> str:
+    """The key a hiring manager's JD is filed under: <field>/<function>/<level>/<title slug> from the JD's own facets."""
+    import re
+    f = facets or {}
+    first = lambda k: (f.get(k) or ["_"])[0] if isinstance(f.get(k), list) else (f.get(k) or "_")
+    slug = re.sub(r"[^a-z0-9]+", "-", (title or "").lower()).strip("-")[:48] or "role"
+    return f"{first('field')}/{first('function')}/{first('level')}/{slug}"

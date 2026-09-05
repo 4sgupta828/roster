@@ -231,3 +231,71 @@ def test_direction_reads_are_unambiguous(monkeypatch):
     assert _run(s.step(message="I'm looking for my next role", state=None))["state"]["kernel"]["direction"] == "job"
     assert _run(s.step(message="I need to hire a backend engineer", state=None))["state"]["kernel"]["direction"] == "candidate"
     assert _run(s.step(message="hello", state=None))["question"]["kind"] == "direction"
+
+
+def test_multi_select_answers_land_as_lists_on_items_and_keys():
+    s = _service()
+    out = _run(s.step(message="I'm looking for my next role", state=None, direction="job"))
+    out = _run(s.step(message="Software engineer, Acme, 2019 to now. Python, Go.", state=out["state"]))
+    assert out["question"]["name"] == "level"
+    out = _run(s.step(answer={"name": "level", "value": ["senior", "staff_plus", "not-a-level"]}, state=out["state"]))
+    assert sorted(out["state"]["kernel"]["contract"]["prefer"]["level"]) == ["senior", "staff_plus"]          # illegal token dropped
+    # a key question with several chips
+    while out["stage"] != "ready" and out["question"]["kind"] != "key":
+        out = _run(s.step(answer={"name": out["question"]["name"], "value": "__decline__"}, state=out["state"]))
+    if out["stage"] != "ready":
+        name = out["question"]["name"]
+        vals = [o[0] for o in out["question"]["options"]][:2]
+        out = _run(s.step(answer={"name": name, "value": vals}, state=out["state"]))
+        k = out["state"]["kernel"]["contract"]
+        assert sorted((k["must"].get(name) or k["prefer"].get(name) or [])) == sorted(vals)
+
+
+def test_saved_jds_are_offered_and_a_pick_becomes_the_artifact():
+    async def briefs_fn(user):
+        return [{"id": 7, "kind": "jd", "title": "Senior Payments Backend", "role_key": "software/engineering/senior/payments", "text": "Backend Engineer, Payments. " * 12},
+                {"id": 9, "kind": "jd", "title": "ML Platform Lead", "role_key": "data_ml/engineering/leadership/ml-platform-lead", "text": "ML Platform Lead. " * 20}]
+    s = _service(); s.briefs_fn = briefs_fn
+    out = _run(s.step(message="I'm hiring again", state=None, direction="candidate", user={"id": "u1"}))
+    q = out["question"]
+    assert q["kind"] == "artifact" and q["name"] == "jd" and [o[0] for o in q["options"]][:2] == ["brief:7", "brief:9"] and "new" in [o[0] for o in q["options"]]
+    out = _run(s.step(answer={"name": "jd", "value": "brief:7"}, state=out["state"], user={"id": "u1"}))
+    k = out["state"]["kernel"]
+    assert k["artifact"]["status"] == "present" and k["artifact"]["source"] == "saved" and k["artifact"]["brief_id"] == 7
+    assert out["stage"] == "questions"
+
+
+def test_draft_path_builds_from_context_takes_changes_and_accepts():
+    calls = []
+    async def draft_fn(role_text, context):
+        calls.append(("draft", role_text)); return {"title": "Senior Backend Engineer, Payments", "text": "Senior Backend Engineer, Payments\n\nMust have\n- Built ledgering systems\n", "must_have": [{"text": "Built ledgering systems", "support": {"you": True}}], "peers": [{"id": 1}] * 10, "centre": [], "optional": [], "market": {}, "sparse": False}
+    async def redraft_fn(draft, change):
+        calls.append(("redraft", change)); d = dict(draft); d["text"] = draft["text"] + "- Kafka\n"; return d
+    s = _service(); s.draft_fn = draft_fn; s.redraft_fn = redraft_fn
+    out = _run(s.step(message="I'm hiring", state=None))
+    out = _run(s.step(answer={"name": "jd", "value": "draft"}, state=out["state"]))
+    assert out["question"]["kind"] == "draft_context"
+    out = _run(s.step(message="senior backend engineer for our payments team, SF or remote, must have built ledgering", state=out["state"]))
+    assert out["question"]["kind"] == "draft" and out["question"]["draft"]["title"].startswith("Senior Backend") and calls[0][0] == "draft"
+    out = _run(s.step(message="add Kafka as a must", state=out["state"]))
+    assert calls[-1] == ("redraft", "add Kafka as a must") and "- Kafka" in out["question"]["draft"]["text"]
+    out = _run(s.step(answer={"name": "jd", "value": "accept"}, state=out["state"]))
+    k = out["state"]["kernel"]
+    assert k["artifact"]["status"] == "present" and k["artifact"]["source"] == "drafted" and out["state"]["artifact_text"].startswith("Senior Backend")
+    assert out["stage"] in ("questions", "ready")
+
+
+def test_improve_uses_only_the_original_and_the_answers():
+    class Improver(FakeLLM):
+        def __call__(self, system, user):
+            if "fuller" in system:
+                assert "ORIGINAL" in user and "ANSWERS" in user
+                return {"text": "Software engineer at Acme (2019–now)\nLevel: senior\nSkills: Python, Go\nPrefers remote roles", "added": ["Level: senior", "Prefers remote roles", "Has a PhD from MIT"]}
+            return super().__call__(system, user)
+    s = _service(Improver())
+    out = _run(s.step(message="I'm looking for my next role", state=None, direction="job"))
+    out = _run(s.step(message="Software engineer, Acme, 2019 to now. Python, Go.", state=out["state"]))
+    out = _run(s.step(answer={"name": "level", "value": "senior"}, state=out["state"]))
+    imp = _run(s.improve(state=out["state"]))
+    assert imp["kind"] == "profile" and "Level: senior" in imp["text"]
+    assert imp["added"] == ["Level: senior", "Prefers remote roles"]                  # a claimed addition absent from the text is dropped
