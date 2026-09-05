@@ -577,8 +577,9 @@ async def refresh_boards(conn, boards: int, *, live: bool) -> dict:
         first_pass = not existing     # rows from the original ingest carry no ats_id yet: this pass stamps them
         new, changed, gone = plan_refresh(existing, listed)
         if first_pass:   # only postings we truly lack are new (and get embedded); the rest just get stamped
-            have = {(r["title_norm"], r["location"] or "") for r in await conn.fetch(
-                "SELECT title_norm, location FROM rs_job WHERE source=$1 AND company=$2", ats, company)}
+            # (normalize the RAW title on both sides — jobs_sweep wrote title_norm with a different rule)
+            have = {(_norm_title(r["title"]), r["location"] or "") for r in await conn.fetch(
+                "SELECT title, location FROM rs_job WHERE source=$1 AND company=$2", ats, company)}
             new = [r for r in listed if (_norm_title(r.get("title") or ""), r.get("location") or "") not in have]
         touched = bool(new or changed or gone or first_pass)
         st["new"] += len(new); st["changed"] += len(changed)
