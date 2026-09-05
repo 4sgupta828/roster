@@ -12,6 +12,7 @@ import os
 from roster_kernel.contract.manifest import VerticalManifest
 
 from . import discovery, entities, evidence_kind
+from .facet_schema import FACET_SCHEMA
 from .answer_format import (TECH_ANSWER_FORMAT, TECH_DILIGENCE_SYNTHESIS_FORMAT,
                             TECH_VISUAL_GUIDANCE, TECH_CHART_GUIDANCE, TECH_REASONING_FORMAT,
                             TECH_AUTHORITY_BASIS_DIRECTIVE)
@@ -94,6 +95,8 @@ def build_manifest() -> VerticalManifest:
         name="roster",
         entity_types=entities.ENTITY_TYPES,
         scope_dimensions=SCOPE_DIMENSIONS,
+        # the canonical facet dimensions of people / jobs / companies (docs/specs/facet-contract-evaluator.md)
+        extraction_schema=FACET_SCHEMA,
         # Connectors are fixture-injected so the offline pipeline + tests run without network.
         connectors={
             "edgar": EdgarConnector(filings=sample_filings()),
