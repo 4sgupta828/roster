@@ -167,3 +167,24 @@ def test_reviewer_tags_edit_the_contract_and_never_become_musts():
     assert c.avoid == {"level": ["senior"], "metro": ["bay area"]}
     assert "prefer company: stripe" in log and all("nope" not in x and "principal" not in x for x in log)
     assert base.prefer == {}                                                          # pure
+
+
+def test_row_tags_become_contract_edits_from_the_rows_own_facets():
+    """A reviewer's card tag (wrong level / wrong domain / more like this / not relevant) edits the contract
+    through THAT row's schema facets — prefer / avoid / exclude, never a must (spec §4, §6)."""
+    from api.facets_engine import row_tags_to_contract
+    base = Contract(kind="person", text="cto", must={"level": ["leadership"]})
+    rows = {"p1": {"entity_id": "p1", "facets": {"level": ["leadership"], "field": ["sales"], "function": ["sales"], "metro": ["nyc"]}},
+            "p2": {"entity_id": "p2", "facets": {"level": ["senior"], "field": ["software"], "function": ["engineering"]}},
+            "p3": {"entity_id": "p3", "attributes": [{"key": "seniority", "display": "Senior"}]}}          # a row saved before facets
+    fb = [{"entity_id": "p1", "tags": ["wrong_domain", "wrong_location"]},
+          {"entity_id": "p2", "tags": ["more_like_this", "wrong_seniority"]},
+          {"entity_id": "p3", "tags": ["wrong_domain"], "state": "not relevant"},
+          {"entity_id": "p1", "tags": ["prefer:company=acme"]}]
+    c, log = row_tags_to_contract(base, fb, rows, FACET_SCHEMA)
+    assert c.must == {"level": ["leadership"]}                          # feedback never filters
+    assert c.avoid.get("field") == ["sales"] and c.avoid.get("metro") == ["nyc"] and c.avoid.get("level") == ["senior"]
+    assert c.prefer.get("field") == ["software"] and c.prefer.get("function") == ["engineering"]
+    assert c.prefer.get("company") == ["acme"]                          # explicit prefer:key=value tags still work
+    assert "p3" in c.exclude_ids and "p1" not in c.exclude_ids
+    assert any("p3" in x or "not relevant" in x for x in log) and any("avoid field" in x for x in log)

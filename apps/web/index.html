@@ -3017,6 +3017,11 @@ function peopleRowsMarkup(data){
   window.PEOPLE_RENDERS = window.PEOPLE_RENDERS || {};
   if(!data._pid){ data._pid = String(Date.now()) + Math.random().toString(36).slice(2,6); }
   window.PEOPLE_RENDERS[data._pid] = data;
+  // THE TALENT RAIL (spec §7): the server's contract + counts over the people index ride on `facet_nav`
+  // (first turn) or on the turn itself (a saved map / an applied navigation); one id serves the rail
+  if(data.facet_nav && !data.contract){ Object.assign(data, {contract: data.facet_nav.contract, counts: data.facet_nav.counts, coverage: data.facet_nav.coverage, labels: data.facet_nav.labels}); }
+  data._jpid = data._pid;
+  const railHtml = (isEnum && data.contract && data.counts && typeof facetRailMarkup === "function") ? facetRailMarkup(data) : "";
   const PAGE = 20;
   const pagesN = Math.max(1, Math.ceil(rows.length / PAGE));
   const page = Math.min(pagesN - 1, Math.max(0, data._page || 0));
@@ -3077,7 +3082,7 @@ function peopleRowsMarkup(data){
       + `<div class="ppl-cov" style="border-left-color:var(--gap);">◔ ${esc(lk.clarify||"")} Searched Roster's index, GitHub, OpenAlex, LinkedIn snippets${lk.searched_web?` and the open web for ${esc(lk.searched_web)}`:""}. ${qaBtn}</div>`;
   }
   const head = isEnum
-    ? `<div class="ppl-head">${pagedMode && pagesN>1?`${page===0?`Top <b>${paged.length}</b> most relevant`:`People <b>${from}–${to}</b> by relevance`} <span class="ppl-fc" style="text-transform:none;">· of ${rows.length} matched in the index · page ${page+1} of ${pagesN}</span>`:`<b>${rows.length}</b> ${rows.length===1?"person":"people"} found`}${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${metaBlock}<div class="ppl-enrich" data-pid="${esc(data._pid)}"></div>`
+    ? `<div class="ppl-head">${pagedMode && pagesN>1?`${page===0?`Top <b>${paged.length}</b> most relevant`:`People <b>${from}–${to}</b> by relevance`} <span class="ppl-fc" style="text-transform:none;">· of ${rows.length} matched in the index · page ${page+1} of ${pagesN}</span>`:`<b>${rows.length}</b> ${rows.length===1?"person":"people"} found`}${facetChips?` <span class="ppl-facets">${facetChips}</span>`:""}</div>${mapBar}${railHtml}${metaBlock}<div class="ppl-enrich" data-pid="${esc(data._pid)}"></div>`
     : (lkHead || `<div class="ppl-head">Profile</div>`);   // single-person profile card (no enumeration coverage)
   // ambiguous lookup: each candidate card gets a PICK control (sends its entity id back as the choice)
   const pickCards = (lk && lk.resolution === "ambiguous")
@@ -7519,6 +7524,7 @@ function facetLabel(d, key, value){
   if(value === "unknown") return "unknown";
   return vl || String(value).replace(/_/g, " ");
 }
+function facetRenderOf(id){ return (window.JOBS_RENDERS||{})[id] || (window.PEOPLE_RENDERS||{})[id] || null; }
 function facetDraft(d){ return d._draft || d.contract || {}; }
 function facetPending(d){   // how many chip states differ between the draft and the applied contract
   const a = d.contract || {}, b = d._draft; if(!b) return 0;
@@ -7556,12 +7562,12 @@ function facetRailMarkup(d){
   return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}"><div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""} ${rank}<span style="margin-left:auto;">● must · ▲ prefer · ▼ avoid</span></div>${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
 }
 function rerenderRail(jpid){
-  const d = (window.JOBS_RENDERS||{})[jpid]; if(!d) return;
+  const d = facetRenderOf(jpid); if(!d) return;
   const el = document.querySelector(`.frail[data-jpid="${CSS.escape(jpid)}"]`); if(!el) return;
   el.outerHTML = facetRailMarkup(d);
 }
 async function facetReevaluate(jpid, contract, save){
-  const d = (window.JOBS_RENDERS||{})[jpid]; if(!d) return;
+  const d = facetRenderOf(jpid); if(!d) return;
   d._busy = true; d._applied = false; rerenderRail(jpid);
   try{
     const r = d._map_id
@@ -7570,6 +7576,13 @@ async function facetReevaluate(jpid, contract, save){
     const out = await r.json();
     if(!r.ok){ d._busy = false; rerenderRail(jpid); alert(out.detail || "Couldn't apply those changes."); return; }
     d.contract = out.contract; d._draft = null; d.counts = out.counts; d.coverage = out.coverage; d.labels = out.labels || d.labels;
+    if((out.contract||{}).kind === "person" || Array.isArray(d.people_rows)){
+      // TALENT: the evaluator's rows replace the cohort (card-shaped, evidence attached); paging restarts
+      d.people_rows = out.rows || []; d._page = 0; d._busy = false; d._applied = true; d._reranked = false;
+      d.coverage_basis = {...(d.coverage_basis||{}), query_facets: (d.coverage_basis||{}).query_facets || {}, population_statement: ((d.coverage_basis||{}).population_statement||"")};
+      if(save && out.revision_id != null && d._map_id){ loadMapView(d._map_id, d._map_token||""); return; }
+      gotoPeoplePage(d._pid, 0); return;
+    }
     d.jobs = (out.rows||[]).map(x => ({...x, seniority: ((x.facets||{}).level||[""])[0]}));
     d.count = d.jobs.length; d._jpage = 0; d._busy = false; d._applied = true;
     if(d.brief_contract){ d.brief_contract.contract = out.contract; d.brief_contract.counts = out.counts; }
@@ -7579,21 +7592,21 @@ async function facetReevaluate(jpid, contract, save){
 }
 document.addEventListener("click", (e)=>{
   const go = e.target.closest && e.target.closest(".frail-go");
-  if(go){ e.preventDefault(); const d = (window.JOBS_RENDERS||{})[go.dataset.jpid]; if(d && d._draft) facetReevaluate(go.dataset.jpid, d._draft); return; }
+  if(go){ e.preventDefault(); const d = facetRenderOf(go.dataset.jpid); if(d && d._draft) facetReevaluate(go.dataset.jpid, d._draft); return; }
   const sv = e.target.closest && e.target.closest(".frail-save");
-  if(sv){ e.preventDefault(); const d = (window.JOBS_RENDERS||{})[sv.dataset.jpid]; if(d && d.contract) facetReevaluate(sv.dataset.jpid, d.contract, true); return; }
+  if(sv){ e.preventDefault(); const d = facetRenderOf(sv.dataset.jpid); if(d && d.contract) facetReevaluate(sv.dataset.jpid, d.contract, true); return; }
   const rs = e.target.closest && e.target.closest(".frail-reset");
-  if(rs){ e.preventDefault(); const d = (window.JOBS_RENDERS||{})[rs.dataset.jpid]; if(d){ d._draft = null; rerenderRail(rs.dataset.jpid); } return; }
+  if(rs){ e.preventDefault(); const d = facetRenderOf(rs.dataset.jpid); if(d){ d._draft = null; rerenderRail(rs.dataset.jpid); } return; }
   const ch = e.target.closest && e.target.closest(".fchip, .fpill button");
   if(!ch || ch.disabled) return;
   e.preventDefault(); e.stopPropagation();
-  const d = (window.JOBS_RENDERS||{})[ch.dataset.jpid]; if(!d || !d.contract) return;
+  const d = facetRenderOf(ch.dataset.jpid); if(!d || !d.contract) return;
   d._draft = facetEdit(facetDraft(d), ch.dataset.key, ch.dataset.value, ch.dataset.mode || "cycle");   // staged, not run
   rerenderRail(ch.dataset.jpid);
 });
 document.addEventListener("change", (e)=>{
   const sel = e.target.closest && e.target.closest("select.frank"); if(!sel) return;
-  const d = (window.JOBS_RENDERS||{})[sel.dataset.jpid]; if(!d || !d.contract) return;
+  const d = facetRenderOf(sel.dataset.jpid); if(!d || !d.contract) return;
   d._draft = {...facetDraft(d), rank_by: sel.value}; rerenderRail(sel.dataset.jpid);
 });
 // ===== 🚀 APPLY — one integrated flow on the job card: fit → answers → résumé & letter → fill & submit =====
@@ -8913,7 +8926,7 @@ async function saveTalentMap(){
   const t = lastPeopleTurn(); if(!t) return;
   const cb = t.coverage_basis || {};
   const body = {tenant_id:"demo", map_type:"talent", brief:(t.question||CURRENT_Q||""), title:(t.question||"").slice(0,80),
-    rows:(t.people_rows||[]).slice(0,400), coverage:cb, filters:(cb.query_facets||{})};
+    rows:(t.people_rows||[]).slice(0,400), coverage:cb, filters:(cb.query_facets||{}), contract:(t.contract||null)};
   try{
     const r = await fetch("/maps", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(body)});
     if(!r.ok){ const e = await r.json().catch(()=>({})); alert(e.detail || "Couldn't save the map."); return; }
@@ -8953,9 +8966,16 @@ async function loadMapView(id, token){
     window.ACTIVE_MAP = {id:m.id, map_type:"talent", title:m.title, notes:m.notes||"", share_path:m.share_path||"", token:(token||""), refresh_every:(m.refresh_every||"off"), last_checked_at:(m.last_checked_at||""),
       is_owner:!!m.is_owner, reviews:(m.reviews||{}), feedback:(m.feedback||[]), revisions:(m.revisions||[]), brief_contract:((m.coverage||{}).brief_contract||null),
       n_rows:(m.rows||[]).length, created_at:m.created_at};
-    THREAD = {session_id:null, turns:[{question:m.brief||m.title||"Talent Map", people_rows:(m.rows||[]), coverage_basis:(m.coverage||{}), grounded:true, claims:[], coverage_gaps:[]}]};
+    THREAD = {session_id:null, turns:[{question:m.brief||m.title||"Talent Map", people_rows:(m.rows||[]), coverage_basis:(m.coverage||{}), grounded:true, claims:[], coverage_gaps:[],
+      contract:(m.contract||null), counts:((m.coverage||{}).counts||null), labels:null, coverage:null, _map_id:m.id, _map_token:(token||""), _map_owner:!!m.is_owner}]};
     TAB_THREADS.people = THREAD;
     renderThread(); window.scrollTo({top:0});
+    if(m.contract){   // the rail's live counts for this map's contract (the snapshot stays until you apply)
+      try{
+        const nr = await fetch(`/maps/${encodeURIComponent(m.id)}/navigate`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({t: token||""})});
+        if(nr.ok){ const nd = await nr.json(); const t0 = THREAD.turns[0]; t0.counts = nd.counts; t0.labels = nd.labels; t0.coverage = nd.coverage; t0.contract = nd.contract; if(t0._pid) rerenderPeople(t0._pid); else renderThread(); }
+      }catch(e){}
+    }
   }catch(e){ if(out) out.innerHTML = `<div class="pitem-empty">Couldn't load the map — ${esc(e.message||e)}</div>`; }
 }
 async function saveMapMeta(){

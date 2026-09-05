@@ -255,3 +255,42 @@ def tags_to_contract(contract: Contract, feedback: list[dict], schema: FacetSche
             c = _edit(c, skey, nv, mode)
             log.append(f"{mode} {k.label.lower() or skey}: {nv.replace('_', ' ')}")
     return c, log
+
+
+# Card tags a reviewer taps (the People / Jobs review control) → the contract, read through THAT row's
+# schema facets. wrong_* avoids the row's value on the named key; more_like_this prefers the row's values on
+# the identity keys; less_like_this avoids them; a `not relevant` state excludes the row. Never a must.
+_ROW_TAGS = {"wrong_seniority": ("avoid", ("level",)), "wrong_domain": ("avoid", ("field",)), "wrong_location": ("avoid", ("metro", "state")),
+             "wrong_company_target": ("avoid", ("company",)), "more_like_this": ("prefer", ("field", "function", "level")),
+             "less_like_this": ("avoid", ("field", "function"))}
+
+
+def row_tags_to_contract(contract: Contract, feedback: list[dict], rows_by_id: dict, schema: FacetSchema) -> tuple[Contract, list[str]]:
+    """`tags_to_contract` (explicit prefer:key=value tags) plus the card tags resolved through each row's own
+    facets. A row saved before it carried schema facets can only be excluded, never edit the contract."""
+    from roster_kernel.facets import edit as _edit
+    c, log = tags_to_contract(contract, feedback, schema)
+    excl: set[str] = set(str(x) for x in (c.exclude_ids or []))
+    for f in feedback or []:
+        rid = str(f.get("entity_id") or f.get("ref") or "")
+        row = rows_by_id.get(rid) or {}
+        facets = row.get("facets") if isinstance(row.get("facets"), dict) else {}
+        if f.get("state") == "not relevant" and rid:
+            excl.add(rid); log.append(f"drop {rid}: marked not relevant")
+        for t in (f.get("tags") or []):
+            spec = _ROW_TAGS.get(str(t).strip().lower())
+            if not spec:
+                continue
+            mode, keys = spec
+            for key in keys:
+                k = schema.key(key)
+                if k is None or contract.kind not in k.kinds:
+                    continue
+                for v in (facets.get(key) or [])[:2]:
+                    nv = schema.validate_value(key, str(v))
+                    if nv is None or nv == UNKNOWN:
+                        continue
+                    c = _edit(c, key, nv, mode)
+                    log.append(f"{mode} {k.label.lower() or key}: {str(nv).replace('_', ' ')}")
+    c.exclude_ids = sorted(excl)
+    return c, list(dict.fromkeys(log))

@@ -1465,6 +1465,7 @@ class ResearchOut(BaseModel):
     jobs: list = []                  # indexed-job rows (the Q&A jobs route) — rendered as job cards, not prose
     geo_scope: dict | None = None    # LOCAL scope applied to job rows {label, counts, statement, …}
     coverage_basis: dict | None = None  # honest coverage facts for a people-enumeration answer (else None)
+    facet_nav: dict | None = None    # the Talent rail: {contract, counts, coverage, labels} over the people index (flag)
     claims: list[Citation]           # the verified findings (evidence for the answer)
     coverage_gaps: list[str]
     rejected: int
@@ -3978,6 +3979,19 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                            "or location (e.g. 'ML directors in NYC').")
             if on_event is not None:
                 await on_event({"type": "people", "count": len(res.get("people_rows") or [])})
+            # THE TALENT RAIL (spec §6/§7, flag ROSTER_FACET_EVALUATOR): the engine's compiled legacy filter,
+            # translated through the one vocabulary table, becomes the contract the rail navigates — counts
+            # over the same slice the engine filtered; applying an edit re-runs the evaluator.
+            _nav = None
+            if facet_evaluator_enabled() and res.get("kind") != "person":
+                try:
+                    from roster_vertical.facet_legacy import legacy_facets_to_contract
+                    _qf = ((res.get("coverage_basis") or {}).get("query_facets")) or {}
+                    _tr = legacy_facets_to_contract(_qf)
+                    _nav = await _facet_nav("person", text=(question_text or body.question), must=_tr["must"], prefer=_tr["prefer"],
+                                            scope={"country": scope_country} if scope_country else {})
+                except Exception:   # noqa: BLE001 — the rail is an aid; its failure never costs the answer
+                    _nav = None
             sid = None
             sstore = _store()
             if sstore is not None:
@@ -3997,7 +4011,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             return ResearchOut(
                 grounded=res.get("grounded", False), answer=answer, claims=[],
                 coverage_gaps=[], rejected=0, people_rows=res.get("people_rows") or [],
-                coverage_basis=res.get("coverage_basis"), session_id=sid), res
+                coverage_basis=res.get("coverage_basis"), facet_nav=_nav, session_id=sid), res
 
         # ---- Q&A INTENT ROUTER (flag ROSTER_QA_ROUTER, default OFF — Rule 20) ----------------
         # Classifies the question BEFORE any engine short-circuit and dispatches per
@@ -6003,10 +6017,97 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             cache[key] = c
         return {"contract": c.to_dict()}
 
+    async def _facet_nav(kind: str, *, text: str, must: dict, prefer: dict | None = None, scope: dict | None = None, limit: int = 60) -> dict | None:
+        """The rail WITHOUT rows: a validated contract + counts over its must-slice + labels (no embedding, no
+        model call; counts cached 10 min per (kind, musts) — the index moves slowly). None when the index or
+        the contract is unavailable, so a surface degrades to no rail rather than an error."""
+        from roster_kernel.facets import Contract, validate_contract
+        store = _facet_store()
+        if store is None:
+            return None
+        c = Contract(kind=kind, text=(text or "")[:500], must=dict(must or {}), prefer=dict(prefer or {}), scope=dict(scope or {}), limit=limit)
+        if validate_contract(c, _facet_schema()):
+            c = Contract(kind=kind, text=c.text, scope=c.scope, limit=limit)          # an untranslatable filter → an open rail
+        import time as _time
+        cache = getattr(app.state, "_nav_counts", None)
+        if cache is None:
+            cache = app.state._nav_counts = {}
+        key = f"{kind}:{json.dumps(c.must, sort_keys=True)}"
+        hit = cache.get(key)
+        if hit and _time.monotonic() - hit[0] < 600:
+            counts = hit[1]
+        else:
+            try:
+                counts = await store.counts(kind, c.must, _facet_schema())
+            except Exception:   # noqa: BLE001
+                return None
+            if len(cache) > 200:
+                cache.clear()
+            cache[key] = (_time.monotonic(), counts)
+        from roster_vertical.facet_schema import VALUE_LABELS
+        sch = _facet_schema()
+        return {"contract": c.to_dict(), "counts": counts, "coverage": {"pool": None},
+                "labels": {"keys": {k.key: k.label for k in sch.for_kind(kind)}, "values": VALUE_LABELS,
+                           "types": {k.key: k.type.value for k in sch.for_kind(kind) if k.navigable},
+                           "order": [k.key for k in sch.for_kind(kind) if k.navigable]}}
+
+    async def _hydrate_people(rows: list[dict]) -> list[dict]:
+        """Evaluator person rows → the people-card shape the Talent surface renders (attributes, links, citation,
+        evidence packet, linked artifacts), in evaluator order, with the evaluator's facets / match / reasons
+        riding along. Without a people store the rows keep the evaluator shape plus the card's required keys."""
+        if not rows:
+            return []
+        from api.people_population import rows_to_people
+        cs = _claim_store_cached()
+        ids = [str(r.get("id") or r.get("entity_id") or "") for r in rows]
+        cards: dict[str, dict] = {}
+        if cs is not None:
+            try:
+                raw = await cs.people_by_ids(ids)
+                cards = {p["entity_id"]: p for p in rows_to_people(raw)}
+            except Exception:   # noqa: BLE001
+                cards = {}
+        out = []
+        for r, eid in zip(rows, ids):
+            card = cards.get(eid) or {"entity_id": eid, "name": r.get("name") or eid, "blurb": "", "attributes": [], "links": [], "citation": None, "evidence": {}}
+            card = {**card, "entity_id": eid, "facets": r.get("facets") or {}, "display": r.get("display") or {}, "provenance": r.get("provenance") or {},
+                    "match_pct": r.get("match_pct"), "reasons": r.get("reasons") or [], "score": r.get("score")}
+            out.append(card)
+        if cs is not None and out:
+            try:
+                from api.artifacts import attach_artifacts
+                await attach_artifacts(cs, out)
+            except Exception:   # noqa: BLE001
+                pass
+        return out
+
     @app.post("/search/evaluate")
     async def search_evaluate(body: EvaluateIn) -> dict:
-        """Contract → rows + counts + coverage. Deterministic for a given index state (no model call)."""
-        return await _evaluate_contract(body.contract, depth=body.depth)
+        """Contract → rows + counts + coverage. Deterministic for a given index state (no model call).
+        People rows come back card-shaped (the Talent surface renders them as is)."""
+        out = await _evaluate_contract(body.contract, depth=body.depth)
+        if (body.contract or {}).get("kind") == "person":
+            out["rows"] = await _hydrate_people(out.get("rows") or [])
+        return out
+
+    @app.post("/admin/facets/project-people")
+    async def admin_facets_project_people(x_admin_token: str = Header(default="")) -> dict:
+        """Bridge the people index's pre-schema facet rows into the schema (set-based SQL, no model call,
+        idempotent): the one vocabulary table in `roster_vertical.facet_legacy` plus `evidence` from linked
+        artifacts. Re-run after people ingest; a real extraction replaces these rows key by key."""
+        want = os.environ.get("ROSTER_ADMIN_TOKEN", "")
+        if want and x_admin_token != want:
+            raise HTTPException(status_code=401, detail="admin token required")
+        from roster_vertical.facet_legacy import ARTIFACT_EVIDENCE, legacy_person_pairs
+        from api.facet_store import project_legacy_people
+        store = _facet_store(); cs = _claim_store_cached()
+        if store is None or cs is None:
+            raise HTTPException(status_code=503, detail="index unavailable")
+        await store.ensure_schema()
+        pool = await cs._get_pool()
+        written = await project_legacy_people(pool, pairs=legacy_person_pairs(), artifact_map=ARTIFACT_EVIDENCE, schema_version=_facet_schema().version())
+        app.state._nav_counts = {}; app.state._facet_cov = {}
+        return {"written": written, "schema_version": _facet_schema().version()}
 
     @app.post("/admin/facets/project-jobs")
     async def admin_facets_project_jobs(limit: int = 5000, x_admin_token: str = Header(default="")) -> dict:
@@ -6041,12 +6142,12 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             n += 1
         return {"projected": n, "schema_version": ver}
 
-    def _rows_from_eval(kind: str, out: dict) -> list[dict]:
-        """Evaluator rows → the row shape the map surfaces render (jobs: the card fields; people: as is)."""
+    async def _rows_from_eval(kind: str, out: dict) -> list[dict]:
+        """Evaluator rows → the row shape the map surfaces render (jobs: the card fields; people: hydrated cards)."""
         if kind == "jobs":
             return [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display")},
                      "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in out.get("rows") or []]
-        return list(out.get("rows") or [])
+        return await _hydrate_people(list(out.get("rows") or []))
 
     @app.post("/maps/{map_id}/navigate")
     async def map_navigate(map_id: str, body: MapNavigateIn, x_roster_token: str = Header(default="")) -> dict:
@@ -6065,7 +6166,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         cdict = dict(body.contract or base)
         cdict["kind"] = base.get("kind") or ("job" if m.get("map_type") == "jobs" else "person")
         out = await _evaluate_contract(cdict)
-        new_rows = _rows_from_eval(m.get("map_type") or "jobs", out)
+        new_rows = await _rows_from_eval(m.get("map_type") or "jobs", out)
         res = {"rows": new_rows, "counts": out["counts"], "coverage": out["coverage"], "contract": out["contract"], "labels": out.get("labels")}
         if body.save:
             if not m.get("is_owner"):
@@ -6176,7 +6277,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         is_jobs = (m.get("map_type") or "talent") == "jobs"
         if m.get("contract"):                                    # the evaluator IS the refresh
             _out = await _evaluate_contract(dict(m["contract"]))
-            new_rows = _rows_from_eval(m.get("map_type") or "jobs", _out)
+            new_rows = await _rows_from_eval(m.get("map_type") or "jobs", _out)
             new_cov = {**cov, "counts": _out["counts"], "coverage": _out["coverage"]}
             filters, brief, last = (m.get("filters") or {}), (m.get("brief") or ""), dict(m["contract"])
         elif is_jobs:
@@ -6331,7 +6432,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 if not _log:
                     raise HTTPException(status_code=400, detail="the feedback so far implies no change to the search")
                 _out = await _evaluate_contract(_new.to_dict())
-                new_rows = _rows_from_eval("jobs", _out)
+                new_rows = await _rows_from_eval("jobs", _out)
                 for j in new_rows:
                     old = rows_by_ref.get(row_ref(j))
                     if old and old.get("summary"):
@@ -6372,6 +6473,29 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         if not feedback:
             raise HTTPException(status_code=400, detail="no feedback yet — reviewers mark rows with tags or shortlist / not relevant first")
         cov = m.get("coverage") or {}
+        if m.get("contract"):
+            # TALENT CALIBRATION ON THE EVALUATOR (spec §6): card tags edit the contract through each row's own
+            # facets (prefer / avoid / exclude — never a must); the evaluator re-runs it; rows re-hydrate.
+            from roster_kernel.facets import Contract as _Contract
+            from api.facets_engine import row_tags_to_contract
+            _new, _log = row_tags_to_contract(_Contract.from_dict(m["contract"]), feedback, rows_by_id, _facet_schema())
+            contract = {"question": m.get("brief") or "", "edits": _log, "contract": _new.to_dict(), "n_feedback": len(feedback),
+                        "next_revision": len(m.get("revisions") or [])}
+            if body.preview:
+                return {"preview": True, "contract": contract}
+            if not _log:
+                raise HTTPException(status_code=400, detail="the feedback so far implies no change to the search")
+            _out = await _evaluate_contract(_new.to_dict())
+            new_rows = await _rows_from_eval("talent", _out)
+            delta = diff_rows(rows, new_rows)
+            summary = await phrase_delta(build_llm(mode=resolve_mode()), delta, _log)
+            delta_rec = {**delta, "edits": _log, "summary": summary, "contract": _new.to_dict()}
+            new_cov = {**cov, "counts": _out["counts"]}
+            rev = await ms.add_revision(map_id, owner_id=user["id"], reason="hiring_manager_feedback", brief=m.get("brief") or "",
+                                        filters=(m.get("filters") or {}), coverage=new_cov, rows=new_rows, delta=delta_rec, contract=_new.to_dict())
+            if rev is None:
+                raise HTTPException(status_code=404, detail="map not found")
+            return {"revision_id": rev, "summary": summary, "delta": delta_rec, "rows": new_rows, "coverage_basis": new_cov, "brief": m.get("brief") or ""}
         ev_kinds = list(((cov.get("evidence_filter") or {}).get("kinds")) or [])
         contract = feedback_to_contract(m.get("brief") or "", m.get("filters") or {}, ev_kinds, feedback, rows_by_id)
         contract["n_feedback"] = len(feedback)

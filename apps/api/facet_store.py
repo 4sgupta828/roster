@@ -327,3 +327,39 @@ def structural_job_facets(job: dict, *, schema_version: str, now_days: float | N
     if now_days is not None:
         facets["posted"] = [{"number": float(now_days), "display": f"{int(now_days)} days ago", "confidence": 1.0, "provenance": "ats_field"}]
     return {"schema_version": schema_version, "facets": facets}
+
+
+async def project_legacy_people(pool, *, pairs: list[tuple[str, str, str, str]], artifact_map: dict[str, str],
+                                schema_version: str, tenant_id: str = "demo") -> dict:
+    """SET-BASED projection of the people index's pre-schema rows into schema rows (spec §8 step 4 bridge —
+    no model call). For each (legacy_key, legacy_value → schema_key, schema_value) pair the matching rows
+    gain a schema row with provenance `legacy`; an entity that already holds a NON-legacy row for that key
+    (a real extraction) is left alone. The `evidence` key is derived from `rs_person_artifact` (provenance
+    `artifact`). Idempotent (ON CONFLICT DO NOTHING); returns rows written per schema key."""
+    out: dict[str, int] = {}
+    by_key: dict[str, list[tuple[str, str, str]]] = {}
+    for ok, ov, nk, nv in pairs:
+        by_key.setdefault(nk, []).append((ok, ov, nv))
+    async with pool.acquire() as conn:
+        for nk, items in by_key.items():
+            res = await conn.execute("""
+                INSERT INTO roster_entity_facet (tenant_id, entity_id, entity_kind, facet_key, facet_value_norm, display_value, confidence, provenance, schema_version, numeric_value)
+                SELECT DISTINCT f.tenant_id, f.entity_id, 'person', $2, m.nv, '', 0.5, 'legacy', $3, NULL
+                FROM roster_entity_facet f
+                JOIN unnest($4::text[], $5::text[], $6::text[]) AS m(ok, ov, nv) ON m.ok = f.facet_key AND m.ov = f.facet_value_norm
+                WHERE f.tenant_id = $1 AND f.entity_kind = 'person'
+                  AND NOT EXISTS (SELECT 1 FROM roster_entity_facet x WHERE x.tenant_id = f.tenant_id AND x.entity_id = f.entity_id
+                                  AND x.facet_key = $2 AND x.provenance <> 'legacy')
+                ON CONFLICT (tenant_id, entity_id, facet_key, facet_value_norm) DO NOTHING""",
+                tenant_id, nk, schema_version, [i[0] for i in items], [i[1] for i in items], [i[2] for i in items])
+            out[nk] = out.get(nk, 0) + int(str(res).split()[-1] or 0)
+        if artifact_map:
+            res = await conn.execute("""
+                INSERT INTO roster_entity_facet (tenant_id, entity_id, entity_kind, facet_key, facet_value_norm, display_value, confidence, provenance, schema_version, numeric_value)
+                SELECT DISTINCT $1, a.entity_id, 'person', 'evidence', m.nv, '', 1.0, 'artifact', $2, NULL
+                FROM rs_person_artifact a JOIN unnest($3::text[], $4::text[]) AS m(ok, nv) ON m.ok = a.kind
+                JOIN rs_entity e ON e.entity_id = a.entity_id AND e.kind = 'person'
+                ON CONFLICT (tenant_id, entity_id, facet_key, facet_value_norm) DO NOTHING""",
+                tenant_id, schema_version, list(artifact_map.keys()), list(artifact_map.values()))
+            out["evidence"] = int(str(res).split()[-1] or 0)
+    return out
