@@ -188,3 +188,13 @@ def test_row_tags_become_contract_edits_from_the_rows_own_facets():
     assert c.prefer.get("company") == ["acme"]                          # explicit prefer:key=value tags still work
     assert "p3" in c.exclude_ids and "p1" not in c.exclude_ids
     assert any("p3" in x or "not relevant" in x for x in log) and any("avoid field" in x for x in log)
+
+
+def test_closed_keys_only_count_and_attach_schema_legal_values():
+    """The people index wrote `function=backend` under the old vocabulary; the schema's `function` names
+    engineering / research / …. A closed key never surfaces a value the schema does not name."""
+    from api.facet_store import closed_vocab_pairs
+    open_keys, ck, cv = closed_vocab_pairs(FACET_SCHEMA, "person")
+    assert "function" in ck and ("function", "engineering") in set(zip(ck, cv)) and ("function", "backend") not in set(zip(ck, cv))
+    assert "years" in ck and ("years", "6_10") in set(zip(ck, cv))            # numeric keys are closed by band
+    assert set(open_keys) >= {"metro", "state", "country", "company", "skill", "specialty"}

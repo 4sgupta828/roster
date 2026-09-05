@@ -44,6 +44,23 @@ def via_target_key(key: str, via: str) -> str:
     return key[len(via) + 1:] if key.startswith(via + "_") else key
 
 
+def closed_vocab_pairs(schema: FacetSchema, kind: str) -> tuple[list[str], list[str], list[str]]:
+    """(open_keys, closed_keys, closed_values) for the kind's navigable own keys: a closed key (categorical /
+    ordinal vocabulary, numeric bands) only ever counts or attaches values the schema names — rows an older
+    vocabulary wrote under the same key name are invisible to the read model, never a chip."""
+    open_keys, ck, cv = [], [], []
+    for k in schema.for_kind(kind):
+        if k.via:
+            continue
+        vals = tuple(k.values) if k.values else tuple(b[0] for b in k.bands) if k.bands else ()
+        if vals:
+            for v in vals:
+                ck.append(k.key); cv.append(v)
+        else:
+            open_keys.append(k.key)
+    return open_keys, ck, cv
+
+
 class FacetSQLStore:
     def __init__(self, pool_getter, schema: FacetSchema, *, tenant_id: str = "demo", embed=None, baseline=None):
         self._pool_getter = pool_getter
@@ -116,7 +133,13 @@ class FacetSQLStore:
         fr = await conn.fetch("SELECT entity_id, facet_key, facet_value_norm, display_value, numeric_value, provenance FROM roster_entity_facet "
                               "WHERE tenant_id = $1 AND entity_id = ANY($2::text[])", self.tenant, ids)
         by: dict[str, dict] = {eid: {"facets": {}, "numeric": {}, "display": {}, "provenance": {}} for eid in ids}
+        _ok, _ck, _cv = closed_vocab_pairs(self.schema, kind)
+        _closed: dict[str, set] = {}
+        for k_, v_ in zip(_ck, _cv):
+            _closed.setdefault(k_, set()).add(v_)
         for f in fr:
+            if f["facet_key"] in _closed and f["facet_value_norm"] not in _closed[f["facet_key"]]:
+                continue                                     # an older vocabulary's value under a schema key name
             d = by[f["entity_id"]]
             d["facets"].setdefault(f["facet_key"], []).append(f["facet_value_norm"])
             if f["numeric_value"] is not None:
@@ -212,19 +235,24 @@ class FacetSQLStore:
         else:
             slice_sql = "SELECT e.entity_id FROM rs_entity e WHERE e.kind = 'person' AND e.status = 'active'" + "".join(" AND " + c for c in cl)
         nav = [k for k in schema.for_kind(kind) if k.navigable]
-        own_keys = [k.key for k in nav if not k.via]
-        args.append(own_keys); ki = len(args)
+        _open, _ck, _cv = closed_vocab_pairs(schema, kind)
+        nav_keys = {x.key for x in nav}
+        args.append([k for k in _open if k in nav_keys]); oi = len(args)
+        args.append([k for k in _ck if k in nav_keys]); cki = len(args)
+        args.append([v for k, v in zip(_ck, _cv) if k in nav_keys]); cvi = len(args)
+        ki = oi                                  # the slice's own params end before ours
+        legal = f"(f.facet_key = ANY(${oi}) OR (f.facet_key, f.facet_value_norm) IN (SELECT * FROM unnest(${cki}::text[], ${cvi}::text[])))"
         out: dict = {}
         async with pool.acquire() as conn:
             total = int(await conn.fetchval(f"SELECT count(*) FROM ({slice_sql}) s", *args[: ki - 1]) or 0)
             rows = await conn.fetch(f"""WITH s AS ({slice_sql})
                                         SELECT f.facet_key, f.facet_value_norm AS v, count(DISTINCT f.entity_id) AS n
                                         FROM roster_entity_facet f JOIN s ON s.entity_id = f.entity_id
-                                        WHERE f.facet_key = ANY(${ki}) GROUP BY 1, 2""", *args)
+                                        WHERE {legal} GROUP BY 1, 2""", *args)
             have = await conn.fetch(f"""WITH s AS ({slice_sql})
                                         SELECT f.facet_key, count(DISTINCT f.entity_id) AS n
                                         FROM roster_entity_facet f JOIN s ON s.entity_id = f.entity_id
-                                        WHERE f.facet_key = ANY(${ki}) GROUP BY 1""", *args)
+                                        WHERE {legal} GROUP BY 1""", *args)
             have_n = {r["facet_key"]: int(r["n"]) for r in have}
             for k in nav:
                 if k.via:
@@ -349,7 +377,7 @@ async def project_legacy_people(pool, *, pairs: list[tuple[str, str, str, str]],
                 JOIN unnest($4::text[], $5::text[], $6::text[]) AS m(ok, ov, nv) ON m.ok = f.facet_key AND m.ov = f.facet_value_norm
                 WHERE f.tenant_id = $1 AND f.entity_kind = 'person'
                   AND NOT EXISTS (SELECT 1 FROM roster_entity_facet x WHERE x.tenant_id = f.tenant_id AND x.entity_id = f.entity_id
-                                  AND x.facet_key = $2 AND x.provenance <> 'legacy')
+                                  AND x.facet_key = $2 AND x.provenance <> 'legacy' AND x.schema_version <> '')
                 ON CONFLICT (tenant_id, entity_id, facet_key, facet_value_norm) DO NOTHING""",
                 tenant_id, nk, schema_version, [i[0] for i in items], [i[1] for i in items], [i[2] for i in items])
             out[nk] = out.get(nk, 0) + int(str(res).split()[-1] or 0)
