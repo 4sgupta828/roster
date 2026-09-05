@@ -104,8 +104,12 @@ class IntakeService:
         if q.kind == "item":
             it = V.item(artifact, q.name)
             key, m = (it.key if it else None), (mode or (it.mode if it else "must"))
-            if key and value is not None and self.schema.validate_value(key, str(value)) is None and self.schema.key(key) and self.schema.key(key).values:
-                return apply_answer(st, q, value, contract_key=None)          # free text that is not a legal token stays an artifact answer
+            if key and value is not None:
+                vals = value if isinstance(value, (list, tuple)) else [value]
+                legal = [v for v in vals if self.schema.validate_value(key, str(v)) is not None]
+                if not legal:
+                    return apply_answer(st, q, value, contract_key=None)      # free text that is no legal token stays an artifact answer
+                return apply_answer(st, q, legal, contract_key=key, mode=m)
             return apply_answer(st, q, value, contract_key=key, mode=m)
         m = mode or ("must" if q.klass == "required" else "prefer")
         if value is not None and self.schema.validate_value(q.name, str(value)) is None:

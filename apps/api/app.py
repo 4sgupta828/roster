@@ -5997,18 +5997,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         return cached
 
     def _llm_json(system: str, user: str) -> dict:
-        """One strict-JSON model call for the facets engine (DeepSeek first, OpenAI fallback) — sync, small."""
-        import urllib.request as _ur
-        ds, oa = os.environ.get("DEEPSEEK_API_KEY"), os.environ.get("OPENAI_API_KEY")
-        endpoint, key, model = (("https://api.deepseek.com/chat/completions", ds, "deepseek-chat") if ds
-                                else ("https://api.openai.com/v1/chat/completions", oa, "gpt-4o-mini"))
-        if not key:
-            raise RuntimeError("no model key")
-        body = json.dumps({"model": model, "temperature": 0, "response_format": {"type": "json_object"},
-                           "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}).encode()
-        req = _ur.Request(endpoint, data=body, headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
-        with _ur.urlopen(req, timeout=60) as r:
-            return json.loads(json.load(r)["choices"][0]["message"]["content"])
+        """One strict-JSON model call for the facets engine / compile / intake — DeepSeek first, OpenAI on a
+        provider error, with a cooldown after 402 / 401 (`api.model_json`). Sync, small."""
+        from api.model_json import llm_json
+        return llm_json(system, user, timeout=60)
 
     async def _facet_coverage(kind: str) -> dict[str, float]:
         """Share of entities with a KNOWN value per navigable key (index-wide, cached an hour) — the number

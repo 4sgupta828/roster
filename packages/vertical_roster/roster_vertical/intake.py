@@ -128,7 +128,10 @@ def understood_words(direction: str, contract: dict, answers: dict | None = None
     prefers = [f"{L(k, v)}" for k, vs in (c.get("prefer") or {}).items() if isinstance(vs, list) for v in vs]
     parts = []
     noun = _DIRECTION_WORDS[direction]
-    parts.append(f"{noun.capitalize()} that must be " + ", ".join(musts) if musts else f"{noun.capitalize()} matching \"{(c.get('text') or '').strip()[:80]}\"")
+    a0 = answers or {}
+    who = str(a0.get("current_role") or a0.get("title") or "").strip()
+    base = (f"{noun.capitalize()} for a {who}" if who and direction == "job" else f"{noun.capitalize()} for the {who} role" if who else f"{noun.capitalize()} matching your {'profile' if direction == 'job' else 'job description'}")
+    parts.append(base + (" that must be " + ", ".join(musts) if musts else ""))
     if prefers:
         parts.append("preferring " + ", ".join(prefers))
     ctr = c.get("center") or {}

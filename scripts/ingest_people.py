@@ -261,16 +261,10 @@ async def upsert_person(conn, profile: dict, fac: dict, vec: str | None) -> None
 
 
 def _llm_json(system: str, user: str) -> dict:
-    ds, oa = os.environ.get("DEEPSEEK_API_KEY"), os.environ.get("OPENAI_API_KEY")
-    endpoint, key, model = (("https://api.deepseek.com/chat/completions", ds, "deepseek-chat") if ds
-                            else ("https://api.openai.com/v1/chat/completions", oa, "gpt-4o-mini"))
-    if not key:
-        raise RuntimeError("no model key")
-    body = json.dumps({"model": model, "temperature": 0, "response_format": {"type": "json_object"},
-                       "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}).encode()
-    req = urllib.request.Request(endpoint, data=body, headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return json.loads(json.load(r)["choices"][0]["message"]["content"])
+    """One strict-JSON model call (DeepSeek first, OpenAI on a provider error, cooldown after 402 / 401 —
+    `api.model_json`, shared with the API so a dead provider is handled in one place)."""
+    from api.model_json import llm_json
+    return llm_json(system, user, timeout=120)
 
 
 async def backfill_person_facets(conn, limit: int, *, live: bool, batch_size: int = 20) -> dict:
