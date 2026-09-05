@@ -309,8 +309,14 @@ Nothing is deleted before its replacement runs behind the flag on prod for one d
   two closed vocabularies — `roster_vertical/facet_legacy.py` (provenance `legacy`; `evidence` derived from
   `rs_person_artifact`, provenance `artifact`) via the set-based `POST /admin/facets/project-people`
   (idempotent; re-run after people ingest). The SAME table translates the old engine's compiled filter into the
-  rail's contract (`legacy_facets_to_contract`: within a legacy key only the schema keys EVERY chosen value maps
-  to become musts; the rest rank), so the rail's counts describe the slice the engine filtered.
+  rail's contract (`legacy_brief_to_contract`: the engine's HARD facets → musts — within a legacy key only the
+  schema keys EVERY chosen value maps to; its SOFT facets → prefer), so the rail's counts describe the slice the
+  engine filtered. Vocabulary collision handled in the store: the legacy `function` key (backend, medicine,
+  chemistry …) shares its NAME with the schema's `function`; `closed_vocab_pairs` makes closed keys count and
+  attach only schema-legal values, so an older vocabulary's rows are invisible to the read model.
+  Verified on prod 2026-09-05: People tab rail (desktop + 390 px), stage → Apply → hydrated cards, saved Talent
+  Map create → navigate → save-as-revision → tag → revise preview (throwaway account, deleted). Person evaluate
+  ≈ 4 s (embedding + two legs + counts); counts for the rail are cached 10 min per must-set.
   Talent surface: the first turn's rows still come from `answer_people_population` (person lookup, refinement
   turns, company guard, topic partition, evidence ranking stay there); `facet_nav` on the response carries the
   rail (counts-only, cached 10 min per must-set); Apply → `POST /search/evaluate` kind=person → rows hydrated
