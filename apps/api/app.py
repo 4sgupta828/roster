@@ -6518,6 +6518,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 brief = cached["brief"]
                 if brief.get("search_text"):
                     prefs["brief_text"] = brief["search_text"]
+                if brief.get("fields") or brief.get("field"):     # the model's read of the candidate's field(s)
+                    prefs["profile_fields"] = list(brief.get("fields") or []) + ([brief["field"]] if brief.get("field") else [])
         try:
             res = await match_resume_jobs(cstore, profile, prefs)
             if brief:

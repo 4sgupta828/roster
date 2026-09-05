@@ -37,6 +37,14 @@ import hashlib
 import json
 import logging
 import re
+
+
+def _title_term_rx(term: str) -> str:
+    """Title-term RETRIEVAL regex (string retrieval, not meaning): a SHORT token (cto, vp, ml, qa) must
+    stand as a whole word ('%cto%' once pulled 150 'director' titles and no CTO); a longer term keeps
+    prefix matching so 'engineer' still finds 'engineers' / 'engineering'."""
+    t = re.escape(str(term).strip().lower())
+    return r"(^|[^a-z0-9])" + t + (r"([^a-z0-9]|$)" if len(term.strip()) <= 4 else "")
 from datetime import date
 from typing import Any, Sequence
 
@@ -1611,7 +1619,8 @@ class ClaimGraphStore:
         for t in (terms or [])[:4]:
             t = str(t).strip().lower()
             if t:
-                conds.append(f"title_norm ILIKE ${i}"); args.append(f"%{t}%"); i += 1
+                # WHOLE-WORD title match: '%cto%' once pulled 150 'director' titles and no CTO (2026-09-05)
+                conds.append(f"title_norm ~* ${i}"); args.append(_title_term_rx(t)); i += 1
         conds.append("closed_at IS NULL")     # a posting its board no longer lists is out of search
         where = (" WHERE " + " AND ".join(conds)) if conds else ""
         # updated_at rides as a date STRING so rows stay JSON-serializable everywhere (sessions,
@@ -1634,7 +1643,8 @@ class ClaimGraphStore:
         for t in (terms or [])[:4]:
             t = str(t).strip().lower()
             if t:
-                conds.append(f"title_norm ILIKE ${i}"); args.append(f"%{t}%"); i += 1
+                # WHOLE-WORD title match: '%cto%' once pulled 150 'director' titles and no CTO (2026-09-05)
+                conds.append(f"title_norm ~* ${i}"); args.append(_title_term_rx(t)); i += 1
         sql = (f"SELECT id,company,title,location,department,url,source,to_char(updated_at,'YYYY-MM-DD') AS updated_at "
                f"FROM rs_job WHERE {' AND '.join(conds)} ORDER BY updated_at DESC LIMIT {int(cap)}")
         try:
@@ -1897,10 +1907,10 @@ class ClaimGraphStore:
         for t in (terms or [])[:6]:
             t = str(t).strip().lower()
             if t:
-                args.append("%" + t + "%"); conds.append(f"title_norm ILIKE ${len(args)}")
+                args.append(_title_term_rx(t)); conds.append(f"title_norm ~* ${len(args)}")
         if qvec:
             args.append(qvec)
-            sql = (f"SELECT id, company, title, location, department, url, source, skills, left(body, 900) AS body_head, "
+            sql = (f"SELECT id, company, title, location, department, url, source, skills, facets, left(body, 900) AS body_head, "
                    f"1 - (embedding <=> ${len(args)}::vector) AS sim FROM rs_job "
                    f"WHERE embedding IS NOT NULL AND {' AND '.join(conds)} "
                    f"ORDER BY embedding <=> ${len(args)}::vector LIMIT {int(cap)}")
@@ -1936,7 +1946,7 @@ class ClaimGraphStore:
         """Top `cap` jobs by cosine similarity to the résumé embedding, WITH the similarity score and
         id, so the caller can re-rank by user preferences (location/seniority/company-type/…)."""
         pool = await self._get_pool()
-        sql = ("SELECT id, company, title, location, department, url, source, skills, left(body, 900) AS body_head, "
+        sql = ("SELECT id, company, title, location, department, url, source, skills, facets, left(body, 900) AS body_head, "
                "1 - (embedding <=> $1::vector) AS sim "
                "FROM rs_job WHERE embedding IS NOT NULL AND closed_at IS NULL ORDER BY embedding <=> $1::vector LIMIT $2")
         try:
@@ -2048,7 +2058,8 @@ class ClaimGraphStore:
         for t in (filters.get("terms") or [])[:4]:
             t = str(t).strip().lower()
             if t:
-                conds.append(f"title_norm ILIKE ${i}"); args.append(f"%{t}%"); i += 1
+                # WHOLE-WORD title match: '%cto%' once pulled 150 'director' titles and no CTO (2026-09-05)
+                conds.append(f"title_norm ~* ${i}"); args.append(_title_term_rx(t)); i += 1
         args.append(top_n); li = i
         sql = (f"SELECT {val_expr} AS value, max({group_by}) AS display, count(*) AS n FROM rs_job "
                f"WHERE {' AND '.join(conds)} GROUP BY {val_expr} ORDER BY n DESC LIMIT ${li}")

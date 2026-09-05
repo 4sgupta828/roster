@@ -49,3 +49,52 @@ def test_a_posting_about_another_field_is_demoted_even_when_the_title_says_nothi
     # a software posting that mentions one non-software term stays a software posting
     assert family_of_body("Build our billing platform in Go; partner with the finance controller on invoicing.") == ""
     assert family_penalty(prof, "Staff Software Engineer", "Build our billing platform in Go; partner with the finance controller.") == (0.0, "")
+
+
+def test_founding_titles_count_as_leadership_level():
+    from api.people_population import _title_level
+    assert _title_level("Founding Engineer") == ("leadership", True)
+    assert _title_level("Founding CTO (New Healthcare Startup)") == ("leadership", True)
+    assert _title_level("Co-Founder & CTO") == ("leadership", True)
+
+
+def test_title_term_search_is_whole_word():
+    src = open(__file__.replace("test_match_pct.py", "claimgraph.py")).read()
+    assert "title_norm ILIKE" not in src.split("async def search_jobs(")[1].split("async def match_jobs_scored(")[0]
+
+
+def test_short_title_terms_are_whole_words_and_long_ones_keep_prefixes():
+    import re
+    from api.claimgraph import _title_term_rx
+    assert not re.search(_title_term_rx("cto"), "director of turbomachinery")
+    assert re.search(_title_term_rx("cto"), "founding cto") and re.search(_title_term_rx("cto"), "cto / vp engineering")
+    assert re.search(_title_term_rx("engineer"), "software engineers, platform") and re.search(_title_term_rx("engineer"), "director of engineering")
+    assert not re.search(_title_term_rx("engineer"), "reengineering lead")     # a left boundary still applies
+
+
+def test_model_facets_decide_field_and_level_and_regex_is_only_the_fallback():
+    from api.people_population import job_field_penalty, job_level, profile_fields
+    prof = profile_fields({"field": "software", "fields": ["software", "data_ml"]})
+    assert prof == {"software", "data_ml"}
+    # the model said the posting is mechanical engineering → demoted, worded from the taxonomy label
+    j = {"title": "Director of Turbomachinery", "facets": {"field": "mechanical_civil_electrical", "level": "leadership", "role_family": "director of engineering"}}
+    assert job_field_penalty(prof, j) == (0.20, "a different field: mechanical / civil / electrical engineering")
+    assert job_level(j) == ("leadership", True)
+    # the model said data/ML for a software profile that also lists data_ml → no penalty; hardware → a discipline nudge
+    assert job_field_penalty(prof, {"title": "x", "facets": {"field": "data_ml"}}) == (0.0, "")
+    assert job_field_penalty(prof, {"title": "x", "facets": {"field": "hardware"}})[0] == 0.10
+    # 'other' and an absent profile field never demote
+    assert job_field_penalty(prof, {"title": "x", "facets": {"field": "other"}}) == (0.0, "")
+    assert job_field_penalty(set(), j) == (0.0, "")
+    # NO facets yet → the regex fallback still catches a stated field
+    assert job_field_penalty(prof, {"title": "Senior Director, Clinical Translational Scientist"})[0] == 0.20
+    # a model 'unknown' level is not a level; a title heuristic is the fallback only without facets
+    assert job_level({"title": "Senior Engineer", "facets": {"field": "software", "level": "unknown"}}) == ("mid", False)
+    assert job_level({"title": "Senior Engineer"}) == ("senior", True)
+
+
+def test_profile_fields_fall_back_to_text_families_only_when_the_model_said_nothing():
+    from api.people_population import profile_fields
+    assert profile_fields({}, {"profile_fields": ["clinical_pharma"]}) == {"clinical_pharma"}
+    assert profile_fields({}, {}, "Founder CTO. Kubernetes, distributed systems, backend platform.") == {"software"}
+    assert profile_fields({"field": "sales"}, {}, "backend engineer") == {"sales"}          # the model's read wins over text

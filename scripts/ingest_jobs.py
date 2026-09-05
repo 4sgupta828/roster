@@ -358,6 +358,8 @@ async def ensure_checkpoint(conn) -> None:
                 "ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS last_seen_at timestamptz",
                 "ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS closed_at timestamptz",
                 "ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS posted_at text",
+                "ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS facets jsonb",
+                "CREATE INDEX IF NOT EXISTS ix_rs_job_nofacets ON rs_job (updated_at DESC) WHERE facets IS NULL AND closed_at IS NULL",
                 "CREATE INDEX IF NOT EXISTS ix_rs_job_open ON rs_job (source, company) WHERE closed_at IS NULL",
                 "ALTER TABLE rs_ingest_checkpoint ADD COLUMN IF NOT EXISTS etag text",
                 "ALTER TABLE rs_ingest_checkpoint ADD COLUMN IF NOT EXISTS company text",
@@ -498,6 +500,78 @@ async def backfill_bodies(conn, boards: int, *, live: bool) -> tuple[int, int]:
                                key, f"body_done: {w} postings")
         print(f"[live] {key:28s} {company:20s} {len(with_body):4d} bodies → {w} upserted")
     return nb, nj
+
+
+# ---- JOB FACETS — the MODEL owns meaning (owner, 2026-09-05): field / level / role family per posting ----
+JOB_FIELDS = ("software", "data_ml", "hardware", "product", "design", "clinical_pharma", "finance", "sales",
+              "marketing", "legal", "people_hr", "operations", "mechanical_civil_electrical", "research", "other")
+JOB_LEVELS = ("intern", "junior", "mid", "senior", "staff_plus", "leadership", "unknown")
+_FACET_SYS = ("You classify job postings. For EACH posting return {\"i\": index, \"field\": one of [" + " | ".join(JOB_FIELDS)
+              + "], \"level\": one of [" + " | ".join(JOB_LEVELS) + "], \"role_family\": a short normalized role phrase in plain "
+              "lowercase words (e.g. 'software engineer', 'cto', 'founding engineer', 'clinical scientist', 'account executive')}. "
+              "field = the discipline the ROLE belongs to (a 'Director of Turbomachinery' is mechanical_civil_electrical; a 'Clinical "
+              "Translational Scientist' is clinical_pharma; a 'Field CTO' at a software vendor is sales). level = what the title and "
+              "text state: founder / CTO / VP / director / head of = leadership; principal / staff / distinguished = staff_plus; "
+              "unstated = unknown. Return STRICT JSON: {\"items\": [...]} with every index present.")
+
+
+def extract_job_facets(batch: list[dict]) -> list[dict]:
+    """ONE model call per batch of postings → [{field, level, role_family}] aligned to the batch. DeepSeek
+    first (cheap), OpenAI gpt-4o-mini fallback. Fail-safe: [] on any error (rows stay facet-less and are
+    retried next pass)."""
+    ds, oa = os.environ.get("DEEPSEEK_API_KEY"), os.environ.get("OPENAI_API_KEY")
+    if ds:
+        endpoint, key, model = "https://api.deepseek.com/chat/completions", ds, "deepseek-chat"
+    elif oa:
+        endpoint, key, model = "https://api.openai.com/v1/chat/completions", oa, "gpt-4o-mini"
+    else:
+        return []
+    lines = [{"i": i, "title": (r.get("title") or "")[:120], "company": (r.get("company") or "")[:60],
+              "department": (r.get("department") or "")[:60], "excerpt": (r.get("body") or "")[:320]} for i, r in enumerate(batch)]
+    try:
+        body = json.dumps({"model": model, "temperature": 0, "response_format": {"type": "json_object"},
+                           "messages": [{"role": "system", "content": _FACET_SYS},
+                                        {"role": "user", "content": json.dumps({"postings": lines})}]}).encode()
+        req = urllib.request.Request(endpoint, data=body, headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=90) as r:
+            txt = json.load(r)["choices"][0]["message"]["content"]
+        items = json.loads(txt).get("items") or []
+    except Exception as e:   # noqa: BLE001
+        print(f"  ! facet batch failed: {e}", file=sys.stderr)
+        return []
+    out = [{} for _ in batch]
+    for it in items:
+        try:
+            i = int(it.get("i"))
+        except Exception:   # noqa: BLE001
+            continue
+        if 0 <= i < len(batch):
+            f = str(it.get("field") or "").strip().lower(); lv = str(it.get("level") or "").strip().lower()
+            out[i] = {"field": f if f in JOB_FIELDS else "other", "level": lv if lv in JOB_LEVELS else "unknown",
+                      "role_family": re.sub(r"[^a-z0-9 ]+", " ", str(it.get("role_family") or "").lower()).strip()[:60]}
+    return out
+
+
+async def backfill_facets(conn, limit: int, *, live: bool, batch_size: int = 25) -> dict:
+    """Give up to N open postings without facets their model facets, newest first. ~25 postings per
+    call; a failed batch is skipped (retried next pass). Cost ≈ $0.02 per 1k postings (DeepSeek)."""
+    rows = await conn.fetch("SELECT id, title, company, department, left(body, 400) AS body FROM rs_job "
+                            "WHERE facets IS NULL AND closed_at IS NULL ORDER BY updated_at DESC LIMIT $1", int(limit))
+    st = {"rows": len(rows), "written": 0, "calls": 0, "failed_batches": 0}
+    for i in range(0, len(rows), batch_size):
+        chunk = [dict(r) for r in rows[i:i + batch_size]]
+        if not live:
+            continue
+        facets = extract_job_facets(chunk); st["calls"] += 1
+        if not facets:
+            st["failed_batches"] += 1; continue
+        async with conn.transaction():
+            for r, f in zip(chunk, facets):
+                if f:
+                    await conn.execute("UPDATE rs_job SET facets = $2::jsonb WHERE id = $1", r["id"], json.dumps(f)); st["written"] += 1
+        if (i // batch_size) % 20 == 19:
+            print(f"  facets: {st['written']}/{len(rows)}", flush=True)
+    return st
 
 
 # ---- REFRESH: keep already-ingested boards current at near-zero cost ----
@@ -655,6 +729,9 @@ async def main() -> None:
                     help="BODY mode: refetch up to N already-done Greenhouse/Ashby/Lever boards WITH posting "
                          "content, store body + skills, re-embed those rows (title + body excerpt). Resumable: "
                          "boards whose rows all carry a body are skipped.")
+    ap.add_argument("--facets", type=int, default=0,
+                    help="FACETS mode: give up to N open postings without model facets their field / level / role family "
+                         "(one LLM call per 25 postings; newest first; resumable)")
     ap.add_argument("--refresh-boards", type=int, default=0,
                     help="REFRESH mode: re-check up to N due Greenhouse/Ashby/Lever boards conditionally (ETag → 304 when "
                          "unchanged); new postings embedded + inserted, vanished ones closed; adaptive cadence per board")
@@ -694,6 +771,14 @@ async def main() -> None:
         finally:
             await conn.close()
         print(f"backfill: embedded {n} jobs (~${n * 20 / 1_000_000 * 0.02:.4f})")
+        return
+    if args.facets:
+        try:
+            await ensure_checkpoint(conn)
+            st = await backfill_facets(conn, args.facets, live=live)
+        finally:
+            await conn.close()
+        print(f"facets: {st}{' (dry — nothing written)' if not live else ''} (~${st['calls'] * 0.0006:.3f} model calls)")
         return
     if args.refresh_boards:
         try:

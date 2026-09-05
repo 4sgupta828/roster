@@ -91,6 +91,19 @@ def _jobs_refresh_loop(boards: int, pause: int) -> None:
         time.sleep(pause)
 
 
+def _job_facets_loop(rows: int, pause: int) -> None:
+    """JOB FACETS (the model owns meaning): postings without field / level / role family get them, newest
+    first, `rows` per pass. Spend ≈ $0.02 per 1k postings — the knob ROSTER_BULK_JOB_FACETS is the gate."""
+    while True:
+        try:
+            stopped = asyncio.run(_is_stopped())
+        except Exception:   # noqa: BLE001
+            stopped = False
+        if not stopped:
+            _run_chunk(["scripts/ingest_jobs.py", "--live", "--facets", str(rows)])
+        time.sleep(pause)
+
+
 def run_bulk_ingest_loop() -> None:
     people_on = os.environ.get("ROSTER_BULK_INGEST_PEOPLE", "").lower() in ("1", "true", "yes")
     import threading
@@ -98,6 +111,10 @@ def run_bulk_ingest_loop() -> None:
     if body_boards:
         threading.Thread(target=_body_backfill_loop, args=(body_boards, 30), daemon=True, name="body-backfill").start()
         print(f"[bulk] body backfill thread started — {body_boards} boards per chunk, back to back", flush=True)
+    facet_rows = int(os.environ.get("ROSTER_BULK_JOB_FACETS", "0") or 0)   # opt-in: model facets per pass (spend)
+    if facet_rows:
+        threading.Thread(target=_job_facets_loop, args=(facet_rows, 60), daemon=True, name="job-facets").start()
+        print(f"[bulk] job facets thread started — {facet_rows} postings per pass", flush=True)
     refresh_boards = int(os.environ.get("ROSTER_BULK_REFRESH_BOARDS", "0") or 0)   # opt-in knob (validated on prod first)
     if refresh_boards:
         threading.Thread(target=_jobs_refresh_loop, args=(refresh_boards, 120), daemon=True, name="jobs-refresh").start()

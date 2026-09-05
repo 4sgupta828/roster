@@ -116,7 +116,7 @@ _SEN_RE = [
     (re.compile(r"\b(intern|internship|co-?op)\b", re.I), "intern"),
     (re.compile(r"\b(junior|jr\.?|entry[- ]?level|new ?grad|graduate|associate)\b", re.I), "junior"),
     (re.compile(r"\b(principal|staff|distinguished|fellow)\b", re.I), "staff_plus"),
-    (re.compile(r"\b(director|vp|vice ?president|head of|chief|cto|ceo|cfo)\b", re.I), "leadership"),
+    (re.compile(r"\b(director|vp|vice ?president|head of|chief|cto|ceo|cfo|founder|founding|co-?founder)\b", re.I), "leadership"),
     (re.compile(r"\b(senior|sr\.?|lead)\b", re.I), "senior"),
 ]
 def _title_seniority(title: str) -> str:
@@ -158,6 +158,150 @@ _FAMILY_RX = {
     "mechanical / civil / electrical": re.compile(r"\b(mechanical engineer\w*|civil engineer\w*|structural engineer\w*|electrical engineer\w*|hvac|manufacturing engineer\w*|process engineer\w*|quality engineer\w*|turbomachinery|turbine\w*|propulsion|aerospace|aerodynamic\w*|combustion|thermodynamic\w*|rotor\w*|compressor\w*|piping|solidworks|ansys|cad design\w*|mechanical design|power electronics|pcb)\b", re.I),
 }
 _TECH_FAMILIES = {"backend / infra", "frontend", "mobile", "security", "data / ML", "QA / test", "hardware"}
+
+# FIELD TAXONOMY (owner, 2026-09-05: "meaning-based match via LLM; regex only as fallback"). The model
+# picks a posting's / a profile's field from this list (vocabulary supplied to it, never matched by
+# pattern); matching compares the two choices. The regex families above remain ONLY the fallback for a
+# posting that has no model facets yet.
+JOB_FIELDS = ("software", "data_ml", "hardware", "product", "design", "clinical_pharma", "finance", "sales",
+              "marketing", "legal", "people_hr", "operations", "mechanical_civil_electrical", "research", "other")
+FIELD_LABELS = {"software": "software engineering", "data_ml": "data / ML", "hardware": "hardware", "product": "product management",
+                "design": "design", "clinical_pharma": "clinical / pharma", "finance": "finance / accounting", "sales": "sales",
+                "marketing": "marketing", "legal": "legal", "people_hr": "people / HR", "operations": "operations / supply chain",
+                "mechanical_civil_electrical": "mechanical / civil / electrical engineering", "research": "research / science", "other": "other"}
+_TECH_FIELDS = {"software", "data_ml", "hardware"}
+JOB_LEVELS = ("intern", "junior", "mid", "senior", "staff_plus", "leadership")
+_REGEX_FAMILY_TO_FIELD = {"backend / infra": "software", "frontend": "software", "mobile": "software", "security": "software",
+                          "QA / test": "software", "data / ML": "data_ml", "hardware": "hardware", "clinical / pharma": "clinical_pharma",
+                          "finance / accounting": "finance", "sales": "sales", "marketing": "marketing", "legal": "legal",
+                          "people / HR": "people_hr", "operations / supply chain": "operations", "design": "design",
+                          "mechanical / civil / electrical": "mechanical_civil_electrical"}
+
+
+def profile_fields(profile: dict | None, prefs: dict | None = None, text: str = "") -> set[str]:
+    """The FIELDS a profile is in, model-first: the résumé parser's `field`/`fields`, the cached candidate
+    brief's `fields` (prefs['profile_fields']); regex families over the text only when the model said nothing."""
+    out: set[str] = set()
+    for src in ((profile or {}).get("fields") or []), ((prefs or {}).get("profile_fields") or []), [(profile or {}).get("field") or ""]:
+        for f in src:
+            f = str(f or "").strip().lower()
+            if f in JOB_FIELDS and f != "other":
+                out.add(f)
+    if not out and text:
+        out = {_REGEX_FAMILY_TO_FIELD[f] for f in text_families(text) if f in _REGEX_FAMILY_TO_FIELD}
+    return out
+
+
+def job_facets(j: dict) -> dict:
+    f = j.get("facets") if isinstance(j, dict) else None
+    if isinstance(f, str):
+        try:
+            import json as _json
+            f = _json.loads(f)
+        except Exception:   # noqa: BLE001
+            f = None
+    return f if isinstance(f, dict) else {}
+
+
+def job_level(j: dict) -> tuple[str, bool]:
+    """(level, known) — the model's level for the posting when it has facets; the title heuristic only as fallback."""
+    lv = str(job_facets(j).get("level") or "").strip().lower()
+    if lv in JOB_LEVELS:
+        return lv, True
+    if job_facets(j) and lv == "unknown":
+        return "mid", False
+    return _title_level(j.get("title") or "")
+
+
+def job_field_penalty(prof_fields: set[str], j: dict) -> tuple[float, str]:
+    """(penalty, reason) when a posting is in a field the profile is not: model facets first; the regex
+    families (title, then body) only for a posting that has no facets yet. A different field entirely
+    costs 0.20; another tech discipline (software vs data/ML vs hardware) 0.10. Never a gate."""
+    if not prof_fields:
+        return 0.0, ""
+    jf = job_facets(j)
+    field = str(jf.get("field") or "").strip().lower()
+    if field in JOB_FIELDS:
+        if field == "other" or field in prof_fields:
+            return 0.0, ""
+        if field in _TECH_FIELDS and prof_fields & _TECH_FIELDS:
+            return 0.10, f"a different discipline: {FIELD_LABELS[field]}"
+        return 0.20, f"a different field: {FIELD_LABELS[field]}"
+    # FALLBACK (no model facets on this row yet)
+    fam_prof = {f for f, fld in _REGEX_FAMILY_TO_FIELD.items() if fld in prof_fields}
+    return family_penalty(fam_prof, j.get("title") or "", str(j.get("body_head") or ""))
+
+# FIELD TAXONOMY (owner, 2026-09-05: "meaning-based match via LLM; regex only as fallback"). The model
+# picks a posting's / a profile's field from this list (vocabulary supplied to it, never matched by
+# pattern); matching compares the two choices. The regex families above remain ONLY the fallback for a
+# posting that has no model facets yet.
+JOB_FIELDS = ("software", "data_ml", "hardware", "product", "design", "clinical_pharma", "finance", "sales",
+              "marketing", "legal", "people_hr", "operations", "mechanical_civil_electrical", "research", "other")
+FIELD_LABELS = {"software": "software engineering", "data_ml": "data / ML", "hardware": "hardware", "product": "product management",
+                "design": "design", "clinical_pharma": "clinical / pharma", "finance": "finance / accounting", "sales": "sales",
+                "marketing": "marketing", "legal": "legal", "people_hr": "people / HR", "operations": "operations / supply chain",
+                "mechanical_civil_electrical": "mechanical / civil / electrical engineering", "research": "research / science", "other": "other"}
+_TECH_FIELDS = {"software", "data_ml", "hardware"}
+JOB_LEVELS = ("intern", "junior", "mid", "senior", "staff_plus", "leadership")
+_REGEX_FAMILY_TO_FIELD = {"backend / infra": "software", "frontend": "software", "mobile": "software", "security": "software",
+                          "QA / test": "software", "data / ML": "data_ml", "hardware": "hardware", "clinical / pharma": "clinical_pharma",
+                          "finance / accounting": "finance", "sales": "sales", "marketing": "marketing", "legal": "legal",
+                          "people / HR": "people_hr", "operations / supply chain": "operations", "design": "design",
+                          "mechanical / civil / electrical": "mechanical_civil_electrical"}
+
+
+def profile_fields(profile: dict | None, prefs: dict | None = None, text: str = "") -> set[str]:
+    """The FIELDS a profile is in, model-first: the résumé parser's `field`/`fields`, the cached candidate
+    brief's `fields` (prefs['profile_fields']); regex families over the text only when the model said nothing."""
+    out: set[str] = set()
+    for src in ((profile or {}).get("fields") or []), ((prefs or {}).get("profile_fields") or []), [(profile or {}).get("field") or ""]:
+        for f in src:
+            f = str(f or "").strip().lower()
+            if f in JOB_FIELDS and f != "other":
+                out.add(f)
+    if not out and text:
+        out = {_REGEX_FAMILY_TO_FIELD[f] for f in text_families(text) if f in _REGEX_FAMILY_TO_FIELD}
+    return out
+
+
+def job_facets(j: dict) -> dict:
+    f = j.get("facets") if isinstance(j, dict) else None
+    if isinstance(f, str):
+        try:
+            import json as _json
+            f = _json.loads(f)
+        except Exception:   # noqa: BLE001
+            f = None
+    return f if isinstance(f, dict) else {}
+
+
+def job_level(j: dict) -> tuple[str, bool]:
+    """(level, known) — the model's level for the posting when it has facets; the title heuristic only as fallback."""
+    lv = str(job_facets(j).get("level") or "").strip().lower()
+    if lv in JOB_LEVELS:
+        return lv, True
+    if job_facets(j) and lv == "unknown":
+        return "mid", False
+    return _title_level(j.get("title") or "")
+
+
+def job_field_penalty(prof_fields: set[str], j: dict) -> tuple[float, str]:
+    """(penalty, reason) when a posting is in a field the profile is not: model facets first; the regex
+    families (title, then body) only for a posting that has no facets yet. A different field entirely
+    costs 0.20; another tech discipline (software vs data/ML vs hardware) 0.10. Never a gate."""
+    if not prof_fields:
+        return 0.0, ""
+    jf = job_facets(j)
+    field = str(jf.get("field") or "").strip().lower()
+    if field in JOB_FIELDS:
+        if field == "other" or field in prof_fields:
+            return 0.0, ""
+        if field in _TECH_FIELDS and prof_fields & _TECH_FIELDS:
+            return 0.10, f"a different discipline: {FIELD_LABELS[field]}"
+        return 0.20, f"a different field: {FIELD_LABELS[field]}"
+    # FALLBACK (no model facets on this row yet)
+    fam_prof = {f for f, fld in _REGEX_FAMILY_TO_FIELD.items() if fld in prof_fields}
+    return family_penalty(fam_prof, j.get("title") or "", str(j.get("body_head") or ""))
 
 
 _BODY_FAMILIES = ("clinical / pharma", "mechanical / civil / electrical", "finance / accounting", "legal")
@@ -351,7 +495,7 @@ def apply_level_pref(rows: list[dict], level: str, *, kind: str, span: int = 1) 
     for r in rows:
         if kind == "job":
             t = r.get("title") or ""
-            lvl, known = _title_level(t)
+            lvl, known = job_level(r)
             b = level_bucket(lvl) if known else ""
             if not b and re.search(r"(?i)\bmanager\b", t) and not re.search(r"(?i)\b(account|technical account|program|project|community|office)\s+manager\b", t):
                 b = "exec"
@@ -603,7 +747,7 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
         qtext = (brief_text + "\n\n" + qtext).strip() if qtext else brief_text
     if not qtext:
         return {"jobs": [], "note": "Add or parse a résumé first — no profile content to match on."}
-    _prof_fams = text_families(qtext)          # the disciplines the profile itself names (for the soft family demotion)
+    _prof_fields = profile_fields(profile, prefs, qtext)   # model-named fields first; regex families only as fallback
     _prof_skills = set(profile_skills(qtext, limit=30))   # the skills the profile names (matched against posting bodies)
     qvec = embed_query(qtext)
     if not qvec:
@@ -692,13 +836,13 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
             score += 0.15; reasons.append("remote")
         if locs and any(l in loc for l in locs):
             score += 0.15; reasons.append("location")
-        jsen, _jsen_known = _title_level(title)
+        jsen, _jsen_known = job_level(j)                 # the model's level when the posting has facets
         if want_sens and _jsen_known and jsen in want_sens:
             score += 0.12; reasons.append(f"{jsen.replace('_', ' ')} level")
         # SOFT family demotion (never a gate): a title that STATES a different discipline from the
         # profile's ("SDE I - Frontend", "Security Engineer" for a backend/SRE profile) moves down with
         # the reason shown; unstated titles ("Software Engineer") are left alone — titles vary by company.
-        _fam_pen, _fam_why = family_penalty(_prof_fams, title, str(j.get("body_head") or ""))
+        _fam_pen, _fam_why = job_field_penalty(_prof_fields, j)
         if _fam_pen:
             score -= _fam_pen; reasons.append(_fam_why)
         _jsk = [str(x) for x in (j.get("skills") or []) if x]
@@ -716,7 +860,9 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
             score -= 0.10; reasons.append("location ranked down")
         if avoid_mode and any(m in loc for m in avoid_mode):
             score -= 0.10; reasons.append("work mode ranked down")
-        if role_kw and any(re.search(r"(?<![a-z0-9])" + re.escape(k) + r"(?![a-z0-9])", title.lower()) for k in role_kw):
+        _rf = str(job_facets(j).get("role_family") or "").replace("_", " ").strip().lower()
+        if role_kw and ((_rf and any(_rf == k or _rf in k or k in _rf for k in role_kw))
+                        or any(re.search(r"(?<![a-z0-9])" + re.escape(k) + r"(?![a-z0-9])", title.lower()) for k in role_kw)):
             score += 0.10; reasons.append("role match")
         if "f500" in want and is_f500:
             score += 0.12; reasons.append("Fortune 500")
@@ -976,6 +1122,10 @@ class _CandidateBrief(BaseModel):
     target_roles: list[str] = []         # roles a recruiter would pitch them for (canonical, snake_case)
     seniority: str = ""                  # intern|junior|mid|senior|staff|principal|lead|manager|director|vp|c_level
     search_text: str = ""                # a rich recency-weighted paragraph — the query used to find jobs
+    field: str = ""                      # the candidate's field, one of JOB_FIELDS
+    fields: list[str] = []               # every field they credibly fit (primary first), from JOB_FIELDS
+    field: str = ""                      # the candidate's field, one of JOB_FIELDS
+    fields: list[str] = []               # every field they credibly fit (primary first), from JOB_FIELDS
 
 
 async def build_candidate_brief(resume_text: str, profile: dict, llm) -> dict | None:
@@ -1016,7 +1166,9 @@ async def build_candidate_brief(resume_text: str, profile: dict, llm) -> dict | 
                 "— team size, IC vs manager), key_contributions (what they built/shipped), major_achievements "
                 "(impact/scale/outcomes). target_roles: 3–6 job-title phrases a recruiter would pitch them for, "
                 "in PLAIN lowercase words (e.g. 'staff machine learning engineer', 'ml infrastructure lead') — "
-                f"NOT snake_case. seniority: EXACTLY ONE of [{_SEN}] — no other value. search_text: a rich 4–8 "
+                f"NOT snake_case. seniority: EXACTLY ONE of [{_SEN}] — no other value. field: the candidate's field, "
+                f"EXACTLY ONE of [{' | '.join(JOB_FIELDS)}]; fields: every field they credibly fit from that same list, "
+                "primary first (a CTO who codes: software first, then data_ml if they built ML). search_text: a rich 4–8 "
                 "sentence paragraph capturing the SOUL of this candidate (recent focus, strengths, level, "
                 "domains) — the query used to retrieve matching jobs, so make it dense with the signal a great "
                 "match shares. Ground everything in the résumé; do not invent."),
@@ -1034,6 +1186,8 @@ async def build_candidate_brief(resume_text: str, profile: dict, llm) -> dict | 
                 # against job titles, so a leaked 'staff_ml_engineer' must still become 'staff ml engineer'.
                 "target_roles": [str(r).strip().lower().replace("_", " ") for r in (b.target_roles or []) if str(r).strip()][:6],
                 "seniority": sen if sen in _SEN_OK else "",
+                "field": (str(b.field or "").strip().lower() if str(b.field or "").strip().lower() in JOB_FIELDS else ""),
+                "fields": [str(f).strip().lower() for f in (b.fields or []) if str(f).strip().lower() in JOB_FIELDS][:4],
                 "search_text": (b.search_text or "").strip()}
     except Exception as e:   # noqa: BLE001 — never break matching; fall back to raw résumé
         _log.warning("build_candidate_brief failed: %s", e)
@@ -2024,6 +2178,10 @@ class _JobPlan(BaseModel):
     company: list[str] = []
     seniority: str = ""
     location: str = ""
+    field: str = ""                  # the field the seeker wants, one of JOB_FIELDS ('' if unstated)
+    level: str = ""                  # the level, one of JOB_LEVELS ('' if unstated)
+    field: str = ""                  # the field the seeker wants, one of JOB_FIELDS ('' if unstated)
+    level: str = ""                  # the level, one of JOB_LEVELS ('' if unstated)
 
 
 async def _llm_job_plan(question: str, llm) -> dict:
@@ -2034,7 +2192,9 @@ async def _llm_job_plan(question: str, llm) -> dict:
         "platform engineer','MLOps engineer','distributed training engineer']). `must_have` (2-4 key "
         "terms a strong match's TITLE should contain). `company` (member companies if a GROUP is named "
         "e.g. FAANG/big tech, else []). `seniority` (senior/staff/leadership/… or ''). `location` (a "
-        "city, 'remote', or ''). JSON only.\n\nQuery: " + question)
+        f"city, 'remote', or ''). `field`: the FIELD the seeker wants, exactly one of [{' | '.join(JOB_FIELDS)}] or ''. "
+        f"`level`: exactly one of [{' | '.join(JOB_LEVELS)}] or '' (a founder / CTO / VP / head-of query is leadership). "
+        "JSON only.\n\nQuery: " + question)
     try:
         comp = await llm.complete(system="You plan an intelligent, multi-angle job search. Return only the object.",
                                   messages=[{"role": "user", "content": prompt}],
@@ -2044,9 +2204,11 @@ async def _llm_job_plan(question: str, llm) -> dict:
                 "variants": [str(v).strip() for v in (p.query_variants or []) if str(v).strip()][:5],
                 "must_have": [str(m).strip().lower() for m in (p.must_have or []) if str(m).strip()][:4],
                 "company": [str(c).strip().lower().replace(" ", "_") for c in (p.company or []) if str(c).strip()],
-                "seniority": (p.seniority or "").strip().lower(), "location": (p.location or "").strip()}
+                "seniority": (p.seniority or "").strip().lower(), "location": (p.location or "").strip(),
+                "field": (str(p.field or "").strip().lower() if str(p.field or "").strip().lower() in JOB_FIELDS else ""),
+                "level": (str(p.level or "").strip().lower() if str(p.level or "").strip().lower() in JOB_LEVELS else "")}
     except Exception:   # noqa: BLE001
-        return {"intent": "", "variants": [], "must_have": [], "company": [], "seniority": "", "location": ""}
+        return {"intent": "", "variants": [], "must_have": [], "company": [], "seniority": "", "location": "", "field": "", "level": ""}
 
 
 async def agentic_job_search(store, question: str, llm, country: str = "us") -> dict:
@@ -2079,8 +2241,9 @@ async def agentic_job_search(store, question: str, llm, country: str = "us") -> 
     # SENIORITY the seeker stated ("senior", "staff", "new grad") RANKS: a title that states the wanted
     # level moves up; a title that states a clearly different level moves down; an unmarked title is
     # unknown and moves nowhere (never a confident 'mid').
-    want_lv = wanted_levels(plan.get("seniority") or "")
+    want_lv = wanted_levels(plan.get("seniority") or "") | ({plan["level"]} if plan.get("level") else set())
     _ORDER = {"intern": 0, "junior": 1, "mid": 2, "senior": 3, "staff_plus": 4, "leadership": 5}
+    _want_fields = {plan["field"]} if plan.get("field") else profile_fields(None, None, question)
     out, dropped = [], 0
     for e in pool.values():
         j = e["job"]; loc = (j.get("location") or "").lower(); title_l = (j.get("title") or "").lower()
@@ -2093,14 +2256,17 @@ async def agentic_job_search(store, question: str, llm, country: str = "us") -> 
             score += 0.08 * len(hits); reasons.append("matches " + ", ".join(hits))
         if e["legs"] > 1:
             reasons.append(f"{e['legs']} search angles")
-        lvl, known = _title_level(j.get("title") or "")
+        lvl, known = job_level(j)
         if want_lv and known:
             if lvl in want_lv:
                 score += 0.06; reasons.append(f"{lvl.replace('_', ' ')} level")
             elif min(abs(_ORDER.get(lvl, 2) - _ORDER.get(w, 2)) for w in want_lv) >= 2:
                 score -= 0.08; reasons.append(f"title says {lvl.replace('_', ' ')}")
+        _fpen, _fwhy = job_field_penalty(_want_fields, j)
+        if _fpen:
+            score -= _fpen; reasons.append(_fwhy)
         out.append({**{k: j.get(k) for k in ("id", "company", "title", "location", "url", "source")},
-                    "score": round(score, 4), "match_pct": calibrated_pct(e["best"]), "reasons": reasons,
+                    "score": round(score, 4), "match_pct": calibrated_pct(e["best"] - _fpen), "reasons": reasons,
                     "seniority": (lvl if known else ""), "level_source": ("title" if known else "unknown")})
     out.sort(key=lambda x: -x["score"])
     note = ((f"{want_country.upper()} only · " if want_country else "")
