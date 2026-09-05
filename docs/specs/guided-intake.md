@@ -74,10 +74,51 @@ artifact stage asks them to sign in when they want a résumé or a JD kept.
 | **Profile** | job search | résumé on file (`roster_candidate_profile.parsed_profile`) → attachment this session (parsed, offered to save as the Apply résumé) → a self-description typed in the intake (`is_self_description` path → parsed into the profile shape, offered to save) | existing table |
 | **Job description** | candidate search | pasted JD / URL (the `Find candidates` inputs; the URL path fetches the posting) → one of the user's company's own live postings in the index (search by company) → DRAFTED from the centre of peer postings + the user's answers (§4) | new `roster_brief` (kind `jd`) |
 
-Artifact QUALITY gate (not just presence): the compile must yield the REQUIRED keys for the direction from the
-artifact + the words; each still-unknown required key becomes one question. `roster_brief`: `id, user_id, kind,
-title, text, structured jsonb (contract + extracted facets), sources jsonb (posting ids + per-line support),
-created_at, updated_at`. v1: overwrite on save, with the prior text kept in `structured.history[]`.
+### 2.1 Completeness — an artifact is present AND complete (owner, 2026-09-05)
+
+Presence is not enough: a résumé can be terse or silent on the things a search turns on; a pasted JD can omit
+the level, the location, the comp, or the one skill the hiring manager actually cares about. Each artifact
+kind carries a COMPLETENESS CHECKLIST (vertical-owned vocabulary; the schema's keys plus a few artifact-only
+items). The gap read is the model's (meaning), the gate is code's (which items are required):
+
+| Artifact | Checklist items (required in bold) | Where an answer goes |
+|---|---|---|
+| Profile | **current title / role**, **level**, **years**, **field / function**, **top skills (≥ 3)**, **location + work-mode wants**, **comp expectation (band)**, target level, target company types, must-avoid (industries, on-site), notable work (repos / papers / talks), authorization | facts → the profile record (`parsed_profile`), wants → the contract (comp → `must comp ≥ band` or `prefer`; level target → `center`; work mode / geo → `must`) |
+| JD | **title**, **level**, **location + work mode**, **must-have skills (≥ 3)**, **responsibilities (≥ 2)**, **comp range or "not disclosed"**, team / reporting line, nice-to-haves, evidence wanted (repos / papers), disqualifiers, company context (stage / type) | the JD text and its `structured` facets → the candidate-search contract |
+
+Flow: after ARTIFACT, one model read returns `{present: {item: value}, missing: [items], weak: [items]}` over
+the artifact text (a résumé's "5 years at Acme, backend" fills years / field; a one-line JD leaves most items
+missing). Missing REQUIRED items are asked first, one at a time, options from counts where the item is a
+schema key (comp bands, levels, metros) and free text otherwise; ask budget for artifact gaps: ≤ 4, then the
+contract questions (§3) with their own ≤ 2 + 2. "Search now" always ends it. Weak items are not asked — they
+show on the ready card as "you could add …".
+
+Salary: for a job seeker the comp expectation is a REQUIRED want (band chips from the jobs `comp` counts,
+"prefer not to say" allowed → no constraint); for a hiring manager the comp range is REQUIRED for the JD (a
+range, or "not disclosed" — the peers' market signal is shown beside the question, labeled as signal).
+
+### 2.2 Improve and save — a better résumé or JD, kept on the account
+
+At READY the intake offers, never imposes: "Want a fuller version of your résumé / JD with what you told me?
+I'll save it to your account." One model call rewrites the artifact in the vertical's template using ONLY the
+original text plus the user's answers — nothing invented; each added line is marked "from this conversation"
+in a diff view the user reads before saving. Saved as `roster_brief` rows:
+
+`roster_brief`: `id, user_id, kind (jd | resume), title, role_key, text, structured jsonb (contract +
+extracted facets + checklist state), sources jsonb (peer posting ids + per-line support, or "conversation"),
+version int, active bool, created_at, updated_at`.
+
+- **Résumé:** the improved text becomes the Apply profile's résumé on file when the user says so (the
+  original is kept as version 1; `roster_candidate_profile` points at the active version). Job search and 🚀
+  Apply read the active one.
+- **Multiple JDs:** a hiring manager keeps one row per kind of hire. `role_key` = `<field>/<function>/<level>/
+  <slug(title)>` (from the JD's own facets), unique with `user_id`; a new JD with the same key becomes the next
+  version of that row, a different key is a new hire. The intake ASKS which JD when the account holds more
+  than one ("Is this the senior payments backend hire, the ML platform lead, or a new role?"), lists them with
+  their pool sizes, and the chosen one is the artifact. Saved Talent Maps carry `brief_id`; the JD card in
+  Account lists each JD with its maps and a "find candidates" button.
+
+v1: overwrite = new version; no branching.
 
 ---
 
@@ -85,12 +126,15 @@ created_at, updated_at`. v1: overwrite on save, with the prior text kept in `str
 
 ```
 DIRECTION  job (I am looking) | candidate (I am hiring)          — "both" = one direction now, the other offered after
-ARTIFACT   required artifact present and parsed?  missing → collect (attach / describe / paste / draft)
-COMPILE    artifact + words → Contract (compile_contract, cached) ; counts over the must-slice via store.counts
+ARTIFACT   required artifact present and parsed?  missing → collect (attach / describe / paste / draft);
+           several JDs on the account → ask which (or "a new role")
+GAPS       completeness read (§2.1) → missing REQUIRED checklist items asked one at a time, ≤ 4
+COMPILE    artifact + answers + words → Contract (compile_contract, cached) ; counts over the must-slice via store.counts
            (_facet_nav) — NEVER evaluate(): that runs the embedding + semantic leg; counts need no rows
 REQUIRED   still-unknown required keys → one question each (options = the top counts), ≤ 2
 OPTIONAL   spread dimensions → one question each, ≤ 2, only if the budget remains
 READY      ratification card: understood · contract chips · pool size · artifact · advice · one button per search
+           · the offer to save an improved résumé / JD (§2.2)
 ```
 
 `/intake/step` → `{stage, message, question?: {key, options[], free_text: true}, understood, contract, counts,
@@ -175,8 +219,15 @@ Entry points: the Guided tab; the first-run nudge gains "Guided search"; an empt
 ## 7. Tests (written first)
 
 - kernel: `spread`, `worth_asking` (thresholds; constrained keys never asked; unknown-heavy keys never asked;
-  required keys asked regardless of spread), `next_gap` order (required before optional), budget, `search_now`
-  forces READY.
+  required keys asked regardless of spread), `next_gap` order (artifact gaps → required → optional), budgets,
+  `search_now` forces READY; the checklist gate is generic (a list of required item names the caller supplies).
+- completeness: a terse résumé ("SWE, 5 yrs") reports years present, skills / location / comp missing; a
+  one-line JD reports title present and level / location / must-haves / comp missing; an answer fills the item
+  and the contract; "prefer not to say" on comp leaves no constraint; weak items never become questions.
+- improve & save: the rewritten artifact contains no fact absent from the original text + the answers (a
+  trap case: a résumé with no employer must not gain one); versions increment; `role_key` derives from the
+  JD's facets; two JDs with different keys coexist; the same key becomes a new version; the intake asks which
+  JD when the account holds more than one; a Talent Map saved from an intake carries `brief_id`.
 - vertical: required keys per direction exist in the schema; question words + option labels for every
   navigable key; the JD template sections; prompts name only schema keys.
 - app: `/intake/step` transitions with a fake model (direction → artifact → required q → optional q → ready);
@@ -194,7 +245,7 @@ Entry points: the Guided tab; the first-run nudge gains "Guided search"; an empt
 
 ## 8. Non-goals (v1)
 
-No JD posting to boards; no outreach; no multi-user intake; no voice; no inline JD editor (words → re-draft);
+No résumé tailoring per posting here (that stays in 🚀 Apply); no JD posting to boards; no outreach; no multi-user intake; no voice; no inline JD editor (words → re-draft);
 no automatic re-centring of a saved JD (on demand later); no "both" as a parallel flow.
 
 ---
@@ -204,7 +255,8 @@ no automatic re-centring of a saved JD (on demand later); no "both" as a paralle
 1. **v1 intake core** (no spend beyond ≈ $0.001 / turn): kernel gates + tests → vertical intake vocabulary →
    `/intake/step` with fake-model tests → FE Guided re-point (chips, artifact stage, ready card) → session
    row → audit field → prod smoke (throwaway accounts) at desktop and 390 px.
-2. **v1.1 JD draft** from peer summaries → save → candidate search from the saved text.
+2. **v1.1 JD draft** from peer summaries → save → candidate search from the saved text; improve-and-save for
+   both artifacts; multiple JDs keyed by `role_key` with the "which JD" question.
 3. **v1.2 advice on the rail** (counts-derived line on every result) and the "search the other side" offer.
 4. Eval harness with persona users; then the first Talent turn moves to compile → evaluate (after the people
    re-extraction lands — separate track).
