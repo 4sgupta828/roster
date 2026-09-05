@@ -52,3 +52,14 @@ def test_a_legacy_filter_becomes_a_sound_contract():
     # company / skill pass through as sets (slugs untouched)
     c5 = legacy_facets_to_contract({"company": ["openai", "Deep Mind"], "skill": ["python"]})
     assert c5["must"]["company"] == ["openai", "deep_mind"] and c5["must"]["skill"] == ["python"]
+
+
+def test_the_engines_hard_soft_split_is_respected_by_the_rail():
+    from roster_vertical.facet_legacy import legacy_brief_to_contract
+    hard = {"country": ["us"], "metro": ["bay area"]}
+    soft = {"function": ["machine learning"], "seniority": ["engineering manager"], "stage": ["startup"]}
+    c = legacy_brief_to_contract(hard, soft)
+    assert c["must"] == {"country": ["us"], "metro": ["bay_area"]}           # what the engine filtered
+    assert c["prefer"] == {"field": ["data_ml"], "work_type": ["manager"]}   # what it only ranked; stage has no person key
+    # no brief contract → the compiled filter is read as all-hard
+    assert legacy_brief_to_contract({}, {}, {"seniority": ["c_level"]})["must"]["level"] == ["leadership"]

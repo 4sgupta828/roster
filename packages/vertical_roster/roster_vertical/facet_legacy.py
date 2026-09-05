@@ -141,3 +141,21 @@ def legacy_facets_to_contract(query_facets: dict) -> dict:
             for nk, nv in m.items():
                 _add(must if nk in common else prefer, nk, [nv])
     return {"must": must, "prefer": prefer}
+
+
+def legacy_brief_to_contract(hard: dict, soft: dict, fallback: dict | None = None) -> dict:
+    """The old engine's interpreted brief (what FILTERED vs what only RANKED) → {must, prefer}: hard facets
+    translate as `legacy_facets_to_contract` does; soft facets only ever rank, whatever they map to. With no
+    brief contract at all, the compiled filter (`fallback`) is read as all-hard."""
+    if not hard and not soft:
+        return legacy_facets_to_contract(fallback or {})
+    out = legacy_facets_to_contract(hard or {})
+    s = legacy_facets_to_contract(soft or {})
+    prefer = dict(out["prefer"])
+    for d in (s["must"], s["prefer"]):
+        for k, vals in d.items():
+            cur = prefer.setdefault(k, [])
+            for v in vals:
+                if v not in cur and v not in (out["must"].get(k) or []):
+                    cur.append(v)
+    return {"must": out["must"], "prefer": {k: v for k, v in prefer.items() if v}}

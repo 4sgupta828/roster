@@ -3985,9 +3985,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             _nav = None
             if facet_evaluator_enabled() and res.get("kind") != "person":
                 try:
-                    from roster_vertical.facet_legacy import legacy_facets_to_contract
-                    _qf = ((res.get("coverage_basis") or {}).get("query_facets")) or {}
-                    _tr = legacy_facets_to_contract(_qf)
+                    from roster_vertical.facet_legacy import legacy_brief_to_contract
+                    _cb = res.get("coverage_basis") or {}
+                    _bc = _cb.get("brief_contract") or {}
+                    _tr = legacy_brief_to_contract(_bc.get("hard") or {}, _bc.get("soft") or {}, _cb.get("query_facets") or {})
                     _nav = await _facet_nav("person", text=(question_text or body.question), must=_tr["must"], prefer=_tr["prefer"],
                                             scope={"country": scope_country} if scope_country else {})
                 except Exception:   # noqa: BLE001 — the rail is an aid; its failure never costs the answer
