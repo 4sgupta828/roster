@@ -286,7 +286,7 @@ async def backfill_person_facets(conn, limit: int, *, live: bool, batch_size: in
     await conn.execute("ALTER TABLE rs_entity ADD COLUMN IF NOT EXISTS facet_env jsonb")
     rows = await conn.fetch("""SELECT e.entity_id, e.name, e.facets, e.retrieved_at,
                                       (SELECT string_agg(f.facet_key || ': ' || f.display_value, '; ') FROM roster_entity_facet f
-                                        WHERE f.entity_id = e.entity_id AND f.facet_key IN ('title','company','metro','country','role','function','seniority','skill')) AS legacy,
+                                        WHERE f.entity_id = e.entity_id AND f.facet_key IN ('title','company','metro','country','role','function','skill')) AS legacy,   -- never the old extractor's 'seniority' (its 'mid' was a default, and the model echoed it)
                                       EXISTS (SELECT 1 FROM rs_map m, jsonb_array_elements(m.rows) r WHERE r->>'entity_id' = e.entity_id) AS on_map
                                FROM rs_entity e WHERE e.kind = 'person' AND e.status = 'active'
                                  AND (e.facet_env IS NULL OR e.facet_env->>'schema_version' IS DISTINCT FROM $2)
