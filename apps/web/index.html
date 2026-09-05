@@ -655,6 +655,7 @@
   .notif .nt{font-weight:600;} .notif .nb{color:var(--muted);font-size:.78rem;margin-top:.15rem;}
   .mb-cadence{display:inline-flex;align-items:center;gap:.35rem;font-size:.74rem;color:var(--muted);flex-basis:auto;}
   .mb-cadence select{font:inherit;font-size:.74rem;padding:.2rem .35rem;border:1px solid var(--hair);border-radius:6px;background:var(--panel);color:var(--ink);min-height:30px;}
+  .rev-box.rev-fresh{padding:.4rem .7rem;} .rev-box.rev-fresh .rev-h{margin:0;font-size:.8rem;} .rev-box.rev-fresh details{margin:.15rem 0 0;} .rev-box.rev-fresh summary{font-size:.74rem;cursor:pointer;color:var(--muted);}
   .aptabs{display:flex;gap:.3rem;flex-wrap:wrap;margin:.6rem 0 .5rem;border-bottom:1px solid var(--hair);padding-bottom:.45rem;}
   .aptab{font:inherit;font-size:.78rem;padding:.35rem .75rem;min-height:38px;border:1px solid var(--hair);border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;}
   .aptab:hover{color:var(--ink);}
@@ -8644,6 +8645,14 @@ function revisionsMarkup(m){
   const REASON = {hiring_manager_feedback:"from reviewer feedback", manual_filter_change:"filters changed", evidence_refresh:"evidence refreshed", corpus_expansion:"corpus grew", refresh:"kept fresh — index moved"};
   const names = k => (d[k]||[]).map(x => x.name).filter(Boolean).slice(0, last.reason === "refresh" ? 40 : 6).map(esc).join(", ");
   const lines = String(d.summary||"").split("\n").filter(Boolean).map(esc).join("<br>");
+  if(last.reason === "refresh"){   // KEEP-FRESH: one line of counts; the names fold away (owner: "can it be concised?")
+    const when = last.created_at ? esc(String(last.created_at).slice(0,10)) : "";
+    const fold = (k, label) => (d[k]||[]).length ? `<details class="rev-edits"><summary>${d["n_"+k]||0} ${label}</summary><div class="rev-meta">${names(k)}${(d["n_"+k]||0)>40?", …":""}</div></details>` : "";
+    return `<div class="rev-box rev-fresh">
+      <div class="rev-h">↻ Kept fresh${when?` · ${when}`:""} <span class="ppl-fc" style="text-transform:none;">· ${d.n_added||0} new · ${d.n_removed||0} dropped · ${d.n_moved||0} moved · revision ${last.revision_id}${revs.length>1?` of ${revs.length-1} kept`:""}</span></div>
+      ${fold("added", "new")}${fold("removed", "dropped")}
+    </div>`;
+  }
   return `<div class="rev-box">
     <div class="rev-h">What changed since revision ${Math.max(0,last.revision_id-1)} <span class="ppl-fc" style="text-transform:none;">(revision ${last.revision_id}, ${esc(REASON[last.reason]||last.reason)}${last.created_at?`, ${esc(String(last.created_at).slice(0,10))}`:""})</span></div>
     <div class="rev-meta">${last.reason==="refresh" ? "Refreshed automatically on this map's cadence — same link; the list before is kept as revision " + Math.max(0,last.revision_id-1) + "." : "This map was revised <b>in place</b> — same link, nothing to re-save. Revision " + Math.max(0,last.revision_id-1) + " (the list before) is kept with the map."}</div>
