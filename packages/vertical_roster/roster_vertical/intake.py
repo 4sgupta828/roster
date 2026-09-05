@@ -109,6 +109,18 @@ def completeness_prompt(artifact: str) -> str:
             "unless a figure or range is written. Keep values verbatim-ish and under 12 words.")
 
 
+def direction_prompt() -> str:
+    """The first read: is the user looking for a role for themselves, or hiring people? Unambiguous tokens —
+    'candidate' would mean both things here."""
+    return ("Read the user's message and return ONLY JSON {\"direction\": \"looking\" | \"hiring\" | null}. "
+            "\"looking\" = the user wants a role / job for themselves (their own next role, their résumé, jobs to apply to). "
+            "\"hiring\" = the user wants to find or hire PEOPLE for a role (a job description, candidates, a team to staff). "
+            "null when the message says neither. Never guess from a bare greeting.")
+
+
+DIRECTION_TOKENS = {"looking": "job", "hiring": "candidate"}
+
+
 def turn_prompt(direction: str) -> str:
     keys = ", ".join(REQUIRED_KEYS[direction] + OPTIONAL_KEYS[direction])
     vocab = "; ".join(f"{k.key}: {', '.join(k.values)}" for k in FACET_SCHEMA.for_kind(SEARCH_KIND[direction]) if k.values and k.key in set(REQUIRED_KEYS[direction] + OPTIONAL_KEYS[direction]))

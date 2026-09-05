@@ -1776,6 +1776,7 @@
     <button type="button" class="pjbtn on" data-pj="people" role="tab" aria-selected="true">🗺 Talent Map</button>
     <button type="button" class="pjbtn" data-pj="jobs" role="tab" aria-selected="false">💼 Jobs</button>
     <button type="button" class="pjbtn" data-pj="qa" role="tab" aria-selected="false" id="pjqa" hidden>💬 Q&amp;A</button>
+    <button type="button" class="pjbtn" data-pj="guided" role="tab" aria-selected="false" id="pjguided" hidden title="Not sure how to phrase it? A short guided intake builds the search for you">◍ Guided</button>
   </div>
   <div class="modeswitch" id="modeswitch">
     <div class="modeseg" role="tablist" aria-label="Answer mode">
@@ -2421,6 +2422,17 @@ let MODE_VIEWS = {};            // per-mode result snapshot {html, hidden} — e
 //                                 last result: switching away hides it, switching back restores it,
 //                                 "＋ New search" clears all (the user-specified tab semantics).
 function setSearchMode(m){
+  const tabOn = (name) => document.querySelectorAll("#pjmode .pjbtn").forEach(b=>{ const on = b.dataset.pj === name; b.classList.toggle("on", on); b.setAttribute("aria-selected", on); });
+  if(m === "guided"){                                    // the Guided TAB enters the intake shell
+    tabOn("guided");
+    if(APP_MODE !== "triage" && typeof setMode === "function") setMode("triage");
+    return;
+  }
+  if(APP_MODE === "triage"){                             // leaving the Guided tab: back to the search shell
+    APP_MODE = "qa"; document.body.dataset.mode = "qa"; document.body.classList.remove("triage-live");
+    if(/^#triage$/.test(location.hash)) history.replaceState(null, "", location.pathname + location.search);
+    ATTN_BOX = "#attns"; if(typeof renderAttachments === "function") renderAttachments();
+  }
   const nm = PJ_COPY[m] ? m : "people";
   const outEl = document.getElementById("out");
   const prev = SEARCH_MODE;
@@ -2572,12 +2584,13 @@ async function loadConfig(){
     }
     PANEL_SPECIALISTS = c.panel_specialists || [];
     PANEL_EXAMPLES = c.panel_examples || [];
-    if(ASK_PANEL_ENABLED || TRIAGE_ENABLED){
-      // One shell, up to three modes (Guided intake ⇄ Quick Q&A ⇄ Expert Panel), switched in the same
-      // place under the heading. Only the enabled modes' buttons show; the shared box carries across them.
+    // GUIDED is a fourth search TAB beside Talent Map / Jobs / Q&A (owner, 2026-09-05) — never a separate
+    // answer-mode bar. The old mode switch shows only for the Expert Panel (inherited, off in roster).
+    const gbtn = $("#pjmode .pjbtn[data-pj='guided']"); if(gbtn) gbtn.hidden = !TRIAGE_ENABLED;
+    if(ASK_PANEL_ENABLED){
       $("#modeswitch").classList.add("on");
       const pbtn = $("#modeswitch .mbtn[data-mode='panel']"); if(pbtn) pbtn.hidden = !ASK_PANEL_ENABLED;
-      const tbtn = $("#modeswitch .mbtn[data-mode='triage']"); if(tbtn) tbtn.hidden = !TRIAGE_ENABLED;
+      const tbtn = $("#modeswitch .mbtn[data-mode='triage']"); if(tbtn) tbtn.hidden = true;
       wireModeSwitch($("#modeswitch"));
     }
     VISION_ENABLED = !!c.vision_enabled;
@@ -5122,6 +5135,7 @@ function setMode(mode, opts){
   } else if(mode === "triage"){
     document.body.classList.remove("chatting"); out.style.paddingBottom = "";
     $("#heading").textContent = "Guided search";
+    document.querySelectorAll("#pjmode .pjbtn").forEach(b=>{ const on = b.dataset.pj === "guided"; b.classList.toggle("on", on); b.setAttribute("aria-selected", on); });
     if(location.hash !== "#triage") history.pushState(null, "", "#triage");
     renderTriage(!!opts.fresh);
     q.focus();

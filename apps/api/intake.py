@@ -164,8 +164,8 @@ class IntakeService:
             d = (direction or "").strip().lower()
             if d not in V.DIRECTIONS and message:
                 try:
-                    read = await self._model(V.turn_prompt("job"), "QUESTION: Are you looking for a role, or hiring?\nREPLY: " + message)
-                    d = str(read.get("direction") or "").lower()
+                    read = await self._model(V.direction_prompt(), message[:600])
+                    d = V.DIRECTION_TOKENS.get(str(read.get("direction") or "").lower(), "")
                 except Exception:   # noqa: BLE001
                     d = ""
             if d not in V.DIRECTIONS:
@@ -300,6 +300,10 @@ class IntakeService:
             c = Contract(kind=kind, text=text[:500])
         if validate_contract(c, self.schema):
             c = Contract(kind=kind, text=c.text, limit=c.limit)
+        # a résumé's employer is not where the seeker wants to be; a JD's own company is not where candidates
+        # come from — the intake never constrains `company` (the rail can, explicitly)
+        for section in (c.must, c.prefer, c.avoid):
+            section.pop("company", None)
         st.contract = c.to_dict()
 
 

@@ -41,6 +41,9 @@ class FakeLLM:
                 return {"present": {"title": "Backend Engineer, Payments", "responsibilities": "own ledger services"},
                         "missing": ["level", "location", "comp"], "weak": ["must_skills"]}
             return {"present": {}, "missing": ["level"], "weak": []}
+        if '{"direction": "looking" | "hiring" | null}' in system:
+            r = user.lower()
+            return {"direction": "looking" if ("looking for" in r or "my next role" in r or "find me roles" in r) else "hiring" if ("hire" in r or "hiring" in r) else None}
         if "The user was asked ONE question" in system:
             reply = user.split("REPLY:", 1)[-1].strip().lower()
             if "prefer not" in reply:
@@ -192,3 +195,39 @@ def test_intake_endpoint_is_flag_gated(monkeypatch):
     from api.app import create_app
     monkeypatch.delenv("ROSTER_GUIDED_INTAKE", raising=False)
     assert TestClient(create_app()).post("/intake/step", json={"message": "hi"}).status_code == 404
+
+
+def test_a_reply_that_does_not_answer_the_question_never_repeats_it_and_volunteered_facts_land():
+    """Prod 2026-09-05: 'senior, remote, around 200k' to 'how many years?' was asked six times. The model's reply
+    shape (a literal 'name' key, no entry for the asked item) must mark the item skipped and keep the volunteered
+    level / work mode."""
+    class Volunteer(FakeLLM):
+        def __call__(self, system, user):
+            if "The user was asked ONE question" in system:
+                return {"answers": {"name": None, "level": "senior", "work_mode": "remote"}, "free_text": "around 200k", "direction": "candidate"}
+            return super().__call__(system, user)
+    s = _service(Volunteer())
+    out = _run(s.step(message="I'm looking for my next role", state=None, direction="job"))
+    out = _run(s.step(message="Software engineer, Acme, 2019 to now. Python, Go.", state=out["state"]))
+    asked = [out["question"]["name"]]
+    for _ in range(6):
+        if out["stage"] == "ready":
+            break
+        out = _run(s.step(message="senior, remote, around 200k", state=out["state"]))
+        if out["stage"] != "ready":
+            asked.append(out["question"]["name"])
+    assert len(asked) == len(set(asked)), asked                                            # never the same question twice
+    k = out["state"]["kernel"]
+    assert k["contract"]["prefer"].get("level") == ["senior"] and k["contract"]["must"].get("work_mode") == ["remote"]
+    assert k["direction"] == "job"                                                          # a mid-intake 'direction' never flips it
+
+
+def test_direction_reads_are_unambiguous(monkeypatch):
+    """'I'm looking for my next role' is a job seeker; 'I need to hire a backend engineer' is a hiring manager."""
+    class Dir(FakeLLM):
+        def __call__(self, system, user):
+            return super().__call__(system, user)
+    s = _service(Dir())
+    assert _run(s.step(message="I'm looking for my next role", state=None))["state"]["kernel"]["direction"] == "job"
+    assert _run(s.step(message="I need to hire a backend engineer", state=None))["state"]["kernel"]["direction"] == "candidate"
+    assert _run(s.step(message="hello", state=None))["question"]["kind"] == "direction"
