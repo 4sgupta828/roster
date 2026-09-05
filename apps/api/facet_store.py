@@ -19,6 +19,9 @@ _DDL = (
     "CREATE INDEX IF NOT EXISTS ix_roster_facet_kind_kv ON roster_entity_facet (tenant_id, entity_kind, facet_key, facet_value_norm)",
     "CREATE INDEX IF NOT EXISTS ix_roster_facet_entity ON roster_entity_facet (entity_id, facet_key)",
     "ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS facets_projected text",
+    # the must clauses correlate on ('job:' || j.id::text); without this expression index Postgres nested-loops
+    # every open job against the facet rows (prod 2026-09-05: 72M row comparisons, 30 s per counts call)
+    "CREATE INDEX IF NOT EXISTS ix_rs_job_facet_eid ON rs_job ((('job:' || id::text)))",
 )
 
 _JOB_COLS = "j.id, j.company, j.title, j.location, j.department, j.url, j.source, j.skills, j.posted_at, j.updated_at"
