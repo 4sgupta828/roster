@@ -344,7 +344,7 @@ async def project_legacy_people(pool, *, pairs: list[tuple[str, str, str, str]],
         for nk, items in by_key.items():
             res = await conn.execute("""
                 INSERT INTO roster_entity_facet (tenant_id, entity_id, entity_kind, facet_key, facet_value_norm, display_value, confidence, provenance, schema_version, numeric_value)
-                SELECT DISTINCT f.tenant_id, f.entity_id, 'person', $2, m.nv, '', 0.5, 'legacy', $3, NULL
+                SELECT DISTINCT f.tenant_id, f.entity_id, 'person', $2, m.nv, '', 0.5, 'legacy', $3, NULL::double precision
                 FROM roster_entity_facet f
                 JOIN unnest($4::text[], $5::text[], $6::text[]) AS m(ok, ov, nv) ON m.ok = f.facet_key AND m.ov = f.facet_value_norm
                 WHERE f.tenant_id = $1 AND f.entity_kind = 'person'
@@ -356,7 +356,7 @@ async def project_legacy_people(pool, *, pairs: list[tuple[str, str, str, str]],
         if artifact_map:
             res = await conn.execute("""
                 INSERT INTO roster_entity_facet (tenant_id, entity_id, entity_kind, facet_key, facet_value_norm, display_value, confidence, provenance, schema_version, numeric_value)
-                SELECT DISTINCT $1, a.entity_id, 'person', 'evidence', m.nv, '', 1.0, 'artifact', $2, NULL
+                SELECT DISTINCT $1::text, a.entity_id, 'person', 'evidence', m.nv, '', 1.0, 'artifact', $2::text, NULL::double precision
                 FROM rs_person_artifact a JOIN unnest($3::text[], $4::text[]) AS m(ok, nv) ON m.ok = a.kind
                 JOIN rs_entity e ON e.entity_id = a.entity_id AND e.kind = 'person'
                 ON CONFLICT (tenant_id, entity_id, facet_key, facet_value_norm) DO NOTHING""",
