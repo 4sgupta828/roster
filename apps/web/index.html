@@ -7282,6 +7282,19 @@ async function logout(){
   $("#savedmodal").hidden = true;
   maybeShowSavedBtn();
 }
+// EXPIRED SESSION: a tab whose token the server no longer honors (a sign-in from before per-device
+// tokens, or a pruned device) gets told, instead of every /me call failing silently (owner, 2026-09-05).
+function sessionExpired(){
+  if(!USER) return;
+  USER = null;
+  try{ localStorage.removeItem("roster_user"); }catch(e){}
+  try{ maybeShowSavedBtn(); }catch(e){}
+  try{ maybeShowApplyBtn(); }catch(e){}
+  const b = $("#bellbtn"); if(b) b.hidden = true;
+  AUTH_MODE = "login"; if(typeof updateAuthUI==="function") updateAuthUI();
+  const err = $("#iderr"); if(err) err.textContent = "Your sign-in in this tab has expired — please sign in again.";
+  $("#idmodal").hidden = false;
+}
 $("#acctbtn") && $("#acctbtn").addEventListener("click", openAccount);
 $("#signinbtn") && $("#signinbtn").addEventListener("click", ()=>{ AUTH_MODE = "login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden = false; });
 $("#logoutbtn") && $("#logoutbtn").addEventListener("click", logout);
@@ -8324,6 +8337,7 @@ async function loadAccountsList(){
   if(!loggedIn()){ box.innerHTML = `<div class="sethint">Sign in with an admin account to see the accounts list.</div>`; return; }
   try{
     const r = await fetch("/admin/users", {headers: {"x-admin-password": sessionStorage.getItem("roster_apw") || "", ...authHeaders()}});
+    if(r.status === 401){ const e = await r.json().catch(()=>({})); if(/sign in/i.test(e.detail||"")){ box.innerHTML = `<div class="sethint">Your sign-in in this tab has expired — sign in again, then reopen this panel.</div>`; sessionExpired(); return; } }
     if(r.status === 403){ box.innerHTML = `<div class="sethint">Your account is not an admin (set ROSTER_ADMIN_EMAILS to change who is).</div>`; return; }
     if(!r.ok) throw new Error(r.status);
     const d = await r.json();
@@ -8657,8 +8671,9 @@ async function refreshBell(){
   const b = $("#bellbtn"), c = $("#bellcount"); if(!b) return;
   if(!loggedIn()){ b.hidden = true; return; }
   b.hidden = false;
-  try{ const d = await (await fetch("/me/notifications?unread=1", {headers: authHeaders()})).json();
-    const n = d.unread || 0; c.hidden = !n; c.textContent = n > 99 ? "99+" : String(n); }catch(e){ c.hidden = true; }
+  try{ const r = await fetch("/me/notifications?unread=1", {headers: authHeaders()});
+    if(r.status === 401){ sessionExpired(); return; }
+    const d = await r.json(); const n = d.unread || 0; c.hidden = !n; c.textContent = n > 99 ? "99+" : String(n); }catch(e){ c.hidden = true; }
 }
 async function renderNotifications(){
   const el = $("#notiflist"); if(!el) return;
