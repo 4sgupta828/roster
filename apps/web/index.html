@@ -655,6 +655,22 @@
   .notif .nt{font-weight:600;} .notif .nb{color:var(--muted);font-size:.78rem;margin-top:.15rem;}
   .mb-cadence{display:inline-flex;align-items:center;gap:.35rem;font-size:.74rem;color:var(--muted);flex-basis:auto;}
   .mb-cadence select{font:inherit;font-size:.74rem;padding:.2rem .35rem;border:1px solid var(--hair);border-radius:6px;background:var(--panel);color:var(--ink);min-height:30px;}
+  /* facet RAIL: one row per dimension; chips carry counts; state glyphs ● must ▲ prefer ▼ avoid */
+  .frail{margin:.5rem 0 .7rem;border:1px solid var(--hair);border-radius:10px;padding:.45rem .6rem;background:var(--panel);}
+  .frail-h{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;font-size:.72rem;color:var(--muted);margin-bottom:.25rem;}
+  .frail-h select{font:inherit;font-size:.72rem;padding:.15rem .35rem;border:1px solid var(--hair);border-radius:6px;background:var(--panel);color:var(--ink);min-height:30px;}
+  .frail-row{display:flex;gap:.3rem;align-items:center;overflow-x:auto;padding:.15rem 0;scrollbar-width:thin;}
+  .frail-k{flex:none;font-size:.66rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);min-width:84px;}
+  .fchip{flex:none;font:inherit;font-size:.72rem;padding:.25rem .55rem;min-height:34px;border:1px solid var(--hair);border-radius:999px;background:transparent;color:var(--ink);cursor:pointer;white-space:nowrap;}
+  .fchip b{font-weight:600;color:var(--muted);margin-left:.25rem;}
+  .fchip.must{border-color:var(--gold);background:rgba(var(--gold-rgb),.14);color:var(--gold-strong);font-weight:600;}
+  .fchip.prefer{border-color:var(--verified);background:rgba(19,122,84,.10);color:var(--verified);font-weight:600;}
+  .fchip.avoid{border-color:var(--gap);background:rgba(224,96,72,.10);color:var(--gap);text-decoration:line-through;}
+  .fchip.unknown{color:var(--muted);border-style:dashed;}
+  .frail-pills{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.3rem;}
+  .fpill{font-size:.7rem;padding:.15rem .5rem;border-radius:999px;background:rgba(var(--gold-rgb),.10);color:var(--gold-strong);border:1px solid var(--gold);}
+  .fpill button{font:inherit;border:0;background:transparent;color:inherit;cursor:pointer;margin-left:.2rem;}
+  @media (max-width:560px){ .frail-k{min-width:64px;font-size:.6rem;} .fchip{font-size:.7rem;} }
   .rev-box.rev-fresh{padding:.4rem .7rem;} .rev-box.rev-fresh .rev-h{margin:0;font-size:.8rem;} .rev-box.rev-fresh details{margin:.15rem 0 0;} .rev-box.rev-fresh summary{font-size:.74rem;cursor:pointer;color:var(--muted);}
   .aptabs{display:flex;gap:.3rem;flex-wrap:wrap;margin:.6rem 0 .5rem;border-bottom:1px solid var(--hair);padding-bottom:.45rem;}
   .aptab{font:inherit;font-size:.78rem;padding:.35rem .75rem;min-height:38px;border:1px solid var(--hair);border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;}
@@ -2856,8 +2872,9 @@ function jobsMarkup(d){
   }).join("");
   const at = (q.company&&q.company.length)?` at ${esc(q.company.join(", ").replace(/_/g," "))}`:"";
   const bcJ = d.brief_contract || null;
-  const intentHtml = bcJ ? briefStripMarkup(bcJ) + (bcJ.ranking ? `<div class="ppl-cov ev-dist">⇅ Ranked by ${esc(bcJ.ranking)}.</div>` : "")
-    : ((d.agentic && d.intent) ? `<div class="ppl-cov"><b>⚡ Smart search</b> — ${esc(d.intent)}</div>` : "");
+  const railHtml = (d.counts && d.contract && typeof facetRailMarkup === "function") ? facetRailMarkup(d) : "";
+  const intentHtml = railHtml + (bcJ ? briefStripMarkup(bcJ) + (bcJ.ranking ? `<div class="ppl-cov ev-dist">⇅ Ranked by ${esc(bcJ.ranking)}.</div>` : "")
+    : ((d.agentic && d.intent) ? `<div class="ppl-cov"><b>⚡ Smart search</b> — ${esc(d.intent)}</div>` : ""));
   const jobMapBar = (jobs.length && typeof jobMapBarMarkup === "function" && !d._noMapBar) ? jobMapBarMarkup(d) : "";
   const head = `<div class="ppl-head"><b>${jobs.length}</b> open role${jobs.length===1?"":"s"}${at}${jpagesN>1?` <span class="ppl-fc" style="text-transform:none;">· showing ${jfrom}–${jto} · page ${jpage+1} of ${jpagesN}</span>`:""}</div>`
     + jobMapBar
@@ -7471,6 +7488,74 @@ async function doReach(ch){
 }
 // CONTROLLED AUTO-APPLY: prepare (fill + screenshot, stop) → review → approve (the only submit path)
 const APP_STATUS = {queued:"planning…", planned:"plan ready — review", filled:"filled in your browser — submit it", needs_you:"needs you", submitted:"submitted ✓", failed:"failed"};
+// ===== FACET RAIL (docs/specs/facet-contract-evaluator.md §7): the contract rendered with counts =====
+// Tap a chip: off → must → prefer → avoid → off (the kernel's edit cycle, mirrored here); the contract is
+// re-evaluated server-side (deterministic, no model call) and the list + counts re-render in place.
+const _FSTATE = {must:"prefer", prefer:"avoid", avoid:"off", off:"must"};
+function facetState(c, key, value){
+  for(const m of ["must","prefer","avoid"]){ const v = (c[m]||{})[key]; if(Array.isArray(v) && v.map(String).includes(String(value))) return m; }
+  return "off";
+}
+function facetEdit(c, key, value, mode){
+  const n = JSON.parse(JSON.stringify(c)); n.must = n.must||{}; n.prefer = n.prefer||{}; n.avoid = n.avoid||{};
+  if(mode === "cycle") mode = _FSTATE[facetState(n, key, value)];
+  for(const m of ["must","prefer","avoid"]){ const v = n[m][key]; if(Array.isArray(v)){ n[m][key] = v.filter(x => String(x) !== String(value)); if(!n[m][key].length) delete n[m][key]; } }
+  if(mode !== "off"){ const cur = n[mode][key]; n[mode][key] = (Array.isArray(cur) ? cur : []).concat([String(value)]); }
+  return n;
+}
+function facetLabel(d, key, value){
+  const L = d.labels || {}; const vl = (L.values||{})[value];
+  if(value === "unknown") return "unknown";
+  return vl || String(value).replace(/_/g, " ");
+}
+function facetRailMarkup(d){
+  const c = d.contract || {}, counts = d.counts || {}, L = d.labels || {};
+  const order = (L.order || Object.keys(counts)).filter(k => counts[k] && Object.keys(counts[k]).length);
+  const rows = order.map(key => {
+    const entries = Object.entries(counts[key]).sort((a, b) => (a[0] === "unknown") - (b[0] === "unknown") || b[1] - a[1]).slice(0, 14);
+    const chips = entries.map(([v, n]) => {
+      const st = facetState(c, key, v); const glyph = st === "must" ? "● " : st === "prefer" ? "▲ " : st === "avoid" ? "▼ " : "";
+      const cls = "fchip" + (st !== "off" ? " " + st : "") + (v === "unknown" ? " unknown" : "");
+      const dis = v === "unknown" ? " disabled" : "";
+      return `<button type="button" class="${cls}" data-jpid="${esc(d._jpid)}" data-key="${esc(key)}" data-value="${esc(v)}" title="${esc(((L.keys||{})[key]||key) + ': ' + facetLabel(d, key, v))} — tap: must → prefer → avoid → off"${dis}>${glyph}${esc(facetLabel(d, key, v))}<b>${n}</b></button>`;
+    }).join("");
+    return `<div class="frail-row"><span class="frail-k">${esc((L.keys||{})[key]||key)}</span>${chips}</div>`;
+  }).join("");
+  const pills = [];
+  for(const m of ["must","prefer","avoid"]) for(const [key, vals] of Object.entries(c[m]||{})) for(const v of (Array.isArray(vals) ? vals : [JSON.stringify(vals)]))
+    pills.push(`<span class="fpill">${m === "must" ? "●" : m === "prefer" ? "▲" : "▼"} ${esc((L.keys||{})[key]||key)}: ${esc(facetLabel(d, key, v))}<button type="button" data-jpid="${esc(d._jpid)}" data-key="${esc(key)}" data-value="${esc(v)}" data-mode="off" title="remove">✕</button></span>`);
+  const rankable = (L.order||[]).filter(k => ["numeric","ordinal"].includes((L.types||{})[k]));
+  const rank = `<label>rank by <select data-jpid="${esc(d._jpid)}" class="frank"><option value="match"${(c.rank_by||"match")==="match"?" selected":""}>match</option>${rankable.map(k => `<option value="${esc(k)}"${c.rank_by===k?" selected":""}>${esc((L.keys||{})[k]||k)}</option>`).join("")}</select></label>`;
+  const cov = d.coverage || {};
+  return `<div class="frail"><div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""} ${rank}<span style="margin-left:auto;">tap a chip: ● must · ▲ prefer · ▼ avoid</span></div>${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}</div>`;
+}
+async function facetReevaluate(jpid, contract){
+  const d = (window.JOBS_RENDERS||{})[jpid]; if(!d) return;
+  const wrap = document.querySelector(`.ppl-wrap[data-jpid="${CSS.escape(jpid)}"]`);
+  if(wrap){ const h = wrap.querySelector(".frail-h"); if(h) h.insertAdjacentHTML("beforeend", `<span class="frail-busy"> · updating…</span>`); }
+  try{
+    const r = await fetch("/search/evaluate", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({contract})});
+    const out = await r.json();
+    if(!r.ok){ alert(out.detail || "Couldn't apply that filter."); return; }
+    d.contract = out.contract; d.counts = out.counts; d.coverage = out.coverage; d.labels = out.labels || d.labels;
+    d.jobs = (out.rows||[]).map(x => ({...x, seniority: ((x.facets||{}).level||[""])[0]}));
+    d.count = d.jobs.length; d._jpage = 0;
+    if(d.brief_contract){ d.brief_contract.contract = out.contract; d.brief_contract.counts = out.counts; }
+    gotoJobsPage(jpid, 0);
+  }catch(e){ alert("Couldn't apply that filter — try again."); }
+}
+document.addEventListener("click", (e)=>{
+  const ch = e.target.closest && e.target.closest(".fchip, .fpill button");
+  if(!ch || ch.disabled) return;
+  e.preventDefault(); e.stopPropagation();
+  const d = (window.JOBS_RENDERS||{})[ch.dataset.jpid]; if(!d || !d.contract) return;
+  facetReevaluate(ch.dataset.jpid, facetEdit(d.contract, ch.dataset.key, ch.dataset.value, ch.dataset.mode || "cycle"));
+});
+document.addEventListener("change", (e)=>{
+  const sel = e.target.closest && e.target.closest("select.frank"); if(!sel) return;
+  const d = (window.JOBS_RENDERS||{})[sel.dataset.jpid]; if(!d || !d.contract) return;
+  facetReevaluate(sel.dataset.jpid, {...d.contract, rank_by: sel.value});
+});
 // ===== 🚀 APPLY — one integrated flow on the job card: fit → answers → résumé & letter → fill & submit =====
 // The two former surfaces ("Apply with assistant" = JD × résumé fit; "Prepare application" = the form
 // plan) are ONE modal now. Fit and plan load together; a drafted cover letter drops into the plan's
