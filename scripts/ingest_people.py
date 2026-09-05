@@ -380,6 +380,7 @@ async def main() -> None:
     import asyncpg
     # BACKFILL mode: embeddings only, no GitHub — safe to run without a token.
     if args.facets:
+        conn = await asyncpg.connect(dsn)
         try:
             await ensure_checkpoint(conn)
             st = await backfill_person_facets(conn, args.facets, live=live)
