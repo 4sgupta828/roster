@@ -128,3 +128,13 @@ def test_counts_query_parameters_line_up(monkeypatch):
     for sql, args in pool.c.calls:
         refs = {int(m) for m in _re.findall(r"\$(\d+)", sql)}
         assert refs and max(refs) == len(args) and refs == set(range(1, len(args) + 1)), (sorted(refs), len(args), sql[:120])
+
+
+def test_compile_never_promises_open_phrases_and_uncovered_keys_downgrade_to_prefer():
+    from api.facets_engine import downgrade_uncovered_musts
+    c = compile_contract("job", "founder cto", FACET_SCHEMA, lambda s, u: {"must": {"role_family": ["cto"], "work_type": ["founder"], "company": ["acme"]}, "prefer": {"level": ["leadership"]}})
+    assert "role_family" not in c.must and c.prefer["role_family"] == ["cto"]          # an open phrase is a preference
+    assert c.must == {"work_type": ["founder"], "company": ["acme"]}                   # exact keys may be promised
+    moved = downgrade_uncovered_musts(c, {"work_type": 0.02, "company": 0.99})
+    assert moved == ["work_type"] and c.must == {"company": ["acme"]} and c.prefer["work_type"] == ["founder"]
+    assert validate_contract(c, FACET_SCHEMA) == []

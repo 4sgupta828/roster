@@ -2829,10 +2829,11 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     if facet_evaluator_enabled():
                         # RÉSUMÉ → CONTRACT (spec §6): the brief compiles the query; the résumé's soul joins the
                         # semantic text; named skills become prefers; the stated level centres.
-                        from api.facets_engine import compile_contract
+                        from api.facets_engine import compile_contract, downgrade_uncovered_musts
                         from api.people_population import profile_skills, years_to_levels
                         _sc = {"country": (body.country or "us").strip().lower()}
                         _c = await asyncio.to_thread(compile_contract, "job", body.question or "", _facet_schema(), _llm_json, limit=80, scope=_sc)
+                        downgrade_uncovered_musts(_c, await _facet_coverage("job"))
                         _c.text = ((body.question or "").strip() + "\n\n" + (_brief_txt or str(_prof.get("_resume_text") or "")[:1500])).strip()
                         _sk = profile_skills(str(_prof.get("_resume_text") or ""), limit=8)
                         if _sk and "skill" not in _c.prefer:
@@ -2879,10 +2880,11 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
 
         if facet_evaluator_enabled():
             # THE EVALUATOR (docs/specs/facet-contract-evaluator.md): brief → contract → rows + counts.
-            from api.facets_engine import compile_contract
+            from api.facets_engine import compile_contract, downgrade_uncovered_musts
             from api.people_population import job_brief_contract
             _scope = {"country": (body.country or "us").strip().lower()}
             _c = await asyncio.to_thread(compile_contract, "job", body.question or "", _facet_schema(), _llm_json, limit=80, scope=_scope)
+            _moved = downgrade_uncovered_musts(_c, await _facet_coverage("job"))
             if body.levels and body.levels[0]:
                 _c.center = {"key": "level", "value": body.levels[0], "span": int(body.level_span)}
             for _m in (body.job_must or []):
@@ -5935,6 +5937,28 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         req = _ur.Request(endpoint, data=body, headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
         with _ur.urlopen(req, timeout=60) as r:
             return json.loads(json.load(r)["choices"][0]["message"]["content"])
+
+    async def _facet_coverage(kind: str) -> dict[str, float]:
+        """Share of entities with a KNOWN value per navigable key (index-wide, cached an hour) — the number
+        that decides whether a compiled must can be a promise."""
+        cache = getattr(app.state, "_facet_cov", None) or {}
+        hit = cache.get(kind)
+        import time as _time
+        if hit and _time.monotonic() - hit[0] < 3600:
+            return hit[1]
+        store = _facet_store()
+        if store is None:
+            return {}
+        try:
+            counts = await store.counts(kind, {}, _facet_schema())
+        except Exception:   # noqa: BLE001
+            return {}
+        cov = {}
+        for key, d in (counts or {}).items():
+            total = sum(d.values()) or 1
+            cov[key] = 1.0 - (d.get("unknown", 0) / total)
+        cache[kind] = (_time.monotonic(), cov); app.state._facet_cov = cache
+        return cov
 
     async def _evaluate_contract(cdict: dict, *, depth: dict | None = None) -> dict:
         from roster_kernel.facets import Contract, evaluate

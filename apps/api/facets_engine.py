@@ -115,10 +115,15 @@ def extract_envelopes(kind: str, items: list[dict], schema: FacetSchema, llm_jso
 
 
 _COMPILE_SYS = ("You compile a search brief into a facet CONTRACT. Return STRICT JSON with keys: must (object: facet key → list of values the results "
-                "MUST have — only what the brief states as a requirement), prefer (object: key → values that should rank higher), avoid (object: key → values "
-                "to rank down), center (object {key, value, span} for ONE ordinal key when the brief names a level, span 1), angles (2–4 alternative phrasings "
-                "or adjacent titles that would surface strong matches), intent (one sentence). Use ONLY the keys and vocabularies listed; omit what the "
-                "brief does not say; never invent constraints.")
+                "MUST have — ONLY hard requirements the brief states explicitly: a named company, a place, remote/hybrid, a pay floor, 'only senior' — a "
+                "role or a field the brief merely describes is a PREFERENCE, not a must), prefer (object: key → values that should rank higher — the role, "
+                "field, function, work type and level the brief describes go here), avoid (object: key → values to rank down), center (object {key, value, "
+                "span} for ONE ordinal key when the brief names a level, span 1), angles (2–4 alternative phrasings or adjacent titles that would surface "
+                "strong matches), intent (one sentence). Use ONLY the keys and vocabularies listed; omit what the brief does not say; never invent constraints.")
+
+# A must is a promise the index must be able to keep: open-vocabulary keys (free phrases) cannot be promised
+# exactly, so a compiled must on them becomes a prefer — except the employer and named skills, which ARE exact.
+_EXACT_SET_KEYS = ("company", "skill", "country", "state", "metro")
 
 
 def compile_contract(kind: str, text: str, schema: FacetSchema, llm_json, *, limit: int = 60, scope: dict | None = None) -> Contract:
@@ -132,18 +137,23 @@ def compile_contract(kind: str, text: str, schema: FacetSchema, llm_json, *, lim
     for section in ("must", "prefer", "avoid"):
         for key, vals in (out.get(section) or {}).items():
             k = schema.key(key)
-            if k is None or kind not in k.kinds or k.via and section == "must" and False:
+            if k is None or kind not in k.kinds:
                 continue
+            if section == "must" and k.type is FacetType.set and key not in _EXACT_SET_KEYS:
+                section_target = "prefer"                      # an open phrase cannot be a promise
+            else:
+                section_target = section
             if isinstance(vals, dict) and k.type is FacetType.numeric:
                 rng = {b: float(vals[b]) for b in ("min", "max") if isinstance(vals.get(b), (int, float))}
                 if rng:
-                    getattr(c, section)[key] = rng
+                    getattr(c, section_target)[key] = rng
                 continue
             vals = vals if isinstance(vals, list) else [vals]
             keep = [schema.validate_value(key, v) for v in vals]
             keep = [v for v in keep if v]
             if keep:
-                getattr(c, section)[key] = sorted(set(keep))
+                cur = getattr(c, section_target).get(key)
+                getattr(c, section_target)[key] = sorted(set((cur if isinstance(cur, list) else []) + keep))
     ctr = out.get("center") or {}
     if isinstance(ctr, dict) and ctr.get("key") and schema.key(str(ctr["key"])) and schema.key(str(ctr["key"])).type is FacetType.ordinal:
         v = schema.validate_value(str(ctr["key"]), ctr.get("value"))
@@ -184,3 +194,18 @@ def pay_figures_present(text: str) -> bool:
     """A cheap gate before the model may return pay: the posting text must actually contain a dollar figure
     (a verbatim-span rule — invented pay cannot pass)."""
     return bool(_MONEY.search(text or ""))
+
+
+
+def downgrade_uncovered_musts(contract: Contract, coverage_known: dict[str, float], *, min_known: float = 0.5) -> list[str]:
+    """A must on a key the index barely knows (share of entities with a value < min_known) would filter by
+    absence, not by fact — downgrade it to a prefer and say so. Returns the keys moved."""
+    moved = []
+    for key in list(contract.must):
+        known = coverage_known.get(key)
+        if known is not None and known < min_known and isinstance(contract.must[key], list):
+            vals = contract.must.pop(key)
+            cur = contract.prefer.get(key)
+            contract.prefer[key] = sorted(set((cur if isinstance(cur, list) else []) + list(vals)))
+            moved.append(key)
+    return moved
