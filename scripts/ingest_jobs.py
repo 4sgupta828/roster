@@ -77,6 +77,23 @@ def _http_json(url: str, *, timeout: int = 25):
         return json.load(r)
 
 
+def _http_json_cond(url: str, etag: str | None, *, timeout: int = 25) -> tuple[int, object, str]:
+    """CONDITIONAL GET: with the board's last ETag the ATS answers 304 + zero bytes when nothing changed
+    (Greenhouse, Lever and Ashby all honor If-None-Match — verified 2026-09-04). Returns
+    (status, json_or_None, new_etag)."""
+    headers = dict(_UA)
+    if etag:
+        headers["If-None-Match"] = etag
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return 200, json.load(r), (r.headers.get("ETag") or "")
+    except urllib.error.HTTPError as e:
+        if e.code == 304:
+            return 304, None, (etag or "")
+        raise
+
+
 def _norm_title(t: str) -> str:
     return re.sub(r"\s+", " ", (t or "").strip().lower())
 
@@ -124,20 +141,27 @@ def blurb(r: dict, company: str) -> str:
     return head + (("\n" + b[:1200]) if b else "")
 
 
-def fetch_greenhouse(token: str) -> list[dict]:
-    d = _http_json(f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true")
+# Every ATS row carries the ATS's OWN posting id (`ats_id`) and its change stamp (`changed_at`, ISO or
+# epoch-ms as the ATS gives it) — the refresh diff keys on ats_id, never on title/location.
+_BOARD_URL = {"greenhouse": "https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true",
+              "lever": "https://api.lever.co/v0/postings/{token}?mode=json",
+              "ashby": "https://api.ashbyhq.com/posting-api/job-board/{token}?includeCompensation=false"}
+
+
+def _rows_greenhouse(d) -> list[dict]:
     out = []
     for j in d.get("jobs", []):
         out.append({"title": j.get("title") or "",
                     "location": ((j.get("location") or {}).get("name") or ""),
                     "department": (", ".join(x.get("name", "") for x in (j.get("departments") or [])) or ""),
                     "url": j.get("absolute_url") or "",
-                    "body": _html_text(j.get("content") or "")})
+                    "body": _html_text(j.get("content") or ""),
+                    "ats_id": str(j.get("id") or ""), "changed_at": str(j.get("updated_at") or j.get("first_published") or ""),
+                    "company_name": j.get("company_name") or ""})
     return out
 
 
-def fetch_lever(token: str) -> list[dict]:
-    d = _http_json(f"https://api.lever.co/v0/postings/{token}?mode=json")
+def _rows_lever(d) -> list[dict]:
     out = []
     for j in (d if isinstance(d, list) else []):
         cat = j.get("categories") or {}
@@ -147,20 +171,44 @@ def fetch_lever(token: str) -> list[dict]:
                     "location": cat.get("location") or "",
                     "department": cat.get("team") or cat.get("department") or "",
                     "url": j.get("hostedUrl") or "",
-                    "body": "\n".join(p for p in parts if p.strip())[:BODY_CAP]})
+                    "body": "\n".join(p for p in parts if p.strip())[:BODY_CAP],
+                    "ats_id": str(j.get("id") or ""), "changed_at": str(j.get("createdAt") or "")})
     return out
 
 
-def fetch_ashby(token: str) -> list[dict]:
-    d = _http_json(f"https://api.ashbyhq.com/posting-api/job-board/{token}?includeCompensation=false")
+def _rows_ashby(d) -> list[dict]:
     out = []
     for j in d.get("jobs", []):
         out.append({"title": j.get("title") or "",
                     "location": j.get("location") or "",
                     "department": j.get("departmentName") or j.get("teamName") or j.get("department") or "",
                     "url": j.get("jobUrl") or "",
-                    "body": (j.get("descriptionPlain") or _html_text(j.get("descriptionHtml") or ""))[:BODY_CAP]})
+                    "body": (j.get("descriptionPlain") or _html_text(j.get("descriptionHtml") or ""))[:BODY_CAP],
+                    "ats_id": str(j.get("id") or ""), "changed_at": str(j.get("publishedAt") or "")})
     return out
+
+
+_ROWS = {"greenhouse": _rows_greenhouse, "lever": _rows_lever, "ashby": _rows_ashby}
+
+
+def fetch_board(ats: str, token: str, etag: str | None = None) -> tuple[int, list[dict], str]:
+    """One board, conditionally: (304, [], etag) when unchanged since `etag`; else (200, rows, new_etag)."""
+    status, d, new_etag = _http_json_cond(_BOARD_URL[ats].format(token=token), etag)
+    if status == 304:
+        return 304, [], new_etag
+    return 200, _ROWS[ats](d), new_etag
+
+
+def fetch_greenhouse(token: str) -> list[dict]:
+    return fetch_board("greenhouse", token)[1]
+
+
+def fetch_lever(token: str) -> list[dict]:
+    return fetch_board("lever", token)[1]
+
+
+def fetch_ashby(token: str) -> list[dict]:
+    return fetch_board("ashby", token)[1]
 
 
 _FETCHERS = {"greenhouse": fetch_greenhouse, "lever": fetch_lever, "ashby": fetch_ashby}
@@ -304,6 +352,18 @@ async def ensure_checkpoint(conn) -> None:
     await conn.execute("ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS body text")
     await conn.execute("ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS skills text[]")
     await conn.execute("ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS body_at timestamptz")
+    # REFRESH columns (2026-09-04): the ATS's own posting id, when the posting was last listed by its
+    # board, and when it vanished from the board (closed → out of search, kept for history)
+    for ddl in ("ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS ats_id text",
+                "ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS last_seen_at timestamptz",
+                "ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS closed_at timestamptz",
+                "ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS posted_at text",
+                "CREATE INDEX IF NOT EXISTS ix_rs_job_open ON rs_job (source, company) WHERE closed_at IS NULL",
+                "ALTER TABLE rs_ingest_checkpoint ADD COLUMN IF NOT EXISTS etag text",
+                "ALTER TABLE rs_ingest_checkpoint ADD COLUMN IF NOT EXISTS company text",
+                "ALTER TABLE rs_ingest_checkpoint ADD COLUMN IF NOT EXISTS next_check_at timestamptz",
+                "ALTER TABLE rs_ingest_checkpoint ADD COLUMN IF NOT EXISTS last_change_at timestamptz"):
+        await conn.execute(ddl)
 
 
 async def done_boards(conn) -> set[str]:
@@ -356,8 +416,9 @@ async def upsert_jobs(conn, source: str, rows: list[dict], vecs: list[str | None
         body = (r.get("body") or "").strip()[:BODY_CAP] or None
         await conn.execute(
             """INSERT INTO rs_job (company, title, location, department, url, source, title_norm, embedding, updated_at,
-                                   body, skills, body_at)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8::vector,now(),$9::text,$10::text[], CASE WHEN $9::text IS NULL THEN NULL ELSE now() END)
+                                   body, skills, body_at, ats_id, posted_at, last_seen_at, closed_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8::vector,now(),$9::text,$10::text[], CASE WHEN $9::text IS NULL THEN NULL ELSE now() END,
+                       $11::text, $12::text, now(), NULL)
                ON CONFLICT (company, title, location, source) DO UPDATE SET
                  department = EXCLUDED.department, url = EXCLUDED.url, title_norm = EXCLUDED.title_norm,
                  embedding  = CASE WHEN EXCLUDED.body IS NOT NULL THEN COALESCE(EXCLUDED.embedding, rs_job.embedding)
@@ -365,9 +426,13 @@ async def upsert_jobs(conn, source: str, rows: list[dict], vecs: list[str | None
                  body       = COALESCE(EXCLUDED.body, rs_job.body),
                  skills     = COALESCE(EXCLUDED.skills, rs_job.skills),
                  body_at    = COALESCE(EXCLUDED.body_at, rs_job.body_at),
+                 ats_id     = COALESCE(EXCLUDED.ats_id, rs_job.ats_id),
+                 posted_at  = COALESCE(EXCLUDED.posted_at, rs_job.posted_at),
+                 last_seen_at = now(), closed_at = NULL,
                  updated_at = now()""",
             company, title, (r.get("location") or ""), (r.get("department") or ""),
-            (r.get("url") or ""), source, _norm_title(title), vec, body, (body_skills(body) if body else None))
+            (r.get("url") or ""), source, _norm_title(title), vec, body, (body_skills(body) if body else None),
+            (str(r.get("ats_id")) if r.get("ats_id") else None), (str(r.get("changed_at")) if r.get("changed_at") else None))
         n += 1
     return n
 
@@ -435,6 +500,117 @@ async def backfill_bodies(conn, boards: int, *, live: bool) -> tuple[int, int]:
     return nb, nj
 
 
+# ---- REFRESH: keep already-ingested boards current at near-zero cost ----
+_ATS_BOARDS = ("greenhouse", "ashby", "lever")
+_MIN_GAP, _MAX_GAP = 6 * 3600, 7 * 86400
+
+
+def next_check_after(last_change_at, now, *, changed: bool) -> float:
+    """ADAPTIVE cadence, in seconds from `now`: a board that just changed is checked again in 6h; an
+    unchanged one waits half the time since its last change, clamped to [6h, 7d]. (Unchanged checks
+    are 304s — free — so the cadence sets latency, not cost.)"""
+    if changed or not last_change_at:
+        return float(_MIN_GAP)
+    gap = (now - last_change_at).total_seconds() / 2
+    return float(max(_MIN_GAP, min(_MAX_GAP, gap)))
+
+
+def plan_refresh(existing: dict[str, str], listed: list[dict]) -> tuple[list[dict], list[dict], list[str]]:
+    """Diff a board's fresh listing against what we hold for it. existing = {ats_id: changed_at}.
+    Returns (new_rows, changed_rows, gone_ids): new → embed + insert; changed (the ATS's change
+    stamp moved) → re-upsert incl. body; gone → close. Rows without an ats_id are treated as new."""
+    new, changed, seen = [], [], set()
+    for r in listed:
+        aid = str(r.get("ats_id") or "")
+        if not aid:
+            new.append(r); continue
+        seen.add(aid)
+        if aid not in existing:
+            new.append(r)
+        elif str(r.get("changed_at") or "") != str(existing.get(aid) or ""):
+            changed.append(r)
+    gone = [aid for aid in existing if aid not in seen]
+    return new, changed, gone
+
+
+async def refresh_boards(conn, boards: int, *, live: bool) -> dict:
+    """Refresh up to N due ATS boards: conditional GET (304 = nothing to do), else diff by ats_id →
+    new postings embedded + inserted, changed ones re-upserted, vanished ones CLOSED (closed_at set:
+    out of search, kept for application history). Embedding spend = new postings only."""
+    import datetime as _dt
+    rows = await conn.fetch(
+        """SELECT cursor_key, etag, company, last_change_at FROM rs_ingest_checkpoint
+           WHERE source = 'jobs' AND status = 'done'
+             AND split_part(cursor_key, ':', 1) = ANY($2::text[])
+             AND (next_check_at IS NULL OR next_check_at <= now())
+           ORDER BY next_check_at NULLS FIRST, updated_at LIMIT $1""", int(boards), list(_ATS_BOARDS))
+    st = {"boards": 0, "unchanged": 0, "new": 0, "changed": 0, "closed": 0, "failed": 0}
+    for cp in rows:
+        key = cp["cursor_key"]; ats, token = key.split(":", 1)
+        now = _dt.datetime.now(_dt.timezone.utc)
+        st["boards"] += 1
+        try:
+            status, listed, etag = fetch_board(ats, token, cp["etag"])
+        except Exception as e:   # noqa: BLE001
+            st["failed"] += 1
+            print(f"[skip] {key}: {e}", file=sys.stderr)
+            if live:
+                await note_fetch_failure(conn, key, e, live=True)
+                await conn.execute("UPDATE rs_ingest_checkpoint SET next_check_at = now() + interval '1 day' WHERE source='jobs' AND cursor_key=$1", key)
+            continue
+        if status == 304:
+            st["unchanged"] += 1
+            if live:
+                await conn.execute("UPDATE rs_ingest_checkpoint SET next_check_at = now() + $2 * interval '1 second', updated_at = now() "
+                                   "WHERE source='jobs' AND cursor_key=$1", key, next_check_after(cp["last_change_at"], now, changed=False))
+            continue
+        company = cp["company"] or (listed[0].get("company_name") if listed and listed[0].get("company_name") else "") \
+            or await conn.fetchval("SELECT company FROM rs_job WHERE source = $1 AND url ILIKE '%' || $2 || '%' LIMIT 1", ats, token) or ""
+        if not company:
+            print(f"[skip] {key}: no company known for this board", file=sys.stderr); st["failed"] += 1
+            continue
+        existing = {r["ats_id"]: (r["posted_at"] or "") for r in await conn.fetch(
+            "SELECT ats_id, posted_at FROM rs_job WHERE source=$1 AND company=$2 AND closed_at IS NULL AND ats_id IS NOT NULL", ats, company)}
+        first_pass = not existing     # rows from the original ingest carry no ats_id yet: this pass stamps them
+        new, changed, gone = plan_refresh(existing, listed)
+        touched = bool(new or changed or gone or first_pass)
+        st["new"] += len(new); st["changed"] += len(changed)
+        if not live:
+            print(f"[dry ] {key:28s} {company:20s} {len(listed):4d} listed → {len(new)} new, {len(changed)} changed, {len(gone)} gone")
+            continue
+        vecs = [None] * len(new)
+        texts = [blurb(r, company) for r in new]
+        for i in range(0, len(texts), 100):
+            vecs[i:i + 100] = embed_batch(texts[i:i + 100])
+        async with conn.transaction():
+            await upsert_jobs(conn, ats, new, vecs, company_default=company)
+            if first_pass:   # stamp ats_id / last_seen on the legacy rows (the conflict key finds them)
+                await upsert_jobs(conn, ats, [r for r in listed if r not in new], [None] * (len(listed) - len(new)), company_default=company)
+            else:
+                await upsert_jobs(conn, ats, changed, [None] * len(changed), company_default=company)
+                if listed:   # every listed posting was just seen → bump it
+                    await conn.execute("UPDATE rs_job SET last_seen_at = now(), closed_at = NULL WHERE source=$1 AND company=$2 AND ats_id = ANY($3::text[])",
+                                       ats, company, [str(r.get("ats_id")) for r in listed if r.get("ats_id")])
+            # CLOSE what the board no longer lists: rows of this board not seen in this pull
+            r = await conn.execute("UPDATE rs_job SET closed_at = now() WHERE source=$1 AND company=$2 AND closed_at IS NULL "
+                                   "AND (last_seen_at IS NULL OR last_seen_at < $3)", ats, company, now)
+            n_closed = int(r.split()[-1]) if r else 0
+            st["closed"] += n_closed
+            await conn.execute("""UPDATE rs_ingest_checkpoint SET etag=$2, company=$3, updated_at=now(),
+                                    last_change_at = CASE WHEN $4 THEN now() ELSE last_change_at END,
+                                    next_check_at = now() + $5 * interval '1 second',
+                                    error = CASE WHEN $6 > 0 THEN NULL ELSE error END
+                                  WHERE source='jobs' AND cursor_key=$1""",
+                               key, etag, company, touched, next_check_after(cp["last_change_at"], now, changed=touched), len(new))
+        print(f"[live] {key:28s} {company:20s} {len(listed):4d} listed → {len(new)} new, {len(changed)} changed, {n_closed} closed")
+    if live:
+        # aggregator / long-tail rows have no board to diff against: EXPIRE what nobody has re-listed in 45 days
+        r = await conn.execute("UPDATE rs_job SET closed_at = now() WHERE closed_at IS NULL AND source <> ALL($1::text[]) "
+                               "AND COALESCE(last_seen_at, updated_at) < now() - interval '45 days'", list(_ATS_BOARDS))
+        st["expired"] = int(r.split()[-1]) if r else 0
+    return st
+
+
 async def backfill_embeddings(conn, limit: int) -> int:
     """Embed rs_job rows whose vector is NULL (same blurb the ingest paths embed), newest first,
     100 per HTTP call; a failed batch is skipped, never retried in-run. Returns rows embedded."""
@@ -470,6 +646,9 @@ async def main() -> None:
                     help="BODY mode: refetch up to N already-done Greenhouse/Ashby/Lever boards WITH posting "
                          "content, store body + skills, re-embed those rows (title + body excerpt). Resumable: "
                          "boards whose rows all carry a body are skipped.")
+    ap.add_argument("--refresh-boards", type=int, default=0,
+                    help="REFRESH mode: re-check up to N due Greenhouse/Ashby/Lever boards conditionally (ETag → 304 when "
+                         "unchanged); new postings embedded + inserted, vanished ones closed; adaptive cadence per board")
     ap.add_argument("--backfill", type=int, default=0,
                     help="EMBED-ONLY mode: give up to N rs_job rows written without a vector their embedding "
                          "(rows a sweep wrote during an embed hiccup are invisible to résumé matching until then)")
@@ -506,6 +685,14 @@ async def main() -> None:
         finally:
             await conn.close()
         print(f"backfill: embedded {n} jobs (~${n * 20 / 1_000_000 * 0.02:.4f})")
+        return
+    if args.refresh_boards:
+        try:
+            await ensure_checkpoint(conn)
+            st = await refresh_boards(conn, args.refresh_boards, live=live)
+        finally:
+            await conn.close()
+        print(f"refresh: {st}{' (dry — nothing written)' if not live else ''} (~${st['new'] * 350 / 1_000_000 * 0.02:.4f} embeddings)")
         return
     if args.bodies:
         try:

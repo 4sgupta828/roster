@@ -1612,6 +1612,7 @@ class ClaimGraphStore:
             t = str(t).strip().lower()
             if t:
                 conds.append(f"title_norm ILIKE ${i}"); args.append(f"%{t}%"); i += 1
+        conds.append("closed_at IS NULL")     # a posting its board no longer lists is out of search
         where = (" WHERE " + " AND ".join(conds)) if conds else ""
         # updated_at rides as a date STRING so rows stay JSON-serializable everywhere (sessions,
         # /jobs, Q&A) — the freshness disclosure ("postings as of …") depends on it.
@@ -1629,7 +1630,7 @@ class ClaimGraphStore:
         """Jobs at a SET of companies keyed by the alphanumeric-only company key (the same key the
         F500 / startup sets use), optionally narrowed by title terms. Newest first."""
         pool = await self._get_pool()
-        conds, args, i = ["regexp_replace(lower(company),'[^a-z0-9]','','g') = ANY($1)"], [list(norm_companies)], 2
+        conds, args, i = ["regexp_replace(lower(company),'[^a-z0-9]','','g') = ANY($1)", "closed_at IS NULL"], [list(norm_companies)], 2
         for t in (terms or [])[:4]:
             t = str(t).strip().lower()
             if t:
@@ -1870,7 +1871,7 @@ class ClaimGraphStore:
     async def semantic_jobs(self, qvec: str, *, company=None, cap: int = 80) -> list[dict]:
         """Rank jobs by cosine similarity to the query embedding (optionally within a company set)."""
         pool = await self._get_pool()
-        conds, args, i = ["embedding IS NOT NULL"], [], 1
+        conds, args, i = ["embedding IS NOT NULL", "closed_at IS NULL"], [], 1
         if company:
             conds.append(f"lower(replace(company,' ','_')) = ANY(${i})"); args.append([str(c).lower().replace(' ', '_') for c in company]); i += 1
         args.append(qvec); qi = i; i += 1
@@ -1892,7 +1893,7 @@ class ClaimGraphStore:
         if not location_regex:
             return []
         pool = await self._get_pool()
-        conds, args = ["location ~* $1"], [location_regex]
+        conds, args = ["location ~* $1", "closed_at IS NULL"], [location_regex]
         for t in (terms or [])[:6]:
             t = str(t).strip().lower()
             if t:
@@ -1921,7 +1922,7 @@ class ClaimGraphStore:
         pool = await self._get_pool()
         sql = ("SELECT id, company, title, location, department, url, source, skills, "
                "1 - (embedding <=> $1::vector) AS sim "
-               "FROM rs_job WHERE embedding IS NOT NULL ORDER BY embedding <=> $1::vector LIMIT $2")
+               "FROM rs_job WHERE embedding IS NOT NULL AND closed_at IS NULL ORDER BY embedding <=> $1::vector LIMIT $2")
         try:
             async with pool.acquire() as conn:
                 async with conn.transaction():

@@ -77,13 +77,31 @@ def _body_backfill_loop(body_boards: int, pause: int) -> None:
         time.sleep(pause)
 
 
+def _jobs_refresh_loop(boards: int, pause: int) -> None:
+    """POSTING FRESHNESS in its own loop: re-check due ATS boards conditionally (ETag → 304 when nothing
+    changed, so an unchanged board costs one tiny request), insert + embed new postings, close vanished
+    ones. Adaptive per-board cadence lives in the checkpoint row; this loop just drains what is due."""
+    while True:
+        try:
+            stopped = asyncio.run(_is_stopped())
+        except Exception:   # noqa: BLE001
+            stopped = False
+        if not stopped:
+            _run_chunk(["scripts/ingest_jobs.py", "--live", "--refresh-boards", str(boards)])
+        time.sleep(pause)
+
+
 def run_bulk_ingest_loop() -> None:
     people_on = os.environ.get("ROSTER_BULK_INGEST_PEOPLE", "").lower() in ("1", "true", "yes")
+    import threading
     body_boards = int(os.environ.get("ROSTER_BULK_BODY_BACKFILL", "0") or 0)
     if body_boards:
-        import threading
         threading.Thread(target=_body_backfill_loop, args=(body_boards, 30), daemon=True, name="body-backfill").start()
         print(f"[bulk] body backfill thread started — {body_boards} boards per chunk, back to back", flush=True)
+    refresh_boards = int(os.environ.get("ROSTER_BULK_REFRESH_BOARDS", "0") or 0)   # opt-in knob (validated on prod first)
+    if refresh_boards:
+        threading.Thread(target=_jobs_refresh_loop, args=(refresh_boards, 120), daemon=True, name="jobs-refresh").start()
+        print(f"[bulk] jobs refresh thread started — {refresh_boards} due boards per pass", flush=True)
     jobs_chunk = int(os.environ.get("ROSTER_BULK_JOBS_CHUNK", "0") or 0)
     people_chunk = int(os.environ.get("ROSTER_BULK_PEOPLE_CHUNK", "500") or 500)
     # public-artifact linking (papers/repos/orgs by identity key): people per source per cycle; 0 = off
