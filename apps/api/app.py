@@ -377,6 +377,12 @@ def discovery_enabled() -> bool:
     return os.environ.get("ROSTER_DISCOVERY", "").lower() in ("1", "true", "yes")
 
 
+def guided_intake_enabled() -> bool:
+    """Flag (default OFF, Rule 20): the Guided intake mode (docs/specs/guided-intake.md) — POST /intake/step and
+    the ◍ Guided tab. Needs the facet evaluator (counts) and a model key."""
+    return os.environ.get("ROSTER_GUIDED_INTAKE", "").lower() in ("1", "true", "yes")
+
+
 def refine_enabled() -> bool:
     """Flag (default OFF, Rule 20): when ON, a FRESH question (no history) is first sent to /refine,
     which proposes a few distinct sharper standalone questions to pick from (express refinement). The
@@ -1045,6 +1051,7 @@ class ResearchIn(BaseModel):
     history: list[dict] | None = None     # prior turns [{question, answer}] → follow-up context
     session_id: str | None = None         # thread to append this turn to (conversation)
     intake_transcript: list[dict] | None = None  # Guided-intake conversation [{role,text}] → saved for admin audit
+    contract: dict | None = None       # a READY intake's contract (docs/specs/guided-intake.md §5): the evaluator runs it as is
     effort: float = Field(default=1.0, ge=1.0, le=2.5)   # effort multiplier; ignored unless flag on
     audience: str = "clinician"           # "clinician" (default) | "patient"; ignored unless flag on
     mode: str = ""                        # analytical lens, e.g. "acquirer" (M&A); "" = default investor lens
@@ -1283,6 +1290,17 @@ class MapReviewIn(BaseModel):
 class MapReviewerIn(BaseModel):
     share_token: str
     name: str = Field(default="", max_length=80)
+
+
+class IntakeIn(BaseModel):                 # one Guided-intake turn (docs/specs/guided-intake.md §3)
+    state: dict | None = None              # the previous turn's `state` (FE-held; None = a fresh intake)
+    message: str = Field(default="", max_length=8000)
+    direction: str | None = None           # "job" | "candidate" when tapped
+    answer: dict | None = None             # {name, value} when a chip answered the pending question
+    search_now: bool = False
+    attachments: list[Attachment] | None = None   # a résumé / JD file this turn (parsed once)
+    tenant_id: str = "demo"
+    country: str = "us"
 
 
 class CompileIn(BaseModel):                # brief → contract (docs/specs/facet-contract-evaluator.md §4)
@@ -2123,7 +2141,7 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
                 for s in getattr(svc, "panel_specialists", ())] if live_panel else []),
             "panel_examples": (list(getattr(svc, "panel_examples", ())) if live_panel else []),
             "refine_enabled": refine_enabled() and bool(getattr(svc, "refine_prompt", None)),
-            "triage_enabled": False,
+            "triage_enabled": guided_intake_enabled() and facet_evaluator_enabled(),
             "pulse_enabled": pulse_enabled() and bool(os.environ.get("ROSTER_CORPUS_DSN")),
             "graph_enabled": graph_enabled() and bool(os.environ.get("ROSTER_CORPUS_DSN")),
             "graph_expand": graph_expand_mode(),
@@ -2891,8 +2909,14 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             from api.facets_engine import compile_contract, downgrade_uncovered_musts
             from api.people_population import job_brief_contract
             _scope = {"country": (body.country or "us").strip().lower()}
-            _c = await asyncio.to_thread(compile_contract, "job", body.question or "", _facet_schema(), _llm_json, limit=80, scope=_scope)
-            _moved = downgrade_uncovered_musts(_c, await _facet_coverage("job"))
+            if body.contract and str(body.contract.get("kind") or "job") == "job":
+                from roster_kernel.facets import Contract as _Contract
+                _c = _Contract.from_dict(body.contract); _moved = []                     # a ratified intake contract runs as is
+                if not _c.text:
+                    _c.text = body.question or ""
+            else:
+                _c = await asyncio.to_thread(compile_contract, "job", body.question or "", _facet_schema(), _llm_json, limit=80, scope=_scope)
+                _moved = downgrade_uncovered_musts(_c, await _facet_coverage("job"))
             if body.levels and body.levels[0]:
                 _c.center = {"key": "level", "value": body.levels[0], "span": int(body.level_span)}
             for _m in (body.job_must or []):
@@ -4014,6 +4038,30 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 coverage_gaps=[], rejected=0, people_rows=res.get("people_rows") or [],
                 coverage_basis=res.get("coverage_basis"), facet_nav=_nav, session_id=sid), res
 
+        async def _people_contract_route(cdict: dict) -> ResearchOut:
+            """A ratified contract (Guided intake) → the evaluator, hydrated to cards, with the rail (spec §5)."""
+            c = dict(cdict or {}); c["kind"] = "person"
+            if not c.get("text"):
+                c["text"] = body.question or ""
+            out = await _evaluate_contract(c)
+            rows = await _hydrate_people(out.get("rows") or [])
+            if on_event is not None:
+                await on_event({"type": "people", "count": len(rows)})
+            nav = {"contract": out["contract"], "counts": out["counts"], "coverage": out["coverage"], "labels": out.get("labels")}
+            cov = {"query_facets": {}, "population_statement": f"{len(rows)} people from the index match this contract (evaluator; counts on the rail)."}
+            sid = None
+            sstore = _store()
+            if sstore is not None:
+                try:
+                    sid = await sstore.save(tenant_id=body.tenant_id, workspace_id=body.workspace_id, question=body.question, answer="",
+                                            grounded=True, claims=[], source_stats={}, coverage_gaps=[], rejected=0, sources=body.sources,
+                                            user_name=body.user_name, user_email=body.user_email, kind="people_population",
+                                            extra={"coverage_basis": cov, "people_rows": rows, "contract": out["contract"],
+                                                   **({"intake_transcript": [{"role": str(m.get("role") or ""), "text": str(m.get("text") or "")[:2000]} for m in (body.intake_transcript or [])[:40] if isinstance(m, dict) and m.get("text")]} if body.intake_transcript else {})})
+                except Exception:   # noqa: BLE001
+                    sid = None
+            return ResearchOut(grounded=True, answer="", claims=[], coverage_gaps=[], rejected=0, people_rows=rows, coverage_basis=cov, facet_nav=nav, session_id=sid)
+
         # ---- Q&A INTENT ROUTER (flag ROSTER_QA_ROUTER, default OFF — Rule 20) ----------------
         # Classifies the question BEFORE any engine short-circuit and dispatches per
         # docs/qa_improvements_amended_design.md. OFF → this whole block is skipped and the legacy
@@ -4031,6 +4079,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             # PEOPLE TAB IS A SEARCH SURFACE, NOT AN ORACLE: it only ever runs the closed people
             # engine (rows / person card / coverage gap). A question-shaped input gets a no-cost
             # redirect to Q&A — never a prose answer inside People mode. No router LLM call needed.
+            if (body.surface or "").strip().lower() == "people" and body.contract and facet_evaluator_enabled():
+                return await _people_contract_route(body.contract)          # a READY intake: evaluate the contract as is
             if (body.surface or "").strip().lower() == "people" and people_population_enabled():
                 out, pres = await _people_population_route(fallthrough=True)
                 if out is not None:
@@ -6000,6 +6050,44 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                          "types": {k.key: k.type.value for k in sch.for_kind(c.kind) if k.navigable},
                          "order": [k.key for k in sch.for_kind(c.kind) if k.navigable]}
         return out
+
+    @app.post("/intake/step")
+    async def intake_step(body: IntakeIn, x_roster_token: str = Header(default="")) -> dict:
+        """One Guided-intake turn (docs/specs/guided-intake.md §3). Stateless: the FE returns `state` each turn.
+        A typed reply costs one small model call; a chip tap costs nothing; counts come from the facet store."""
+        if not guided_intake_enabled():
+            raise HTTPException(status_code=404, detail="guided intake is not enabled")
+        from api.facets_engine import compile_contract
+        from api.intake import IntakeService
+        from api.media import attachment_texts_async
+        store = _facet_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="the index is unavailable right now")
+        user = await _optional_user(x_roster_token)
+        acc = _accounts()
+
+        async def counts_fn(kind: str, must: dict) -> dict:
+            nav = await _facet_nav(kind, text="", must=must, scope={"country": (body.country or "us").lower()})
+            return (nav or {}).get("counts") or {}
+
+        def compile_fn(kind: str, text: str, *, limit: int = 60, scope: dict | None = None):
+            return compile_contract(kind, text, _facet_schema(), _llm_json, limit=limit, scope=scope or {"country": (body.country or "us").lower()})
+
+        async def profile_fn(u: dict | None) -> dict | None:
+            if acc is None or not u:
+                return None
+            return ((await acc.get_parse(u["id"])).get("profile") or {}) or None
+
+        svc = getattr(app.state, "intake_service", None) or IntakeService(schema=_facet_schema(), llm_json=getattr(app.state, "intake_llm", None) or _llm_json,
+                                                                              counts_fn=counts_fn, compile_fn=compile_fn, profile_fn=profile_fn, jd_fetch_fn=_fetch_jd_text)
+        att_texts = []
+        if body.attachments:
+            try:
+                att_texts = [t for _n, t in await attachment_texts_async([a.model_dump() for a in body.attachments]) if t]
+            except Exception:   # noqa: BLE001
+                att_texts = []
+        return await svc.step(state=body.state, message=body.message, direction=body.direction, answer=body.answer,
+                              search_now=body.search_now, attachments_text=att_texts, user=user)
 
     @app.post("/search/compile")
     async def search_compile(body: CompileIn) -> dict:

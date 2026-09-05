@@ -904,6 +904,17 @@
   .tgt-wrapline.prominent{text-align:center;margin-top:.7rem;}
   .tgt-wrapline.prominent .tgt-wrapup{background:var(--gold);color:var(--on-accent);border-color:var(--gold);
     font-size:.8rem;padding:.5rem 1.1rem;}
+  /* Guided intake: the question card, option chips (tap = answer), advice list */
+  .tgt-q{background:var(--panel2);border:1px solid var(--hair);border-radius:13px;padding:.75rem .9rem;margin:.4rem 0 .2rem;}
+  .tgt-q-words{font-size:.95rem;line-height:1.45;color:var(--ink);}
+  .tgt-q-hint{font-size:.76rem;color:var(--muted);margin-top:.2rem;line-height:1.45;}
+  .tgt-opts{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.6rem;}
+  .tgt-opt{font:inherit;font-size:.82rem;min-height:40px;padding:.4rem .8rem;border:1px solid var(--hair);border-radius:999px;background:var(--panel);color:var(--ink);cursor:pointer;}
+  .tgt-opt b{font-weight:600;color:var(--muted);margin-left:.3rem;}
+  .tgt-opt:hover{border-color:var(--gold);}
+  .tgt-opt.quiet{color:var(--muted);}
+  .tgt-advice{margin:.2rem 0 .9rem;padding-left:1.1rem;font-size:.82rem;color:var(--muted);line-height:1.5;}
+  @media (max-width:560px){ .tgt-route{min-width:100%;} .tgt-opt{flex:1 1 auto;text-align:center;} }
   /* Intake v2: retrieval-vocabulary chips on the ready card */
   .tgt-chips{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1rem;}
   .tgt-chip{font-family:var(--mono);font-size:.62rem;color:var(--muted);border:1px solid var(--hair);
@@ -5110,7 +5121,7 @@ function setMode(mode, opts){
     q.focus();
   } else if(mode === "triage"){
     document.body.classList.remove("chatting"); out.style.paddingBottom = "";
-    $("#heading").textContent = "Let's get to a crisp question";
+    $("#heading").textContent = "Guided search";
     if(location.hash !== "#triage") history.pushState(null, "", "#triage");
     renderTriage(!!opts.fresh);
     q.focus();
@@ -5306,181 +5317,143 @@ function maybeShowVoice(){
   if(!b.dataset.wired){ b.dataset.wired = "1"; b.addEventListener("click", voiceToggle); }
 }
 function triageMsgHtml(m){ return `<div class="tgt-msg ${m.role==='user'?'user':'bot'}">${esc(m.text)}</div>`; }
+// ===== GUIDED INTAKE (docs/specs/guided-intake.md): direction → artifact → gaps → ready → one search =====
+// The shell's "triage" mode, re-pointed: the server is stateless (`INTAKE.state` rides every turn), a chip
+// tap answers without a model call, a typed reply is read by the model, "Search now" ends it from any turn,
+// and the READY card ratifies the contract (what I understood · chips · pool · advice) before anything runs.
+// The old medical-lineage logic (safety / register / retrieval terms / Q&A-panel routes) is gone.
+let INTAKE = {state: null, busy: false, last: null, ready: null};
 function renderTriage(fresh){
-  if(fresh){ TRIAGE = {transcript: [], busy: false, refined: "", register: "", urgent: false}; q.value = ""; autoGrow(); }
-  // dock the composer to the bottom once the conversation has started (chat feel); top on the empty landing
-  document.body.classList.toggle("triage-live", TRIAGE.transcript.length > 0);
-  q.setAttribute("placeholder", TRIAGE.transcript.length ? "Type your answer…"
-                                                         : "Describe your research question…");
-  const lead = TRIAGE.transcript.length ? "" :
-    `<div class="tgt-lead">Tell me your research question in your own words. I'll ask only what's needed to make
-     the answer high-quality — then point you to a quick answer or a full expert panel.
-     I just help you ask the sharpest question.</div>`;
-  // Persistent "wrap up & search now" — the user can end the intake on ANY turn (server forces a route).
-  // Quiet by default; PROMINENT once an urgent detail has surfaced mid-intake.
-  const wrap = TRIAGE.transcript.length ?
-    `<div class="tgt-wrapline${TRIAGE.urgent ? " prominent" : ""}">
-       <button type="button" class="tgt-wrapup" id="tgt-wrapup">✓ Wrap up &amp; search now</button></div>` : "";
-  tbody().innerHTML = lead + `<div class="tgt-thread" id="tgt-thread">${TRIAGE.transcript.map(triageMsgHtml).join("")}</div>` + wrap;
+  if(fresh){ INTAKE = {state: null, busy: false, last: null, ready: null}; TRIAGE = {transcript: [], busy: false, refined: "", register: "", urgent: false}; q.value = ""; autoGrow(); }
+  const transcript = (INTAKE.state && INTAKE.state.transcript) || [];
+  document.body.classList.toggle("triage-live", transcript.length > 0);
+  const pending = INTAKE.last && INTAKE.last.question;
+  q.setAttribute("placeholder", pending ? (pending.kind === "artifact" ? "Paste or describe here…" : "Type your answer, or tap a chip…")
+                                        : "Tell me what you're after — a role for you, or a hire for your team…");
+  const lead = transcript.length ? "" :
+    `<div class="tgt-lead">Guided search. I'll ask only what changes the results — then hand you a search you can adjust.
+     Attach a résumé or paste a job description any time with 📎.</div>`;
+  const qcard = pending ? intakeQuestionHtml(pending) : "";
+  const wrap = transcript.length && !INTAKE.ready ?
+    `<div class="tgt-wrapline"><button type="button" class="tgt-wrapup" id="tgt-wrapup">✓ Search now with what I have</button></div>` : "";
+  tbody().innerHTML = lead + `<div class="tgt-thread" id="tgt-thread">${transcript.map(triageMsgHtml).join("")}</div>` + qcard + wrap;
   const w = $("#tgt-wrapup"); if(w) w.addEventListener("click", wrapUpTriage);
+  tbody().querySelectorAll(".tgt-opt").forEach(b => b.addEventListener("click", () => {
+    const name = b.dataset.name, val = b.dataset.value;
+    if(pending && pending.kind === "direction"){ submitTriage("", {direction: val}); return; }
+    if(pending && pending.kind === "artifact"){
+      if(val === "attach"){ const a = $("#attach"); if(a && !a.hidden) a.click(); else q.focus(); return; }
+      q.focus(); return;                                   // paste / describe / link: type into the composer
+    }
+    submitTriage("", {answer: {name, value: val}});
+  }));
   triageScroll();
 }
-// Scroll to the newest message when a conversation is active; on the empty landing scroll to the TOP (the
-// intake box) — never to the bottom (that jumped past the intake to the footer, esp. on mobile).
+function intakeQuestionHtml(p){
+  const opts = (p.options || []).map(o => `<button type="button" class="tgt-opt" data-name="${esc(p.name)}" data-value="${esc(String(o[0]))}">${esc(String(o[1]||o[0]))}${o[2] ? `<b>${o[2]}</b>` : ""}</button>`).join("")
+    + (p.decline ? `<button type="button" class="tgt-opt quiet" data-name="${esc(p.name)}" data-value="__decline__">${esc(p.decline)}</button>` : "");
+  return `<div class="tgt-q"><div class="tgt-q-words">${esc(p.words||"")}</div>${p.hint ? `<div class="tgt-q-hint">${esc(p.hint)}</div>` : ""}${opts ? `<div class="tgt-opts">${opts}</div>` : ""}</div>`;
+}
 function triageScroll(){
-  if(TRIAGE.transcript.length) window.scrollTo({top: document.body.scrollHeight, behavior:"smooth"});
+  const transcript = (INTAKE.state && INTAKE.state.transcript) || [];
+  if(transcript.length) window.scrollTo({top: document.body.scrollHeight, behavior:"smooth"});
   else window.scrollTo({top: 0});
 }
-// One triage POST — carries the last echoed register (v2 cap selection; "" under v1 → inert) and
-// the user's explicit wrap-up request (forces a route server-side; harmless under v1).
-function triageFetch(wrapUp){
-  return fetch("/triage/step", {method:"POST", headers:{"content-type":"application/json"},
-    body: JSON.stringify({transcript: TRIAGE.transcript, tenant_id:"demo",
-                          register: TRIAGE.register || "", wrap_up: !!wrapUp})});
+function triageFetch(extra){
+  const body = {state: INTAKE.state, tenant_id: "demo", ...geoPayload(), ...(extra || {})};
+  if(ATTACHMENTS.length){ body.attachments = ATTACHMENTS.map(a => ({data: a.data, media_type: a.media_type, name: a.name})); }
+  return fetch("/intake/step", {method: "POST", headers: {"content-type": "application/json", ...authHeaders()}, body: JSON.stringify(body)});
 }
-// Shared turn handler for submit + wrap-up. v1-shaped turns (no register/retrieval_terms) flow
-// through untouched — every v2 affordance stays inert.
 function handleTriageTurn(d){
-  if(typeof d.register === "string" && d.register) TRIAGE.register = d.register;  // echoed choice (v2)
-  // SAFETY on every turn, not only at ready: an emergent detail revealed mid-intake must
-  // surface immediately (the panel's code review found ask-turns silently dropped d.safety).
-  if(d.safety === "urgent" && d.status !== "ready"){
-    TRIAGE.urgent = true;   // the wrap-up affordance turns prominent from here on
-    const utext = (d.message || "") +
-      "\n\n⚠ Based on what you've described, this may need immediate attention beyond a research answer. I can keep researching the evidence meanwhile.";
-    TRIAGE.transcript.push({role:"assistant", text: utext});
-    renderTriage(false);
-    if(VOICE.on) voiceSay(utext, voiceListen);
-  }
-  else if(d.status === "ready"){
-    renderTriageReady(d);
-    // hand-off: read the understood question aloud, then leave the (visual) route choice to the user
-    if(VOICE.on) voiceSay("I have what I need. Here's the question I'll research: "
-      + (d.plain || d.refined || ""), voiceOff);
-  }
-  else {
-    const atext = d.message || "Could you tell me a bit more about the case?";
-    TRIAGE.transcript.push({role:"assistant", text: atext});
-    renderTriage(false);
-    if(VOICE.on) voiceSay(atext, voiceListen);
-  }
+  INTAKE.last = d; INTAKE.state = d.state || INTAKE.state;
+  if(d.stage === "ready" && d.ready){ INTAKE.ready = d.ready; renderTriageReady(d.ready); return; }
+  INTAKE.ready = null; renderTriage(false);
 }
-async function submitTriage(text){
-  if(TRIAGE.busy) return;
-  if(!text){ q.focus(); return; }
-  if(typeof voiceHush === "function") voiceHush();   // a submitted answer supersedes any question being read
-  TRIAGE.transcript.push({role:"user", text});
+async function submitTriage(text, extra){
+  if(INTAKE.busy) return;
+  extra = extra || {};
+  if(!text && !extra.direction && !extra.answer && !extra.search_now){ q.focus(); return; }
+  if(typeof voiceHush === "function") voiceHush();
   q.value = ""; autoGrow();
-  renderTriage(false);
   const thread = $("#tgt-thread");
-  const think = document.createElement("div"); think.className = "tgt-msg bot thinking"; think.textContent = "thinking…";
-  thread.appendChild(think); triageScroll();
-  TRIAGE.busy = true;
+  if(text && thread){ const u = document.createElement("div"); u.className = "tgt-msg user"; u.textContent = text; thread.appendChild(u); }
+  const think = document.createElement("div"); think.className = "tgt-msg bot thinking"; think.textContent = extra.search_now ? "wrapping up…" : "thinking…";
+  if(thread){ thread.appendChild(think); } triageScroll();
+  INTAKE.busy = true;
   try{
-    const r = await triageFetch(false);
+    const r = await triageFetch({message: text || "", ...extra});
     think.remove();
     if(!r.ok){
-      // A failed turn must NOT masquerade as an instant "ready" — surface WHY, offer a direct route.
-      const why = r.status === 404 ? "Guided mode isn't enabled on this server."
-                : (r.status === 400 ? "I didn't catch that — could you rephrase the case?"
-                                    : `The intake service returned an error (${r.status}).`);
+      const why = r.status === 404 ? "Guided search isn't enabled on this server."
+                : (r.status === 401 ? "Your sign-in has expired — sign in again to use your résumé on file."
+                : `The intake service returned an error (${r.status}).`);
       triageError(why); return;
     }
+    if(ATTACHMENTS.length){ ATTACHMENTS = []; renderAttachments(); }   // parsed once server-side; never re-sent
     handleTriageTurn(await r.json());
   }catch(e){
     think.remove();
-    triageError("I couldn't reach the guided-intake service.");
-  }finally{ TRIAGE.busy = false; }
+    triageError("I couldn't reach the guided-search service.");
+  }finally{ INTAKE.busy = false; }
 }
-// The user's explicit "wrap up & search now": no new user message — the server forces this turn to
-// route (wrap_up → force_ready) and the ready card renders.
-async function wrapUpTriage(){
-  if(TRIAGE.busy || !TRIAGE.transcript.length) return;
-  const thread = $("#tgt-thread");
-  const think = document.createElement("div"); think.className = "tgt-msg bot thinking"; think.textContent = "wrapping up…";
-  if(thread){ thread.appendChild(think); } triageScroll();
-  TRIAGE.busy = true;
-  try{
-    const r = await triageFetch(true);
-    think.remove();
-    if(!r.ok){ triageError(`The intake service returned an error (${r.status}).`); return; }
-    handleTriageTurn(await r.json());
-  }catch(e){
-    think.remove();
-    triageError("I couldn't reach the guided-intake service.");
-  }finally{ TRIAGE.busy = false; }
-}
-// A visible intake error (never a fake "ready" card) — keeps the transcript and offers a direct route so
-// the user is never dead-ended, but a broken/absent endpoint reads as an error, not an instant answer.
+async function wrapUpTriage(){ if(!INTAKE.state) return; submitTriage("", {search_now: true}); }
 function triageError(msg){
   document.body.classList.add("triage-live");
-  const last = [...TRIAGE.transcript].reverse().find(m => m.role === "user");
-  tbody().innerHTML = `<div class="tgt-thread">${TRIAGE.transcript.map(triageMsgHtml).join("")}</div>
+  const transcript = (INTAKE.state && INTAKE.state.transcript) || [];
+  const last = [...transcript].reverse().find(m => m.role === "user");
+  tbody().innerHTML = `<div class="tgt-thread">${transcript.map(triageMsgHtml).join("")}</div>
     <div class="tgt-urgent">⚠ ${esc(msg)}</div>
-    <div class="tgt-routes"><button type="button" class="tgt-route rec" data-route="qa">
-      <div class="tgt-route-t">⚡ Run in Quick Q&amp;A</div>
-      <div class="tgt-route-why">Search the evidence for what you typed.</div></button></div>`;
+    <div class="tgt-routes"><button type="button" class="tgt-route rec" data-route="direct">
+      <div class="tgt-route-t">Search with what you typed</div>
+      <div class="tgt-route-why">Run it as a plain search in the Talent Map or Jobs tab.</div></button></div>`;
   const btn = tbody().querySelector(".tgt-route");
-  if(btn) btn.addEventListener("click", () => routeTriage("qa", (last && last.text) || ""));
+  if(btn) btn.addEventListener("click", () => routeTriage((INTAKE.state && INTAKE.state.kernel && INTAKE.state.kernel.direction) === "candidate" ? "people" : "jobs", (last && last.text) || ""));
   triageScroll();
 }
-// The "ready" hand-off card: the understood problem + the refined question + route buttons (recommended
-// one highlighted). Clicking a route sets the refined question into the shared box and runs that mode.
-function renderTriageReady(d){
-  document.body.classList.add("triage-live");   // keep the composer docked on the hand-off card too
-  const refined = d.refined_question || d.understood_problem || "";
-  TRIAGE.refined = refined;
-  const rec = d.recommended_mode === "panel" ? "panel" : "qa";
-  const urgent = d.safety === "urgent"
-    ? `<div class="tgt-urgent">${esc(d.message || "This may need immediate attention beyond a research answer.")}</div>` : "";
-  const panelBtn = ASK_PANEL_ENABLED ? `<button type="button" class="tgt-route ${rec==='panel'?'rec':''}" data-route="panel">
-      <div class="tgt-route-t">◈ Expert Panel ${rec==='panel'?'<span class="rec-badge">Recommended</span>':''}</div>
-      <div class="tgt-route-why">Take it to the panel — pick the analysts, then convene.</div></button>` : "";
-  // Intake v2 ready card (inert on v1-shaped turns, which carry neither field): the PLAIN
-  // understood_problem is the primary ratified text; the technical-register refined question renders
-  // secondary and still flows into the editable composer via routeTriage (no new gate); the technical
-  // vocabulary shows as small chips.
-  const isV2 = Array.isArray(d.retrieval_terms) || (typeof d.register === "string" && d.register);
-  const chips = (isV2 && Array.isArray(d.retrieval_terms) && d.retrieval_terms.length)
-    ? `<div class="tgt-chips">${d.retrieval_terms.map(t => `<span class="tgt-chip">${esc(String(t))}</span>`).join("")}</div>` : "";
-  const bodyHtml = (isV2 && d.understood_problem)
-    ? `<div class="tgt-refined">${esc(d.understood_problem)}</div>
-       ${d.refined_question ? `<div class="tgt-understood">${esc(d.refined_question)}</div>` : ""}
-       ${chips}`
-    : `${d.understood_problem ? `<div class="tgt-understood">${esc(d.understood_problem)}</div>` : ""}
-       <div class="tgt-refined">${esc(refined)}</div>
-       ${chips}`;
-  tbody().innerHTML = `<div class="tgt-thread">${TRIAGE.transcript.map(triageMsgHtml).join("")}</div>
-    ${urgent}
+function renderTriageReady(rd){
+  document.body.classList.add("triage-live");
+  const transcript = (INTAKE.state && INTAKE.state.transcript) || [];
+  const c = rd.contract || {}, L = (typeof VALUE_LABELS_FE !== "undefined") ? VALUE_LABELS_FE : {};
+  const lab = v => (L[v] || String(v).replace(/_/g, " "));
+  const chips = [];
+  for(const [m, g] of [["must", "●"], ["prefer", "▲"], ["avoid", "▼"]]) for(const [k, vals] of Object.entries(c[m] || {})) for(const v of (Array.isArray(vals) ? vals : [JSON.stringify(vals)]))
+    chips.push(`<span class="fpill">${g} ${esc(k.replace(/_/g, " "))}: ${esc(lab(v))}</span>`);
+  if(c.center && c.center.key) chips.push(`<span class="fpill">◎ centre ${esc(c.center.key)}: ${esc(lab(c.center.value))}</span>`);
+  const art = rd.artifact || {};
+  const artLine = art.kind === "profile" ? `Résumé: ${art.source === "on_file" ? "on file" : art.source === "attachment" ? "attached this session" : "from your description"}`
+                : `Job description: ${art.source === "pasted" ? "pasted" : art.source === "link" ? "from the link" : art.source === "attachment" ? "attached" : "from your description"}`;
+  const dirBtn = rd.direction === "job"
+    ? `<button type="button" class="tgt-route rec" data-route="jobs"><div class="tgt-route-t">💼 Find roles <span class="rec-badge">${rd.pool || 0} in the pool</span></div><div class="tgt-route-why">Runs this contract in Jobs — the rail lets you adjust it.</div></button>`
+    : `<button type="button" class="tgt-route rec" data-route="people"><div class="tgt-route-t">🗺 Find candidates <span class="rec-badge">${rd.pool || 0} in the pool</span></div><div class="tgt-route-why">Runs this contract in the Talent Map — the rail lets you adjust it.</div></button>`;
+  const advice = (rd.advice || []).map(a => `<li>${esc(a)}</li>`).join("");
+  const improve = rd.offer_improve ? `<div class="tgt-q-hint" style="margin-top:.6rem;">You told me things your ${art.kind === "profile" ? "résumé" : "JD"} doesn't say — a fuller version you can save to your account comes next release.</div>` : "";
+  tbody().innerHTML = `<div class="tgt-thread">${transcript.map(triageMsgHtml).join("")}</div>
+    ${rd.note ? `<div class="tgt-urgent">${esc(rd.note)}</div>` : ""}
     <div class="tgt-ready">
-      <div class="tgt-ready-h">Here's your refined question — where should it go?</div>
-      ${bodyHtml}
-      <div class="tgt-routes">
-        <button type="button" class="tgt-route ${rec==='qa'?'rec':''}" data-route="qa">
-          <div class="tgt-route-t">⚡ Quick Q&amp;A ${rec==='qa'?'<span class="rec-badge">Recommended</span>':''}</div>
-          <div class="tgt-route-why">Take it to Quick Q&amp;A — set effort, then ask.</div></button>
-        ${panelBtn}
-      </div>
+      <div class="tgt-ready-h">Here's what I'll search — adjust it after, or start over</div>
+      <div class="tgt-refined">${esc(rd.understood || "")}</div>
+      <div class="tgt-understood">${esc(artLine)}</div>
+      <div class="frail-pills" style="margin-bottom:.8rem;">${chips.join("") || '<span class="tgt-q-hint">No filters — the words alone rank the results.</span>'}</div>
+      ${advice ? `<ul class="tgt-advice">${advice}</ul>` : ""}
+      <div class="tgt-routes">${dirBtn}</div>
+      ${improve}
       <button type="button" class="tgt-restart" id="tgt-restart">↺ Start over</button>
     </div>`;
   q.setAttribute("placeholder", "Add a detail to refine further…");
-  tbody().querySelectorAll(".tgt-route").forEach(b => b.addEventListener("click", () => routeTriage(b.dataset.route, refined)));
+  tbody().querySelectorAll(".tgt-route").forEach(b => b.addEventListener("click", () => routeTriage(b.dataset.route, (c.text || rd.understood || ""), rd)));
   const rs = $("#tgt-restart"); if(rs) rs.addEventListener("click", () => setMode("triage", {fresh:true}));
   triageScroll();
 }
-// TAKE the user to the chosen mode with the refined question pre-filled — but DON'T auto-run, so they can
-// still set effort / answer format (Q&A) or pick specialists (Panel) before asking. Attachments added
-// during triage live in the shared ATTACHMENTS pipeline and carry through untouched.
-function routeTriage(route, refined){
-  if(route === "panel" && ASK_PANEL_ENABLED){
-    setMode("panel", {fresh:true, prefill: refined});   // panel landing: question filled, roster to adjust, Convene when ready
-  } else {
-    setMode("qa");                                       // Q&A intake: effort/format available, ask when ready
-    // carry the intake conversation so it's saved on the resulting answer (admin-only audit view)
-    PENDING_INTAKE_TRANSCRIPT = (TRIAGE.transcript || []).map(m => ({role: m.role, text: m.text}));
-    q.value = refined; autoGrow(); q.focus();
-    GUIDED_REFINED = true;   // already sharpened by guided intake → don't offer "pick a sharper question"
-  }
+// TAKE the user to the search with the ratified contract attached; the result lands in that tab's thread with
+// the rail already reflecting the contract. The intake transcript rides the resulting turn as an audit field.
+function routeTriage(route, text, rd){
+  const transcript = (INTAKE.state && INTAKE.state.transcript) || [];
+  PENDING_INTAKE_TRANSCRIPT = transcript.map(m => ({role: m.role, text: m.text}));
+  setMode("qa");
+  if(typeof setSearchMode === "function") setSearchMode(route === "people" ? "people" : "jobs");
+  if(typeof newConversation === "function") { try{ newConversation(); }catch(e){} }
+  const contract = rd && rd.contract ? rd.contract : null;
+  askQuestion(text || (contract && contract.text) || "", {skipRefine: true, contract});
 }
 // A random sample question for the panel intake placeholder (mirrors pickPlaceholder for Q&A).
 function pickPanelCase(){
@@ -6100,6 +6073,7 @@ async function askQuestion(question, opts){
   if(SEARCH_MODE === "people" && LEVEL){ payload.levels = [LEVEL]; payload.level_span = LEVEL_SPAN; }
   if(EFFORT_ENABLED && EFFORT > 1) payload.effort = EFFORT;
   if(ATTACHMENTS.length) payload.attachments = ATTACHMENTS.slice();
+  if(opts.contract) payload.contract = opts.contract;       // a READY intake: the evaluator runs it as is
   if(PENDING_INTAKE_TRANSCRIPT && PENDING_INTAKE_TRANSCRIPT.length && !THREAD.turns.length){
     payload.intake_transcript = PENDING_INTAKE_TRANSCRIPT;   // save the Guided conversation onto this answer
   }
