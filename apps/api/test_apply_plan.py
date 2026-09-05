@@ -41,6 +41,23 @@ def test_ashby_definition_keeps_boolean_questions_the_dom_never_showed():
     assert kinds["_systemfield_resume"] == ("file", "file", [])
 
 
+def test_cover_letter_text_twin_stays_open_for_the_drafted_letter_while_resume_text_twin_is_skipped():
+    from api.apply_adapters import question
+    form = {"ats": "greenhouse", "questions": [
+        question(id="resume", label="Resume/CV", kind="file", required=True),
+        question(id="resume_text", label="Enter manually (Resume/CV)", kind="textarea"),
+        question(id="cover_letter", label="Cover Letter", kind="file"),
+        question(id="cover_letter_text", label="Enter manually (Cover Letter)", kind="textarea")]}
+    plan = {p["id"]: p for p in bind_plan(form, {"first_name": "A", "email": "a@b.c"}, {}, {})["plan"]}
+    assert plan["resume_text"]["policy"] == "skip"                       # the file is attached instead
+    assert plan["cover_letter_text"]["policy"] == "letter" and not plan["cover_letter_text"]["required"]
+    assert plan["cover_letter_text"]["answer"] == "" and not plan["cover_letter_text"]["blocking"]
+    assert plan["cover_letter_text"] not in draftable({"plan": list(plan.values())})   # never LLM-drafted unasked
+    # the user's (or the Apply flow's) letter lands there and the extension will fill it
+    plan2 = {p["id"]: p for p in bind_plan(form, {"first_name": "A", "email": "a@b.c"}, {}, {"Enter manually (Cover Letter)": "Dear team…"})["plan"]}
+    assert plan2["cover_letter_text"]["answer"] == "Dear team…" and plan2["cover_letter_text"]["source"] == "your answer"
+
+
 def test_ashby_survey_forms_are_planned_as_self_identification_and_declined_by_default():
     # the diversity survey + EEOC block render below the application on the same page (Promise, 2026-09-04):
     # the definition carries them in surveyForms, not applicationForm — dropping them left half the page unfilled

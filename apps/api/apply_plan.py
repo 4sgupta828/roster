@@ -34,8 +34,15 @@ def bind_plan(form: dict, profile: dict, bank: dict | None = None, user_answers:
             plan.append({**q, "answer": "<résumé>" if "resume" in q["id"].lower() or "résumé" in label.lower() or "cv" in label.lower() else "",
                          "source": "profile" if "resume" in q["id"].lower() or "cv" in label.lower() else "", "blocking": False})
             continue
-        if q["id"].endswith("_text") and kind == "textarea" and any(w in label.lower() for w in ("resume", "résumé", "cv", "cover letter")):
+        if q["id"].endswith("_text") and kind == "textarea" and any(w in label.lower() for w in ("resume", "résumé", "cv")) and "cover" not in label.lower():
+            # the résumé's paste-as-text twin: the file is attached instead
             plan.append({**q, "answer": "", "source": "alternative to the file", "blocking": False, "policy": "skip"})
+            continue
+        if q["id"].endswith("_text") and kind == "textarea" and "cover letter" in label.lower():
+            # the cover letter's text twin STAYS open: a letter drafted in the Apply flow lands here (the
+            # user has no file to attach); never LLM-drafted unasked — policy 'letter' keeps it out of drafts
+            u = ua.get(norm_question(label)) or ua.get(norm_question(q["id"]))
+            plan.append({**q, "answer": str(u or ""), "source": "your answer" if u else "", "blocking": False, "policy": "letter", "required": False})
             continue
         u = ua.get(norm_question(label)) or ua.get(norm_question(q["id"]))
         if u:

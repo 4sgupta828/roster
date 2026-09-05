@@ -653,6 +653,7 @@
   .aptab.on{background:rgba(var(--gold-rgb),.12);color:var(--gold-strong);border-color:var(--gold);font-weight:600;}
   .aptab .apdot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--verified);margin-left:.35rem;vertical-align:middle;}
   .aptab .apdot.busy{background:var(--gold);animation:appulse 1s infinite alternate;}
+  .aptab .apdot[hidden]{display:none;}
   @keyframes appulse{from{opacity:.35}to{opacity:1}}
   .aa-tblwrap{overflow-x:auto;}
   .apnext{margin-top:.8rem;}
@@ -7539,7 +7540,8 @@ function renderPlanPane(d){
   const POL = {identity_sensitive:"self-identification", legal:"acknowledgement", file:"file"};
   const row = (p) => {
     const val = p.answer || "";
-    const ctrl = p.kind === "file" ? `<span class="acctmuted">${esc(val||"— no résumé on file —")} <span class="ppl-fc" style="text-transform:none;">attached by the extension</span></span>`
+    const isCL = /cover letter/i.test(p.label||"");
+    const ctrl = p.kind === "file" ? `<span class="acctmuted">${val ? esc(val) + ` <span class="ppl-fc" style="text-transform:none;">attached by the extension</span>` : (isCL ? `<span class="ppl-fc" style="text-transform:none;">not attached — draft one in step 3 and it lands in the cover-letter text question</span>` : `<span class="ppl-fc" style="text-transform:none;">nothing to attach</span>`)}</span>`
       : (["select","radio","boolean","multiselect","checkbox"].includes(p.kind) && (p.options||[]).length)
         ? `<select data-q="${esc(p.label)}" class="appq"><option value="">— choose —</option>${(p.options||[]).map(o=>`<option${val===o?" selected":""}>${esc(o)}</option>`).join("")}</select>`
         : `<textarea data-q="${esc(p.label)}" class="appq" rows="${p.kind==="textarea"?3:1}" placeholder="${p.required?"required":"optional"}">${esc(val)}</textarea>`;
