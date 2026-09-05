@@ -125,6 +125,12 @@ and a résumé or a posting can compile to a contract against either kind.
 Facet-through-relation: a job's `company_type` / `company_stage` are the facets of the company entity the job's
 `company` slug points to. The kernel evaluator supports one hop (`via: company`) declared in the schema; the
 adapter resolves it in SQL (one join) — this is how "startup" reaches both people (current employer) and jobs.
+Convention (adapter): the via-key `company_type` reads the company entity's `type`, `company_stage` its `stage`
+(the `via` prefix is stripped); company entities are keyed `company:<slug>` with the same slug the entity's
+`company` facet holds.
+
+Geo, v1: the existing open-vocabulary keys `country` / `state` / `metro` (set type) carry location, so no
+migration is needed; the hierarchical `geo` path is reserved for v2 once metros are mapped to states.
 
 ### 2.4 Provenance and labelling
 

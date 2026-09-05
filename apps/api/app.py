@@ -5951,6 +5951,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         if store is None or cs is None:
             raise HTTPException(status_code=503, detail="index unavailable")
         schema = _facet_schema(); ver = schema.version()
+        await store.ensure_schema()            # the read-model columns exist before any query touches them
         pool = await cs._get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch("""SELECT id, company, skills, facets, COALESCE(posted_at, '') AS posted_at, updated_at FROM rs_job
