@@ -54,6 +54,12 @@ CREATE TABLE IF NOT EXISTS rs_map_revision (
     PRIMARY KEY (map_id, revision_id)
 );
 ALTER TABLE rs_map_revision ADD COLUMN IF NOT EXISTS delta jsonb NOT NULL DEFAULT '{}'::jsonb;
+-- KEEP FRESH (2026-09-04): the owner opts a map into a cadence; the refresh loop re-runs the saved
+-- contract only when the index moved since last time, and records a 'refresh' revision when rows changed
+ALTER TABLE rs_map ADD COLUMN IF NOT EXISTS refresh_every text NOT NULL DEFAULT 'off';
+ALTER TABLE rs_map ADD COLUMN IF NOT EXISTS next_refresh_at timestamptz;
+ALTER TABLE rs_map ADD COLUMN IF NOT EXISTS last_refresh_at timestamptz;
+ALTER TABLE rs_map ADD COLUMN IF NOT EXISTS last_checked_at timestamptz;
 CREATE TABLE IF NOT EXISTS rs_map_review (
     map_id        text NOT NULL REFERENCES rs_map(id) ON DELETE CASCADE,
     entity_id     text NOT NULL,
@@ -101,7 +107,8 @@ def derive_state(tags: list[str] | None) -> str:
     return "maybe" if t else "unreviewed"
 
 
-REVISION_REASONS = ("initial", "hiring_manager_feedback", "manual_filter_change", "evidence_refresh", "corpus_expansion")
+REVISION_REASONS = ("initial", "hiring_manager_feedback", "manual_filter_change", "evidence_refresh", "corpus_expansion", "refresh")
+CADENCES = {"off": None, "daily": 1, "weekly": 7}       # keep-fresh cadence → days between refreshes
 _MAX_ROWS = 400
 
 
@@ -262,6 +269,41 @@ class MapStore:
                 (title.strip()[:160] if title is not None else None),
                 (notes[:8000] if notes is not None else None))
         return res.endswith("1")
+
+    async def set_cadence(self, map_id: str, *, owner_id: str, every: str) -> bool:
+        """Owner opts the map into keep-fresh: 'off' | 'daily' | 'weekly'. A newly enabled map is due now."""
+        every = every if every in CADENCES else "off"
+        await self._ensure()
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            res = await conn.execute(
+                """UPDATE rs_map SET refresh_every = $3,
+                       next_refresh_at = CASE WHEN $3 = 'off' THEN NULL ELSE now() END, updated_at = now()
+                   WHERE id = $1 AND owner_id = $2""", map_id, owner_id, every)
+        return res.endswith("1")
+
+    async def due_maps(self, *, limit: int = 20) -> list[dict]:
+        """Maps whose cadence says it is time: (id, owner_id, map_type, last_refresh_at)."""
+        await self._ensure()
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT id, owner_id, map_type, title, refresh_every, last_refresh_at FROM rs_map
+                   WHERE refresh_every <> 'off' AND owner_id IS NOT NULL
+                     AND (next_refresh_at IS NULL OR next_refresh_at <= now())
+                   ORDER BY next_refresh_at NULLS FIRST LIMIT $1""", int(limit))
+        return [dict(r) for r in rows]
+
+    async def mark_checked(self, map_id: str, *, refreshed: bool) -> None:
+        """Schedule the next check by the map's cadence; `refreshed` also stamps last_refresh_at."""
+        await self._ensure()
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE rs_map SET last_checked_at = now(),
+                       last_refresh_at = CASE WHEN $2 THEN now() ELSE last_refresh_at END,
+                       next_refresh_at = now() + (CASE refresh_every WHEN 'daily' THEN 1 WHEN 'weekly' THEN 7 ELSE 1 END) * interval '1 day'
+                   WHERE id = $1""", map_id, bool(refreshed))
 
     async def add_revision(self, map_id: str, *, owner_id: str, reason: str, brief: str, filters: dict | None,
                            coverage: dict | None, rows: list[dict], delta: dict | None = None) -> int | None:

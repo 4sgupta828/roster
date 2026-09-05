@@ -1278,6 +1278,22 @@ class MapReviewerIn(BaseModel):
     name: str = Field(default="", max_length=80)
 
 
+class MapCadenceIn(BaseModel):
+    every: str = "off"                # off | daily | weekly — keep this map fresh on a cadence (owner)
+
+
+class PeopleRefreshIn(BaseModel):     # admin-only, on-demand people refresh (never automatic)
+    limit: int = Field(default=500, ge=1, le=20000)
+    older_than_days: int = Field(default=14, ge=0, le=3650)
+    logins: list[str] = Field(default_factory=list)
+    map_id: str = ""
+    dry: bool = False
+
+
+class NotificationsReadIn(BaseModel):
+    ids: list[int] = Field(default_factory=list)   # empty = all
+
+
 class MapReviseIn(BaseModel):
     tenant_id: str = "demo"
     preview: bool = False             # True → only the code-owned contract edits (free; no search runs)
@@ -1984,6 +2000,35 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
                                  daemon=True, name="corpus-ingest")
             t.start()
             app.state._gap_thread = t
+
+    @app.on_event("startup")
+    async def _start_map_refresh_loop() -> None:
+        """KEEP-FRESH loop (ROSTER_MAP_REFRESH_LOOP=1, default on): every 10 minutes refresh the maps whose
+        cadence is due, capped at ROSTER_MAP_REFRESH_MAX_DAY per day (a talent-map re-run costs cents; a
+        job-map re-run is retrieval only). Runs in the API process — the compute lives here."""
+        if os.environ.get("ROSTER_MAP_REFRESH_LOOP", "1").lower() not in ("1", "true", "yes"):
+            return
+        if not os.environ.get("ROSTER_CORPUS_DSN") or getattr(app.state, "_map_refresh_task", None):
+            return
+        cap = int(os.environ.get("ROSTER_MAP_REFRESH_MAX_DAY", "50") or 50)
+
+        async def _loop():
+            import time as _time
+            done_today, day = 0, _time.monotonic()
+            await asyncio.sleep(90)              # let the service settle first
+            while True:
+                if _time.monotonic() - day > 86400:
+                    done_today, day = 0, _time.monotonic()
+                try:
+                    if done_today < cap:
+                        res = await _refresh_due_maps(limit=min(10, cap - done_today))
+                        done_today += sum(1 for r in res if r.get("refreshed"))
+                        if res:
+                            print(f"[maps] keep-fresh pass: {res}", flush=True)
+                except Exception as e:   # noqa: BLE001 — never let the loop die
+                    print(f"[maps] keep-fresh pass failed: {e}", flush=True)
+                await asyncio.sleep(600)
+        app.state._map_refresh_task = asyncio.create_task(_loop())
 
     # Answer-video add-on — separate, flag-gated router (default OFF). Kept fully out of
     # the research path: mounting it changes nothing about how answers are produced.
@@ -5781,6 +5826,217 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=400, detail="invalid review, or neither the owner nor a registered reviewer")
         return {"ok": True}
 
+    async def _rerun_jobs_map(m: dict, owner_id: str, *, prefs_extra: dict, exclude_refs: list, country: str) -> tuple[list[dict], dict]:
+        """Re-run a JOB MAP's saved contract (the owner's résumé × the brief × fixed filters) → (rows, coverage).
+        Shared by revise (with feedback-derived prefs) and keep-fresh refresh (the last contract as is)."""
+        from api.calibration import row_ref
+        from api.people_population import apply_job_must, job_brief_contract, match_resume_jobs, years_to_levels
+        store = _claim_store_cached()
+        if store is None:
+            raise HTTPException(status_code=503, detail="the job index is unavailable right now — please retry")
+        rows = [r for r in (m.get("rows") or []) if isinstance(r, dict)]
+        rows_by_ref = {row_ref(r): r for r in rows}
+        cov = m.get("coverage") or {}
+        _acc = _accounts()
+        _parsed = ((await _acc.get_parse(owner_id)).get("profile") or {}) if _acc else {}
+        _cv = str(_parsed.get("_resume_text") or "")
+        lp = cov.get("linkedin_profile") or {}
+        _prof_text = " ".join(x for x in [lp.get("name") or "", lp.get("headline") or "", _cv] if x).strip()
+        gs = cov.get("geo_scope") or {}
+        prefs = {"limit": 60, "brief_text": (m.get("brief") or ""), "country": (country or "us"),
+                 "metro": (gs.get("metro") or ""), "state": (gs.get("state") or ""),
+                 "seniorities": sorted(years_to_levels(_cv)) if _cv else [], **(prefs_extra or {}), "exclude_refs": list(exclude_refs or [])}
+        res = await match_resume_jobs(store, {"_resume_text": _prof_text}, prefs)
+        new_rows = list(res.get("jobs") or [])
+        must = (cov.get("must") or {}).get("kinds") or []
+        if must:
+            new_rows, _ = await apply_job_must(store, new_rows, must)
+        for j in new_rows:                                  # saved summaries travel with the map
+            old = rows_by_ref.get(row_ref(j))
+            if old and old.get("summary"):
+                j["summary"] = old["summary"]
+        _lv = re.search(r"(?i)\b(intern|junior|entry[- ]level|new grad|mid|senior|staff|principal|lead|director|vp|head of)\b", m.get("brief") or "")
+        bc = job_brief_contract(question=m.get("brief") or "", job_must=must, scope=res.get("geo_scope"),
+                                profile_text=(_prof_text if _cv else ""), matched_on=("resume" if _cv else "description"),
+                                stated_seniority=(_lv.group(1).lower() if _lv else ""))
+        bc["assumptions"] = ["filters fixed by this revision — the brief's wording only ranks"] + [a for a in bc.get("assumptions") or []][:2]
+        return new_rows, {**cov, "geo_scope": res.get("geo_scope"), "brief_contract": bc, "note": res.get("note") or ""}
+
+    async def _rerun_talent_map(m: dict, contract: dict, *, country: str, tenant_id: str = "demo") -> tuple[list[dict], dict]:
+        """Re-run a TALENT MAP's fixed contract (no compile, no refinement) → (rows, coverage_basis)."""
+        store = _claim_store_cached()
+        if store is None:
+            raise HTTPException(status_code=503, detail="the people index is unavailable right now — please retry")
+        from api.people_population import answer_people_population
+        cov = m.get("coverage") or {}
+        gs = cov.get("geo_scope") or {}
+        geo_on = people_geo_scope_enabled()
+        res = await answer_people_population(
+            question=contract["question"], tenant_id=tenant_id, store=store, llm=build_llm(mode=resolve_mode()),
+            scope_country=((country or "us").strip().lower() if geo_on else ""),
+            fixed_facets=contract["refine_facets"], assume_people=True,
+            scope_metro=((gs.get("metro") or "").strip().lower() if geo_on else ""),
+            scope_state=((gs.get("state") or "").strip().lower() if geo_on else ""),
+            evidence_kinds=contract.get("evidence_kinds") or [], exclude_ids=contract.get("exclude_ids") or [],
+            exclude_companies=contract.get("exclude_companies") or [], avoid_terms=contract.get("avoid_terms") or [])
+        return [r for r in (res.get("people_rows") or []) if isinstance(r, dict)], (res.get("coverage_basis") or {})
+
+    def _last_contract(m: dict) -> dict:
+        """The contract the map last ran with: the newest revision's stored contract, else the saved state."""
+        for rev in reversed(m.get("revisions") or []):
+            c = (rev.get("delta") or {}).get("contract") or {}
+            if c:
+                return dict(c)
+        return {}
+
+    async def _index_moved_since(m: dict, since) -> bool:
+        """CHEAP change check before any recompute: did the index this map reads from move since `since`?"""
+        if since is None:
+            return True
+        store = _claim_store_cached()
+        if store is None:
+            return False
+        pool = await store._get_pool()
+        async with pool.acquire() as conn:
+            if (m.get("map_type") or "talent") == "jobs":
+                n = await conn.fetchval("SELECT count(*) FROM rs_job WHERE updated_at > $1 OR closed_at > $1", since)
+            else:
+                n = await conn.fetchval("SELECT count(*) FROM rs_entity WHERE retrieved_at > $1", since)
+        return int(n or 0) > 0
+
+    async def _refresh_map(map_id: str, owner_id: str) -> dict:
+        """KEEP FRESH: re-run the map's last contract against the current index; when rows changed, save a
+        'refresh' revision (code-written summary, no LLM phrasing) and notify the owner. Skipped for free
+        when the index has not moved since the last refresh."""
+        from api.calibration import diff_rows
+        ms = _require_maps()
+        m = await ms.get(map_id, owner_id=owner_id)
+        if m is None or not m.get("is_owner"):
+            return {"map_id": map_id, "skipped": "not found"}
+        if not await _index_moved_since(m, m.get("last_refresh_at")):
+            await ms.mark_checked(map_id, refreshed=False)
+            return {"map_id": map_id, "skipped": "index unchanged"}
+        rows = [r for r in (m.get("rows") or []) if isinstance(r, dict)]
+        cov = m.get("coverage") or {}
+        country = str(((cov.get("geo_scope") or {}).get("country")) or "us")
+        last = _last_contract(m)
+        is_jobs = (m.get("map_type") or "talent") == "jobs"
+        if is_jobs:
+            new_rows, new_cov = await _rerun_jobs_map(m, owner_id, prefs_extra=last.get("prefs") or {}, exclude_refs=last.get("exclude_refs") or [], country=country)
+            filters = m.get("filters") or {}
+            brief = m.get("brief") or ""
+        else:
+            contract = {"question": m.get("brief") or "", "refine_facets": (m.get("filters") or {}),
+                        "evidence_kinds": list(((cov.get("evidence_filter") or {}).get("kinds")) or []),
+                        "exclude_ids": [], "exclude_companies": [], "avoid_terms": [], **{k: v for k, v in last.items() if k in ("question", "refine_facets", "evidence_kinds", "exclude_ids", "exclude_companies", "avoid_terms")}}
+            new_rows, new_cov = await _rerun_talent_map(m, contract, country=country)
+            filters = new_cov.get("query_facets") or contract["refine_facets"]
+            brief = contract["question"]
+        delta = diff_rows(rows, new_rows)
+        changed = bool(delta.get("n_added") or delta.get("n_removed"))
+        if not changed:
+            await ms.mark_checked(map_id, refreshed=True)
+            return {"map_id": map_id, "skipped": "no new or dropped rows", "n_moved": delta.get("n_moved", 0)}
+        noun = "roles" if is_jobs else "people"
+        summary = (f"Refreshed against the current index: {delta.get('n_added', 0)} new {noun}, "
+                   f"{delta.get('n_removed', 0)} dropped, {delta.get('n_moved', 0)} moved 10+ places.")
+        delta_rec = {**delta, "edits": [], "summary": summary, "contract": last, "refresh": True}
+        await ms.add_revision(map_id, owner_id=owner_id, reason="refresh", brief=brief, filters=filters,
+                              coverage=new_cov, rows=new_rows, delta=delta_rec)
+        await ms.mark_checked(map_id, refreshed=True)
+        acc = _accounts()
+        if acc is not None:
+            names = ", ".join(str(x.get("name") or x.get("title") or "") for x in (delta.get("added") or [])[:4] if isinstance(x, dict))
+            await acc.add_notification(owner_id, kind="map_refresh",
+                                       title=f"{delta.get('n_added', 0)} new {noun} in “{m.get('title') or 'your map'}”" if delta.get("n_added") else f"{delta.get('n_removed', 0)} {noun} dropped from “{m.get('title') or 'your map'}”",
+                                       body=(summary + (f" New: {names}." if names else "")), url=f"#m/{map_id}")
+        return {"map_id": map_id, "refreshed": True, "n_added": delta.get("n_added", 0), "n_removed": delta.get("n_removed", 0)}
+
+    async def _refresh_due_maps(limit: int = 10) -> list[dict]:
+        ms = _require_maps()
+        out = []
+        for d in await ms.due_maps(limit=limit):
+            try:
+                out.append(await _refresh_map(d["id"], d["owner_id"]))
+            except Exception as e:   # noqa: BLE001 — one map's failure never blocks the rest
+                out.append({"map_id": d["id"], "error": str(e)[:200]})
+                try:
+                    await ms.mark_checked(d["id"], refreshed=False)
+                except Exception:   # noqa: BLE001
+                    pass
+        return out
+
+    @app.post("/maps/{map_id}/cadence")
+    async def map_cadence(map_id: str, body: MapCadenceIn, x_roster_token: str = Header(default="")) -> dict:
+        """KEEP FRESH: the owner opts this map into a refresh cadence (off / daily / weekly)."""
+        from api.maps import CADENCES
+        ms = _require_maps()
+        _, user = await _require_user(x_roster_token)
+        every = body.every if body.every in CADENCES else "off"
+        if not await ms.set_cadence(map_id, owner_id=user["id"], every=every):
+            raise HTTPException(status_code=404, detail="map not found")
+        return {"ok": True, "every": every}
+
+    @app.post("/admin/maps/refresh-due")
+    async def admin_maps_refresh_due(x_admin_token: str = Header(default="")) -> dict:
+        """Run the keep-fresh pass now (the startup loop does this every 10 minutes)."""
+        want = os.environ.get("ROSTER_ADMIN_TOKEN", "")
+        if want and x_admin_token != want:
+            raise HTTPException(status_code=401, detail="admin token required")
+        return {"results": await _refresh_due_maps(limit=20)}
+
+    @app.post("/admin/people/refresh")
+    async def admin_people_refresh(body: PeopleRefreshIn, x_admin_token: str = Header(default="")) -> dict:
+        """ON-DEMAND people refresh (admin only; never automatic — owner's call): conditional GitHub
+        re-checks of the oldest profiles (or one map's people, or named logins) in a separate process.
+        Progress: GET /admin/people/refresh."""
+        want = os.environ.get("ROSTER_ADMIN_TOKEN", "")
+        if want and x_admin_token != want:
+            raise HTTPException(status_code=401, detail="admin token required")
+        if not os.environ.get("ROSTER_GITHUB_TOKEN"):
+            raise HTTPException(status_code=503, detail="ROSTER_GITHUB_TOKEN not set on this service")
+        import subprocess, sys as _sys, time as _time
+        run_id = f"run-{int(_time.time())}"
+        argv = [_sys.executable, "scripts/refresh_people.py", "--limit", str(body.limit), "--older-than-days", str(body.older_than_days), "--run-id", run_id]
+        if not body.dry:
+            argv.append("--live")
+        if body.logins:
+            argv += ["--logins", ",".join(l.strip() for l in body.logins if l.strip())[:5000]]
+        if body.map_id:
+            argv += ["--map", body.map_id[:64]]
+        try:
+            subprocess.Popen(argv, cwd="/app" if os.path.isdir("/app/scripts") else None, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True, env=os.environ.copy())
+        except Exception as e:   # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"could not start the refresh: {e}") from e
+        return {"run_id": run_id, "dry": body.dry, "status": "started"}
+
+    @app.get("/admin/people/refresh")
+    async def admin_people_refresh_status(x_admin_token: str = Header(default="")) -> dict:
+        want = os.environ.get("ROSTER_ADMIN_TOKEN", "")
+        if want and x_admin_token != want:
+            raise HTTPException(status_code=401, detail="admin token required")
+        store = _claim_store_cached()
+        if store is None:
+            return {"runs": []}
+        pool = await store._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("SELECT cursor_key, status, n_seen, n_written, error, updated_at FROM rs_ingest_checkpoint "
+                                    "WHERE source='people_refresh' ORDER BY updated_at DESC LIMIT 10")
+        return {"runs": [{"run_id": r["cursor_key"], "status": r["status"], "checked": r["n_seen"], "changed": r["n_written"],
+                          "stats": r["error"], "updated_at": str(r["updated_at"])} for r in rows]}
+
+    @app.get("/me/notifications")
+    async def me_notifications(unread: int = 0, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        items = await store.list_notifications(user["id"], unread_only=bool(unread))
+        return {"notifications": items, "unread": (items[0]["unread_total"] if items else 0)}
+
+    @app.post("/me/notifications/read")
+    async def me_notifications_read(body: NotificationsReadIn, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return {"marked": await store.mark_notifications_read(user["id"], ids=body.ids or None)}
+
     @app.post("/maps/{map_id}/revise")
     async def map_revise(map_id: str, body: MapReviseIn, x_roster_token: str = Header(default="")) -> dict:
         """HIRING-MANAGER CALIBRATION (recruiter-workflows P2b): the owner turns the reviewers' tags into a
@@ -5796,7 +6052,6 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         if (m.get("map_type") or "talent") == "jobs":
             # JOB MAP: taps on job cards → résumé-match preferences → the roles re-run → a new revision
             from api.calibration import job_feedback_to_prefs, row_ref
-            from api.people_population import apply_job_must, job_brief_contract, match_resume_jobs, years_to_levels
             rows = [r for r in (m.get("rows") or []) if isinstance(r, dict)]
             rows_by_ref = {row_ref(r): r for r in rows}
             feedback = [f for f in (m.get("feedback") or []) if (f.get("tags") or []) or f.get("state") in ("shortlist", "not relevant")]
@@ -5811,35 +6066,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 return {"preview": True, "contract": contract}
             if not cal["edits"]:
                 raise HTTPException(status_code=400, detail="the feedback so far implies no change to the search")
-            store = _claim_store_cached()
-            if store is None:
-                raise HTTPException(status_code=503, detail="the job index is unavailable right now — please retry")
-            cov = m.get("coverage") or {}
-            # the profile the map was matched on: the signed-in user's résumé when on file, else the brief text
-            _acc = _accounts()
-            _parsed = ((await _acc.get_parse(user["id"])).get("profile") or {}) if _acc else {}
-            _cv = str(_parsed.get("_resume_text") or "")
-            lp = cov.get("linkedin_profile") or {}
-            _prof_text = " ".join(x for x in [lp.get("name") or "", lp.get("headline") or "", _cv] if x).strip()
-            gs = cov.get("geo_scope") or {}
-            prefs = {"limit": 60, "brief_text": (m.get("brief") or ""), "country": (body.country or "us"),
-                     "metro": (gs.get("metro") or ""), "state": (gs.get("state") or ""),
-                     "seniorities": sorted(years_to_levels(_cv)) if _cv else [], **cal["prefs"], "exclude_refs": cal["exclude_refs"]}
-            res = await match_resume_jobs(store, {"_resume_text": _prof_text}, prefs)
-            new_rows = list(res.get("jobs") or [])
-            must = (cov.get("must") or {}).get("kinds") or []
-            if must:
-                new_rows, _ = await apply_job_must(store, new_rows, must)
-            for j in new_rows:                                  # saved summaries travel with the map
-                old = rows_by_ref.get(row_ref(j))
-                if old and old.get("summary"):
-                    j["summary"] = old["summary"]
-            _lv = re.search(r"(?i)\b(intern|junior|entry[- ]level|new grad|mid|senior|staff|principal|lead|director|vp|head of)\b", m.get("brief") or "")
-            bc = job_brief_contract(question=m.get("brief") or "", job_must=must, scope=res.get("geo_scope"),
-                                    profile_text=(_prof_text if _cv else ""), matched_on=("resume" if _cv else "description"),
-                                    stated_seniority=(_lv.group(1).lower() if _lv else ""))
-            bc["assumptions"] = ["filters fixed by this revision (your feedback) — the brief's wording only ranks"] + [a for a in bc.get("assumptions") or []][:2]
-            new_cov = {**cov, "geo_scope": res.get("geo_scope"), "brief_contract": bc, "note": res.get("note") or ""}
+            new_rows, new_cov = await _rerun_jobs_map(m, user["id"], prefs_extra=cal["prefs"], exclude_refs=cal["exclude_refs"], country=(body.country or "us"))
             delta = diff_rows(rows, new_rows)
             summary = await phrase_delta(build_llm(mode=resolve_mode()), delta, cal["edits"])
             delta_rec = {**delta, "edits": cal["edits"], "summary": summary, "contract": {"prefs": cal["prefs"], "exclude_refs": cal["exclude_refs"]}}
@@ -5865,22 +6092,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             return {"preview": True, "contract": contract}
         if not contract["edits"]:
             raise HTTPException(status_code=400, detail="the feedback so far implies no change to the brief")
-        store = _claim_store_cached()
-        if store is None:
-            raise HTTPException(status_code=503, detail="the people index is unavailable right now — please retry")
-        from api.people_population import answer_people_population
-        gs = cov.get("geo_scope") or {}
-        geo_on = people_geo_scope_enabled()
-        res = await answer_people_population(
-            question=contract["question"], tenant_id=body.tenant_id, store=store, llm=build_llm(mode=resolve_mode()),
-            scope_country=((body.country or "us").strip().lower() if geo_on else ""),
-            fixed_facets=contract["refine_facets"], assume_people=True,
-            scope_metro=((gs.get("metro") or "").strip().lower() if geo_on else ""),
-            scope_state=((gs.get("state") or "").strip().lower() if geo_on else ""),
-            evidence_kinds=contract["evidence_kinds"], exclude_ids=contract["exclude_ids"],
-            exclude_companies=contract["exclude_companies"], avoid_terms=contract["avoid_terms"])
-        new_rows = [r for r in (res.get("people_rows") or []) if isinstance(r, dict)]
-        new_cov = res.get("coverage_basis") or {}
+        new_rows, new_cov = await _rerun_talent_map(m, contract, country=(body.country or "us"), tenant_id=body.tenant_id)
         delta = diff_rows(rows, new_rows)
         summary = await phrase_delta(build_llm(mode=resolve_mode()), delta, contract["edits"])
         delta_rec = {**delta, "edits": contract["edits"], "summary": summary,

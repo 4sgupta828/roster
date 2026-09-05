@@ -647,6 +647,12 @@
   .mapbar .mb-meta{flex-basis:100%;font-size:.74rem;color:var(--muted);}
   .appqrow{display:flex;flex-direction:column;gap:.2rem;margin:.4rem 0;font-size:.84rem;}
   /* 🚀 Apply — one modal, four steps */
+  .bellcount{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--gold);color:#fff;font-size:.66rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center;}
+  .notif{border:1px solid var(--hair);border-radius:8px;padding:.5rem .6rem;margin:.35rem 0;font-size:.84rem;display:flex;gap:.5rem;align-items:flex-start;}
+  .notif.unread{border-left:3px solid var(--gold);}
+  .notif .nt{font-weight:600;} .notif .nb{color:var(--muted);font-size:.78rem;margin-top:.15rem;}
+  .mb-cadence{display:inline-flex;align-items:center;gap:.35rem;font-size:.74rem;color:var(--muted);flex-basis:auto;}
+  .mb-cadence select{font:inherit;font-size:.74rem;padding:.2rem .35rem;border:1px solid var(--hair);border-radius:6px;background:var(--panel);color:var(--ink);min-height:30px;}
   .aptabs{display:flex;gap:.3rem;flex-wrap:wrap;margin:.6rem 0 .5rem;border-bottom:1px solid var(--hair);padding-bottom:.45rem;}
   .aptab{font:inherit;font-size:.78rem;padding:.35rem .75rem;min-height:38px;border:1px solid var(--hair);border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;}
   .aptab:hover{color:var(--ink);}
@@ -1717,6 +1723,7 @@
     <button type="button" class="histbtn" id="signinbtn" style="margin-left:0;" title="Sign in or create an account">Sign in</button>
     <button type="button" class="histbtn" id="histbtn2" style="margin-left:0;" hidden title="Your search history — private to your account">⧗ History</button>
     <button type="button" class="histbtn" id="mapsbtn" style="margin-left:0;" title="Your saved Talent Maps" onclick="location.hash='#maps'">🗺 Maps</button>
+    <button type="button" class="histbtn" id="bellbtn" hidden style="margin-left:0;position:relative;" title="Notifications — new roles or people in maps you keep fresh">🔔<span id="bellcount" class="bellcount" hidden></span></button>
     <button type="button" class="histbtn" id="acctbtn" style="margin-left:0;" hidden title="Your account — shortlists, saved searches, apply profile">◈ Account</button>
     <!-- legacy hidden hooks (handlers guard for null; kept out of the header) -->
     <button type="button" id="savedbtn" hidden></button>
@@ -1980,6 +1987,11 @@
         </div>
       </section>
       <section class="acctcard">
+        <h3>Notifications <span class="acctmuted">maps you keep fresh · applications</span></h3>
+        <div id="notiflist" class="acctmuted">none yet</div>
+        <button type="button" class="histbtn" id="notifreadall" style="margin-top:.4rem;">Mark all read</button>
+      </div>
+      <div class="acctcard">
         <h3>Roster Apply extension <span class="acctmuted">fills forms in your browser</span></h3>
         <p class="acctcardsub">One-minute setup: 1. <a href="/extension.zip">Download the extension</a> and unzip it. 2. In Chrome open <code>chrome://extensions</code>, turn on Developer mode, click <b>Load unpacked</b>, pick the <code>roster-apply</code> folder. 3. Chrome hides new extensions: click the puzzle-piece 🧩 button at the right of the address bar, then the pin next to <b>Roster Apply</b> so its purple <b>R</b> stays on the toolbar. 4. Click that <b>R</b> and paste this token:</p>
         <div class="acctrow"><input id="exttoken" type="password" readonly value="" /><button type="button" class="idgo" id="exttokencopy" style="width:auto;">Copy token</button></div>
@@ -7607,6 +7619,7 @@ function prepareApplication(ref){ openApplyFlow({ref}); }
 function applyWithAssistant(ref){ openApplyFlow({ref}); }
 async function openApplication(id){ openApplyFlow({appId: Number(id), pane: "plan"}); }
 async function renderApplications(){
+  renderNotifications(); refreshBell();
   const el = $("#applist"); if(!el) return;
   try{
     const d = await (await fetch("/me/applications", {headers: authHeaders()})).json(); const apps = d.applications||[];
@@ -8574,7 +8587,7 @@ function talentMapBar(){
     const reviewAs = m.is_owner ? "" : `<span class="mb-meta" style="flex-basis:auto;">Review as <input class="mb-title" id="reviewerName" style="max-width:180px;" placeholder="your name" value="${esc(reviewerName())}" onchange="setReviewerName(this.value);"> <span class="ppl-fc" style="text-transform:none;">(no account needed — your review states and feedback save to this map under your name)</span></span>`;
     const revise = (m.is_owner && nAct) ? `<button type="button" class="mb-btn" id="reviseBtn" onclick="reviseMapPreview()">↻ Revise from feedback (${nAct} new)</button>`
       : (m.is_owner && revN ? `<span class="mb-meta" style="flex-basis:auto;">no new feedback since revision ${revN}</span>` : "");
-    return `<div class="mapbar">${title}${share}<a class="mb-btn" href="${csvHref}" target="_blank" rel="noopener">⬇ Export CSV</a>${revise}
+    return `<div class="mapbar">${title}${share}<a class="mb-btn" href="${csvHref}" target="_blank" rel="noopener">⬇ Export CSV</a>${revise}${cadenceMarkup(m)}
       <span class="mb-meta">Saved Talent Map${revN?` · revision ${revN}`:""} · ${m.n_rows||0} people · ${m.is_owner?"you own this map — review states, feedback and notes persist here":"shared view"}${nFb?` · ${nFb} reviewer feedback item${nFb===1?"":"s"}`:""}${m.created_at?` · saved ${esc(String(m.created_at).slice(0,10))}`:""}</span>
       ${reviewAs}
       ${revisionsMarkup(m)}
@@ -8592,18 +8605,50 @@ function revisionsMarkup(m){
   if(!revs.length) return "";
   const last = revs[revs.length-1], d = last.delta || {};
   if(!Object.keys(d).length) return "";
-  const REASON = {hiring_manager_feedback:"from reviewer feedback", manual_filter_change:"filters changed", evidence_refresh:"evidence refreshed", corpus_expansion:"corpus grew"};
-  const names = k => (d[k]||[]).map(x => x.name).filter(Boolean).slice(0,6).map(esc).join(", ");
+  const REASON = {hiring_manager_feedback:"from reviewer feedback", manual_filter_change:"filters changed", evidence_refresh:"evidence refreshed", corpus_expansion:"corpus grew", refresh:"kept fresh — index moved"};
+  const names = k => (d[k]||[]).map(x => x.name).filter(Boolean).slice(0, last.reason === "refresh" ? 40 : 6).map(esc).join(", ");
   const lines = String(d.summary||"").split("\n").filter(Boolean).map(esc).join("<br>");
   return `<div class="rev-box">
     <div class="rev-h">What changed since revision ${Math.max(0,last.revision_id-1)} <span class="ppl-fc" style="text-transform:none;">(revision ${last.revision_id}, ${esc(REASON[last.reason]||last.reason)}${last.created_at?`, ${esc(String(last.created_at).slice(0,10))}`:""})</span></div>
-    <div class="rev-meta">This map was revised <b>in place</b> — same link, nothing to re-save. Revision ${Math.max(0,last.revision_id-1)} (the list before) is kept with the map.</div>
+    <div class="rev-meta">${last.reason==="refresh" ? "Refreshed automatically on this map's cadence — same link; the list before is kept as revision " + Math.max(0,last.revision_id-1) + "." : "This map was revised <b>in place</b> — same link, nothing to re-save. Revision " + Math.max(0,last.revision_id-1) + " (the list before) is kept with the map."}</div>
     ${lines?`<div class="rev-sum">${lines}</div>`:""}
     <div class="rev-meta">${d.n_added||0} new${names("added")?` (${names("added")}${(d.n_added||0)>6?", …":""})`:""} · ${d.n_removed||0} dropped${names("removed")?` (${names("removed")}${(d.n_removed||0)>6?", …":""})`:""} · ${d.n_moved||0} moved 10+ places</div>
     ${(d.edits||[]).length?`<details class="rev-edits" open><summary>Feedback that produced this revision (${d.edits.length})</summary><ul>${d.edits.map(e=>`<li>${esc(e)}</li>`).join("")}</ul></details>`:""}
     ${revs.length>1?`<div class="rev-meta">Earlier: ${revs.slice(0,-1).reverse().map(r=>`rev ${r.revision_id} (${esc(REASON[r.reason]||r.reason)})`).join(" · ")}</div>`:""}
   </div>`;
 }
+// KEEP FRESH: the owner opts a saved map into a cadence; the server re-runs the saved contract only when
+// the index moved, records a 'refresh' revision when rows changed, and drops a notification.
+function cadenceMarkup(m){
+  if(!m || !m.is_owner) return "";
+  const v = m.refresh_every || "off";
+  const when = m.last_checked_at ? ` · checked ${esc(String(m.last_checked_at).slice(0,16).replace("T"," "))}` : "";
+  return `<label class="mb-cadence" title="Re-run this map on a cadence when the index has new postings or people; you get a notification when rows change">↻ Keep fresh
+    <select onchange="setMapCadence(this.value)"><option value="off"${v==="off"?" selected":""}>off</option><option value="daily"${v==="daily"?" selected":""}>daily</option><option value="weekly"${v==="weekly"?" selected":""}>weekly</option></select>${when}</label>`;
+}
+async function setMapCadence(every){
+  const m = window.ACTIVE_MAP; if(!m || !m.is_owner) return;
+  try{ const r = await fetch(`/maps/${encodeURIComponent(m.id)}/cadence`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({every})});
+    if(r.ok){ m.refresh_every = every; } }catch(e){}
+}
+async function refreshBell(){
+  const b = $("#bellbtn"), c = $("#bellcount"); if(!b) return;
+  if(!loggedIn()){ b.hidden = true; return; }
+  b.hidden = false;
+  try{ const d = await (await fetch("/me/notifications?unread=1", {headers: authHeaders()})).json();
+    const n = d.unread || 0; c.hidden = !n; c.textContent = n > 99 ? "99+" : String(n); }catch(e){ c.hidden = true; }
+}
+async function renderNotifications(){
+  const el = $("#notiflist"); if(!el) return;
+  try{ const d = await (await fetch("/me/notifications", {headers: authHeaders()})).json(); const items = d.notifications || [];
+    if(!items.length){ el.innerHTML = "<span class='acctmuted'>none yet — turn on ↻ Keep fresh on a saved map, or apply to a role</span>"; return; }
+    el.innerHTML = items.map(n => `<div class="notif${n.read_at?"":" unread"}"><div style="flex:1;"><div class="nt">${esc(n.title||"")}</div>${n.body?`<div class="nb">${esc(n.body)}</div>`:""}<div class="nb">${esc(String(n.created_at||"").slice(0,16).replace("T"," "))}</div></div>${n.url?`<a class="histbtn" href="${esc(n.url)}" onclick="markNotifRead(${Number(n.id)})">Open</a>`:""}</div>`).join("");
+  }catch(e){ el.innerHTML = "<span class='acctmuted'>couldn't load</span>"; }
+}
+async function markNotifRead(id){ try{ await fetch("/me/notifications/read", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({ids:[id]})}); }catch(e){} refreshBell(); }
+$("#notifreadall") && $("#notifreadall").addEventListener("click", async ()=>{ try{ await fetch("/me/notifications/read", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({ids:[]})}); }catch(e){} renderNotifications(); refreshBell(); });
+$("#bellbtn") && $("#bellbtn").addEventListener("click", ()=>{ openAccount(); });
+setTimeout(refreshBell, 1500); setInterval(refreshBell, 5 * 60 * 1000);
 // PREVIEW first (free — no search runs): the code-owned edits the feedback implies; the owner confirms.
 async function reviseMapPreview(){
   const m = window.ACTIVE_MAP; if(!m || !m.is_owner) return;
@@ -8651,7 +8696,7 @@ function jobMapBarMarkup(d){
     const nAct = (m.feedback||[]).filter(f => ((f.tags||[]).length || f.state === "shortlist" || f.state === "not relevant") && (!since || String(f.updated_at||"") > since)).length;
     const revise = (m.is_owner && nAct) ? `<button type="button" class="mb-btn" id="reviseBtn" onclick="reviseMapPreview()">↻ Revise from feedback (${nAct} new)</button>`
       : (m.is_owner && revN ? `<span class="mb-meta" style="flex-basis:auto;">no new feedback since revision ${revN}</span>` : "");
-    return `<div class="mapbar">${title}${share}<a class="mb-btn" href="${csvHref}" target="_blank" rel="noopener">⬇ Export CSV</a>${revise}
+    return `<div class="mapbar">${title}${share}<a class="mb-btn" href="${csvHref}" target="_blank" rel="noopener">⬇ Export CSV</a>${revise}${cadenceMarkup(m)}
       <span class="mb-meta">Saved Job Map${revN?` · revision ${revN}`:""} · ${m.n_rows||0} roles · ${m.is_owner?"you own this map — 👍 / 👎 roles, then revise; notes persist here":"shared read-only view"}${m.created_at?` · saved ${esc(String(m.created_at).slice(0,10))}`:""}</span>
       ${revisionsMarkup(m)}
       <div id="reviseBox" hidden></div>

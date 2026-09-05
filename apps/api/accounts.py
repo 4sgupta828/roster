@@ -133,6 +133,19 @@ CREATE TABLE IF NOT EXISTS roster_outreach (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_ro_user ON roster_outreach (user_id, created_at DESC);
+-- NOTIFICATIONS (2026-09-04): in-app inbox — a map refresh found new rows, an application moved, …
+-- Read by the FE bell and by the Roster Apply extension (native Chrome notifications). Per user.
+CREATE TABLE IF NOT EXISTS roster_notification (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    kind        TEXT NOT NULL DEFAULT '',        -- map_refresh | application | system
+    title       TEXT NOT NULL,
+    body        TEXT NOT NULL DEFAULT '',
+    url         TEXT NOT NULL DEFAULT '',        -- in-app hash route (#m/<id>) or a link
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    read_at     TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_rn_user ON roster_notification (user_id, created_at DESC);
 -- RÉSUMÉ → PROFILE autofill: docling+LLM parse runs in a SEPARATE process; these columns hold its
 -- status and the suggested fields (the FE prefills the form from parsed_profile for the user to review).
 ALTER TABLE roster_candidate_profile ADD COLUMN IF NOT EXISTS parse_status TEXT;      -- pending|done|failed
@@ -707,6 +720,33 @@ class AccountStore:
             res = await conn.execute(f"UPDATE roster_application SET {', '.join(sets)}, updated_at = now() WHERE user_id = $1 AND id = $2",
                                      user_id, int(app_id), *vals)
         return res.endswith("1")
+
+    # ---- notifications (in-app inbox; the extension polls the same list) ----
+    async def add_notification(self, user_id: str, *, kind: str, title: str, body: str = "", url: str = "") -> int:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            return int(await conn.fetchval(
+                "INSERT INTO roster_notification (user_id, kind, title, body, url) VALUES ($1,$2,$3,$4,$5) RETURNING id",
+                user_id, kind[:40], title[:300], body[:2000], url[:1000]))
+
+    async def list_notifications(self, user_id: str, *, unread_only: bool = False, limit: int = 50) -> list[dict]:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, kind, title, body, url, created_at, read_at FROM roster_notification WHERE user_id = $1 "
+                + ("AND read_at IS NULL " if unread_only else "") + "ORDER BY created_at DESC LIMIT $2", user_id, int(limit))
+            unread = int(await conn.fetchval("SELECT count(*) FROM roster_notification WHERE user_id = $1 AND read_at IS NULL", user_id) or 0)
+        return [{**dict(r), "id": int(r["id"]), "created_at": str(r["created_at"]), "read_at": (str(r["read_at"]) if r["read_at"] else None),
+                 "unread_total": unread} for r in rows]
+
+    async def mark_notifications_read(self, user_id: str, *, ids: list[int] | None = None) -> int:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            if ids:
+                r = await conn.execute("UPDATE roster_notification SET read_at = now() WHERE user_id = $1 AND read_at IS NULL AND id = ANY($2::bigint[])", user_id, [int(i) for i in ids])
+            else:
+                r = await conn.execute("UPDATE roster_notification SET read_at = now() WHERE user_id = $1 AND read_at IS NULL", user_id)
+        return int(r.split()[-1]) if r else 0
 
     async def list_applications(self, user_id: str, *, limit: int = 200) -> list[dict]:
         await self._ensure()

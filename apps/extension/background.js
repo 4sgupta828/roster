@@ -24,6 +24,37 @@ async function getResume() {
   return { name: (m && m[1]) || "resume.pdf", type: r.headers.get("content-type") || "application/pdf", b64: btoa(bin) };
 }
 
+// NOTIFICATIONS: every 15 minutes ask Roster for unread notifications (a map refresh found new roles or
+// people, an application moved) and raise them as native Chrome notifications. Nothing is sent anywhere;
+// the poll is a plain read with the user's own token, and it stops when there is no token.
+const SEEN_KEY = "roster_notified_ids";
+async function pollNotifications() {
+  try {
+    const { token, base } = await cfg();
+    if (!token) return;
+    const r = await fetch(base + "/me/notifications?unread=1", { headers: { "X-Roster-Token": token } });
+    if (!r.ok) return;
+    const d = await r.json();
+    const s = await chrome.storage.local.get([SEEN_KEY]);
+    const seen = new Set(s[SEEN_KEY] || []);
+    const fresh = (d.notifications || []).filter(n => !seen.has(n.id)).slice(0, 5);
+    for (const n of fresh) {
+      chrome.notifications.create("roster-" + n.id, { type: "basic", iconUrl: "icons/128.png", title: n.title || "Roster",
+        message: (n.body || "").slice(0, 200), priority: 1 });
+      seen.add(n.id);
+    }
+    await chrome.storage.local.set({ [SEEN_KEY]: [...seen].slice(-500) });
+  } catch (e) { /* offline or token revoked: try again next tick */ }
+}
+chrome.alarms.create("roster-notify", { periodInMinutes: 15 });
+chrome.alarms.onAlarm.addListener(a => { if (a.name === "roster-notify") pollNotifications(); });
+chrome.notifications.onClicked.addListener(async id => {
+  const { base } = await cfg();
+  chrome.tabs.create({ url: base + "/" });
+  chrome.notifications.clear(id);
+});
+chrome.runtime.onInstalled.addListener(() => pollNotifications());
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     try {
