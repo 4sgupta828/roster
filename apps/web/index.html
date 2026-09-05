@@ -8679,8 +8679,16 @@ async function renderNotifications(){
   const el = $("#notiflist"); if(!el) return;
   try{ const d = await (await fetch("/me/notifications", {headers: authHeaders()})).json(); const items = d.notifications || [];
     if(!items.length){ el.innerHTML = "<span class='acctmuted'>none yet — turn on ↻ Keep fresh on a saved map, or apply to a role</span>"; return; }
-    el.innerHTML = items.map(n => `<div class="notif${n.read_at?"":" unread"}"><div style="flex:1;"><div class="nt">${esc(n.title||"")}</div>${n.body?`<div class="nb">${esc(n.body)}</div>`:""}<div class="nb">${esc(String(n.created_at||"").slice(0,16).replace("T"," "))}</div></div>${n.url?`<a class="histbtn" href="${esc(n.url)}" onclick="markNotifRead(${Number(n.id)})">Open</a>`:""}</div>`).join("");
+    el.innerHTML = items.map(n => `<div class="notif${n.read_at?"":" unread"}"><div style="flex:1;"><div class="nt">${esc(n.title||"")}</div>${n.body?`<div class="nb">${esc(n.body)}</div>`:""}<div class="nb">${esc(String(n.created_at||"").slice(0,16).replace("T"," "))}</div></div>${n.url?`<button type="button" class="histbtn" onclick="openNotif(${Number(n.id)}, '${esc(n.url)}')">Open</button>`:""}</div>`).join("");
   }catch(e){ el.innerHTML = "<span class='acctmuted'>couldn't load</span>"; }
+}
+// OPEN a notification: mark it read, leave the Account page (it covers the whole screen), and route to
+// the target — even when the hash is already the target (no hashchange fires then).
+function openNotif(id, url){
+  markNotifRead(id);
+  const acct = $("#savedmodal"); if(acct) acct.hidden = true;
+  if(location.hash === url){ routeHash(); } else { location.hash = url; }
+  window.scrollTo(0, 0);
 }
 async function markNotifRead(id){ try{ await fetch("/me/notifications/read", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({ids:[id]})}); }catch(e){} refreshBell(); }
 $("#notifreadall") && $("#notifreadall").addEventListener("click", async ()=>{ try{ await fetch("/me/notifications/read", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({ids:[]})}); }catch(e){} renderNotifications(); refreshBell(); });
