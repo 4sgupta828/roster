@@ -410,7 +410,10 @@ async def upsert_jobs(conn, source: str, rows: list[dict], vecs: list[str | None
     (aggregators) falling back to company_default (single-company boards). location/department coalesced
     to '' so the unique key actually dedups (NULLs never collide in a unique index)."""
     n = 0
+    _nul = lambda v: str(v or "").replace("\x00", "")     # Postgres text/jsonb reject NUL; scraped postings carry it
     for r, vec in zip(rows, vecs):
+        r = {**r, "title": _nul(r.get("title")), "location": _nul(r.get("location")), "department": _nul(r.get("department")),
+             "url": _nul(r.get("url")), "body": _nul(r.get("body")), "company": _nul(r.get("company"))}
         title = (r.get("title") or "").strip()
         company = (r.get("company") or company_default or "").strip()
         if not title or not company:
