@@ -304,6 +304,13 @@ class IntakeService:
         # come from — the intake never constrains `company` (the rail can, explicitly)
         for section in (c.must, c.prefer, c.avoid):
             section.pop("company", None)
+        if st.direction == "job":
+            # a résumé states FACTS (what the seeker did): they rank; only the seeker's WANTS filter (asked later)
+            keep = {"field", "metro", "state", "country", "work_mode", "employment_type", "comp"}
+            for key in [k for k in list(c.must.keys()) if k not in keep]:
+                vals = c.must.pop(key)
+                if isinstance(vals, list):
+                    c.prefer[key] = sorted(set(list(c.prefer.get(key) or []) + [str(v) for v in vals]))
         st.contract = c.to_dict()
 
 

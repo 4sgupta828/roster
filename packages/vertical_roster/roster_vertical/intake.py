@@ -150,8 +150,11 @@ def understood_words(direction: str, contract: dict, answers: dict | None = None
     if ctr.get("key"):
         parts.append(f"centred on {option_label(ctr['key'], str(ctr.get('value')))} {ctr['key'].replace('_', ' ')}")
     a = answers or {}
-    if a.get("comp"):
-        parts.append(f"around {option_label('comp', str(a['comp']))}")
-    if a.get("years"):
-        parts.append(f"{a['years']} years in")
+    comp = a.get("comp")
+    comp = comp[0] if isinstance(comp, (list, tuple)) and comp else comp
+    if comp and "comp" not in (c.get("must") or {}):
+        parts.append(f"around {option_label('comp', str(comp))}")
+    yrs = str(a.get("years") or "").strip()
+    if yrs and yrs.replace("+", "").strip().isdigit():
+        parts.append(f"{yrs} years in")
     return "; ".join(parts) + "."

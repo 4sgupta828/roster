@@ -241,7 +241,11 @@ class FacetSQLStore:
         args.append([k for k in _ck if k in nav_keys]); cki = len(args)
         args.append([v for k, v in zip(_ck, _cv) if k in nav_keys]); cvi = len(args)
         ki = oi                                  # the slice's own params end before ours
-        legal = f"(f.facet_key = ANY(${oi}) OR (f.facet_key, f.facet_value_norm) IN (SELECT * FROM unnest(${cki}::text[], ${cvi}::text[])))"
+        # index-friendly: two ANY() conditions the (tenant, kind, key, value) index can serve; the exact (key, value)
+        # legality is re-checked in Python below (a value legal for another closed key is a rounding error in `have`)
+        legal = f"(f.facet_key = ANY(${oi}) OR (f.facet_key = ANY(${cki}) AND f.facet_value_norm = ANY(${cvi})))"
+        _legal_pairs = set(zip(args[cki - 1], args[cvi - 1]))
+        _closed_keys = set(args[cki - 1])
         out: dict = {}
         async with pool.acquire() as conn:
             total = int(await conn.fetchval(f"SELECT count(*) FROM ({slice_sql}) s", *args[: ki - 1]) or 0)
@@ -270,7 +274,7 @@ class FacetSQLStore:
                         d[UNKNOWN] = total - known
                     out[k.key] = d
                     continue
-                d = {r["v"]: int(r["n"]) for r in rows if r["facet_key"] == k.key}
+                d = {r["v"]: int(r["n"]) for r in rows if r["facet_key"] == k.key and (k.key not in _closed_keys or (k.key, r["v"]) in _legal_pairs)}
                 if k.type is FacetType.set:
                     d = dict(sorted(d.items(), key=lambda kv: -kv[1])[: k.top_n])
                 else:
