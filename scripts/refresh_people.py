@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import re
 import importlib.util
 import json
 import os
@@ -54,9 +55,17 @@ def gh_get_cond(login: str, *, token: str, etag: str | None) -> tuple[int, dict 
     return 0, None, (etag or "")
 
 
+def _norm_co(v) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(v or "").lower().lstrip("@"))
+
+
 def profile_changed(stored: dict, fresh: dict) -> bool:
-    """The fields the facets are extracted from: a change here is what warrants the LLM + re-embed."""
-    return any((stored.get(k) or "") != (fresh.get(k) or "") for k in ("company", "location", "bio", "name", "blog"))
+    """The fields the facets are extracted from: a change here is what warrants the LLM + re-embed.
+    An EMPLOYER move counts on its own (normalized); location / bio / blog count only when the stored
+    snapshot actually holds them (363k legacy rows carry no snapshot — the first pass learns it, free)."""
+    if _norm_co(stored.get("company")) != _norm_co(fresh.get("company")):
+        return True
+    return any((stored.get(k) or "") != (fresh.get(k) or "") for k in ("location", "bio", "blog") if stored.get(k))
 
 
 async def ensure_columns(conn) -> None:
@@ -66,24 +75,28 @@ async def ensure_columns(conn) -> None:
 
 
 async def select_targets(conn, *, logins: list[str], map_id: str, older_than_days: int, limit: int) -> list[dict]:
+    # the stored snapshot: rs_entity.facets when the ingest wrote one; else the employer facet on record
+    CO = "(SELECT f.display_value FROM roster_entity_facet f WHERE f.entity_id = e.entity_id AND f.facet_key = 'company' LIMIT 1) AS company_facet"
     if logins:
         ids = ["github:" + l.strip() for l in logins if l.strip()]
-        rows = await conn.fetch("SELECT entity_id, facets, etag FROM rs_entity WHERE entity_id = ANY($1::text[]) AND kind='person'", ids)
+        rows = await conn.fetch(f"SELECT e.entity_id, e.facets, e.etag, {CO} FROM rs_entity e WHERE e.entity_id = ANY($1::text[]) AND e.kind='person'", ids)
     elif map_id:
         rows = await conn.fetch(
-            """SELECT e.entity_id, e.facets, e.etag FROM rs_map m, jsonb_array_elements(m.rows) r
+            f"""SELECT e.entity_id, e.facets, e.etag, {CO} FROM rs_map m, jsonb_array_elements(m.rows) r
                JOIN rs_entity e ON e.entity_id = r->>'entity_id'
                WHERE m.id = $1 AND e.entity_id LIKE 'github:%' AND e.kind='person'
                ORDER BY e.refreshed_at NULLS FIRST LIMIT $2""", map_id, int(limit))
     else:
         rows = await conn.fetch(
-            """SELECT entity_id, facets, etag FROM rs_entity
-               WHERE kind='person' AND entity_id LIKE 'github:%' AND COALESCE(status,'') <> 'suppressed'
-                 AND COALESCE(refreshed_at, retrieved_at) < now() - $1 * interval '1 day'
-               ORDER BY COALESCE(refreshed_at, retrieved_at) NULLS FIRST LIMIT $2""", int(older_than_days), int(limit))
+            f"""SELECT e.entity_id, e.facets, e.etag, {CO} FROM rs_entity e
+               WHERE e.kind='person' AND e.entity_id LIKE 'github:%' AND COALESCE(e.status,'') <> 'suppressed'
+                 AND COALESCE(e.refreshed_at, e.retrieved_at) < now() - $1 * interval '1 day'
+               ORDER BY COALESCE(e.refreshed_at, e.retrieved_at) NULLS FIRST LIMIT $2""", int(older_than_days), int(limit))
     out = []
     for r in rows:
         f = r["facets"]; f = json.loads(f) if isinstance(f, str) else (f or {})
+        if not f:
+            f = {"company": r["company_facet"] or ""}
         out.append({"entity_id": r["entity_id"], "login": r["entity_id"].split(":", 1)[1], "facets": f, "etag": r["etag"]})
     return out
 
@@ -111,10 +124,12 @@ async def refresh(conn, targets: list[dict], *, token: str, live: bool, run_id: 
         if not prof:
             st["failed"] += 1; continue
         changed = profile_changed(t["facets"], prof)
-        if not changed:   # first conditional pass: only the etag was missing
+        if not changed:   # first conditional pass: only the etag (and, for legacy rows, the snapshot) was missing
             st["unchanged"] += 1
             if live:
-                await conn.execute("UPDATE rs_entity SET refreshed_at = now(), etag = $2 WHERE entity_id=$1", t["entity_id"], etag or None)
+                snap = json.dumps({k: prof.get(k) for k in ("company", "location", "bio", "html_url", "blog")})
+                await conn.execute("UPDATE rs_entity SET refreshed_at = now(), etag = $2, facets = CASE WHEN facets IS NULL OR facets = '{}'::jsonb THEN $3::jsonb ELSE facets END WHERE entity_id=$1",
+                                   t["entity_id"], etag or None, snap)
             continue
         st["changed"] += 1
         if not live:
