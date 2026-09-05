@@ -299,3 +299,28 @@ tab's thread.
 optional → ratify → hand-off), server-owned once an artifact exists, on the existing compile / counts /
 contract path; JD drafting follows as v1.1 on cached peer summaries; navigation advice is a counts-derived
 line on the rail. Prerequisite chore: move the `rs_job` facet columns' DDL into the store.
+
+---
+
+## 11. Status (2026-09-05, end of session) — START HERE next session
+
+- **v1 intake core LIVE** on prod behind `ROSTER_GUIDED_INTAKE=1` (needs `ROSTER_FACET_EVALUATOR=1`): the ◍ Guided
+  TAB (first, beside Talent Map / Jobs Map / Q&A — never a separate mode bar), `POST /intake/step` (stateless;
+  `state` rides the request; artifact text capped at 6k), kernel gates `roster_kernel/facets/intake.py` (9 tests),
+  vertical vocabulary `roster_vertical/intake.py` (6 tests), service `apps/api/intake.py` (10 tests incl. the
+  endpoint and the contract hand-off). Verified on prod at 390 px and 1280 px: job seeker (self-description →
+  level / field / location / comp chips → READY → Jobs Map with 20 cards + rail) and hiring manager (pasted JD →
+  level / comp / evidence → READY → Talent Map with cards + rail).
+- Hand-off: `ResearchIn.contract` — `/jobs` runs a ratified contract as is; the People surface with a contract
+  runs the evaluator (`_people_contract_route`) instead of the old engine. The intake never constrains `company`;
+  for a job seeker only field / geo / work mode / employment / comp may be musts (résumé facts rank).
+- Direction read is its own prompt with unambiguous tokens (`looking` / `hiring`) — "candidate" meant both.
+- Ops findings this session: DeepSeek returned HTTP 402 (balance exhausted) → `api/model_json.py` is the ONE
+  strict-JSON call (DeepSeek → OpenAI gpt-4o-mini on a provider error, 10-min cooldown after 402 / 401); the
+  people re-extraction had been failing 100/100 batches silently and resumed after the fix. Postgres: the must
+  clauses correlate on `('job:' || j.id::text)` — the expression index `ix_rs_job_facet_eid` (now in the store
+  DDL) took counts from 30 s to 0.1 s. Small must-slices take an exact-distance semantic path (probe ≤ 2000).
+- NOT yet built: v1.1 JD draft from peer summaries (§4), improve-and-save (§2.2), multiple JDs by `role_key`,
+  `roster_brief` / `roster_intake` tables (state is FE-held; attachments are parsed per turn they are sent),
+  advice on the result's rail (§5), the "search the other side" offer, the persona eval harness (§7), the
+  first-run nudge entry point. People evaluate with musts ≈ 10 s (the person semantic leg) — next perf item.
