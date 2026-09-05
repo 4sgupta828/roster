@@ -324,9 +324,13 @@ Nothing is deleted before its replacement runs behind the flag on prod for one d
   reasons riding along). Saved Talent Maps carry `contract`; navigate / save-as-revision / keep-fresh run on the
   evaluator; talent calibration on a contract map uses `row_tags_to_contract` (card tags → prefer / avoid /
   exclude through the row's own facets; never a must).
-  Still GATED: the real re-extraction (`scripts/ingest_people.py --facets N`, knob `ROSTER_BULK_PEOPLE_FACETS`,
-  ≈ $12; a 20-person sample was excellent) — it replaces the legacy rows key by key. After it: the Talent
-  surface's first turn moves to compile → evaluate and the people compile prompt folds into the schema.
+  Step 4 RUNNING (owner's go 2026-09-05): `ROSTER_BULK_PEOPLE_FACETS=2000` on roster-worker — the people-facets
+  thread extracts 2000 people per pass (saved-map people first, then newest), writes `rs_entity.facet_env`,
+  projects the rows (provenance `profile`) and DELETES that person's bridged `legacy` rows in full (a key the
+  model leaves unknown stays unknown). ≈ $12 for 400k people, DeepSeek, ~2 days. Progress: count of
+  `rs_entity.facet_env->>'schema_version' = '77c3be380247'`. The extractor's hint text omits the old
+  `seniority` token (its 'mid' was a default the model echoed). After it lands: the Talent surface's first turn
+  moves to compile → evaluate and the people compile prompt folds into the schema.
 - Step 5 PARTIAL: company `type` facets from lookup data are LIVE (`scripts/company_facets.py`, curated
   `data/company_sets.json` dated 2026-09); eval traps in `apps/api/test_facet_traps.py`; provenance labels on
   cards. Not done: hierarchical geo; golden-eval run with the flag on; deleting old scorers.
