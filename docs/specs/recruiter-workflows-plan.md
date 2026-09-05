@@ -213,6 +213,18 @@ via DataTransfer, React-safe setters, Ashby Yes/No buttons — reports field by 
 has no submit code, and records a submission only when it observes the confirmation. Workday and
 unknown hosts have no adapter → unplannable by construction. `scripts/apply_smoke.py` = planner
 coverage over live definitions, no browser. The paragraph below describes the retired v1 for history.
+
+UNIFIED APPLY FLOW (owner, 2026-09-04: "bring apply assistant into the job card just like prepare
+application, and unify the two … one integrated experience"): the job card carries ONE button, 🚀
+Apply, that opens a single modal with four steps — 1 · Your fit (the grounded JD × résumé table),
+2 · Answers (the application plan, editable), 3 · Résumé & letter (tailored résumé / cover letter on
+request; a drafted letter drops straight into the plan's cover-letter text question, policy `letter`,
+which the extension fills), 4 · Fill & submit (extension instructions, "I submitted it"). Fit and plan
+load together; the card itself shows the application's status; an unsubmitted plan for the same URL
+is reused. The standalone Apply Assistant page and the separate "Prepare application" button are
+gone; the header's "🎯 Apply to a job link" opens the same modal for a pasted URL or description.
+Ashby forms are read completely (application form + diversity survey + EEOC surveyForms) and every
+question is scoped to Ashby's own `data-field-path` container on the live page.
 CONTROLLED AUTO-APPLY v1 (retired): `apps/api/auto_apply.py` ran headless Chromium in a SEPARATE
 process (Playwright in the image): `fill` opens the apply page, reaches the form (Lever/Ashby apply
 buttons, Greenhouse iframe), maps labels → Apply-profile fields in code, uploads the résumé, screenshots,
