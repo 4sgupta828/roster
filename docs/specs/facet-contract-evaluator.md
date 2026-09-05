@@ -290,7 +290,7 @@ horizontally; tap targets ≥ 40 px; the rail folds behind one "Filter · N acti
 
 Nothing is deleted before its replacement runs behind the flag on prod for one day with the golden evals green.
 
-### Status (2026-09-05, end of session) — START HERE next session
+### Status (2026-09-05, later session) — START HERE next session
 - Step 1 LIVE: kernel `facets/` (13 tests), vertical schema (6 tests), app store + engine + endpoints, every open
   posting projected into the read model (212k), parity SQL ↔ reference OK on prod (`scripts/facets_parity.py`),
   `ROSTER_FACET_EVALUATOR=1` on prod: the Jobs surface (plain and signed-in résumé path) compiles → evaluates.
@@ -304,14 +304,26 @@ Nothing is deleted before its replacement runs behind the flag on prod for one d
   on the evaluator when a map has a contract (`tags_to_contract`); per-card facet line with provenance.
   Old scorers (`match_resume_jobs`, `agentic_job_search`) still present behind the flag's else-branches —
   delete after a day of golden evals green with the flag on.
-- Step 4 GATED: `scripts/ingest_people.py --facets N` + worker knob `ROSTER_BULK_PEOPLE_FACETS` (default 0). A
-  20-person live sample was excellent (field / function / level / specialty / metro / country / work_type;
-  years unknown when unstated). Full run ≈ $12 — needs the owner's go. Talent Map surface and people
-  calibration still on `answer_people_population`; the people compile prompt (`people_facets.py`) not yet
-  folded into the schema.
+- Step 4 BRIDGED (2026-09-05, no spend): the people index's ~2.3M pre-schema rows (`seniority` / `role` /
+  `function` in `people_facets.py`'s vocabulary) are projected into schema rows by ONE lookup table between the
+  two closed vocabularies — `roster_vertical/facet_legacy.py` (provenance `legacy`; `evidence` derived from
+  `rs_person_artifact`, provenance `artifact`) via the set-based `POST /admin/facets/project-people`
+  (idempotent; re-run after people ingest). The SAME table translates the old engine's compiled filter into the
+  rail's contract (`legacy_facets_to_contract`: within a legacy key only the schema keys EVERY chosen value maps
+  to become musts; the rest rank), so the rail's counts describe the slice the engine filtered.
+  Talent surface: the first turn's rows still come from `answer_people_population` (person lookup, refinement
+  turns, company guard, topic partition, evidence ranking stay there); `facet_nav` on the response carries the
+  rail (counts-only, cached 10 min per must-set); Apply → `POST /search/evaluate` kind=person → rows hydrated
+  to people cards (`_hydrate_people`: `people_by_ids` → `rows_to_people` + artifacts, evaluator facets / match /
+  reasons riding along). Saved Talent Maps carry `contract`; navigate / save-as-revision / keep-fresh run on the
+  evaluator; talent calibration on a contract map uses `row_tags_to_contract` (card tags → prefer / avoid /
+  exclude through the row's own facets; never a must).
+  Still GATED: the real re-extraction (`scripts/ingest_people.py --facets N`, knob `ROSTER_BULK_PEOPLE_FACETS`,
+  ≈ $12; a 20-person sample was excellent) — it replaces the legacy rows key by key. After it: the Talent
+  surface's first turn moves to compile → evaluate and the people compile prompt folds into the schema.
 - Step 5 PARTIAL: company `type` facets from lookup data are LIVE (`scripts/company_facets.py`, curated
   `data/company_sets.json` dated 2026-09); eval traps in `apps/api/test_facet_traps.py`; provenance labels on
-  cards. Not done: Talent Map rail; hierarchical geo; golden-eval run with the flag on; deleting old scorers.
+  cards. Not done: hierarchical geo; golden-eval run with the flag on; deleting old scorers.
 - Known gaps: `role_family` pills show the key label only; the pool for a brief with no musts is the semantic
   top-K (cap ≈ limit × 6), so counts are index-wide while rows are the nearest; navigation on a map with no
   contract (saved before this work) says so and asks for a fresh search.
