@@ -2877,6 +2877,32 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     res["session_id"] = await _save_job_session(jobs, res["query"])
                     return res
 
+        if facet_evaluator_enabled():
+            # THE EVALUATOR (docs/specs/facet-contract-evaluator.md): brief → contract → rows + counts.
+            from api.facets_engine import compile_contract
+            from api.people_population import job_brief_contract
+            _scope = {"country": (body.country or "us").strip().lower()}
+            _c = await asyncio.to_thread(compile_contract, "job", body.question or "", _facet_schema(), _llm_json, limit=80, scope=_scope)
+            if body.levels and body.levels[0]:
+                _c.center = {"key": "level", "value": body.levels[0], "span": int(body.level_span)}
+            for _m in (body.job_must or []):
+                if _m in ("remote", "hybrid"):
+                    _c.must.setdefault("work_mode", []).append(_m)
+                elif _m in ("f500", "public", "startup"):
+                    _c.must.setdefault("company_type", []).append("fortune500" if _m == "f500" else _m)
+                elif _m == "leadership":
+                    _c.must.setdefault("level", []).append("leadership")
+            _out = await _evaluate_contract(_c.to_dict())
+            _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets")},
+                      "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in _out["rows"]]
+            stats = await store.jobs_stats()
+            sid = await _save_job_session(_rows, {"title_keywords": [], "company": [], "location": ""})
+            bc = job_brief_contract(question=body.question or "", plan={"variants": _c.angles, "intent": ""}, job_must=body.job_must, scope=None,
+                                    levels=body.levels, level_span=int(body.level_span))
+            bc["contract"] = _out["contract"]; bc["counts"] = _out["counts"]; bc["coverage"] = _out["coverage"]
+            return {"jobs": _rows, "count": len(_rows), "query": {}, "semantic": True, "stats": stats, "geo_scope": None, "session_id": sid,
+                    "must": None, "level_pref": None, "brief_contract": bc, "contract": _out["contract"], "counts": _out["counts"], "coverage": _out["coverage"],
+                    "labels": _out.get("labels"), "note": f"evaluator — {_out['coverage'].get('pool', 0)} candidates"}
         # AGENTIC mode (flag): LLM expands the query into multiple angles → multi-leg retrieval → rerank
         if agentic_jobs_enabled():
             from api.people_population import agentic_job_search, parse_job_query
@@ -2996,32 +3022,6 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                          [*(str(t) for t in (_pq.get("title_keywords") or [])),
                           *(q.get("title_keywords") or [])]))[:8],
                      "location": (q.get("location") or str(_pq.get("location") or ""))}
-        if facet_evaluator_enabled():
-            # THE EVALUATOR (docs/specs/facet-contract-evaluator.md): brief → contract → rows + counts.
-            from api.facets_engine import compile_contract
-            from api.people_population import job_brief_contract
-            _scope = {"country": (body.country or "us").strip().lower()}
-            _c = await asyncio.to_thread(compile_contract, "job", body.question or "", _facet_schema(), _llm_json, limit=80, scope=_scope)
-            if body.levels and body.levels[0]:
-                _c.center = {"key": "level", "value": body.levels[0], "span": int(body.level_span)}
-            for _m in (body.job_must or []):
-                if _m in ("remote", "hybrid"):
-                    _c.must.setdefault("work_mode", []).append(_m)
-                elif _m in ("f500", "public", "startup"):
-                    _c.must.setdefault("company_type", []).append("fortune500" if _m == "f500" else _m)
-                elif _m == "leadership":
-                    _c.must.setdefault("level", []).append("leadership")
-            _out = await _evaluate_contract(_c.to_dict())
-            _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets")},
-                      "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in _out["rows"]]
-            stats = await store.jobs_stats()
-            sid = await _save_job_session(_rows, {"title_keywords": [], "company": [], "location": ""})
-            bc = job_brief_contract(question=body.question or "", plan={"variants": _c.angles, "intent": ""}, job_must=body.job_must, scope=None,
-                                    levels=body.levels, level_span=int(body.level_span))
-            bc["contract"] = _out["contract"]; bc["counts"] = _out["counts"]; bc["coverage"] = _out["coverage"]
-            return {"jobs": _rows, "count": len(_rows), "query": {}, "semantic": True, "stats": stats, "geo_scope": None, "session_id": sid,
-                    "must": None, "level_pref": None, "brief_contract": bc, "contract": _out["contract"], "counts": _out["counts"], "coverage": _out["coverage"],
-                    "labels": _out.get("labels"), "note": f"evaluator — {_out['coverage'].get('pool', 0)} candidates"}
         # SEMANTIC (flag): rank jobs by embedding similarity (optionally within the company filter);
         # else the exact title-keyword filter. Semantic understands 'jobs building ML infra', etc.
         qvec = embed_query(body.question) if semantic_enabled() else None
