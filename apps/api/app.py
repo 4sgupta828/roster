@@ -5974,7 +5974,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         # the vocabulary's display labels ride along so the UI never hard-codes them
         from roster_vertical.facet_schema import VALUE_LABELS
         sch = _facet_schema()
-        out["labels"] = {"keys": {k.key: k.label for k in sch.for_kind(c.kind) if k.navigable}, "values": VALUE_LABELS,
+        out["labels"] = {"keys": {k.key: k.label for k in sch.for_kind(c.kind)}, "values": VALUE_LABELS,
                          "types": {k.key: k.type.value for k in sch.for_kind(c.kind) if k.navigable},
                          "order": [k.key for k in sch.for_kind(c.kind) if k.navigable]}
         return out
