@@ -1278,6 +1278,18 @@ class MapReviewerIn(BaseModel):
     name: str = Field(default="", max_length=80)
 
 
+class CompileIn(BaseModel):                # brief → contract (docs/specs/facet-contract-evaluator.md §4)
+    kind: str = "job"
+    text: str = Field(default="", max_length=4000)
+    country: str = "us"
+    limit: int = Field(default=60, ge=1, le=400)
+
+
+class EvaluateIn(BaseModel):               # contract → rows + counts + coverage
+    contract: dict
+    depth: dict | None = None
+
+
 class MapCadenceIn(BaseModel):
     every: str = "off"                # off | daily | weekly — keep this map fresh on a cadence (owner)
 
@@ -2952,6 +2964,32 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                          [*(str(t) for t in (_pq.get("title_keywords") or [])),
                           *(q.get("title_keywords") or [])]))[:8],
                      "location": (q.get("location") or str(_pq.get("location") or ""))}
+        if facet_evaluator_enabled():
+            # THE EVALUATOR (docs/specs/facet-contract-evaluator.md): brief → contract → rows + counts.
+            from api.facets_engine import compile_contract
+            from api.people_population import job_brief_contract
+            _scope = {"country": (body.country or "us").strip().lower()}
+            _c = await asyncio.to_thread(compile_contract, "job", body.question or "", _facet_schema(), _llm_json, limit=80, scope=_scope)
+            if body.levels and body.levels[0]:
+                _c.center = {"key": "level", "value": body.levels[0], "span": int(body.level_span)}
+            for _m in (body.job_must or []):
+                if _m in ("remote", "hybrid"):
+                    _c.must.setdefault("work_mode", []).append(_m)
+                elif _m in ("f500", "public", "startup"):
+                    _c.must.setdefault("company_type", []).append("fortune500" if _m == "f500" else _m)
+                elif _m == "leadership":
+                    _c.must.setdefault("level", []).append("leadership")
+            _out = await _evaluate_contract(_c.to_dict())
+            _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets")},
+                      "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in _out["rows"]]
+            stats = await store.jobs_stats()
+            sid = await _save_job_session(_rows, {"title_keywords": [], "company": [], "location": ""})
+            bc = job_brief_contract(question=body.question or "", plan={"variants": _c.angles, "intent": ""}, job_must=body.job_must, scope=None,
+                                    levels=body.levels, level_span=int(body.level_span))
+            bc["contract"] = _out["contract"]; bc["counts"] = _out["counts"]; bc["coverage"] = _out["coverage"]
+            return {"jobs": _rows, "count": len(_rows), "query": {}, "semantic": True, "stats": stats, "geo_scope": None, "session_id": sid,
+                    "must": None, "level_pref": None, "brief_contract": bc, "contract": _out["contract"], "counts": _out["counts"], "coverage": _out["coverage"],
+                    "note": f"evaluator — {_out['coverage'].get('pool', 0)} candidates"}
         # SEMANTIC (flag): rank jobs by embedding similarity (optionally within the company filter);
         # else the exact title-keyword filter. Semantic understands 'jobs building ML infra', etc.
         qvec = embed_query(body.question) if semantic_enabled() else None
@@ -5825,6 +5863,112 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         if not ok:
             raise HTTPException(status_code=400, detail="invalid review, or neither the owner nor a registered reviewer")
         return {"ok": True}
+
+    # ===== FACETS: the one evaluator (docs/specs/facet-contract-evaluator.md) =====
+    def facet_evaluator_enabled() -> bool:
+        return os.environ.get("ROSTER_FACET_EVALUATOR", "").lower() in ("1", "true", "yes")
+
+    def _facet_schema():
+        return load_active_vertical().extraction_schema
+
+    def _facet_store():
+        """The Postgres facet store (tests may pin app.state.facet_store to the kernel's in-memory reference)."""
+        ov = getattr(app.state, "facet_store", None)
+        if ov is not None:
+            return ov
+        cs = _claim_store_cached()
+        if cs is None:
+            return None
+        cached = getattr(app.state, "_facet_store", None)
+        if cached is None:
+            from api.facet_store import FacetSQLStore
+            from api.people_population import embed_query
+
+            async def _baseline(qv, kind):
+                return await cs.similarity_baseline(qv) if kind == "job" else None
+            cached = FacetSQLStore(cs._get_pool, _facet_schema(), embed=embed_query, baseline=_baseline)
+            app.state._facet_store = cached
+        return cached
+
+    def _llm_json(system: str, user: str) -> dict:
+        """One strict-JSON model call for the facets engine (DeepSeek first, OpenAI fallback) — sync, small."""
+        import urllib.request as _ur
+        ds, oa = os.environ.get("DEEPSEEK_API_KEY"), os.environ.get("OPENAI_API_KEY")
+        endpoint, key, model = (("https://api.deepseek.com/chat/completions", ds, "deepseek-chat") if ds
+                                else ("https://api.openai.com/v1/chat/completions", oa, "gpt-4o-mini"))
+        if not key:
+            raise RuntimeError("no model key")
+        body = json.dumps({"model": model, "temperature": 0, "response_format": {"type": "json_object"},
+                           "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}).encode()
+        req = _ur.Request(endpoint, data=body, headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
+        with _ur.urlopen(req, timeout=60) as r:
+            return json.loads(json.load(r)["choices"][0]["message"]["content"])
+
+    async def _evaluate_contract(cdict: dict, *, depth: dict | None = None) -> dict:
+        from roster_kernel.facets import Contract, evaluate
+        from roster_vertical.facet_schema import FACET_WEIGHTS
+        store = _facet_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="the index is unavailable right now")
+        c = Contract.from_dict(cdict)
+        try:
+            return await evaluate(c, store, _facet_schema(), FACET_WEIGHTS, depth=depth)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"contract: {e}") from e
+
+    @app.post("/search/compile")
+    async def search_compile(body: CompileIn) -> dict:
+        """Brief → contract (the model maps the brief onto schema keys; code validates; cached by text)."""
+        from api.facets_engine import compile_contract
+        kind = body.kind if body.kind in ("job", "person") else "job"
+        key = f"compile:{kind}:{hashlib.sha1((body.text or '').strip().lower().encode()).hexdigest()[:16]}"
+        cache = getattr(app.state, "_compile_cache", None)
+        if cache is None:
+            cache = app.state._compile_cache = {}
+        c = cache.get(key)
+        if c is None:
+            c = await asyncio.to_thread(compile_contract, kind, body.text, _facet_schema(), _llm_json, limit=body.limit, scope={"country": (body.country or "us").lower()})
+            if len(cache) > 500:
+                cache.clear()
+            cache[key] = c
+        return {"contract": c.to_dict()}
+
+    @app.post("/search/evaluate")
+    async def search_evaluate(body: EvaluateIn) -> dict:
+        """Contract → rows + counts + coverage. Deterministic for a given index state (no model call)."""
+        return await _evaluate_contract(body.contract, depth=body.depth)
+
+    @app.post("/admin/facets/project-jobs")
+    async def admin_facets_project_jobs(limit: int = 5000, x_admin_token: str = Header(default="")) -> dict:
+        """Project existing job extraction records (rs_job.facets) + structural facets into facet rows.
+        Idempotent; no model calls; `facets_projected` marks the row with the schema version."""
+        want = os.environ.get("ROSTER_ADMIN_TOKEN", "")
+        if want and x_admin_token != want:
+            raise HTTPException(status_code=401, detail="admin token required")
+        from api.facet_store import job_entity_id, legacy_job_envelope, structural_job_facets
+        store = _facet_store()
+        cs = _claim_store_cached()
+        if store is None or cs is None:
+            raise HTTPException(status_code=503, detail="index unavailable")
+        schema = _facet_schema(); ver = schema.version()
+        pool = await cs._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""SELECT id, company, skills, facets, COALESCE(posted_at, '') AS posted_at, updated_at FROM rs_job
+                                       WHERE closed_at IS NULL AND (facets_projected IS NULL OR facets_projected <> $2) ORDER BY updated_at DESC LIMIT $1""", int(limit), ver)
+        n = 0
+        import datetime as _dt
+        now = _dt.datetime.now(_dt.timezone.utc)
+        for r in rows:
+            fx = r["facets"]; fx = json.loads(fx) if isinstance(fx, str) else (fx or {})
+            env = fx if isinstance(fx, dict) and "facets" in fx else legacy_job_envelope(fx or {}, schema_version=ver)
+            age = (now - r["updated_at"]).total_seconds() / 86400 if r["updated_at"] else None
+            st = structural_job_facets({"company": r["company"], "skills": r["skills"]}, schema_version=ver, now_days=age)
+            env.setdefault("facets", {}).update(st["facets"])
+            await store.project("job", job_entity_id(r["id"]), env)
+            async with pool.acquire() as conn:
+                await conn.execute("UPDATE rs_job SET facets_projected = $2 WHERE id = $1", r["id"], ver)
+            n += 1
+        return {"projected": n, "schema_version": ver}
 
     async def _rerun_jobs_map(m: dict, owner_id: str, *, prefs_extra: dict, exclude_refs: list, country: str) -> tuple[list[dict], dict]:
         """Re-run a JOB MAP's saved contract (the owner's résumé × the brief × fixed filters) → (rows, coverage).
