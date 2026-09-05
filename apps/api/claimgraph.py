@@ -1916,6 +1916,22 @@ class ClaimGraphStore:
             return []
         return [dict(r) for r in rows]
 
+    async def similarity_baseline(self, qvec: str, *, sample: int = 300) -> float | None:
+        """This query's NOISE FLOOR: the p90 similarity over a random sample of open postings — what an
+        unrelated posting can reach. One cheap sampled scan; None when the table is too small."""
+        pool = await self._get_pool()
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT 1 - (embedding <=> $1::vector) AS s FROM rs_job TABLESAMPLE SYSTEM (1) "
+                    "WHERE embedding IS NOT NULL AND closed_at IS NULL LIMIT $2", qvec, int(sample))
+        except Exception:
+            return None
+        sims = sorted(float(r["s"]) for r in rows if r["s"] is not None)
+        if len(sims) < 30:
+            return None
+        return sims[int(0.9 * (len(sims) - 1))]
+
     async def match_jobs_scored(self, qvec: str, *, cap: int = 400) -> list[dict]:
         """Top `cap` jobs by cosine similarity to the résumé embedding, WITH the similarity score and
         id, so the caller can re-rank by user preferences (location/seniority/company-type/…)."""

@@ -145,7 +145,44 @@ _FAMILY_RX = {
     "data / ML": re.compile(r"\b(data scientist|data science|data analyst|analytics engineer|machine learning|ml engineer|ai engineer|research scientist)\b", re.I),
     "QA / test": re.compile(r"\b(qa engineer|quality assurance|test engineer|sdet|automation engineer)\b", re.I),
     "hardware": re.compile(r"\b(hardware|firmware|embedded|fpga|asic|silicon)\b", re.I),
+    # OTHER FIELDS (owner, 2026-09-05: a pharma "Senior Director, Clinical Translational Scientist" showed
+    # 55% for a Founder CTO — the embedding sees leadership vocabulary; the field must count)
+    "clinical / pharma": re.compile(r"\b(clinical|pharmac\w*|translational|biolog\w*|biostatist\w*|medical (director|affairs|writer|science)|physician|nurse|nursing|therapeut\w*|regulatory affairs|drug (safety|development)|pharmacovigilance|toxicolog\w*|immunolog\w*|oncolog\w*)\b", re.I),
+    "finance / accounting": re.compile(r"\b(accountant|accounting|controller|treasury|actuar\w*|auditor|tax (manager|analyst|director)|fp&a|financial (analyst|planning|controller|reporting)|bookkeep\w*|payroll)\b", re.I),
+    "sales": re.compile(r"\b(sales|account executive|business development|bdr|sdr|sales development|account manager|customer success)\b", re.I),
+    "marketing": re.compile(r"\b(marketing|brand manager|seo|content (strategist|marketer|writer)|demand generation|communications manager|public relations)\b", re.I),
+    "legal": re.compile(r"\b(counsel|attorney|paralegal|legal|compliance officer)\b", re.I),
+    "people / HR": re.compile(r"\b(recruit\w*|talent acquisition|human resources|hr (business|generalist|manager|director)|people (operations|partner))\b", re.I),
+    "operations / supply chain": re.compile(r"\b(supply chain|logistics|procurement|warehouse|fleet|facilities manager|operations (manager|coordinator|associate))\b", re.I),
+    "design": re.compile(r"\b(product designer|ux|ui/ux|graphic design\w*|visual designer|industrial designer)\b", re.I),
+    "mechanical / civil / electrical": re.compile(r"\b(mechanical engineer|civil engineer|structural engineer|electrical engineer|hvac|manufacturing engineer|process engineer|quality engineer)\b", re.I),
 }
+_TECH_FAMILIES = {"backend / infra", "frontend", "mobile", "security", "data / ML", "QA / test", "hardware"}
+
+
+def family_penalty(profile_families: set[str], title: str) -> tuple[float, str]:
+    """(score penalty, reason) for a title that STATES a family the profile does not: a different
+    field entirely (pharma for a software profile) costs 0.20 and says so; another engineering
+    discipline costs 0.10 (titles vary by company). ('' → no penalty.)"""
+    fam = family_mismatch(profile_families, title)
+    if not fam:
+        return 0.0, ""
+    if fam in _TECH_FAMILIES:
+        return 0.10, f"title says {fam}"
+    return 0.20, f"title says {fam} — a different field"
+
+
+# MATCH PERCENT, calibrated (owner, 2026-09-05: "55% match … 0% against my résumé"). Raw cosine
+# similarity sits near 0.55 for ANY résumé against its nearest postings (random postings score ~0.28,
+# never above ~0.50), so a raw percentage showed the pool's floor as a 55% fit. The percent now measures
+# how far above the résumé's own noise floor a posting sits: floor = what an unrelated posting can reach
+# (the p90 of a random sample for this query), span 0.25 → the best matches read ~90, the floor ~0.
+_DEFAULT_SIM_FLOOR, _SIM_SPAN = 0.40, 0.25
+
+
+def calibrated_pct(sim: float, floor: float | None = None) -> int:
+    f = _DEFAULT_SIM_FLOOR if floor is None else float(floor)
+    return int(max(1, min(99, round(100.0 * (float(sim or 0.0) - f) / _SIM_SPAN))))
 
 
 def text_families(text: str) -> set[str]:
@@ -479,7 +516,7 @@ async def widen_jobs_locally(store, rows: list[dict], *, qvec: str | None, terms
         if j.get("id") in seen or k in seen_k:
             continue
         if j.get("sim") is not None:
-            j["match_pct"] = min(99, round(float(j["sim"]) * 100))
+            j["match_pct"] = calibrated_pct(float(j["sim"]))
         out.append(j); seen.add(j.get("id")); seen_k.add(k)
     if any(r.get("sim") is not None for r in out):
         out.sort(key=lambda r: -(float(r.get("sim") or 0.0)))
@@ -549,6 +586,10 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
     qvec = embed_query(qtext)
     if not qvec:
         return {"jobs": [], "note": "Matching is unavailable right now."}
+    try:                                        # this résumé's noise floor, for the calibrated percent
+        _floor = await store.similarity_baseline(qvec)
+    except Exception:   # noqa: BLE001
+        _floor = None
     # EXPOSURE: the deeper the user has rotated (seen more), the deeper the candidate pool reaches —
     # otherwise rotation would just cycle inside the same top-400 forever.
     _seen_n = len(prefs.get("seen_ids") or [])
@@ -635,13 +676,16 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
         # SOFT family demotion (never a gate): a title that STATES a different discipline from the
         # profile's ("SDE I - Frontend", "Security Engineer" for a backend/SRE profile) moves down with
         # the reason shown; unstated titles ("Software Engineer") are left alone — titles vary by company.
-        _fam_off = family_mismatch(_prof_fams, title)
-        if _fam_off:
-            score -= 0.10; reasons.append(f"title says {_fam_off}")
+        _fam_pen, _fam_why = family_penalty(_prof_fams, title)
+        if _fam_pen:
+            score -= _fam_pen; reasons.append(_fam_why)
         _jsk = [str(x) for x in (j.get("skills") or []) if x]
         _hit = [x for x in _jsk if x in _prof_skills][:4]
         if _hit:                                        # the POSTING BODY names skills the profile has
             score += min(0.20, 0.05 * len(_hit)); reasons.append("skills: " + ", ".join(_hit))
+        # the DISPLAYED percent reflects fit only: similarity, the field penalty and named skills —
+        # never the user's preference bonuses (location, company type), which only order the slate
+        _sim_fit = sim - _fam_pen + min(0.05, 0.0125 * len(_hit))
         if pref_co and _norm_co(co) in pref_co:
             score += 0.15; reasons.append("preferred company")
         if avoid_lv and _jsen_known and jsen in avoid_lv:
@@ -668,7 +712,7 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
             score -= 0.30       # already shown → fresh comparable matches lead this run
         out.append({**{k: j.get(k) for k in ("id", "company", "title", "location", "url", "source")},
                     "key": _key,
-                    "score": round(score, 4), "match_pct": min(99, round(sim * 100)),
+                    "score": round(score, 4), "match_pct": calibrated_pct(_sim_fit, _floor),
                     "seniority": jsen, "company_types": types, "reasons": reasons,
                     "fresh": fresh})
     out.sort(key=lambda x: -x["score"])
@@ -1617,7 +1661,7 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
             if _hits:
                 score += min(0.15, 0.05 * len(_hits)); reasons.append("skills: " + ", ".join(_hits[:3]))
         card = _person_row_from_facets(r)
-        card["match_pct"] = min(99, round(sim * 100)); card["reasons"] = reasons; card["_score"] = score
+        card["match_pct"] = calibrated_pct(sim); card["reasons"] = reasons; card["_score"] = score
         out.append(card)
     out.sort(key=lambda x: -x["_score"])
     for c in out:
@@ -2034,7 +2078,7 @@ async def agentic_job_search(store, question: str, llm, country: str = "us") -> 
             elif min(abs(_ORDER.get(lvl, 2) - _ORDER.get(w, 2)) for w in want_lv) >= 2:
                 score -= 0.08; reasons.append(f"title says {lvl.replace('_', ' ')}")
         out.append({**{k: j.get(k) for k in ("id", "company", "title", "location", "url", "source")},
-                    "score": round(score, 4), "match_pct": min(99, round(e["best"] * 100)), "reasons": reasons,
+                    "score": round(score, 4), "match_pct": calibrated_pct(e["best"]), "reasons": reasons,
                     "seniority": (lvl if known else ""), "level_source": ("title" if known else "unknown")})
     out.sort(key=lambda x: -x["score"])
     note = ((f"{want_country.upper()} only · " if want_country else "")

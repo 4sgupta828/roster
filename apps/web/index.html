@@ -2845,7 +2845,7 @@ function jobsMarkup(d){
     const intro = j.company ? `<button type="button" class="ppl-lnk job-intro" data-ref="${esc(String(jref))}" title="Who you know at this company (your LinkedIn export) and likely hiring managers from public data">🤝 Intro path</button>` : "";
     const prep = "";   // folded into 🚀 Apply
     const jsave = `<div class="ppl-acts"><button type="button" class="rsave" data-kind="job" data-ref="${esc(String(jref))}" data-label="${esc(j.title||"")}" data-sub="${esc(((j.company||"").replace(/_/g," "))+(j.location?" · "+j.location:""))}" data-url="${esc(j.url||"")}" title="Save to a shortlist">☆</button></div>`;
-    const pct = j.match_pct ? ` <span style="color:var(--gold);font-weight:700;font-size:.76rem;">${j.match_pct}% match</span>` : "";
+    const pct = j.match_pct ? ` <span style="color:var(--gold);font-weight:700;font-size:.76rem;" title="How far this posting sits above your résumé's own noise floor (what an unrelated posting scores), after the field check and named skills. The verified fit table in 🚀 Apply is the definitive read.">${j.match_pct}% match</span>` : "";
     const jr = (j.reasons&&j.reasons.length) ? ` <span style="color:var(--muted);font-size:.74rem;">· ${j.reasons.map(esc).join(" · ")}</span>` : "";
     return `<div class="ppl-card job-card" data-jref="${esc(String(jref))}" title="Click for a summary of this posting">${jsave}<span class="ppl-body">
       <span class="ppl-name">${esc(j.title)}${pct}</span>
