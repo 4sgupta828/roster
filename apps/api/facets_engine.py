@@ -48,6 +48,14 @@ def normalize_comp(raw: dict | None, *, employment_type: str = "") -> dict | Non
             "assumption": ("hourly × 2080" if factor == HOURS_PER_YEAR else "monthly × 12" if factor == MONTHS_PER_YEAR else "")}
 
 
+_CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def clean_text(v) -> str:
+    """Postgres jsonb / text reject NUL and other control bytes that scraped postings sometimes carry."""
+    return _CTRL.sub("", str(v if v is not None else ""))
+
+
 def _sys_prompt(kind: str, schema: FacetSchema) -> str:
     return ("You classify " + ("job postings" if kind == "job" else "professional profiles" if kind == "person" else "companies")
             + " into typed facets. For EACH item return an object {\"i\": index, <facet key>: <value>} using ONLY the keys and vocabularies below; "
@@ -67,16 +75,16 @@ def _validate_item(kind: str, item: dict, schema: FacetSchema, *, provenance: st
         if k.type is FacetType.numeric:
             comp = normalize_comp(raw if isinstance(raw, (dict, str)) else None, employment_type=str(item.get("employment_type") or ""))
             if comp and not comp.get("undisclosed") and comp.get("number") is not None:
-                facets[k.key] = [{"number": comp["number"], "display": comp["display"], "confidence": 0.7, "provenance": provenance, "meta": comp}]
+                facets[k.key] = [{"number": comp["number"], "display": clean_text(comp["display"]), "confidence": 0.7, "provenance": provenance, "meta": comp}]
             elif comp and comp.get("display"):
-                facets[k.key] = [{"value": UNKNOWN, "display": comp["display"], "confidence": 0.7, "provenance": provenance, "meta": comp}]
+                facets[k.key] = [{"value": UNKNOWN, "display": clean_text(comp["display"]), "confidence": 0.7, "provenance": provenance, "meta": comp}]
             continue
         vals = raw if isinstance(raw, list) else [raw]
         keep = []
         for v in vals:
             if v is None or str(v).strip().lower() == UNKNOWN:
                 continue
-            nv = schema.validate_value(k.key, v)
+            nv = schema.validate_value(k.key, clean_text(v))
             if nv is not None and nv not in keep:
                 keep.append(nv)
         if keep:
@@ -88,7 +96,7 @@ def extract_envelopes(kind: str, items: list[dict], schema: FacetSchema, llm_jso
     """One model call for a batch → one envelope per item (aligned). `items` are the text fields the caller
     chose (for a job: title, company, department, location, head, tail, structured). Structured fields the
     caller passes under `structured` override the model for the same key with provenance 'ats_field'."""
-    payload = [{"i": i, **{k: v for k, v in it.items() if k not in ("structured",)}} for i, it in enumerate(items)]
+    payload = [{"i": i, **{k: (clean_text(v) if isinstance(v, str) else v) for k, v in it.items() if k not in ("structured",)}} for i, it in enumerate(items)]
     try:
         out = llm_json(_sys_prompt(kind, schema), json.dumps({"items": payload}))
         got = {int(o.get("i")): o for o in (out.get("items") or []) if isinstance(o, dict) and str(o.get("i", "")).lstrip("-").isdigit()}

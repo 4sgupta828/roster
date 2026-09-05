@@ -24,6 +24,13 @@ _DDL = (
 _JOB_COLS = "j.id, j.company, j.title, j.location, j.department, j.url, j.source, j.skills, j.posted_at, j.updated_at"
 
 
+_CTRL = __import__("re").compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _clean(v) -> str:
+    return _CTRL.sub("", str(v if v is not None else ""))
+
+
 def job_entity_id(job_id: int | str) -> str:
     return f"job:{job_id}"
 
@@ -278,7 +285,7 @@ class FacetSQLStore:
                     val = self.schema.validate_value(key, it.get("value"))
                     if val is None:
                         continue
-                rows.append((self.tenant, entity_id, kind, key, val, str(it.get("display") or "")[:300], float(it.get("confidence") or 0.0),
+                rows.append((self.tenant, entity_id, kind, key, val, _clean(it.get("display"))[:300], float(it.get("confidence") or 0.0),
                              str(it.get("provenance") or "")[:40], version, (float(num) if num is not None else None)))
         pool = await self._conn()
         async with pool.acquire() as conn:

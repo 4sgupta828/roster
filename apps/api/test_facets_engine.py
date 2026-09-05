@@ -146,3 +146,11 @@ def test_invented_pay_cannot_pass_the_verbatim_figure_gate():
     assert "comp" not in no_figure[0]["facets"]                                            # the text never stated a figure
     with_figure = extract_envelopes("job", [{"title": "SWE", "head": "", "tail": "Base salary $150,000 – $180,000"}], FACET_SCHEMA, llm)
     assert with_figure[0]["facets"]["comp"][0]["number"] == 165000
+
+
+def test_control_bytes_in_postings_never_reach_the_database():
+    from api.facets_engine import clean_text
+    assert clean_text("Base\x00 pay\x01 $1") == "Base pay $1"
+    llm = lambda s, u: {"items": [{"i": 0, "specialty": ["tur\x00bomachinery"], "comp": {"min": 100000, "max": 120000, "currency": "USD", "period": "year", "display": "$100k\x00–$120k"}}]}
+    env = extract_envelopes("job", [{"title": "T\x00", "head": "pay $100,000", "tail": ""}], FACET_SCHEMA, llm)
+    assert env[0]["facets"]["specialty"][0]["value"] == "turbomachinery" and "\x00" not in env[0]["facets"]["comp"][0]["display"]
