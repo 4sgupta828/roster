@@ -287,11 +287,15 @@ class MapStore:
         await self._ensure()
         pool = await self._get_pool()
         async with pool.acquire() as conn:
+            # CLAIM with a one-hour lease so two passes (the loop and an admin trigger) never refresh the
+            # same map twice; mark_checked replaces the lease with the real next time
             rows = await conn.fetch(
-                """SELECT id, owner_id, map_type, title, refresh_every, last_refresh_at FROM rs_map
-                   WHERE refresh_every <> 'off' AND owner_id IS NOT NULL
-                     AND (next_refresh_at IS NULL OR next_refresh_at <= now())
-                   ORDER BY next_refresh_at NULLS FIRST LIMIT $1""", int(limit))
+                """UPDATE rs_map SET next_refresh_at = now() + interval '1 hour'
+                   WHERE id IN (SELECT id FROM rs_map
+                                WHERE refresh_every <> 'off' AND owner_id IS NOT NULL
+                                  AND (next_refresh_at IS NULL OR next_refresh_at <= now())
+                                ORDER BY next_refresh_at NULLS FIRST LIMIT $1 FOR UPDATE SKIP LOCKED)
+                   RETURNING id, owner_id, map_type, title, refresh_every, last_refresh_at""", int(limit))
         return [dict(r) for r in rows]
 
     async def mark_checked(self, map_id: str, *, refreshed: bool) -> None:

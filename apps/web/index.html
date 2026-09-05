@@ -647,6 +647,8 @@
   .mapbar .mb-meta{flex-basis:100%;font-size:.74rem;color:var(--muted);}
   .appqrow{display:flex;flex-direction:column;gap:.2rem;margin:.4rem 0;font-size:.84rem;}
   /* 🚀 Apply — one modal, four steps */
+  .nudge{margin:.6rem 0 .4rem;padding:.6rem .8rem;border:1px solid var(--gold);border-left-width:4px;border-radius:10px;background:rgba(var(--gold-rgb),.08);font-size:.86rem;line-height:1.5;display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;}
+  .nudge .histbtn{min-height:36px;}
   .bellcount{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--gold);color:#fff;font-size:.66rem;font-weight:700;display:inline-flex;align-items:center;justify-content:center;}
   .notif{border:1px solid var(--hair);border-radius:8px;padding:.5rem .6rem;margin:.35rem 0;font-size:.84rem;display:flex;gap:.5rem;align-items:flex-start;}
   .notif.unread{border-left:3px solid var(--gold);}
@@ -1737,6 +1739,7 @@
   </header>
 
   <h1 id="heading">Who are you looking for?</h1>
+  <div id="nudge" class="nudge" hidden>👋 <b>Welcome to Roster.</b> Set up your Apply profile once — name, contact, work authorization, résumé — and every <b>🚀 Apply</b> is planned for you. <button type="button" class="histbtn" id="nudgego">Set up now</button> <button type="button" class="histbtn" id="nudgelater">Later</button></div>
   <div class="pjmode" id="pjmode" role="tablist" aria-label="Search mode">
     <button type="button" class="pjbtn on" data-pj="people" role="tab" aria-selected="true">🗺 Talent Map</button>
     <button type="button" class="pjbtn" data-pj="jobs" role="tab" aria-selected="false">💼 Jobs</button>
@@ -6340,7 +6343,7 @@ async function ppRender(){
     feed = Array.isArray(rf) ? rf : [];
     if(ri.status === 401){
       PULSE_REAUTH = true;
-      if(USER){ delete USER.token; localStorage.setItem("roster_user", JSON.stringify(USER)); }
+      if(USER){ delete USER.token; localStorage.setItem("roster_user", JSON.stringify(USER)); setTimeout(maybeNudgeApplyProfile, 800); }
       main.innerHTML = `<div class="pitem-empty">Your sign-in needs a quick refresh — submit the form once and Pulse will reload.</div>`;
       const m = $("#idmodal"); if(m){ if(USER){ if(USER.name) $("#idname").value = USER.name;
         if(USER.email) $("#idemail").value = USER.email; } m.hidden = false; }
@@ -7158,6 +7161,25 @@ function initIdentity(){
 // server-side too; the FE check is just a fast affordance. authHeaders() attaches the bearer token.
 let AUTH_MODE = "register";
 function authHeaders(){ return (USER && USER.token) ? {"X-Roster-Token": USER.token} : {}; }
+// ONBOARDING NUDGE (owner, 2026-09-04): a new account is prompted on its first few visits to set up the
+// Apply profile — the one thing every 🚀 Apply plan is built from. Stops once the profile is usable
+// (name + email + work authorization) or after three "Later"s.
+async function maybeNudgeApplyProfile(){
+  const el = $("#nudge"); if(!el) return;
+  if(!loggedIn()){ el.hidden = true; return; }
+  const key = "nudge_" + ((USER && USER.email) || ""); let n = 0;
+  try{ n = parseInt(localStorage.getItem(key) || "0", 10) || 0; }catch(e){}
+  if(n >= 3){ el.hidden = true; return; }
+  try{
+    const d = await (await fetch("/me/profile", {headers: authHeaders()})).json(); const p = d.profile || {};
+    if(p.email && (p.first_name || p.last_name) && p.us_authorized_to_work){ el.hidden = true; try{ localStorage.setItem(key, "3"); }catch(e){} return; }
+  }catch(e){ return; }
+  el.hidden = false;
+  try{ localStorage.setItem(key, String(n + 1)); }catch(e){}
+}
+$("#nudgego") && $("#nudgego").addEventListener("click", ()=>{ $("#nudge").hidden = true; openApply(); });
+$("#nudgelater") && $("#nudgelater").addEventListener("click", ()=>{ $("#nudge").hidden = true; });
+setTimeout(maybeNudgeApplyProfile, 1200);
 function updateAuthUI(){
   if(!ACCOUNTS_ENABLED) return;
   const go = $("#idgo"), sw = $("#idswitch"), nm = $("#idname");
@@ -7197,7 +7219,7 @@ $("#idgo").addEventListener("click", async ()=>{
               disclaimer_ack: true, disclaimer_ack_at: new Date().toISOString()};
     }catch(e){ $("#iderr").textContent = "Network error — try again."; btn.textContent = was; btn.disabled = false; return; }
     btn.textContent = was; btn.disabled = false;
-    localStorage.setItem("roster_user", JSON.stringify(USER));
+    localStorage.setItem("roster_user", JSON.stringify(USER)); setTimeout(maybeNudgeApplyProfile, 800);
     $("#idmodal").hidden = true;
     maybeShowPulseBell(); maybeShowSavedBtn();
     if(PULSE_REAUTH && USER && USER.token){ PULSE_REAUTH = false; openPulsePage(); }
@@ -7207,7 +7229,7 @@ $("#idgo").addEventListener("click", async ()=>{
   // ---- accounts OFF: legacy local identity (name + email, no password) ----
   if(name.length < 2){ $("#iderr").textContent = "Please enter your name."; return; }
   USER = {name, email, disclaimer_ack: true, disclaimer_ack_at: new Date().toISOString()};
-  localStorage.setItem("roster_user", JSON.stringify(USER));
+  localStorage.setItem("roster_user", JSON.stringify(USER)); setTimeout(maybeNudgeApplyProfile, 800);
   $("#idmodal").hidden = true;
   maybeShowPulseBell();
 });
@@ -8751,7 +8773,7 @@ async function loadMapView(id, token){
     const m = (await r.json()).map;
     if(m.map_type === "jobs"){
       if(typeof setSearchMode === "function") setSearchMode("jobs");
-      window.ACTIVE_MAP = {id:m.id, map_type:"jobs", title:m.title, notes:m.notes||"", share_path:m.share_path||"", token:(token||""),
+      window.ACTIVE_MAP = {id:m.id, map_type:"jobs", title:m.title, notes:m.notes||"", share_path:m.share_path||"", token:(token||""), refresh_every:(m.refresh_every||"off"), last_checked_at:(m.last_checked_at||""),
         is_owner:!!m.is_owner, reviews:(m.reviews||{}), feedback:(m.feedback||[]), revisions:(m.revisions||[]), n_rows:(m.rows||[]).length, created_at:m.created_at};
       window.JOB_SUMMARIES = window.JOB_SUMMARIES || {};
       (m.rows||[]).forEach(j => { if(j.summary && j.url) window.JOB_SUMMARIES[j.url] = j.summary; });   // saved reads travel with the map
@@ -8763,7 +8785,7 @@ async function loadMapView(id, token){
       return;
     }
     if(typeof setSearchMode === "function") setSearchMode("people");   // a talent map lives in the Talent Map tab
-    window.ACTIVE_MAP = {id:m.id, map_type:"talent", title:m.title, notes:m.notes||"", share_path:m.share_path||"", token:(token||""),
+    window.ACTIVE_MAP = {id:m.id, map_type:"talent", title:m.title, notes:m.notes||"", share_path:m.share_path||"", token:(token||""), refresh_every:(m.refresh_every||"off"), last_checked_at:(m.last_checked_at||""),
       is_owner:!!m.is_owner, reviews:(m.reviews||{}), feedback:(m.feedback||[]), revisions:(m.revisions||[]), brief_contract:((m.coverage||{}).brief_contract||null),
       n_rows:(m.rows||[]).length, created_at:m.created_at};
     THREAD = {session_id:null, turns:[{question:m.brief||m.title||"Talent Map", people_rows:(m.rows||[]), coverage_basis:(m.coverage||{}), grounded:true, claims:[], coverage_gaps:[]}]};
@@ -9412,7 +9434,7 @@ function gotoPeoplePage(pid, page){
 // A 401 from any signed-in call means THIS device's token is no longer valid (rotated or removed):
 // clear it and ask for a fresh sign-in instead of failing quietly.
 function handleAuthExpired(){
-  try{ if(USER){ delete USER.token; localStorage.setItem("roster_user", JSON.stringify(USER)); } }catch(e){}
+  try{ if(USER){ delete USER.token; localStorage.setItem("roster_user", JSON.stringify(USER)); setTimeout(maybeNudgeApplyProfile, 800); } }catch(e){}
   AUTH_MODE = "login"; if(typeof updateAuthUI === "function") updateAuthUI();
   const m = $("#idmodal"); if(m){ m.hidden = false; const err = $("#iderr"); if(err) err.textContent = "Your sign-in has expired on this device — please sign in again."; }
 }
