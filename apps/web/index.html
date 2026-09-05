@@ -668,6 +668,10 @@
   .fchip.avoid{border-color:var(--gap);background:rgba(224,96,72,.10);color:var(--gap);text-decoration:line-through;}
   .fchip.unknown{color:var(--muted);border-style:dashed;}
   .frail-pills{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.3rem;}
+  .frail-apply{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.45rem;padding-top:.4rem;border-top:1px dashed var(--hair);font-size:.76rem;color:var(--muted);}
+  .frail-apply .idgo{width:auto;padding:.4rem .9rem;min-height:36px;}
+  .frail-apply .histbtn{min-height:36px;}
+  .frail.busy{opacity:.6;pointer-events:none;}
   .fpill{font-size:.7rem;padding:.15rem .5rem;border-radius:999px;background:rgba(var(--gold-rgb),.10);color:var(--gold-strong);border:1px solid var(--gold);}
   .fpill button{font:inherit;border:0;background:transparent;color:inherit;cursor:pointer;margin-left:.2rem;}
   @media (max-width:560px){ .frail-k{min-width:64px;font-size:.6rem;} .fchip{font-size:.7rem;} }
@@ -7509,8 +7513,18 @@ function facetLabel(d, key, value){
   if(value === "unknown") return "unknown";
   return vl || String(value).replace(/_/g, " ");
 }
+function facetDraft(d){ return d._draft || d.contract || {}; }
+function facetPending(d){   // how many chip states differ between the draft and the applied contract
+  const a = d.contract || {}, b = d._draft; if(!b) return 0;
+  let n = 0; const keys = new Set();
+  for(const m of ["must","prefer","avoid"]) for(const o of [a[m]||{}, b[m]||{}]) for(const k of Object.keys(o)) keys.add(k);
+  for(const k of keys){ const vals = new Set(); for(const m of ["must","prefer","avoid"]) for(const o of [a[m]||{}, b[m]||{}]) for(const v of (Array.isArray(o[k]) ? o[k] : [])) vals.add(String(v));
+    for(const v of vals) if(facetState(a, k, v) !== facetState(b, k, v)) n++; }
+  if((a.rank_by||"match") !== (b.rank_by||"match")) n++;
+  return n;
+}
 function facetRailMarkup(d){
-  const c = d.contract || {}, counts = d.counts || {}, L = d.labels || {};
+  const c = facetDraft(d), counts = d.counts || {}, L = d.labels || {};
   const order = (L.order || Object.keys(counts)).filter(k => counts[k] && Object.keys(counts[k]).length);
   const rows = order.map(key => {
     const entries = Object.entries(counts[key]).sort((a, b) => (a[0] === "unknown") - (b[0] === "unknown") || b[1] - a[1]).slice(0, 14);
@@ -7528,34 +7542,47 @@ function facetRailMarkup(d){
   const rankable = (L.order||[]).filter(k => ["numeric","ordinal"].includes((L.types||{})[k]));
   const rank = `<label>rank by <select data-jpid="${esc(d._jpid)}" class="frank"><option value="match"${(c.rank_by||"match")==="match"?" selected":""}>match</option>${rankable.map(k => `<option value="${esc(k)}"${c.rank_by===k?" selected":""}>${esc((L.keys||{})[k]||k)}</option>`).join("")}</select></label>`;
   const cov = d.coverage || {};
-  return `<div class="frail"><div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""} ${rank}<span style="margin-left:auto;">tap a chip: ● must · ▲ prefer · ▼ avoid</span></div>${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}</div>`;
+  const n = facetPending(d);
+  const applyBar = n ? `<div class="frail-apply"><b>${n} change${n===1?"":"s"} pending</b> — nothing runs until you apply.
+      <button type="button" class="idgo frail-go" data-jpid="${esc(d._jpid)}">Apply</button><button type="button" class="histbtn frail-reset" data-jpid="${esc(d._jpid)}">Reset</button></div>`
+    : `<div class="frail-apply">Tap chips to stage changes, then apply once.${d._applied ? ` <span style="color:var(--verified)">Applied ✓</span>` : ""}</div>`;
+  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}"><div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""} ${rank}<span style="margin-left:auto;">● must · ▲ prefer · ▼ avoid</span></div>${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
+}
+function rerenderRail(jpid){
+  const d = (window.JOBS_RENDERS||{})[jpid]; if(!d) return;
+  const el = document.querySelector(`.frail[data-jpid="${CSS.escape(jpid)}"]`); if(!el) return;
+  el.outerHTML = facetRailMarkup(d);
 }
 async function facetReevaluate(jpid, contract){
   const d = (window.JOBS_RENDERS||{})[jpid]; if(!d) return;
-  const wrap = document.querySelector(`.ppl-wrap[data-jpid="${CSS.escape(jpid)}"]`);
-  if(wrap){ const h = wrap.querySelector(".frail-h"); if(h) h.insertAdjacentHTML("beforeend", `<span class="frail-busy"> · updating…</span>`); }
+  d._busy = true; d._applied = false; rerenderRail(jpid);
   try{
     const r = await fetch("/search/evaluate", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({contract})});
     const out = await r.json();
-    if(!r.ok){ alert(out.detail || "Couldn't apply that filter."); return; }
-    d.contract = out.contract; d.counts = out.counts; d.coverage = out.coverage; d.labels = out.labels || d.labels;
+    if(!r.ok){ d._busy = false; rerenderRail(jpid); alert(out.detail || "Couldn't apply those changes."); return; }
+    d.contract = out.contract; d._draft = null; d.counts = out.counts; d.coverage = out.coverage; d.labels = out.labels || d.labels;
     d.jobs = (out.rows||[]).map(x => ({...x, seniority: ((x.facets||{}).level||[""])[0]}));
-    d.count = d.jobs.length; d._jpage = 0;
+    d.count = d.jobs.length; d._jpage = 0; d._busy = false; d._applied = true;
     if(d.brief_contract){ d.brief_contract.contract = out.contract; d.brief_contract.counts = out.counts; }
     gotoJobsPage(jpid, 0);
-  }catch(e){ alert("Couldn't apply that filter — try again."); }
+  }catch(e){ d._busy = false; rerenderRail(jpid); alert("Couldn't apply those changes — try again."); }
 }
 document.addEventListener("click", (e)=>{
+  const go = e.target.closest && e.target.closest(".frail-go");
+  if(go){ e.preventDefault(); const d = (window.JOBS_RENDERS||{})[go.dataset.jpid]; if(d && d._draft) facetReevaluate(go.dataset.jpid, d._draft); return; }
+  const rs = e.target.closest && e.target.closest(".frail-reset");
+  if(rs){ e.preventDefault(); const d = (window.JOBS_RENDERS||{})[rs.dataset.jpid]; if(d){ d._draft = null; rerenderRail(rs.dataset.jpid); } return; }
   const ch = e.target.closest && e.target.closest(".fchip, .fpill button");
   if(!ch || ch.disabled) return;
   e.preventDefault(); e.stopPropagation();
   const d = (window.JOBS_RENDERS||{})[ch.dataset.jpid]; if(!d || !d.contract) return;
-  facetReevaluate(ch.dataset.jpid, facetEdit(d.contract, ch.dataset.key, ch.dataset.value, ch.dataset.mode || "cycle"));
+  d._draft = facetEdit(facetDraft(d), ch.dataset.key, ch.dataset.value, ch.dataset.mode || "cycle");   // staged, not run
+  rerenderRail(ch.dataset.jpid);
 });
 document.addEventListener("change", (e)=>{
   const sel = e.target.closest && e.target.closest("select.frank"); if(!sel) return;
   const d = (window.JOBS_RENDERS||{})[sel.dataset.jpid]; if(!d || !d.contract) return;
-  facetReevaluate(sel.dataset.jpid, {...d.contract, rank_by: sel.value});
+  d._draft = {...facetDraft(d), rank_by: sel.value}; rerenderRail(sel.dataset.jpid);
 });
 // ===== 🚀 APPLY — one integrated flow on the job card: fit → answers → résumé & letter → fill & submit =====
 // The two former surfaces ("Apply with assistant" = JD × résumé fit; "Prepare application" = the form
