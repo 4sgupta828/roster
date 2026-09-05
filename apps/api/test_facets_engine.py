@@ -198,3 +198,42 @@ def test_closed_keys_only_count_and_attach_schema_legal_values():
     assert "function" in ck and ("function", "engineering") in set(zip(ck, cv)) and ("function", "backend") not in set(zip(ck, cv))
     assert "years" in ck and ("years", "6_10") in set(zip(ck, cv))            # numeric keys are closed by band
     assert set(open_keys) >= {"metro", "state", "country", "company", "skill", "specialty"}
+
+
+def test_semantic_query_parameters_line_up_on_both_paths(monkeypatch):
+    """The small-slice EXACT path and the HNSW path both bind every $n (the probe pushes and pops its own arg)."""
+    import re as _re
+
+    class _Conn:
+        def __init__(self, small): self.calls = []; self.small = small
+        async def fetchval(self, sql, *args): self.calls.append((sql, args)); return 5 if self.small else 5000
+        async def fetch(self, sql, *args): self.calls.append((sql, args)); return []
+        async def execute(self, sql, *args): return None
+        def transaction(self):
+            class _T:
+                async def __aenter__(_s): return None
+                async def __aexit__(_s, *a): return False
+            return _T()
+
+    class _Acq:
+        def __init__(self, c): self.c = c
+        async def __aenter__(self): return self.c
+        async def __aexit__(self, *a): return False
+
+    class _Pool:
+        def __init__(self, small): self.c = _Conn(small)
+        def acquire(self): return _Acq(self.c)
+
+    for small in (True, False):
+        pool = _Pool(small)
+        async def getter(): return pool
+        store = FacetSQLStore(getter, FACET_SCHEMA, embed=lambda t: "[0.1,0.2]"); store._ready = True
+        for kind, must in (("job", {"field": ["software"], "comp": ["200k_300k"]}), ("person", {"level": ["senior"]})):
+            pool.c.calls.clear()
+            asyncio.new_event_loop().run_until_complete(store.semantic(kind, "x", must, cap=50))
+            assert pool.c.calls
+            for sql, args in pool.c.calls:
+                refs = {int(m) for m in _re.findall(r"\$(\d+)", sql)}
+                assert refs and max(refs) == len(args) and refs == set(range(1, len(args) + 1)), (small, kind, sorted(refs), len(args), sql[:100])
+            joined = " ".join(sql for sql, _ in pool.c.calls)
+            assert ("MATERIALIZED" in joined) == small

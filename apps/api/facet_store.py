@@ -210,18 +210,44 @@ class FacetSQLStore:
                 await conn.execute("SET LOCAL hnsw.ef_search = 200")
                 if kind == "job":
                     cl = self._must_sql("('job:' || j.id::text)", must, args)
+                    where = "j.embedding IS NOT NULL AND j.closed_at IS NULL" + "".join(" AND " + c for c in cl)
+                    small = await self._slice_is_small(conn, "SELECT 1 FROM rs_job j WHERE j.embedding IS NOT NULL AND j.closed_at IS NULL", "('job:' || j.id::text)", must) if must else False
                     args.append(int(cap))
-                    rows = await conn.fetch(f"SELECT {_JOB_COLS}, 1 - (j.embedding <=> $1::vector) AS sim FROM rs_job j WHERE j.embedding IS NOT NULL AND j.closed_at IS NULL"
-                                            + "".join(" AND " + c for c in cl) + f" ORDER BY j.embedding <=> $1::vector LIMIT ${len(args)}", *args)
+                    if small:
+                        # a SELECTIVE must + the HNSW ordered scan degrades into a long walk (prod 2026-09-05: 33 s for a
+                        # 22-row slice) — enumerate the slice first, then EXACT distances over it
+                        rows = await conn.fetch(f"WITH s AS MATERIALIZED (SELECT j.id FROM rs_job j WHERE {where}) "
+                                                f"SELECT {_JOB_COLS}, 1 - (j.embedding <=> $1::vector) AS sim FROM s JOIN rs_job j ON j.id = s.id "
+                                                f"ORDER BY (j.embedding <=> $1::vector) LIMIT ${len(args)}", *args)
+                    else:
+                        rows = await conn.fetch(f"SELECT {_JOB_COLS}, 1 - (j.embedding <=> $1::vector) AS sim FROM rs_job j WHERE {where}"
+                                                + f" ORDER BY j.embedding <=> $1::vector LIMIT ${len(args)}", *args)
                     out = [self._job_row(r) for r in rows]
                 else:
                     cl = self._must_sql("e.entity_id", must, args)
+                    where = "e.kind = 'person' AND e.status = 'active'" + "".join(" AND " + c for c in cl)
+                    small = await self._slice_is_small(conn, "SELECT 1 FROM rs_entity e WHERE e.kind = 'person' AND e.status = 'active'", "e.entity_id", must) if must else False
                     args.append(int(cap))
-                    rows = await conn.fetch("SELECT e.entity_id, e.name, 1 - (v.embedding <=> $1::vector) AS sim FROM rs_person_vec v JOIN rs_entity e ON e.entity_id = v.entity_id "
-                                            "WHERE e.kind = 'person' AND e.status = 'active'" + "".join(" AND " + c for c in cl)
-                                            + f" ORDER BY v.embedding <=> $1::vector LIMIT ${len(args)}", *args)
+                    if small:
+                        rows = await conn.fetch(f"WITH s AS MATERIALIZED (SELECT e.entity_id, e.name FROM rs_entity e WHERE {where}) "
+                                                "SELECT s.entity_id, s.name, 1 - (v.embedding <=> $1::vector) AS sim FROM s JOIN rs_person_vec v ON v.entity_id = s.entity_id "
+                                                f"ORDER BY (v.embedding <=> $1::vector) LIMIT ${len(args)}", *args)
+                    else:
+                        rows = await conn.fetch("SELECT e.entity_id, e.name, 1 - (v.embedding <=> $1::vector) AS sim FROM rs_person_vec v JOIN rs_entity e ON e.entity_id = v.entity_id "
+                                                f"WHERE {where}" + f" ORDER BY v.embedding <=> $1::vector LIMIT ${len(args)}", *args)
                     out = [self._person_row(r) for r in rows]
             return await self._attach_facets(conn, kind, out)
+
+    SMALL_SLICE = 2000
+
+    async def _slice_is_small(self, conn, base_sql: str, ent: str, must: dict) -> bool:
+        """Cheap probe with its own parameters: does the must-slice hold at most SMALL_SLICE rows? (LIMIT-bounded,
+        so never a full count.)"""
+        pargs: list = []
+        cl = self._must_sql(ent, must, pargs)
+        pargs.append(int(self.SMALL_SLICE) + 1)
+        n = await conn.fetchval(f"SELECT count(*) FROM ({base_sql}" + "".join(" AND " + c for c in cl) + f" LIMIT ${len(pargs)}) x", *pargs)
+        return int(n or 0) <= self.SMALL_SLICE
 
     # ---------------- counts ----------------
     async def counts(self, kind: str, must: dict, schema: FacetSchema, *, depth: dict | None = None) -> dict:

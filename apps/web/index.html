@@ -2663,7 +2663,8 @@ function esc(s){const d=document.createElement("div");d.textContent=s??"";return
 // Returns true if jobs mode HANDLED the query; false (404 / error) → let research handle it. This is
 // config-INDEPENDENT (doesn't depend on window.JOBS_ENABLED having loaded) so job routing is robust
 // even for a stale cached config: /jobs 404s when the flag is off, and we fall through to research.
-async function runJobs(question){
+async function runJobs(question, opts){
+  opts = opts || {};
   let r;
   // LOADING STATE: the button disables and the panel says what is happening (a cold model call
   // takes seconds; a silent wait invited repeated clicks — tester report).
@@ -2676,6 +2677,8 @@ async function runJobs(question){
         job_must: JOB_MUST.size ? [...JOB_MUST] : undefined,   // the pre-search "must have" toggles
         levels: LEVEL ? [LEVEL] : undefined, level_span: LEVEL_SPAN,   // centre + band
         attachments: sent.length ? sent.map(a => ({data:a.data, media_type:a.media_type||"", name:a.name||""})) : undefined,
+        contract: opts.contract || undefined,                 // a READY Guided intake: the evaluator runs it as is
+        intake_transcript: (opts.contract && PENDING_INTAKE_TRANSCRIPT && PENDING_INTAKE_TRANSCRIPT.length) ? PENDING_INTAKE_TRANSCRIPT : undefined,
         user_name:(USER&&USER.name)||"", user_email:(USER&&USER.email)||""})}); }
   catch(e){ if(goBtn){ goBtn.disabled = false; goBtn.classList.remove("loading"); } return false; }
   finally{ if(goBtn){ goBtn.disabled = false; goBtn.classList.remove("loading"); } }
@@ -6056,7 +6059,7 @@ async function askQuestion(question, opts){
   autoSaveSearch(question, SEARCH_MODE);   // signed-in → record to the user's search history (fire-and-forget)
   // EXPLICIT mode: the People/Jobs toggle decides routing — no keyword guessing. Jobs → ATS search;
   // People → the grounded people index (server routes it). (Legacy keyword fallback kept for safety.)
-  if(SEARCH_MODE === "jobs"){ await runJobs(question); return; }
+  if(SEARCH_MODE === "jobs"){ await runJobs(question, {contract: opts.contract}); if(opts.contract) PENDING_INTAKE_TRANSCRIPT = null; return; }
   // Q&A: with the NATIVE router live, fall THROUGH to the full conversational research flow below
   // (thread, follow-ups, streaming, suggestions — the eigen experience); the server's intent router
   // picks the engine per question. Legacy (router off) keeps the one-shot runQA path.
