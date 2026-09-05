@@ -6,13 +6,33 @@
   if (window.__rosterApplyLoaded) return;
   window.__rosterApplyLoaded = true;
 
+  // Set a text-like value the way TYPING would: focus, select what is there, insert through the browser's
+  // editing pipeline (execCommand insertText → real beforeinput/input events every form library accepts), and
+  // only then fall back to the prototype setter + a synthetic InputEvent. Ends with change → blur → focusout so
+  // "touched" + validation state update too (owner, 2026-09-05: fields looked filled but submit complained
+  // until they were touched — the form's own state had never registered the value).
   const setNative = (el, v) => {
     const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : (el.tagName === "SELECT" ? HTMLSelectElement.prototype : HTMLInputElement.prototype);
     const d = Object.getOwnPropertyDescriptor(proto, "value");
-    if (d && d.set) d.set.call(el, v); else el.value = v;
-    el.dispatchEvent(new Event("input", { bubbles: true }));
+    const set = () => { if (d && d.set) d.set.call(el, v); else el.value = v; };
+    try { el.focus(); el.dispatchEvent(new FocusEvent("focus", { bubbles: false })); el.dispatchEvent(new FocusEvent("focusin", { bubbles: true })); } catch (e) {}
+    let typed = false;
+    if (el.tagName !== "SELECT") {
+      try {
+        if (typeof el.select === "function") el.select();
+        else if (typeof el.setSelectionRange === "function") el.setSelectionRange(0, (el.value || "").length);
+        typed = document.execCommand("insertText", false, v) && el.value === v;
+      } catch (e) { typed = false; }
+    }
+    if (!typed) {
+      set();
+      try { el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: v })); }
+      catch (e) { el.dispatchEvent(new Event("input", { bubbles: true })); }
+    }
     el.dispatchEvent(new Event("change", { bubbles: true }));
-    el.dispatchEvent(new Event("blur", { bubbles: true }));
+    try { el.blur(); } catch (e) {}
+    el.dispatchEvent(new FocusEvent("blur", { bubbles: false }));
+    el.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
   };
   const norm = s => (s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
   const mark = (el, ok) => { try { el.style.outline = ok ? "2px solid #6c5ce7" : "2px solid #d63031"; el.style.outlineOffset = "1px"; } catch (e) {} };
@@ -120,7 +140,7 @@
       const w = norm(val);
       const idx = [...sel.options].findIndex(o => norm(o.text) === w) ?? -1;
       const i2 = idx >= 0 ? idx : [...sel.options].findIndex(o => norm(o.text).includes(w) || w.includes(norm(o.text)) && norm(o.text).length > 2);
-      if (i2 >= 0) { sel.selectedIndex = i2; sel.dispatchEvent(new Event("change", { bubbles: true })); mark(sel, true); return true; }
+      if (i2 >= 0) { try { sel.focus(); } catch (e) {} sel.selectedIndex = i2; sel.dispatchEvent(new Event("input", { bubbles: true })); sel.dispatchEvent(new Event("change", { bubbles: true })); try { sel.blur(); } catch (e) {} sel.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); mark(sel, true); return true; }
     }
     // the question's own box first (exact on Ashby): a custom dropdown → open it, pick; a Boolean →
     // Yes / No buttons; radio / checkbox groups → the option by its label; a multi-select → every value

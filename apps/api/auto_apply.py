@@ -68,11 +68,42 @@ def map_label(label: str) -> str:
     return ""
 
 
+_DIAL = {"us": "1", "usa": "1", "united states": "1", "united states of america": "1", "ca": "1", "canada": "1", "uk": "44", "gb": "44",
+         "united kingdom": "44", "in": "91", "india": "91", "de": "49", "germany": "49", "fr": "33", "france": "33", "au": "61", "australia": "61",
+         "sg": "65", "singapore": "65", "nl": "31", "netherlands": "31", "ie": "353", "ireland": "353", "es": "34", "spain": "34", "it": "39", "italy": "39",
+         "br": "55", "brazil": "55", "mx": "52", "mexico": "52", "jp": "81", "japan": "81", "il": "972", "israel": "972", "ch": "41", "switzerland": "41",
+         "se": "46", "sweden": "46", "pl": "48", "poland": "48", "pt": "351", "portugal": "351", "ae": "971"}
+
+
+def normalize_phone(phone: str, country: str = "") -> str:
+    """A phone with its country code (owner, 2026-09-05: the Apply profile phone lacked '+1'). A number that
+    already starts with '+' is kept (digits grouped); otherwise the profile's country supplies the code
+    (unknown country → the number as typed). A 10-digit US/CA number reads +1 555-123-4567."""
+    raw = str(phone or "").strip()
+    if not raw:
+        return ""
+    digits = re.sub(r"\D", "", raw)
+    if raw.startswith("+"):
+        return "+" + digits
+    cc = _DIAL.get(str(country or "").strip().lower(), "")
+    if not cc:
+        return raw
+    if cc == "1" and len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    if cc == "1" and len(digits) == 10:
+        return f"+1 {digits[:3]}-{digits[3:6]}-{digits[6:]}"
+    if digits.startswith(cc) and len(digits) > len(cc) + 6:      # already carries the code without '+'
+        return "+" + digits
+    return f"+{cc} {digits}"
+
+
 def value_for(key: str, profile: dict, answers: dict | None = None) -> str:
     """The value the profile (or the user's saved answers) gives a standard field; '' when unknown."""
     answers = answers or {}
     if key in answers and str(answers[key]).strip():
         return str(answers[key]).strip()
+    if key == "phone":
+        return normalize_phone(str(profile.get("phone") or ""), str(profile.get("country") or "us"))
     if key == "full_name":
         return (" ".join(str(profile.get(k) or "") for k in ("first_name", "last_name"))).strip()
     if key == "city":      # a "Location" style field: City, State

@@ -126,3 +126,16 @@ def test_citizenship_and_onsite_questions_answer_from_the_profile_only():
     # not in the profile → no guess
     assert standard_answer("Are you a U.S. Citizen or Green Card holder?", "boolean", yn, {}) == ""
     assert standard_answer("Are you able to work in person at the office?", "boolean", yn, {"remote_preference": "Remote"}) == ""
+
+
+def test_phone_gets_its_country_code_from_the_profile():
+    from api.auto_apply import normalize_phone, value_for
+    assert normalize_phone("555-010-0100", "United States") == "+1 555-010-0100"
+    assert normalize_phone("(555) 010 0100", "us") == "+1 555-010-0100"
+    assert normalize_phone("1 555 010 0100", "US") == "+1 555-010-0100"
+    assert normalize_phone("+44 20 7946 0958", "us") == "+442079460958"           # an explicit code is kept
+    assert normalize_phone("020 7946 0958", "United Kingdom") == "+44 02079460958"
+    assert normalize_phone("98765 43210", "in") == "+91 9876543210"
+    assert normalize_phone("555-0100", "") == "555-0100"                          # unknown country → as typed
+    assert value_for("phone", {"phone": "555 010 0100", "country": "United States"}) == "+1 555-010-0100"
+    assert value_for("phone", {"phone": "555 010 0100", "country": "United States"}, {"phone": "+1 999"}) == "+1 999"   # the user's own answer wins
