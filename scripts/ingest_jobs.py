@@ -564,8 +564,11 @@ async def refresh_boards(conn, boards: int, *, live: bool) -> dict:
                 await conn.execute("UPDATE rs_ingest_checkpoint SET next_check_at = now() + $2 * interval '1 second', updated_at = now() "
                                    "WHERE source='jobs' AND cursor_key=$1", key, next_check_after(cp["last_change_at"], now, changed=False))
             continue
-        company = cp["company"] or (listed[0].get("company_name") if listed and listed[0].get("company_name") else "") \
-            or await conn.fetchval("SELECT company FROM rs_job WHERE source = $1 AND url ILIKE '%' || $2 || '%' LIMIT 1", ats, token) or ""
+        # the company as OUR rows spell it (the conflict key is company+title+location — a different
+        # spelling would duplicate every posting): checkpoint → our rows for this board → the ATS's name
+        company = cp["company"] \
+            or await conn.fetchval("SELECT company FROM rs_job WHERE source = $1 AND url ILIKE '%' || $2 || '%' LIMIT 1", ats, token) \
+            or (listed[0].get("company_name") if listed and listed[0].get("company_name") else "") or ""
         if not company:
             print(f"[skip] {key}: no company known for this board", file=sys.stderr); st["failed"] += 1
             continue
@@ -573,6 +576,10 @@ async def refresh_boards(conn, boards: int, *, live: bool) -> dict:
             "SELECT ats_id, posted_at FROM rs_job WHERE source=$1 AND company=$2 AND closed_at IS NULL AND ats_id IS NOT NULL", ats, company)}
         first_pass = not existing     # rows from the original ingest carry no ats_id yet: this pass stamps them
         new, changed, gone = plan_refresh(existing, listed)
+        if first_pass:   # only postings we truly lack are new (and get embedded); the rest just get stamped
+            have = {(r["title_norm"], r["location"] or "") for r in await conn.fetch(
+                "SELECT title_norm, location FROM rs_job WHERE source=$1 AND company=$2", ats, company)}
+            new = [r for r in listed if (_norm_title(r.get("title") or ""), r.get("location") or "") not in have]
         touched = bool(new or changed or gone or first_pass)
         st["new"] += len(new); st["changed"] += len(changed)
         if not live:
@@ -585,7 +592,8 @@ async def refresh_boards(conn, boards: int, *, live: bool) -> dict:
         async with conn.transaction():
             await upsert_jobs(conn, ats, new, vecs, company_default=company)
             if first_pass:   # stamp ats_id / last_seen on the legacy rows (the conflict key finds them)
-                await upsert_jobs(conn, ats, [r for r in listed if r not in new], [None] * (len(listed) - len(new)), company_default=company)
+                rest = [r for r in listed if r not in new]
+                await upsert_jobs(conn, ats, rest, [None] * len(rest), company_default=company)
             else:
                 await upsert_jobs(conn, ats, changed, [None] * len(changed), company_default=company)
                 if listed:   # every listed posting was just seen → bump it
