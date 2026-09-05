@@ -1256,6 +1256,13 @@ class MapIn(BaseModel):
     rows: list = []
     coverage: dict | None = None
     filters: dict | None = None
+    contract: dict | None = None      # the contract the rows were evaluated from (facets/evaluator surfaces)
+
+
+class MapNavigateIn(BaseModel):       # navigate a saved map: re-evaluate its contract (⊕ edits); save = a revision
+    contract: dict | None = None
+    save: bool = False
+    t: str = ""                        # share token for viewers (read-only navigation)
 
 
 class MapPatchIn(BaseModel):
@@ -2849,7 +2856,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                             elif _m == "leadership":
                                 _c.must.setdefault("level", []).append("leadership")
                         _out = await _evaluate_contract(_c.to_dict())
-                        _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets")},
+                        _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display")},
                                   "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in _out["rows"]]
                         stats = await store.jobs_stats()
                         sid = await _save_job_session(_rows, {"title_keywords": _pq.get("title_keywords") or [], "company": [], "location": _pq.get("location") or ""})
@@ -2895,7 +2902,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 elif _m == "leadership":
                     _c.must.setdefault("level", []).append("leadership")
             _out = await _evaluate_contract(_c.to_dict())
-            _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets")},
+            _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display")},
                       "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in _out["rows"]]
             stats = await store.jobs_stats()
             sid = await _save_job_session(_rows, {"title_keywords": [], "company": [], "location": ""})
@@ -5818,7 +5825,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         if not (body.brief or "").strip():
             raise HTTPException(status_code=400, detail="brief required")
         rows = [r for r in (body.rows or []) if isinstance(r, dict)]
-        res = await ms.create(tenant_id=body.tenant_id, map_type=(body.map_type or "talent")[:32],
+        res = await ms.create(contract=body.contract, tenant_id=body.tenant_id, map_type=(body.map_type or "talent")[:32],
                               brief=body.brief, rows=rows, coverage=body.coverage,
                               filters=body.filters, title=body.title, owner_id=user["id"])
         res["share_path"] = f"#m/{res['id']}?t={res['share_token']}"
@@ -6034,6 +6041,44 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             n += 1
         return {"projected": n, "schema_version": ver}
 
+    def _rows_from_eval(kind: str, out: dict) -> list[dict]:
+        """Evaluator rows → the row shape the map surfaces render (jobs: the card fields; people: as is)."""
+        if kind == "jobs":
+            return [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display")},
+                     "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in out.get("rows") or []]
+        return list(out.get("rows") or [])
+
+    @app.post("/maps/{map_id}/navigate")
+    async def map_navigate(map_id: str, body: MapNavigateIn, x_roster_token: str = Header(default="")) -> dict:
+        """NAVIGATE a saved map (spec §6): evaluate its contract — or the edited contract sent — against the
+        live index; rows + counts + coverage come back; the snapshot is untouched unless `save` (owner only),
+        which records a revision with the new contract and rows."""
+        from api.calibration import diff_rows
+        ms = _require_maps()
+        user = await _optional_user(x_roster_token)
+        m = await ms.get(map_id, owner_id=(user or {}).get("id"), share_token=(body.t or None))
+        if m is None:
+            raise HTTPException(status_code=404, detail="map not found")
+        base = m.get("contract")
+        if not base:
+            raise HTTPException(status_code=400, detail="this map was saved before contracts — search again and save it to navigate it")
+        cdict = dict(body.contract or base)
+        cdict["kind"] = base.get("kind") or ("job" if m.get("map_type") == "jobs" else "person")
+        out = await _evaluate_contract(cdict)
+        new_rows = _rows_from_eval(m.get("map_type") or "jobs", out)
+        res = {"rows": new_rows, "counts": out["counts"], "coverage": out["coverage"], "contract": out["contract"], "labels": out.get("labels")}
+        if body.save:
+            if not m.get("is_owner"):
+                raise HTTPException(status_code=403, detail="only the owner can save a navigated view")
+            old = [r for r in (m.get("rows") or []) if isinstance(r, dict)]
+            delta = diff_rows(old, new_rows)
+            delta_rec = {**delta, "edits": [], "summary": f"Filters applied: {delta.get('n_added', 0)} new, {delta.get('n_removed', 0)} dropped.", "contract": out["contract"]}
+            rev = await ms.add_revision(map_id, owner_id=user["id"], reason="manual_filter_change", brief=m.get("brief") or "",
+                                        filters=(m.get("filters") or {}), coverage={**(m.get("coverage") or {}), "counts": out["counts"]},
+                                        rows=new_rows, delta=delta_rec, contract=out["contract"])
+            res["revision_id"] = rev
+        return res
+
     async def _rerun_jobs_map(m: dict, owner_id: str, *, prefs_extra: dict, exclude_refs: list, country: str) -> tuple[list[dict], dict]:
         """Re-run a JOB MAP's saved contract (the owner's résumé × the brief × fixed filters) → (rows, coverage).
         Shared by revise (with feedback-derived prefs) and keep-fresh refresh (the last contract as is)."""
@@ -6129,11 +6174,16 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         country = str(((cov.get("geo_scope") or {}).get("country")) or "us")
         last = _last_contract(m)
         is_jobs = (m.get("map_type") or "talent") == "jobs"
-        if is_jobs:
+        if m.get("contract"):                                    # the evaluator IS the refresh
+            _out = await _evaluate_contract(dict(m["contract"]))
+            new_rows = _rows_from_eval(m.get("map_type") or "jobs", _out)
+            new_cov = {**cov, "counts": _out["counts"], "coverage": _out["coverage"]}
+            filters, brief, last = (m.get("filters") or {}), (m.get("brief") or ""), dict(m["contract"])
+        elif is_jobs:
             new_rows, new_cov = await _rerun_jobs_map(m, owner_id, prefs_extra=last.get("prefs") or {}, exclude_refs=last.get("exclude_refs") or [], country=country)
             filters = m.get("filters") or {}
             brief = m.get("brief") or ""
-        else:
+        elif True:
             contract = {"question": m.get("brief") or "", "refine_facets": (m.get("filters") or {}),
                         "evidence_kinds": list(((cov.get("evidence_filter") or {}).get("kinds")) or []),
                         "exclude_ids": [], "exclude_companies": [], "avoid_terms": [], **{k: v for k, v in last.items() if k in ("question", "refine_facets", "evidence_kinds", "exclude_ids", "exclude_companies", "avoid_terms")}}
@@ -6265,6 +6315,36 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             feedback = [f for f in (m.get("feedback") or []) if (f.get("tags") or []) or f.get("state") in ("shortlist", "not relevant")]
             if not feedback:
                 raise HTTPException(status_code=400, detail="no feedback yet — 👍 / 👎 a few roles first")
+            if m.get("contract"):
+                # CALIBRATION ON THE EVALUATOR (spec §6): tags edit the contract; the evaluator re-runs it
+                from roster_kernel.facets import Contract as _Contract
+                from api.facets_engine import tags_to_contract
+                _base = _Contract.from_dict(m["contract"])
+                _new, _log = tags_to_contract(_base, feedback, _facet_schema())
+                _excl = [str(x) for f in feedback if f.get("state") == "not relevant" for x in [f.get("entity_id")] if x]
+                if _excl:
+                    _new.exclude_ids = sorted(set(list(_new.exclude_ids) + _excl)); _log.append(f"drop {len(_excl)} marked not relevant")
+                contract = {"question": m.get("brief") or "", "edits": _log, "contract": _new.to_dict(), "n_feedback": len(feedback),
+                            "next_revision": len(m.get("revisions") or [])}
+                if body.preview:
+                    return {"preview": True, "contract": contract}
+                if not _log:
+                    raise HTTPException(status_code=400, detail="the feedback so far implies no change to the search")
+                _out = await _evaluate_contract(_new.to_dict())
+                new_rows = _rows_from_eval("jobs", _out)
+                for j in new_rows:
+                    old = rows_by_ref.get(row_ref(j))
+                    if old and old.get("summary"):
+                        j["summary"] = old["summary"]
+                delta = diff_rows(rows, new_rows)
+                summary = await phrase_delta(build_llm(mode=resolve_mode()), delta, _log)
+                delta_rec = {**delta, "edits": _log, "summary": summary, "contract": _new.to_dict()}
+                rev = await ms.add_revision(map_id, owner_id=user["id"], reason="hiring_manager_feedback", brief=m.get("brief") or "",
+                                            filters=(m.get("filters") or {}), coverage={**(m.get("coverage") or {}), "counts": _out["counts"]},
+                                            rows=new_rows, delta=delta_rec, contract=_new.to_dict())
+                if rev is None:
+                    raise HTTPException(status_code=404, detail="map not found")
+                return {"revision_id": rev, "summary": summary, "delta": delta_rec, "rows": new_rows, "coverage": {**(m.get("coverage") or {}), "counts": _out["counts"]}}
             cal = job_feedback_to_prefs(m.get("brief") or "", feedback, rows_by_ref)
             cal["n_feedback"] = len(feedback)
             cal["next_revision"] = len(m.get("revisions") or [])

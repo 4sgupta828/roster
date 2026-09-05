@@ -1,0 +1,10 @@
+{
+  "as_of": "2026-09",
+  "note": "Curated, dated lookup sets (docs/specs/facet-contract-evaluator.md §2.3). Company TYPE is lookup data, never a model guess. Keys are compared alphanumeric-only, case-insensitive.",
+  "big_tech": ["google", "alphabet", "microsoft", "apple", "amazon", "meta", "facebook", "nvidia", "netflix", "oracle", "salesforce",
+               "adobe", "ibm", "intel", "cisco", "uber", "airbnb", "stripe", "openai", "anthropic", "databricks", "snowflake",
+               "shopify", "twilio", "atlassian", "servicenow", "workday", "palantir", "linkedin", "tesla", "spacex", "bytedance",
+               "tiktok", "samsung", "sap", "qualcomm", "broadcom", "amd", "arm", "cloudflare", "datadog", "mongodb", "coinbase",
+               "block", "square", "paypal", "pinterest", "snap", "reddit", "dropbox", "doordash", "instacart", "lyft", "roblox",
+               "unity", "zoom", "slack", "figma", "canva", "notion", "scaleai", "scale_ai", "anduril", "anduril_industries"]
+}

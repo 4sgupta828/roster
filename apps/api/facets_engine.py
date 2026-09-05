@@ -222,3 +222,36 @@ def downgrade_uncovered_musts(contract: Contract, coverage_known: dict[str, floa
             contract.prefer[key] = sorted(set((cur if isinstance(cur, list) else []) + list(vals)))
             moved.append(key)
     return moved
+
+
+# ---- reviewer feedback → contract edits (calibration on the evaluator; spec §4, §6) ----
+_TAG_KEYS = {"company": "company", "level": "level", "location": "metro", "mode": "work_mode", "title": "role_family",
+             "field": "field", "function": "function", "skill": "skill", "evidence": "evidence", "seniority": "level", "role": "role_family", "metro": "metro"}
+
+
+def tags_to_contract(contract: Contract, feedback: list[dict], schema: FacetSchema) -> tuple[Contract, list[str]]:
+    """The map's `prefer:key=value` / `avoid:key=value` tags become contract edits (prefer / avoid; never a
+    must — feedback ranks, it does not filter). Values are validated by the schema; illegal ones are
+    skipped. Returns (new contract, the plain-words edit log)."""
+    from roster_kernel.facets import edit as _edit
+    c = Contract.from_dict(contract.to_dict())
+    log: list[str] = []
+    for f in feedback or []:
+        for t in (f.get("tags") or []):
+            t = str(t).strip().lower()
+            if ":" not in t or "=" not in t:
+                continue
+            mode, rest = t.split(":", 1)
+            key, _, val = rest.partition("=")
+            if mode not in ("prefer", "avoid"):
+                continue
+            skey = _TAG_KEYS.get(key.strip(), key.strip())
+            k = schema.key(skey)
+            if k is None or contract.kind not in k.kinds:
+                continue
+            nv = schema.validate_value(skey, val.strip().replace(" ", "_") if k.type in (FacetType.categorical, FacetType.ordinal) else val.strip())
+            if nv is None:
+                continue
+            c = _edit(c, skey, nv, mode)
+            log.append(f"{mode} {k.label.lower() or skey}: {nv.replace('_', ' ')}")
+    return c, log

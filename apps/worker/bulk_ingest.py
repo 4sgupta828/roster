@@ -115,6 +115,19 @@ def run_bulk_ingest_loop() -> None:
     if facet_rows:
         threading.Thread(target=_job_facets_loop, args=(facet_rows, 60), daemon=True, name="job-facets").start()
         print(f"[bulk] job facets thread started — {facet_rows} postings per pass", flush=True)
+    people_facets = int(os.environ.get("ROSTER_BULK_PEOPLE_FACETS", "0") or 0)   # GATED spend (spec step 4): model facets for people
+    if people_facets:
+        def _people_facets_loop(rows: int, pause: int) -> None:
+            while True:
+                try:
+                    stopped = asyncio.run(_is_stopped())
+                except Exception:   # noqa: BLE001
+                    stopped = False
+                if not stopped:
+                    _run_chunk(["scripts/ingest_people.py", "--live", "--facets", str(rows)])
+                time.sleep(pause)
+        threading.Thread(target=_people_facets_loop, args=(people_facets, 60), daemon=True, name="people-facets").start()
+        print(f"[bulk] people facets thread started — {people_facets} people per pass", flush=True)
     refresh_boards = int(os.environ.get("ROSTER_BULK_REFRESH_BOARDS", "0") or 0)   # opt-in knob (validated on prod first)
     if refresh_boards:
         threading.Thread(target=_jobs_refresh_loop, args=(refresh_boards, 120), daemon=True, name="jobs-refresh").start()

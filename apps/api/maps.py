@@ -60,6 +60,9 @@ ALTER TABLE rs_map ADD COLUMN IF NOT EXISTS refresh_every text NOT NULL DEFAULT 
 ALTER TABLE rs_map ADD COLUMN IF NOT EXISTS next_refresh_at timestamptz;
 ALTER TABLE rs_map ADD COLUMN IF NOT EXISTS last_refresh_at timestamptz;
 ALTER TABLE rs_map ADD COLUMN IF NOT EXISTS last_checked_at timestamptz;
+-- the CONTRACT the map runs from (docs/specs/facet-contract-evaluator.md §6): navigation re-evaluates it,
+-- keep-fresh re-runs it, reviewer tags edit it; the row snapshot stays the record
+ALTER TABLE rs_map ADD COLUMN IF NOT EXISTS contract jsonb;
 CREATE TABLE IF NOT EXISTS rs_map_review (
     map_id        text NOT NULL REFERENCES rs_map(id) ON DELETE CASCADE,
     entity_id     text NOT NULL,
@@ -173,7 +176,7 @@ class MapStore:
 
     async def create(self, *, tenant_id: str, map_type: str, brief: str, rows: list[dict],
                      coverage: dict | None, filters: dict | None, title: str = "",
-                     owner_id: str | None = None) -> dict:
+                     owner_id: str | None = None, contract: dict | None = None) -> dict:
         await self._ensure()
         mid = uuid.uuid4().hex
         token = secrets.token_urlsafe(18)
@@ -183,11 +186,11 @@ class MapStore:
         async with pool.acquire() as conn:
             await conn.execute(
                 """INSERT INTO rs_map (id, tenant_id, vertical, map_type, title, brief, filters,
-                                       coverage, rows, owner_id, share_token)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11)""",
+                                       coverage, rows, owner_id, share_token, contract)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11,$12::jsonb)""",
                 mid, tenant_id, self._vertical, map_type, title, (brief or "").strip()[:2000],
                 json.dumps(filters or {}), json.dumps(coverage or {}), json.dumps(rows),
-                owner_id, token)
+                owner_id, token, (json.dumps(contract) if contract else None))
             await conn.execute(
                 """INSERT INTO rs_map_revision (map_id, revision_id, reason, brief_snapshot, filters_snapshot,
                                                 coverage_snapshot, row_snapshot)
@@ -215,6 +218,8 @@ class MapStore:
         for k in ("filters", "coverage", "rows"):
             v = d.get(k)
             d[k] = json.loads(v) if isinstance(v, str) else (v or ({} if k != "rows" else []))
+        _c = d.get("contract")
+        d["contract"] = (json.loads(_c) if isinstance(_c, str) else _c) or None
         d["reviews"] = {}
         d["feedback"] = []                       # every reviewer's row-level feedback (tags + note), by entity
         for x in reviews:
@@ -310,7 +315,8 @@ class MapStore:
                    WHERE id = $1""", map_id, bool(refreshed))
 
     async def add_revision(self, map_id: str, *, owner_id: str, reason: str, brief: str, filters: dict | None,
-                           coverage: dict | None, rows: list[dict], delta: dict | None = None) -> int | None:
+                           coverage: dict | None, rows: list[dict], delta: dict | None = None,
+                           contract: dict | None = None) -> int | None:
         """A NEW REVISION of the map (owner only): the map's live brief/filters/coverage/rows move to the
         revised search's output; the previous state stays in its own revision row. `delta` is the
         code-computed diff + the plain-words edit log + the two-line summary. Returns the revision id."""
@@ -346,8 +352,9 @@ class MapStore:
                     json.dumps(coverage or {}), json.dumps(rows), json.dumps(delta or {}))
                 await conn.execute(
                     """UPDATE rs_map SET brief = $2, filters = $3::jsonb, coverage = $4::jsonb, rows = $5::jsonb,
-                                         updated_at = now() WHERE id = $1""",
-                    map_id, (brief or "").strip()[:2000], json.dumps(filters or {}), json.dumps(coverage or {}), json.dumps(rows))
+                                         contract = COALESCE($6::jsonb, contract), updated_at = now() WHERE id = $1""",
+                    map_id, (brief or "").strip()[:2000], json.dumps(filters or {}), json.dumps(coverage or {}), json.dumps(rows),
+                    (json.dumps(contract) if contract else None))
         return nxt
 
     async def register_reviewer(self, map_id: str, *, share_token: str, name: str) -> dict | None:

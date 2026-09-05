@@ -154,3 +154,16 @@ def test_control_bytes_in_postings_never_reach_the_database():
     llm = lambda s, u: {"items": [{"i": 0, "specialty": ["tur\x00bomachinery"], "comp": {"min": 100000, "max": 120000, "currency": "USD", "period": "year", "display": "$100k\x00–$120k"}}]}
     env = extract_envelopes("job", [{"title": "T\x00", "head": "pay $100,000", "tail": ""}], FACET_SCHEMA, llm)
     assert env[0]["facets"]["specialty"][0]["value"] == "turbomachinery" and "\x00" not in env[0]["facets"]["comp"][0]["display"]
+
+
+def test_reviewer_tags_edit_the_contract_and_never_become_musts():
+    from api.facets_engine import tags_to_contract
+    base = Contract(kind="job", text="founder cto", must={"level": ["leadership"]})
+    fb = [{"entity_id": "j1", "state": "shortlist", "tags": ["prefer:company=stripe", "prefer:mode=remote"]},
+          {"entity_id": "j2", "state": "not relevant", "tags": ["avoid:level=senior", "avoid:location=Bay Area", "prefer:title=cto", "avoid:nope=x", "prefer:level=principal"]}]
+    c, log = tags_to_contract(base, fb, FACET_SCHEMA)
+    assert c.must == {"level": ["leadership"]}                                     # feedback ranks; it never filters
+    assert c.prefer == {"company": ["stripe"], "role_family": ["cto"], "work_mode": ["remote"]}
+    assert c.avoid == {"level": ["senior"], "metro": ["bay area"]}
+    assert "prefer company: stripe" in log and all("nope" not in x and "principal" not in x for x in log)
+    assert base.prefer == {}                                                          # pure
