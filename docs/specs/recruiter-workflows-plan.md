@@ -225,6 +225,25 @@ is reused. The standalone Apply Assistant page and the separate "Prepare applica
 gone; the header's "🎯 Apply to a job link" opens the same modal for a pasted URL or description.
 Ashby forms are read completely (application form + diversity survey + EEOC surveyForms) and every
 question is scoped to Ashby's own `data-field-path` container on the live page.
+
+FRESHNESS (owner, 2026-09-04: "we have to refresh job postings data in first place … find an efficient
+way"; "people refresh on demand, triggered by admin, not automatically"). JOBS: a board is re-checked
+with a CONDITIONAL request (`If-None-Match` — Greenhouse, Lever and Ashby all answer 304 + zero bytes
+when unchanged); a 200 is diffed by the ATS's own posting id: new → embedded + inserted, vanished →
+`closed_at` (out of every search query, kept for application history), changed stamp → body re-read.
+Cadence is adaptive per board (6h after a change, backing off to weekly), so an unchanged board costs
+one tiny request. Aggregator rows expire after 45 days unseen. Worker thread, knob
+`ROSTER_BULK_REFRESH_BOARDS`. PEOPLE: `scripts/refresh_people.py` + `POST /admin/people/refresh`
+(admin token) — conditional GitHub profile GETs (a 304 is free), facets re-extracted and the person
+re-embedded ONLY when employer / location / bio moved, stale semantic facets replaced; never scheduled.
+MAPS: the owner sets Keep fresh (off / daily / weekly) on a saved map; a loop in the API (every 10
+minutes, daily cap) first asks whether the index moved since the map's last refresh (one count query),
+re-runs the map's LAST contract through the same helpers revise uses, and records a `refresh` revision
+with a code-written summary only when rows were added or dropped — plus a notification (`/me/
+notifications`: header bell, Account inbox, and the Roster Apply extension's native Chrome
+notifications every 15 minutes). Due maps are claimed with a lease so two passes never refresh one
+map twice. Email integration (replies from employers) is designed but NOT built: it needs a domain
+to receive mail on (forwarding address) or a Google Cloud project (Gmail read-only).
 CONTROLLED AUTO-APPLY v1 (retired): `apps/api/auto_apply.py` ran headless Chromium in a SEPARATE
 process (Playwright in the image): `fill` opens the apply page, reaches the form (Lever/Ashby apply
 buttons, Greenhouse iframe), maps labels → Apply-profile fields in code, uploads the résumé, screenshots,
