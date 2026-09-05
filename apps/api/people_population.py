@@ -155,21 +155,43 @@ _FAMILY_RX = {
     "people / HR": re.compile(r"\b(recruit\w*|talent acquisition|human resources|hr (business|generalist|manager|director)|people (operations|partner))\b", re.I),
     "operations / supply chain": re.compile(r"\b(supply chain|logistics|procurement|warehouse|fleet|facilities manager|operations (manager|coordinator|associate))\b", re.I),
     "design": re.compile(r"\b(product designer|ux|ui/ux|graphic design\w*|visual designer|industrial designer)\b", re.I),
-    "mechanical / civil / electrical": re.compile(r"\b(mechanical engineer|civil engineer|structural engineer|electrical engineer|hvac|manufacturing engineer|process engineer|quality engineer)\b", re.I),
+    "mechanical / civil / electrical": re.compile(r"\b(mechanical engineer\w*|civil engineer\w*|structural engineer\w*|electrical engineer\w*|hvac|manufacturing engineer\w*|process engineer\w*|quality engineer\w*|turbomachinery|turbine\w*|propulsion|aerospace|aerodynamic\w*|combustion|thermodynamic\w*|rotor\w*|compressor\w*|piping|solidworks|ansys|cad design\w*|mechanical design|power electronics|pcb)\b", re.I),
 }
 _TECH_FAMILIES = {"backend / infra", "frontend", "mobile", "security", "data / ML", "QA / test", "hardware"}
 
 
-def family_penalty(profile_families: set[str], title: str) -> tuple[float, str]:
+_BODY_FAMILIES = ("clinical / pharma", "mechanical / civil / electrical", "finance / accounting", "legal")
+
+
+def family_of_body(body: str) -> str:
+    """The FIELD a posting body is about, when its title says nothing: one of the distinctive non-software
+    families, and only when the body names at least two different terms of it (a software posting that
+    mentions 'the sales team' once must not turn into a sales role)."""
+    txt = (body or "")[:1200]
+    if not txt:
+        return ""
+    best, best_n = "", 0
+    for fam in _BODY_FAMILIES:
+        hits = {m.group(0).lower() for m in _FAMILY_RX[fam].finditer(txt)}
+        if len(hits) >= 2 and len(hits) > best_n:
+            best, best_n = fam, len(hits)
+    return best
+
+
+def family_penalty(profile_families: set[str], title: str, body: str = "") -> tuple[float, str]:
     """(score penalty, reason) for a title that STATES a family the profile does not: a different
     field entirely (pharma for a software profile) costs 0.20 and says so; another engineering
     discipline costs 0.10 (titles vary by company). ('' → no penalty.)"""
     fam = family_mismatch(profile_families, title)
-    if not fam:
-        return 0.0, ""
-    if fam in _TECH_FAMILIES:
-        return 0.10, f"title says {fam}"
-    return 0.20, f"title says {fam} — a different field"
+    if fam:
+        if fam in _TECH_FAMILIES:
+            return 0.10, f"title says {fam}"
+        return 0.20, f"title says {fam} — a different field"
+    if profile_families and body and not text_families(title):
+        bf = family_of_body(body)
+        if bf and bf not in profile_families:
+            return 0.20, f"posting is about {bf} — a different field"
+    return 0.0, ""
 
 
 # MATCH PERCENT, calibrated (owner, 2026-09-05: "55% match … 0% against my résumé"). Raw cosine
@@ -676,7 +698,7 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
         # SOFT family demotion (never a gate): a title that STATES a different discipline from the
         # profile's ("SDE I - Frontend", "Security Engineer" for a backend/SRE profile) moves down with
         # the reason shown; unstated titles ("Software Engineer") are left alone — titles vary by company.
-        _fam_pen, _fam_why = family_penalty(_prof_fams, title)
+        _fam_pen, _fam_why = family_penalty(_prof_fams, title, str(j.get("body_head") or ""))
         if _fam_pen:
             score -= _fam_pen; reasons.append(_fam_why)
         _jsk = [str(x) for x in (j.get("skills") or []) if x]
@@ -694,7 +716,7 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
             score -= 0.10; reasons.append("location ranked down")
         if avoid_mode and any(m in loc for m in avoid_mode):
             score -= 0.10; reasons.append("work mode ranked down")
-        if role_kw and any(k in title.lower() for k in role_kw):
+        if role_kw and any(re.search(r"(?<![a-z0-9])" + re.escape(k) + r"(?![a-z0-9])", title.lower()) for k in role_kw):
             score += 0.10; reasons.append("role match")
         if "f500" in want and is_f500:
             score += 0.12; reasons.append("Fortune 500")

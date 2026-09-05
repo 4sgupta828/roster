@@ -1900,7 +1900,7 @@ class ClaimGraphStore:
                 args.append("%" + t + "%"); conds.append(f"title_norm ILIKE ${len(args)}")
         if qvec:
             args.append(qvec)
-            sql = (f"SELECT id, company, title, location, department, url, source, skills, "
+            sql = (f"SELECT id, company, title, location, department, url, source, skills, left(body, 900) AS body_head, "
                    f"1 - (embedding <=> ${len(args)}::vector) AS sim FROM rs_job "
                    f"WHERE embedding IS NOT NULL AND {' AND '.join(conds)} "
                    f"ORDER BY embedding <=> ${len(args)}::vector LIMIT {int(cap)}")
@@ -1936,7 +1936,7 @@ class ClaimGraphStore:
         """Top `cap` jobs by cosine similarity to the résumé embedding, WITH the similarity score and
         id, so the caller can re-rank by user preferences (location/seniority/company-type/…)."""
         pool = await self._get_pool()
-        sql = ("SELECT id, company, title, location, department, url, source, skills, "
+        sql = ("SELECT id, company, title, location, department, url, source, skills, left(body, 900) AS body_head, "
                "1 - (embedding <=> $1::vector) AS sim "
                "FROM rs_job WHERE embedding IS NOT NULL AND closed_at IS NULL ORDER BY embedding <=> $1::vector LIMIT $2")
         try:
