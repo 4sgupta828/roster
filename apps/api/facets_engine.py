@@ -98,6 +98,11 @@ def extract_envelopes(kind: str, items: list[dict], schema: FacetSchema, llm_jso
     stamp = datetime.now(timezone.utc).isoformat()
     for i, it in enumerate(items):
         facets = _validate_item(kind, got.get(i) or {}, schema, provenance=provenance)
+        # INVENTED PAY cannot pass: a model-read figure needs a dollar figure in the source text (verbatim-span rule)
+        if "comp" in facets and facets["comp"] and facets["comp"][0].get("number") is not None:
+            src = " ".join(str(it.get(k) or "") for k in ("head", "tail", "text"))
+            if not pay_figures_present(src):
+                facets.pop("comp", None)
         for key, val in (it.get("structured") or {}).items():          # structured beats text
             k = schema.key(key)
             if k is None or val in (None, ""):

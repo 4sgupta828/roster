@@ -202,6 +202,13 @@ Semantics, fixed once (kernel):
   value, mode)` is a pure function; the map feedback tags `prefer:key=value` / `avoid:key=value` are the same
   edits (calibration becomes contract editing — `calibration.feedback_to_contract` re-targets this grammar).
 - Serialization is canonical (sorted keys) so a contract can be hashed, diffed, and stored on a map.
+- **A must is a promise the index can keep.** A compiled must on an open-vocabulary key (a free phrase such
+  as `role_family` or `specialty`) is stored as a prefer — an exact promise cannot be made on free text; the
+  employer, named skills and places are exact and may be promised. A must on a key whose index-wide coverage
+  (share of entities with a known value, cached hourly) is below 50 % is downgraded to a prefer, because it
+  would filter by absence rather than by fact. The compile prompt asks for musts only on explicit
+  requirements (a named company, a place, remote / hybrid, a pay floor, "only senior"); what the brief merely
+  describes is a preference. The user's own chip taps are never downgraded — they are explicit.
 
 ---
 

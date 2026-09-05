@@ -138,3 +138,11 @@ def test_compile_never_promises_open_phrases_and_uncovered_keys_downgrade_to_pre
     moved = downgrade_uncovered_musts(c, {"work_type": 0.02, "company": 0.99})
     assert moved == ["work_type"] and c.must == {"company": ["acme"]} and c.prefer["work_type"] == ["founder"]
     assert validate_contract(c, FACET_SCHEMA) == []
+
+
+def test_invented_pay_cannot_pass_the_verbatim_figure_gate():
+    llm = lambda s, u: {"items": [{"i": 0, "field": "software", "comp": {"min": 150000, "max": 180000, "currency": "USD", "period": "year"}}]}
+    no_figure = extract_envelopes("job", [{"title": "SWE", "head": "Great team, competitive pay.", "tail": ""}], FACET_SCHEMA, llm)
+    assert "comp" not in no_figure[0]["facets"]                                            # the text never stated a figure
+    with_figure = extract_envelopes("job", [{"title": "SWE", "head": "", "tail": "Base salary $150,000 – $180,000"}], FACET_SCHEMA, llm)
+    assert with_figure[0]["facets"]["comp"][0]["number"] == 165000

@@ -552,23 +552,65 @@ def extract_job_facets(batch: list[dict]) -> list[dict]:
     return out
 
 
-async def backfill_facets(conn, limit: int, *, live: bool, batch_size: int = 25) -> dict:
-    """Give up to N open postings without facets their model facets, newest first. ~25 postings per
-    call; a failed batch is skipped (retried next pass). Cost ≈ $0.02 per 1k postings (DeepSeek)."""
-    rows = await conn.fetch("SELECT id, title, company, department, left(body, 400) AS body FROM rs_job "
-                            "WHERE facets IS NULL AND closed_at IS NULL ORDER BY updated_at DESC LIMIT $1", int(limit))
-    st = {"rows": len(rows), "written": 0, "calls": 0, "failed_batches": 0}
+def _llm_json(system: str, user: str) -> dict:
+    """One strict-JSON model call (DeepSeek first, OpenAI fallback) for the schema-driven extractor."""
+    ds, oa = os.environ.get("DEEPSEEK_API_KEY"), os.environ.get("OPENAI_API_KEY")
+    endpoint, key, model = (("https://api.deepseek.com/chat/completions", ds, "deepseek-chat") if ds
+                            else ("https://api.openai.com/v1/chat/completions", oa, "gpt-4o-mini"))
+    if not key:
+        raise RuntimeError("no model key")
+    body = json.dumps({"model": model, "temperature": 0, "response_format": {"type": "json_object"},
+                       "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}).encode()
+    req = urllib.request.Request(endpoint, data=body, headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        return json.loads(json.load(r)["choices"][0]["message"]["content"])
+
+
+async def backfill_facets(conn, limit: int, *, live: bool, batch_size: int = 20) -> dict:
+    """SCHEMA-DRIVEN facets (docs/specs/facet-contract-evaluator.md §3): up to N open postings whose
+    extraction record is missing or from another schema version get the model's typed facets — the
+    posting's head AND tail (pay ranges live at the end) — written as the envelope on rs_job.facets and
+    PROJECTED into the facet read model in the same pass. ~20 postings per call; a failed batch is skipped
+    and retried next pass. Cost ≈ $0.03 per 1k postings (DeepSeek)."""
+    from roster_vertical.facet_schema import FACET_SCHEMA
+    from api.facets_engine import extract_envelopes, job_extraction_item
+    from api.facet_store import FacetSQLStore, job_entity_id, structural_job_facets
+    ver = FACET_SCHEMA.version()
+    rows = await conn.fetch("""SELECT id, title, company, department, location, skills, updated_at,
+                                      left(body, 400) AS head, right(body, 600) AS tail, length(body) AS blen
+                               FROM rs_job WHERE closed_at IS NULL AND (facets IS NULL OR facets->>'schema_version' IS DISTINCT FROM $2)
+                               ORDER BY updated_at DESC LIMIT $1""", int(limit), ver)
+    st = {"rows": len(rows), "written": 0, "calls": 0, "failed_batches": 0, "schema_version": ver}
+    if not live:
+        return st
+
+    class _One:                                    # the store wants a pool getter; give it this connection
+        def acquire(self):
+            class _Cm:
+                async def __aenter__(_s): return conn
+                async def __aexit__(_s, *a): return False
+            return _Cm()
+
+    async def _getter():
+        return _One()
+    store = FacetSQLStore(_getter, FACET_SCHEMA)
+    store._ready = True                            # DDL is applied by the API; the worker only writes rows
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc)
     for i in range(0, len(rows), batch_size):
         chunk = [dict(r) for r in rows[i:i + batch_size]]
-        if not live:
-            continue
-        facets = extract_job_facets(chunk); st["calls"] += 1
-        if not facets:
+        items = [job_extraction_item({"title": r["title"], "company": r["company"], "department": r["department"], "location": r["location"],
+                                      "body": (r["head"] or "") + ("\n…\n" + (r["tail"] or "") if (r["blen"] or 0) > 400 else "")}) for r in chunk]
+        envs = extract_envelopes("job", items, FACET_SCHEMA, _llm_json); st["calls"] += 1
+        if not envs:
             st["failed_batches"] += 1; continue
-        async with conn.transaction():
-            for r, f in zip(chunk, facets):
-                if f:
-                    await conn.execute("UPDATE rs_job SET facets = $2::jsonb WHERE id = $1", r["id"], json.dumps(f)); st["written"] += 1
+        for r, env in zip(chunk, envs):
+            age = (now - r["updated_at"]).total_seconds() / 86400 if r["updated_at"] else None
+            env["facets"].update(structural_job_facets({"company": r["company"], "skills": r["skills"]}, schema_version=ver, now_days=age)["facets"])
+            async with conn.transaction():
+                await conn.execute("UPDATE rs_job SET facets = $2::jsonb, facets_projected = $3 WHERE id = $1", r["id"], json.dumps(env), ver)
+                await store.project("job", job_entity_id(r["id"]), env)
+            st["written"] += 1
         if (i // batch_size) % 20 == 19:
             print(f"  facets: {st['written']}/{len(rows)}", flush=True)
     return st
