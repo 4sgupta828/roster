@@ -290,6 +290,19 @@ horizontally; tap targets ≥ 40 px; the rail folds behind one "Filter · N acti
 
 Nothing is deleted before its replacement runs behind the flag on prod for one day with the golden evals green.
 
+### Status (2026-09-05)
+- Step 1 LIVE: kernel `facets/` (13 tests), vertical schema (6 tests), app store + engine + endpoints (12 tests),
+  every open posting projected into the read model (212k), parity SQL ↔ reference OK on prod
+  (`scripts/facets_parity.py`), `ROSTER_FACET_EVALUATOR=1` on prod: the Jobs surface (plain and signed-in
+  résumé path) compiles → evaluates; the rail renders with counts on desktop and phone; taps re-evaluate.
+- Step 2 RUNNING (under the owner's earlier "go" for the job backfill; same budget envelope): the worker's
+  facets loop extracts with the schema-driven engine (head + tail, pay gated by a verbatim figure), writes the
+  envelope and projects in the same pass; legacy flat records re-extract as the schema version differs.
+  Ashby boards are NOT yet re-fetched with structured compensation / work mode (step 2b).
+- Step 3 PARTIAL: rail on Jobs live; saved Job Maps do not carry a `contract` yet; keep-fresh and job-map
+  calibration still use the old re-run helpers; old scorers still present.
+- Steps 4–5 NOT STARTED (people re-extraction ≈ $12 is gated; company lookups; provenance labels; eval traps).
+
 ---
 
 ## 9. Tests (TDD — written before the code they pin)
