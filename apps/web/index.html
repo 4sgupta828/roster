@@ -938,7 +938,10 @@
   .fdiag-drop{min-height:34px;}
   .frail-done{color:var(--verified);font-weight:600;}
   .frail-done b{color:var(--gold-strong);}
-  .newtag{display:inline-block;align-self:flex-start;width:auto;font-family:var(--mono);font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--on-accent);background:var(--gold);border-radius:999px;padding:.12rem .45rem;vertical-align:middle;margin-left:.35rem;line-height:1.3;}
+  .newflag{position:absolute;top:-1px;right:-1px;z-index:2;font-family:var(--mono);font-size:.58rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;
+    color:var(--on-accent);background:var(--gold);padding:.18rem .55rem .2rem;border-radius:0 10px 0 10px;box-shadow:0 1px 3px rgba(0,0,0,.18);pointer-events:none;}
+  .ppl-card.is-new{border-color:rgba(var(--gold-rgb),.6);}
+  .ppl-card.is-new .ppl-acts{top:1.55rem;}
   .frail-note{color:var(--muted);font-weight:400;}
   .frail.busy .frail-apply::after{content:" running…";color:var(--muted);font-weight:400;}
   @media (max-width:560px){ .tgt-route{min-width:100%;} .tgt-opt{flex:1 1 auto;text-align:center;} }
@@ -2933,8 +2936,8 @@ function jobsMarkup(d){
     const PROV = {posting:"read from the posting", ats_field:"from the job board", lookup:"lookup data", profile:"from the profile"};
     const fchip = (key, label) => { const v = (jf[key]||[])[0]; if(!v) return ""; const txt = key === "comp" ? (jd.comp || LB[v] || v) : (LB[v] || String(v).replace(/_/g," ")); const pv = String(jp[key]||""); return `<span class="ppl-tag" title="${esc(label)}: ${esc(txt)} — ${esc(PROV[pv.split(':')[0]] || pv || "model facet")}">${esc(txt)}</span>`; };
     const facetLine = Object.keys(jf).length ? `<span class="ppl-tags" style="gap:.25rem;">${fchip("field","Field")}${fchip("function","Function")}${fchip("level","Level")}${fchip("work_type","Work type")}${fchip("work_mode","Work mode")}${fchip("employment_type","Employment")}${fchip("comp","Compensation")}${fchip("company_type","Company type")}</span>` : "";
-    return `<div class="ppl-card job-card" data-jref="${esc(String(jref))}" title="Click for a summary of this posting">${jsave}<span class="ppl-body">
-      <span class="ppl-name">${esc(j.title)}${pct}${j._new ? ` <span class="newtag" title="Not in the previous result">new</span>` : ""}</span>
+    return `<div class="ppl-card job-card${j._new ? " is-new" : ""}" data-jref="${esc(String(jref))}" title="Click for a summary of this posting">${j._new ? `<span class="newflag" title="Not in the previous result">new</span>` : ""}${jsave}<span class="ppl-body">
+      <span class="ppl-name">${esc(j.title)}${pct}</span>
       <span class="ppl-blurb">${co}${j.source?` · via ${esc(j.source)}`:""}${jr}</span>
       ${loc||dept?`<span class="ppl-tags">${loc}${dept}</span>`:""}
       ${facetLine}
@@ -3048,10 +3051,9 @@ function peopleRowsMarkup(data){
     const saveBtn = `<button type="button" class="rsave" data-kind="person" data-ref="${esc(ref)}" data-label="${esc(p.name||"")}" data-sub="${esc((p.blurb||"").slice(0,140))}" data-url="${esc(profileUrl||"")}" title="Save to a shortlist">☆</button>`;
     const reachBtn = `<button type="button" class="rsave rmsg" data-ref="${esc(ref)}" title="Reach out on their shared channels">✉</button>`;
     const acts = `<div class="ppl-acts">${saveBtn}${reachBtn}</div>`;
-    const newTag = p._new ? ` <span class="newtag" title="Not in the previous result">new</span>` : "";
     const nameHtml = (profileUrl
-      ? `<a class="ppl-name" href="${esc(profileUrl)}" target="_blank" rel="noopener noreferrer">${esc(p.name)}<span class="ppl-ext">↗</span></a>${newTag}`
-      : `<span class="ppl-name">${esc(p.name)}</span>${newTag}`);
+      ? `<a class="ppl-name" href="${esc(profileUrl)}" target="_blank" rel="noopener noreferrer">${esc(p.name)}<span class="ppl-ext">↗</span></a>`
+      : `<span class="ppl-name">${esc(p.name)}</span>`);
     // LinkedIn HEADLINE (self-stated, quoted from a search-engine snippet — never read from
     // linkedin.com) + how well it fits the brief; shown once the cohort enrichment has run.
     const liH = (p.linkedin && p.linkedin.headline) || (attr("linkedin_headline").display || "");
@@ -3059,7 +3061,7 @@ function peopleRowsMarkup(data){
     // the headline is the evidence; no wording-fit verdict (it read as noise: "does not obviously fit")
     const liLine = liH ? `<span class="ppl-li" title="The person's own LinkedIn headline, quoted from a search-engine snippet (self-stated)">in “${esc(liH)}”</span>`
       : "";   // no headline → nothing on the card (a 'not found / ambiguous' line is noise; the panel's Unconfirmed line covers it)
-    return `<div class="ppl-card person-card" data-ref="${esc(ref)}" title="Click for the evidence behind this card">${acts}${avatar}
+    return `<div class="ppl-card person-card${p._new ? " is-new" : ""}" data-ref="${esc(ref)}" title="Click for the evidence behind this card">${p._new ? `<span class="newflag" title="Not in the previous result">new</span>` : ""}${acts}${avatar}
       <span class="ppl-body">
         ${nameHtml}
         ${p.blurb?`<span class="ppl-blurb">${esc(p.blurb)}</span>`:(title?`<span class="ppl-title">${esc(title)}</span>`:"")}
@@ -7723,7 +7725,7 @@ function facetRailMarkup(d){
   const saveBtn = (d._map_id && d._map_owner && d._applied) ? `<button type="button" class="histbtn frail-save" data-jpid="${esc(d._jpid)}" title="Record this navigated view as a revision of the map (same link)">💾 Save these filters to the map</button>` : "";
   const applyBar = n ? `<div class="frail-apply"><b>${n} change${n===1?"":"s"} pending</b> — nothing runs until you apply.
       <button type="button" class="idgo frail-go" data-jpid="${esc(d._jpid)}">Apply</button><button type="button" class="histbtn frail-reset" data-jpid="${esc(d._jpid)}">Reset</button></div>`
-    : `<div class="frail-apply">${d._applied && d._delta ? `<span class="frail-done">Applied ✓ — ${d._delta.after} shown${d._delta.added ? ` · <b>${d._delta.added} new</b>` : ""}${d._delta.removed ? ` · ${d._delta.removed} dropped` : ""}${!d._delta.added && !d._delta.removed ? " · same rows, order may differ" : ""}${(d._delta.prevPool != null && d._delta.pool != null && d._delta.prevPool !== d._delta.pool) ? ` · pool ${d._delta.prevPool} → ${d._delta.pool}` : ""}</span> ${d._delta.added && !d._newFirst ? (() => { const rowsNow = Array.isArray(d.people_rows) ? d.people_rows : (d.jobs||[]); const per = 20, pg = Array.isArray(d.people_rows) ? (d._page||0) : (d._jpage||0); const onPage = rowsNow.slice(pg*per, pg*per+per).filter(r => r._new).length; return `${onPage ? ` <span class="frail-note">${onPage} of them on this page (badged <span class="newtag">new</span>)</span>` : ` <span class="frail-note">none of them on this page</span>`} <button type="button" class="histbtn frail-shownew" data-jpid="${esc(d._jpid)}">Show the ${d._delta.added} new first</button>`; })() : ""}` : "Tap chips to stage changes, then apply once. "}${saveBtn}</div>`;
+    : `<div class="frail-apply">${d._applied && d._delta ? `<span class="frail-done">Applied ✓ — ${d._delta.after} shown${d._delta.added ? ` · <b>${d._delta.added} new</b>` : ""}${d._delta.removed ? ` · ${d._delta.removed} dropped` : ""}${!d._delta.added && !d._delta.removed ? " · same rows, order may differ" : ""}${(d._delta.prevPool != null && d._delta.pool != null && d._delta.prevPool !== d._delta.pool) ? ` · pool ${d._delta.prevPool} → ${d._delta.pool}` : ""}</span> ${d._delta.added && !d._newFirst ? (() => { const rowsNow = Array.isArray(d.people_rows) ? d.people_rows : (d.jobs||[]); const per = 20, pg = Array.isArray(d.people_rows) ? (d._page||0) : (d._jpage||0); const onPage = rowsNow.slice(pg*per, pg*per+per).filter(r => r._new).length; return `${onPage ? ` <span class="frail-note">${onPage} of them on this page (corner flag)</span>` : ` <span class="frail-note">none of them on this page</span>`} <button type="button" class="histbtn frail-shownew" data-jpid="${esc(d._jpid)}">Show the ${d._delta.added} new first</button>`; })() : ""}` : "Tap chips to stage changes, then apply once. "}${saveBtn}</div>`;
   const empty = (cov.diagnosis && !facetPending(d)) ? diagnosisMarkup({...cov.diagnosis, best_match: cov.best_match}, d._jpid, L) : "";
   return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}"><div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
 }
