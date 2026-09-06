@@ -108,7 +108,12 @@ def test_counts_query_parameters_line_up(monkeypatch):
         def __init__(self): self.calls = []
         async def fetchval(self, sql, *args): self.calls.append((sql, args)); return 0
         async def fetch(self, sql, *args): self.calls.append((sql, args)); return []
-        async def execute(self, sql, *args): return None
+        async def execute(self, sql, *args): self.calls.append((sql, args)); return None
+        def transaction(self):
+            class _T:
+                async def __aenter__(_s): return None
+                async def __aexit__(_s, *a): return False
+            return _T()
 
     class _Acq:
         def __init__(self, c): self.c = c
@@ -127,7 +132,7 @@ def test_counts_query_parameters_line_up(monkeypatch):
     assert pool.c.calls
     for sql, args in pool.c.calls:
         refs = {int(m) for m in _re.findall(r"\$(\d+)", sql)}
-        assert refs and max(refs) == len(args) and refs == set(range(1, len(args) + 1)), (sorted(refs), len(args), sql[:120])
+        assert (not refs and not args) or (refs and max(refs) == len(args) and refs == set(range(1, len(args) + 1))), (sorted(refs), len(args), sql[:120])
 
 
 def test_compile_never_promises_open_phrases_and_uncovered_keys_downgrade_to_prefer():

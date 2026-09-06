@@ -6082,6 +6082,9 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         # the vocabulary's display labels ride along so the UI never hard-codes them
         from roster_vertical.facet_schema import VALUE_LABELS
         sch = _facet_schema()
+        _meta = getattr(store, "last_counts_meta", None) or {}
+        if int(_meta.get("sample") or 1) > 1:
+            out["coverage"]["counts_sampled"] = int(_meta["sample"])              # the rail shows ≈
         out["labels"] = {"keys": {k.key: k.label for k in sch.for_kind(c.kind)}, "values": VALUE_LABELS,
                          "types": {k.key: k.type.value for k in sch.for_kind(c.kind) if k.navigable},
                          "order": [k.key for k in sch.for_kind(c.kind) if k.navigable]}
@@ -6289,7 +6292,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             cache[key] = (_time.monotonic(), counts)
         from roster_vertical.facet_schema import VALUE_LABELS
         sch = _facet_schema()
-        return {"contract": c.to_dict(), "counts": counts, "coverage": {"pool": None},
+        _meta = getattr(store, "last_counts_meta", None) or {}
+        return {"contract": c.to_dict(), "counts": counts, "coverage": {"pool": None, **({"counts_sampled": int(_meta["sample"])} if int(_meta.get("sample") or 1) > 1 else {})},
                 "labels": {"keys": {k.key: k.label for k in sch.for_kind(kind)}, "values": VALUE_LABELS,
                            "types": {k.key: k.type.value for k in sch.for_kind(kind) if k.navigable},
                            "order": [k.key for k in sch.for_kind(kind) if k.navigable]}}

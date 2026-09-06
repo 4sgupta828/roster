@@ -267,7 +267,21 @@ class FacetSQLStore:
         return int(n or 0) <= self.SMALL_SLICE
 
     # ---------------- counts ----------------
+    COUNTS_TTL, COUNTS_EXACT_MAX, COUNTS_SAMPLE_TARGET = 600.0, 40_000, 30_000
+
     async def counts(self, kind: str, must: dict, schema: FacetSchema, *, depth: dict | None = None) -> dict:
+        """Counts per navigable key over the must-slice. The slice is materialized ONCE (temp table); a slice above
+        COUNTS_EXACT_MAX entities is counted on a deterministic hash SAMPLE and scaled (prod 2026-09-05: the exact
+        count over 278k US people took 12 s per call — three re-materializations of the slice and a DISTINCT over
+        2.3M facet rows). `last_counts_meta` says whether the numbers are sampled; results are cached per
+        (kind, must) for COUNTS_TTL seconds."""
+        import json as _json, time as _time
+        cache = self.__dict__.setdefault("_counts_cache", {})
+        ckey = (kind, _json.dumps(must or {}, sort_keys=True))
+        hit = cache.get(ckey)
+        if hit and _time.monotonic() - hit[0] < self.COUNTS_TTL:
+            self.last_counts_meta = dict(hit[2])
+            return _json.loads(_json.dumps(hit[1]))
         await self.ensure_schema()
         pool = await self._conn()
         args: list = []
@@ -280,51 +294,56 @@ class FacetSQLStore:
         nav = [k for k in schema.for_kind(kind) if k.navigable]
         _open, _ck, _cv = closed_vocab_pairs(schema, kind)
         nav_keys = {x.key for x in nav}
-        args.append([k for k in _open if k in nav_keys]); oi = len(args)
-        args.append([k for k in _ck if k in nav_keys]); cki = len(args)
-        args.append([v for k, v in zip(_ck, _cv) if k in nav_keys]); cvi = len(args)
-        ki = oi                                  # the slice's own params end before ours
-        # index-friendly: two ANY() conditions the (tenant, kind, key, value) index can serve; the exact (key, value)
-        # legality is re-checked in Python below (a value legal for another closed key is a rounding error in `have`)
-        legal = f"(f.facet_key = ANY(${oi}) OR (f.facet_key = ANY(${cki}) AND f.facet_value_norm = ANY(${cvi})))"
-        _legal_pairs = set(zip(args[cki - 1], args[cvi - 1]))
-        _closed_keys = set(args[cki - 1])
+        open_keys = [k for k in _open if k in nav_keys]
+        closed_keys = [k for k in _ck if k in nav_keys]
+        closed_vals = [v for k, v in zip(_ck, _cv) if k in nav_keys]
+        _legal_pairs = set(zip(closed_keys, closed_vals))
+        _closed_keys = set(closed_keys)
+        legal = "(f.facet_key = ANY($1) OR (f.facet_key = ANY($2) AND f.facet_value_norm = ANY($3)))"
+        largs = [open_keys, closed_keys, closed_vals]
         out: dict = {}
         async with pool.acquire() as conn:
-            total = int(await conn.fetchval(f"SELECT count(*) FROM ({slice_sql}) s", *args[: ki - 1]) or 0)
-            rows = await conn.fetch(f"""WITH s AS ({slice_sql})
-                                        SELECT f.facet_key, f.facet_value_norm AS v, count(DISTINCT f.entity_id) AS n
-                                        FROM roster_entity_facet f JOIN s ON s.entity_id = f.entity_id
-                                        WHERE {legal} GROUP BY 1, 2""", *args)
-            have = await conn.fetch(f"""WITH s AS ({slice_sql})
-                                        SELECT f.facet_key, count(DISTINCT f.entity_id) AS n
-                                        FROM roster_entity_facet f JOIN s ON s.entity_id = f.entity_id
-                                        WHERE {legal} GROUP BY 1""", *args)
-            have_n = {r["facet_key"]: int(r["n"]) for r in have}
-            for k in nav:
-                if k.via:
-                    tkey = via_target_key(k.key, k.via)
-                    vargs = list(args[: ki - 1]) + [tkey, k.via]          # the slice's params, then the two of ours
-                    vr = await conn.fetch(f"""WITH s AS ({slice_sql})
-                                              SELECT c.facet_value_norm AS v, count(DISTINCT f.entity_id) AS n
-                                              FROM roster_entity_facet f JOIN s ON s.entity_id = f.entity_id
-                                              JOIN roster_entity_facet c ON c.tenant_id = f.tenant_id AND c.entity_kind = 'company'
-                                                   AND c.entity_id = 'company:' || f.facet_value_norm AND c.facet_key = ${len(vargs) - 1}
-                                              WHERE f.facet_key = ${len(vargs)} GROUP BY 1""", *vargs)
-                    d = {r["v"]: int(r["n"]) for r in vr}
-                    known = sum(d.values())
-                    if total - known > 0:
-                        d[UNKNOWN] = total - known
+            async with conn.transaction():
+                await conn.execute(f"CREATE TEMP TABLE _facet_slice ON COMMIT DROP AS {slice_sql}", *args)
+                total = int(await conn.fetchval("SELECT count(*) FROM _facet_slice") or 0)
+                factor = 1
+                if total > self.COUNTS_EXACT_MAX:
+                    factor = max(2, round(total / self.COUNTS_SAMPLE_TARGET))
+                    await conn.execute("DELETE FROM _facet_slice WHERE (abs(hashtext(entity_id)) % $1) <> 0", factor)
+                await conn.execute("ANALYZE _facet_slice")
+                rows = await conn.fetch(f"""SELECT f.facet_key, f.facet_value_norm AS v, count(*) AS n
+                                            FROM _facet_slice s JOIN roster_entity_facet f ON f.entity_id = s.entity_id
+                                            WHERE {legal} GROUP BY 1, 2""", *largs)
+                have = await conn.fetch(f"""SELECT f.facet_key, count(DISTINCT f.entity_id) AS n
+                                            FROM _facet_slice s JOIN roster_entity_facet f ON f.entity_id = s.entity_id
+                                            WHERE {legal} GROUP BY 1""", *largs)
+                have_n = {r["facet_key"]: int(r["n"]) * factor for r in have}
+                for k in nav:
+                    if k.via:
+                        tkey = via_target_key(k.key, k.via)
+                        vr = await conn.fetch("""SELECT c.facet_value_norm AS v, count(DISTINCT f.entity_id) AS n
+                                                 FROM _facet_slice s JOIN roster_entity_facet f ON f.entity_id = s.entity_id
+                                                 JOIN roster_entity_facet c ON c.tenant_id = f.tenant_id AND c.entity_kind = 'company'
+                                                      AND c.entity_id = 'company:' || f.facet_value_norm AND c.facet_key = $1
+                                                 WHERE f.facet_key = $2 GROUP BY 1""", tkey, k.via)
+                        d = {r["v"]: int(r["n"]) * factor for r in vr}
+                        known = sum(d.values())
+                        if total - known > 0:
+                            d[UNKNOWN] = total - known
+                        out[k.key] = d
+                        continue
+                    d = {r["v"]: int(r["n"]) * factor for r in rows if r["facet_key"] == k.key and (k.key not in _closed_keys or (k.key, r["v"]) in _legal_pairs)}
+                    if k.type is FacetType.set:
+                        d = dict(sorted(d.items(), key=lambda kv: -kv[1])[: k.top_n])
+                    else:
+                        unknown = total - have_n.get(k.key, 0)
+                        if unknown > 0:
+                            d[UNKNOWN] = unknown
                     out[k.key] = d
-                    continue
-                d = {r["v"]: int(r["n"]) for r in rows if r["facet_key"] == k.key and (k.key not in _closed_keys or (k.key, r["v"]) in _legal_pairs)}
-                if k.type is FacetType.set:
-                    d = dict(sorted(d.items(), key=lambda kv: -kv[1])[: k.top_n])
-                else:
-                    unknown = total - have_n.get(k.key, 0)
-                    if unknown > 0:
-                        d[UNKNOWN] = unknown
-                out[k.key] = d
+        self.last_counts_meta = {"total": total, "sample": factor}
+        if len(cache) > 300:
+            cache.clear()
+        cache[ckey] = (_time.monotonic(), _json.loads(_json.dumps(out)), dict(self.last_counts_meta))
         return out
 
     async def noise_floor(self, kind: str, text: str) -> float | None:
