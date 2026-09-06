@@ -9,10 +9,12 @@ import asyncio
 import re
 from typing import Awaitable, Callable
 
-from roster_kernel.facets import Contract, validate_contract
+from roster_kernel.facets import Contract, edit, validate_contract
 from roster_kernel.facets.intake import IntakeState, Question, apply_answer, next_question, search_now, spread
 
 TRANSCRIPT_CAP, MSG_CAP, ARTIFACT_CAP = 40, 2000, 6000
+# words a model returns INSTEAD of a value: never an answer, never search text (a fallback guard; the prompts forbid them)
+NON_ANSWERS = ("missing", "not stated", "not mentioned", "not specified", "not given", "unknown", "undisclosed", "n/a", "none", "null", "prefer not to say")
 _URL_RX = re.compile(r"https?://\S+")
 
 
@@ -144,7 +146,7 @@ class IntakeService:
             else ("title", "current_role", "field", "skills", "must_skills", "specialty", "location", "target_level")
         for k in keys:
             v = one(k)
-            if v.lower() in ("not stated", "unknown", "undisclosed", "n/a", "none", "prefer not to say"):
+            if v.lower() in NON_ANSWERS:
                 continue
             if v and v.lower() not in parts[0].lower():
                 parts.append(V.option_label(k, v) if k in ("field", "target_level") else v)
@@ -463,12 +465,20 @@ class IntakeService:
         except Exception:   # noqa: BLE001 — no read → everything required is asked (the safe side)
             read = {}
         present = read.get("present") if isinstance(read.get("present"), dict) else {}
+        tokens = read.get("tokens") if isinstance(read.get("tokens"), dict) else {}
         missing = {str(x) for x in (read.get("missing") or [])}
         weak = {str(x) for x in (read.get("weak") or [])}
         st.checklist = {}
+        self._present_tokens = {}
         for name in items:
-            if name in present and str(present[name]).strip():
-                st.checklist[name] = "present"; st.answers.setdefault(name, str(present[name])[:200])
+            stated = str(present.get(name) or "").strip()
+            if name in present and stated and stated.lower() not in NON_ANSWERS:
+                st.checklist[name] = "present"; st.answers.setdefault(name, stated[:200])
+                it = V.item(artifact, name)
+                tok = str(tokens.get(name) or "").strip()
+                # the stated value as a schema token (meaning, read by the model) — it feeds the contract after the compile
+                if it and it.key and tok and tok.lower() not in NON_ANSWERS and self.schema.validate_value(it.key, tok) is not None:
+                    self._present_tokens[name] = (it.key, tok, it.mode)
             elif name in weak:
                 st.checklist[name] = "weak"
             else:
@@ -522,10 +532,12 @@ class IntakeService:
             if isinstance(fv, list):
                 c.prefer["function"] = sorted(set(list(c.prefer.get("function") or []) + [str(v) for v in fv]))
         if self._remote:
-            # a REMOTE role has no metro to ask for: the place, if any, only ranks; "remote US" means the country
-            mv = c.must.pop("metro", None)
-            if isinstance(mv, list) and mv:
-                c.prefer["metro"] = sorted(set(list(c.prefer.get("metro") or []) + [str(v) for v in mv]))
+            # a REMOTE role has no metro to ask for: the place, if any, only ranks; "remote US" means the country.
+            # "Remote or Seattle" is the PLACE-OR-MODE reading: the index-aware step demotes that metro and says why
+            if not self._place_or_mode:
+                mv = c.must.pop("metro", None)
+                if isinstance(mv, list) and mv:
+                    c.prefer["metro"] = sorted(set(list(c.prefer.get("metro") or []) + [str(v) for v in mv]))
             if "country" not in c.must and (c.scope or {}).get("country"):
                 c.must["country"] = [str(c.scope["country"])]
         # INDEX-AWARE (spec §12 step 1): measured against the index before anything runs
@@ -542,6 +554,14 @@ class IntakeService:
                 vals = c.must.pop(key)
                 if isinstance(vals, list):
                     c.prefer[key] = sorted(set(list(c.prefer.get(key) or []) + [str(v) for v in vals]))
+        # what the artifact STATES (as a schema token) beats the compile's read of the same words for that key —
+        # a seeker's 'Head of ML Infrastructure' once centred on 'senior'. `field` stays with the compile: the
+        # index-aware step owns it (co-occurrence home field)
+        for name, (key, tok, mode) in (getattr(self, "_present_tokens", {}) or {}).items():
+            if key == "field":
+                continue
+            c.must.pop(key, None); c.prefer.pop(key, None)
+            c = edit(c, key, tok, mode)
         st.contract = c.to_dict()
 
 

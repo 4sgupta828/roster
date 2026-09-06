@@ -462,3 +462,63 @@ def test_a_remote_role_is_never_asked_for_a_metro_and_means_the_scope_country():
     while out["stage"] != "ready" and len(asked) < 8:
         asked.append(out["question"]["name"]); out = _run(s.step(answer={"name": out["question"]["name"], "value": "__decline__"}, state=out["state"]))
     assert "metro" not in asked and "location" not in asked
+
+
+def test_a_level_the_text_states_lands_as_its_schema_token_and_beats_the_compilers_read():
+    """A seeker's 'Head of ML Infrastructure' once centred on 'senior': the checklist held the words, only the compile's
+    (wrong) read reached the contract."""
+    class Stated(FakeLLM):
+        def __call__(self, system, user):
+            if "report which of these items it states" in system and "Head of ML" in user:
+                return {"present": {"current_role": "Head of ML Infrastructure at Fintech", "level": "Head of ML Infrastructure", "field": "software", "location": "San Francisco"},
+                        "tokens": {"level": "leadership", "field": "software"}, "missing": ["years", "comp"], "weak": []}
+            return super().__call__(system, user)
+    s = _service(llm=Stated())
+    def compile_fn(kind, text, *, limit=60, scope=None, extras=None):
+        return Contract(kind=kind, text=text[:200], must={"field": ["software"]}, prefer={"level": ["senior"]}, limit=limit)
+    s.compile_fn = compile_fn
+    out = _run(s.step(message="I'm looking for my next role", state=None))
+    out = _run(s.step(message="Head of ML Infrastructure at Fintech for 6 years. Kubernetes, Ray. San Francisco.", state=out["state"]))
+    k = out["state"]["kernel"]
+    assert k["checklist"]["level"] == "present"
+    assert k["contract"]["center"] == {"key": "level", "value": "leadership", "span": 1}
+    assert "senior" not in (k["contract"]["prefer"].get("level") or []) and "level" not in k["contract"]["must"]
+
+
+def test_a_non_answer_word_in_the_completeness_read_is_a_missing_item():
+    class Slip(FakeLLM):
+        def __call__(self, system, user):
+            if "report which of these items it states" in system and "Plain text" in user:
+                return {"present": {"current_role": "engineer at Acme", "level": "not stated", "target_level": "missing", "field": "software"},
+                        "tokens": {"level": "missing"}, "missing": ["years", "location", "comp"], "weak": []}
+            return super().__call__(system, user)
+    s = _service(llm=Slip())
+    out = _run(s.step(message="I'm looking for my next role", state=None))
+    out = _run(s.step(message="Plain text. Software engineer at Acme, Python.", state=out["state"]))
+    k = out["state"]["kernel"]
+    assert k["checklist"]["level"] == "missing" and k["checklist"]["target_level"] == "missing"
+    assert "missing" not in k["contract"]["text"].lower() and "not stated" not in k["contract"]["text"].lower()
+    assert "level" not in k["contract"]["prefer"] and k["contract"].get("center") is None
+
+
+def test_a_remote_or_seattle_role_keeps_the_place_or_mode_reading():
+    """Remote pre-empted the place-or-mode rule: the metro was demoted before the index-aware step could say why."""
+    seen = []
+    async def ia(c, *, kind, user_keys, place_or_mode):
+        seen.append((dict(c.must), place_or_mode))
+        if place_or_mode and "metro" in c.must:
+            c.prefer["metro"] = c.must.pop("metro")
+            return c, [{"rule": "place_or_mode", "key": "metro"}]
+        return c, []
+    s = _service()
+    s.index_aware_fn = ia
+    def compile_fn(kind, text, *, limit=60, scope=None, extras=None):
+        if isinstance(extras, dict): extras.update({"work_mode": "remote", "place_or_mode": True})
+        return Contract(kind=kind, text=text[:200], must={"field": ["software"], "metro": ["seattle"]}, limit=limit, scope={"country": "us"})
+    s.compile_fn = compile_fn
+    out = _run(s.step(message="I'm hiring", state=None))
+    out = _run(s.step(message="Senior Backend Engineer, Payments. Remote US or Seattle. " + "Own the ledger. " * 8, state=out["state"]))
+    k = out["state"]["kernel"]
+    assert seen and seen[0][1] is True and seen[0][0].get("metro") == ["seattle"]        # the metro reaches the index-aware step intact
+    assert "metro" not in k["contract"]["must"] and k["contract"]["prefer"].get("metro") == ["seattle"] and k["contract"]["must"].get("country") == ["us"]
+    assert any(n.get("rule") == "place_or_mode" for n in out["state"]["notes"])

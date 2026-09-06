@@ -108,11 +108,16 @@ def completeness_prompt(artifact: str) -> str:
     items = CHECKLIST.get(artifact, ())
     names = ", ".join(it.name for it in items)
     what = "a candidate's résumé or self-description" if artifact == "profile" else "a job description or a hiring manager's role notes"
+    closed = [(it.name, FACET_SCHEMA.key(it.key)) for it in items if it.key and FACET_SCHEMA.key(it.key) is not None and FACET_SCHEMA.key(it.key).values]
+    vocab = "; ".join(f"{name}: {', '.join(k.values)}" for name, k in closed)
     return (f"You read {what} and report which of these items it states: {names}.\n"
-            "Return ONLY JSON: {\"present\": {item: the value as stated, short}, \"missing\": [items it does not state at all], "
-            "\"weak\": [items it touches but too thinly to search on]}. Every item appears in exactly one of the three. "
+            "Return ONLY JSON: {\"present\": {item: the value as stated, short}, \"tokens\": {item: one vocabulary token for a PRESENT "
+            "item that has a vocabulary}, \"missing\": [items it does not state at all], "
+            "\"weak\": [items it touches but too thinly to search on]}. Every item appears in exactly one of present / missing / weak. "
             "Never infer an item the text does not state; a level is 'missing' when no title word states it; comp is 'missing' "
-            "unless a figure or range is written. Keep values verbatim-ish and under 12 words.")
+            "unless a figure or range is written. Keep values verbatim-ish and under 12 words. "
+            f"Vocabularies — {vocab}. A token is the vocabulary word the stated value MEANS (a 'Head of' / VP / CTO / director title "
+            "carries the leadership level; principal / staff is staff_plus); never a token for an item that is missing or weak.")
 
 
 def direction_prompt() -> str:
