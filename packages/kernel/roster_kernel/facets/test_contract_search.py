@@ -102,3 +102,13 @@ def test_the_default_recipe_lets_compiled_musts_on_named_keys_rank_but_never_the
     d = rs[1].contract
     assert d.must == {"k2": ["b"], "k3": ["c"]} and d.prefer["k1"] == ["a"]
     assert [r.name for r in recipes(c, user_keys={"k1", "k3"}, relaxable_keys=set(), default_keys={"k1", "k3"})] == ["strict"]
+
+
+def test_relax_steps_go_least_important_first_compiled_before_the_users_and_never_touch_a_scope():
+    from roster_kernel.facets.contract_search import demote, relax_steps
+    c = _c(must={"k1": ["a"], "k2": ["b"], "k3": ["c"], "k4": ["d"], "k9": ["z"]}, prefer={"k2": ["x"]})
+    steps = relax_steps(c, order=("k4", "k2", "k1", "k3", "k9"), user_keys={"k2", "k1"}, never=("k9",))
+    assert steps == [("k4", False), ("k3", False), ("k2", True), ("k1", True)]          # k9 is a scope: never; k2 before k1 (order)
+    d = demote(c, "k2")
+    assert "k2" not in d.must and d.prefer["k2"] == ["b", "x"] and c.must["k2"] == ["b"]     # merged with the preference; the original untouched
+    assert relax_steps(_c(must={"k5": ["q"]}), order=("k1",), user_keys=set()) == []       # a key outside the order is never relaxed

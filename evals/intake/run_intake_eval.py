@@ -144,10 +144,10 @@ class Run:
             try:
                 if self.ready.get("direction") == "job":
                     d = post(self.base, "/jobs", {"question": c.get("text") or "roles", "tenant_id": "demo", "surface": "jobs", "contract": c, "country": "us"}, self.token)
-                    self.handoff = list(d.get("jobs") or [])
+                    self.handoff = list(d.get("jobs") or []); self.relaxed = list(d.get("relaxed") or [])
                 else:
                     d = post(self.base, "/research", {"question": c.get("text") or "people", "tenant_id": "demo", "surface": "people", "contract": c, "country": "us"}, self.token)
-                    self.handoff = list(d.get("people_rows") or [])
+                    self.handoff = list(d.get("people_rows") or []); self.relaxed = list((d.get("facet_nav") or {}).get("relaxed") or [])
             except urllib.error.HTTPError as e:
                 self.failures.append(f"hand-off HTTP {e.code}")
 
@@ -263,6 +263,11 @@ class Run:
             for w in e["redraft_contains"]:
                 if w not in t1:
                     F(f"redraft lacks {w!r}")
+        if "handoff_relaxed_keys_include" in e:
+            keys = [n.get("key") for n in (getattr(self, "relaxed", None) or []) if n.get("rule") == "relaxed"]
+            for k in e["handoff_relaxed_keys_include"]:
+                if k not in keys:
+                    F(f"hand-off did not relax {k!r} (relaxed: {keys})")
         if "handoff_rows_min" in e:
             n = len(self.handoff or [])
             if self.ready and (self.ready.get("diagnosis") or {}).get("keys") and n == 0:

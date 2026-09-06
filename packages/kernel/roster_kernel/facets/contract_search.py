@@ -241,3 +241,31 @@ def head_precision(rows: list[dict], verdicts: dict, *, k: int, partial: float =
         elif fit == "partial":
             tot += partial
     return round(tot / max(k, 1), 3)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# SMART RELAXING (owner, 2026-09-06): when a search returns too few, musts relax to preferences — least important
+# first, the compile's before the user's own — until the pool is a good size. A relaxed must still ranks first,
+# so what matched everything stays on top; nothing ever becomes an avoid. Pure: the app probes and evaluates.
+# ---------------------------------------------------------------------------------------------------------------
+
+def relax_steps(c, *, order: tuple, user_keys: set, never: tuple = ()) -> list[tuple[str, bool]]:
+    """The musts to relax, in order: every compiled must on a key in `order` (least important first), then the
+    user's own musts in the same order. Keys not in `order` or in `never` are never relaxed (a scope is a promise).
+    Returns [(key, is_user), …]."""
+    rank = {k: i for i, k in enumerate(order)}
+    user_keys = set(user_keys or ()); never = set(never or ())
+    keys = [k for k in c.must if k in rank and k not in never and isinstance(c.must.get(k), list) and c.must.get(k)]
+    compiled = sorted([k for k in keys if k not in user_keys], key=lambda k: rank[k])
+    own = sorted([k for k in keys if k in user_keys], key=lambda k: rank[k])
+    return [(k, False) for k in compiled] + [(k, True) for k in own]
+
+
+def demote(c, key: str):
+    """A copy of the contract with `key`'s must values moved under prefer (merged with any preferred values)."""
+    from .contract import Contract
+    n = Contract.from_dict(c.to_dict())
+    vals = n.must.pop(key, None)
+    if isinstance(vals, list) and vals:
+        n.prefer[key] = sorted(set([str(v) for v in (n.prefer.get(key) or [])] + [str(v) for v in vals]))
+    return n

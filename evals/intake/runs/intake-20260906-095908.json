@@ -1,0 +1,197 @@
+{
+ "base": "https://roster-api-production-3405.up.railway.app",
+ "secs": 51,
+ "results": [
+  {
+   "id": "hiring_place_or_mode",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [],
+   "secs": 32.4,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "present",
+    "source": "pasted",
+    "chars": 210
+   },
+   "contract": {
+    "angles": [
+     "senior software engineer, payments",
+     "backend engineer, payments",
+     "senior engineer, payments",
+     "payments backend developer"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "field": [
+      "software"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "prefer": {
+     "function": [
+      "engineering"
+     ],
+     "metro": [
+      "seattle"
+     ],
+     "skill": [
+      "go",
+      "python"
+     ],
+     "specialty": [
+      "ledger systems",
+      "payments"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm hiring. Senior Backend Engineer, Payments. built a ledger or payments system in production; Go or Python. Remote US or Seattle"
+   },
+   "pool": 74252,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "hiring_field_vs_specialty",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:level",
+    "item:comp",
+    "key:metro"
+   ],
+   "secs": 8.1,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "present",
+    "source": "pasted",
+    "chars": 287
+   },
+   "contract": {
+    "angles": [
+     "senior manager of engineering",
+     "engineering manager for marketing",
+     "lead engineering manager",
+     "manager of marketing engineering"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "metro": [
+      "bangalore"
+     ]
+    },
+    "prefer": {
+     "field": [
+      "software"
+     ],
+     "function": [
+      "engineering",
+      "marketing"
+     ],
+     "work_type": [
+      "manager"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm hiring. Senior Engineering Manager, Marketing Engineering (CRM). 8+ years engineering, 3+ managing. Remote US"
+   },
+   "pool": 7991,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "hiring_decisive_rare_must",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:level"
+   ],
+   "secs": 10.2,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "present",
+    "source": "described",
+    "chars": 198
+   },
+   "contract": {
+    "angles": [
+     "compiler developer",
+     "compiler engineer",
+     "llvm engineer",
+     "mlir engineer"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "field": [
+      "software"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "prefer": {
+     "function": [
+      "engineering"
+     ],
+     "metro": [
+      "bay_area"
+     ],
+     "specialty": [
+      "compiler engineering",
+      "llvm",
+      "mlir"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm hiring. Compiler Engineer. Shipped compiler work in production. Remote US or Bay Area"
+   },
+   "pool": 74252,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  }
+ ]
+}

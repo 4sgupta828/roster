@@ -1,0 +1,72 @@
+{
+ "base": "https://roster-api-production-3405.up.railway.app",
+ "secs": 10,
+ "results": [
+  {
+   "id": "hiring_multi_select_musts",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:responsibilities",
+    "item:comp",
+    "key:metro",
+    "key:company_type"
+   ],
+   "secs": 9.5,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "present",
+    "source": "described",
+    "chars": 101
+   },
+   "contract": {
+    "angles": [
+     "senior platform engineer",
+     "lead platform engineer",
+     "staff engineer for platforms",
+     "platform engineering lead"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "staff_plus",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "field": [
+      "software"
+     ],
+     "metro": [
+      "new_york",
+      "seattle"
+     ]
+    },
+    "prefer": {
+     "company_type": [
+      "other"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm hiring. Staff platform engineer. Go. Full time, hybrid"
+   },
+   "pool": 6799,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  }
+ ]
+}

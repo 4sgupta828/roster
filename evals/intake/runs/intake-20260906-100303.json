@@ -1,0 +1,1219 @@
+{
+ "base": "https://roster-api-production-3405.up.railway.app",
+ "secs": 220,
+ "results": [
+  {
+   "id": "seeker_terse_description",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:level",
+    "item:field",
+    "item:location",
+    "item:comp",
+    "key:company_type"
+   ],
+   "secs": 7.3,
+   "direction": "job",
+   "artifact": {
+    "kind": "profile",
+    "status": "present",
+    "source": "described",
+    "chars": 88
+   },
+   "contract": {
+    "angles": [
+     "software developer",
+     "programmer",
+     "backend engineer",
+     "application developer"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "field": [
+      "software"
+     ],
+     "metro": [
+      "bay_area",
+      "new_york"
+     ]
+    },
+    "prefer": {
+     "company_type": [
+      "other"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "level": [
+      "senior",
+      "staff_plus"
+     ],
+     "role_family": [
+      "software engineer"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm looking for my next role. software. Python, Go, Kubernetes. new_york, bay_area"
+   },
+   "pool": 3250,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "seeker_ambiguous_title_list",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:level",
+    "item:comp",
+    "key:metro"
+   ],
+   "secs": 9.0,
+   "direction": "job",
+   "artifact": {
+    "kind": "profile",
+    "status": "present",
+    "source": "described",
+    "chars": 159
+   },
+   "contract": {
+    "angles": [
+     "ml infrastructure lead",
+     "director of ml infrastructure",
+     "head of machine learning infrastructure",
+     "ml infrastructure manager"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "leadership",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "metro": [
+      "new_york"
+     ]
+    },
+    "prefer": {
+     "field": [
+      "data_ml"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "level": [
+      "leadership",
+      "senior"
+     ],
+     "role_family": [
+      "head of ml infrastructure"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "Founder CTO or VP / Director Engineering ML Infra, Distributed Systems. fintech. Kubernetes, Ray, feature stores, LLM serving. San Francisco"
+   },
+   "pool": 10178,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "seeker_resume_on_file_fast",
+   "ok": true,
+   "failures": [],
+   "notes": [
+    "throwaway intake-eval-1788713979727@roster.test (delete the user row in cleanup)"
+   ],
+   "asked": [
+    "item:level",
+    "item:comp",
+    "key:company_type"
+   ],
+   "secs": 12.3,
+   "direction": "job",
+   "artifact": {
+    "kind": "profile",
+    "status": "present",
+    "source": "on_file",
+    "chars": 270
+   },
+   "contract": {
+    "angles": [
+     "senior backend developer",
+     "senior backend engineer",
+     "senior software developer",
+     "senior software engineer"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "field": [
+      "software"
+     ],
+     "state": [
+      "ca"
+     ],
+     "work_mode": [
+      "remote"
+     ]
+    },
+    "prefer": {
+     "company_type": [
+      "other"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "level": [
+      "senior"
+     ],
+     "metro": [
+      "bay_area"
+     ],
+     "role_family": [
+      "software engineer"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "find me senior backend roles, remote or in the bay area. Software Engineering. Go, Python, Kubernetes, Postgres, Kafka. San Francisco, CA"
+   },
+   "pool": 220,
+   "handoff_rows": 80,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "seeker_founder_in_residence_resume",
+   "ok": true,
+   "failures": [],
+   "notes": [
+    "throwaway intake-eval-1788713991991@roster.test (delete the user row in cleanup)"
+   ],
+   "asked": [
+    "key:metro",
+    "key:company_type"
+   ],
+   "secs": 14.1,
+   "direction": "job",
+   "artifact": {
+    "kind": "profile",
+    "status": "present",
+    "source": "on_file",
+    "chars": 211
+   },
+   "contract": {
+    "angles": [
+     "engineering director",
+     "ml engineering lead",
+     "head of machine learning infrastructure",
+     "ml infra lead"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "leadership",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "field": [
+      "data_ml"
+     ],
+     "metro": [
+      "san_francisco"
+     ]
+    },
+    "prefer": {
+     "company_type": [
+      "other"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "level": [
+      "leadership"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "looking for a hands-on engineering leadership role in ML infra. machine learning. Kubernetes, Ray, feature stores, LLM serving, vector search. missing. missing"
+   },
+   "pool": 702,
+   "handoff_rows": 80,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "seeker_search_now_early",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:level",
+    "item:field"
+   ],
+   "secs": 6.7,
+   "direction": "job",
+   "artifact": {
+    "kind": "profile",
+    "status": "present",
+    "source": "described",
+    "chars": 49
+   },
+   "contract": {
+    "angles": [
+     "data analyst",
+     "machine learning engineer",
+     "statistical analyst",
+     "data engineer"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "mid",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "country": [
+      "us"
+     ],
+     "employment_type": [
+      "full_time"
+     ],
+     "field": [
+      "software"
+     ],
+     "metro": [
+      "chicago"
+     ],
+     "state": [
+      "il"
+     ]
+    },
+    "prefer": {
+     "level": [
+      "mid"
+     ],
+     "role_family": [
+      "data scientist"
+     ],
+     "specialty": [
+      "python",
+      "sql"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm looking for my next role. Python and SQL. Chicago"
+   },
+   "pool": 278,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "hiring_pasted_full_jd",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:level",
+    "key:metro"
+   ],
+   "secs": 6.9,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "present",
+    "source": "pasted",
+    "chars": 413
+   },
+   "contract": {
+    "angles": [
+     "senior software engineer",
+     "backend engineer",
+     "payments engineer",
+     "ledger engineer"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "metro": [
+      "bangalore"
+     ]
+    },
+    "prefer": {
+     "field": [
+      "software"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "specialty": [
+      "distributed systems",
+      "ledgering",
+      "payments"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm hiring. Senior Backend Engineer, Payments. built payments or ledgering systems in production; 5+ years backend engineering; Go or Python; distributed systems. San Francisco or remote (US)"
+   },
+   "pool": 7991,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "hiring_thin_jd",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:comp",
+    "key:level",
+    "key:metro"
+   ],
+   "secs": 7.4,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "present",
+    "source": "described",
+    "chars": 180
+   },
+   "contract": {
+    "angles": [
+     "backend developer",
+     "payments engineer",
+     "software engineer for payments",
+     "ledger engineer"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "field": [
+      "software"
+     ],
+     "metro": [
+      "bangalore"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "prefer": {
+     "function": [
+      "engineering"
+     ],
+     "role_family": [
+      "backend engineer"
+     ],
+     "skill": [
+      "go"
+     ],
+     "specialty": [
+      "ledger",
+      "payments"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm hiring. Backend engineer. built a ledger, knows Go. payments team"
+   },
+   "pool": 6017,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "hiring_rich_opening_draft",
+   "ok": false,
+   "failures": [
+    "draft has no 'you said' line",
+    "peers off-role: ['DevOps Engineer - AWS', 'Senior Cloud Engineer (Hybrid @ Bellevue, WA or Remote @ Florida)', 'Software Engineer, Infrastructure', 'Senior Customer Engineer, Named - Seattle', 'Senior Full-Stack Engineer']"
+   ],
+   "notes": [],
+   "asked": [
+    "item:level",
+    "key:metro"
+   ],
+   "secs": 38.3,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "present",
+    "source": "drafted",
+    "chars": 1049
+   },
+   "contract": {
+    "angles": [
+     "chief technology officer",
+     "head of engineering",
+     "vp of engineering",
+     "technology leader"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "leadership",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "field": [
+      "software"
+     ],
+     "metro": [
+      "london"
+     ]
+    },
+    "prefer": {
+     "function": [
+      "engineering"
+     ],
+     "role_family": [
+      "cto"
+     ],
+     "specialty": [
+      "distributed cloud systems",
+      "ml infrastructure",
+      "streaming services"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I am looking to hire a CTO for my company (startup) to lead a 10-15 person engineering team. Building distributed cloud systems, ML infra, and streaming services. Remote US or Seattle.. 8+ years of software engineering experience. remotely in the US or Seattle"
+   },
+   "pool": 3944,
+   "handoff_rows": 60,
+   "draft_title": "CTO",
+   "draft_peers": [
+    "Staff Software Engineer (Product + Platform Development)",
+    "VP of Engineering",
+    "DevOps Engineer - AWS",
+    "Senior Cloud Engineer (Hybrid @ Bellevue, WA or Remote @ Florida)",
+    "Chief Technology Officer (CTO)",
+    "Co-Founding CTO"
+   ]
+  },
+  {
+   "id": "hiring_thin_opening_keep_going",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [],
+   "secs": 1.5,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "missing"
+   },
+   "contract": null,
+   "pool": null,
+   "handoff_rows": 0,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "hiring_saved_jds",
+   "ok": true,
+   "failures": [],
+   "notes": [
+    "throwaway intake-eval-1788714066898@roster.test (delete the user row in cleanup)"
+   ],
+   "asked": [
+    "item:level",
+    "item:comp",
+    "key:metro"
+   ],
+   "secs": 23.3,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "present",
+    "source": "saved",
+    "chars": 128,
+    "brief_id": 23
+   },
+   "contract": {
+    "angles": [
+     "machine learning platform lead",
+     "ml infrastructure lead",
+     "lead machine learning engineer",
+     "ml systems lead"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "leadership",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "metro": [
+      "bay_area"
+     ]
+    },
+    "prefer": {
+     "field": [
+      "data_ml"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "role_family": [
+      "ml platform lead"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm hiring again. ML Platform Lead. run ML infrastructure at scale. Remote US"
+   },
+   "pool": 10973,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "hiring_jd_by_link",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:level"
+   ],
+   "secs": 18.1,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "present",
+    "source": "link",
+    "chars": 5277
+   },
+   "contract": {
+    "angles": [
+     "infrastructure engineer",
+     "systems engineer",
+     "devops engineer",
+     "platform engineer"
+    ],
+    "avoid": {
+     "work_type": [
+      "executive",
+      "manager"
+     ]
+    },
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "work_type": [
+      "ic"
+     ]
+    },
+    "prefer": {
+     "field": [
+      "software"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "metro": [
+      "mountain_view"
+     ],
+     "role_family": [
+      "backend engineer"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm hiring for this role. Backend Engineer. Strong track record building production systems. Mountain View, CA"
+   },
+   "pool": 109283,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "impossible_musts_diagnosed",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:level",
+    "item:field"
+   ],
+   "secs": 16.8,
+   "direction": "job",
+   "artifact": {
+    "kind": "profile",
+    "status": "present",
+    "source": "described",
+    "chars": 61
+   },
+   "contract": {
+    "angles": [
+     "software developer",
+     "programmer",
+     "application engineer",
+     "coder"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "comp": [
+      "300k_plus"
+     ],
+     "field": [
+      "software"
+     ],
+     "metro": [
+      "nowhere_town"
+     ]
+    },
+    "prefer": {
+     "function": [
+      "engineering"
+     ],
+     "level": [
+      "senior"
+     ],
+     "role_family": [
+      "software engineer"
+     ],
+     "skill": [
+      "go",
+      "kubernetes",
+      "python"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm looking for my next role. Python, Go, Kubernetes"
+   },
+   "pool": 0,
+   "handoff_rows": 0,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "seeker_improve_from_answers",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:level",
+    "item:field",
+    "item:location",
+    "item:comp",
+    "key:company_type",
+    "key:work_mode"
+   ],
+   "secs": 7.0,
+   "direction": "job",
+   "artifact": {
+    "kind": "profile",
+    "status": "present",
+    "source": "described",
+    "chars": 61
+   },
+   "contract": {
+    "angles": [
+     "software developer",
+     "programmer",
+     "application engineer",
+     "coder"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "comp": [
+      "150k_200k"
+     ],
+     "field": [
+      "software"
+     ],
+     "metro": [
+      "new_york"
+     ]
+    },
+    "prefer": {
+     "company_type": [
+      "other"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "level": [
+      "senior"
+     ],
+     "role_family": [
+      "software engineer"
+     ],
+     "skill": [
+      "go",
+      "kubernetes",
+      "python"
+     ],
+     "work_mode": [
+      "onsite"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm looking for my next role. software. Python, Go, Kubernetes. new_york"
+   },
+   "pool": 101,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "hiring_multi_select_musts",
+   "ok": false,
+   "failures": [
+    "must metro has 1 values (< 2)"
+   ],
+   "notes": [],
+   "asked": [
+    "item:comp",
+    "key:metro"
+   ],
+   "secs": 9.6,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "present",
+    "source": "described",
+    "chars": 113
+   },
+   "contract": {
+    "angles": [
+     "senior platform engineer",
+     "staff engineer for platform",
+     "platform engineering lead",
+     "kubernetes engineer"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "staff_plus",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "metro": [
+      "bay_area"
+     ]
+    },
+    "prefer": {
+     "field": [
+      "software"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "level": [
+      "staff_plus"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm hiring. Staff platform engineer. Go. Hybrid in Seattle or New York"
+   },
+   "pool": 10973,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "seeker_decline_everything",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:level",
+    "item:skills",
+    "item:comp",
+    "key:metro",
+    "key:company_type"
+   ],
+   "secs": 11.0,
+   "direction": "job",
+   "artifact": {
+    "kind": "profile",
+    "status": "present",
+    "source": "described",
+    "chars": 43
+   },
+   "contract": {
+    "angles": [
+     "senior product manager",
+     "product lead",
+     "senior product owner",
+     "product management lead"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {},
+    "prefer": {
+     "field": [
+      "software"
+     ],
+     "function": [
+      "product"
+     ],
+     "level": [
+      "senior"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm looking for my next role. B2B SaaS. Austin"
+   },
+   "pool": 235411,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "hiring_place_or_mode",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:level"
+   ],
+   "secs": 13.5,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "present",
+    "source": "pasted",
+    "chars": 210
+   },
+   "contract": {
+    "angles": [
+     "senior software engineer, payments",
+     "senior backend developer, payments",
+     "senior engineer, payments"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "field": [
+      "software"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "prefer": {
+     "function": [
+      "engineering"
+     ],
+     "metro": [
+      "seattle"
+     ],
+     "skill": [
+      "go",
+      "python"
+     ],
+     "specialty": [
+      "ledger",
+      "payments"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm hiring. Senior Backend Engineer, Payments. built a ledger or payments system in production; Go or Python. Remote US or Seattle"
+   },
+   "pool": 74252,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "hiring_field_vs_specialty",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:level",
+    "item:comp",
+    "key:metro"
+   ],
+   "secs": 8.9,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "present",
+    "source": "pasted",
+    "chars": 287
+   },
+   "contract": {
+    "angles": [
+     "senior manager of engineering",
+     "engineering manager for marketing",
+     "lead engineering manager",
+     "manager of marketing engineering"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "metro": [
+      "bangalore"
+     ]
+    },
+    "prefer": {
+     "field": [
+      "software"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "work_type": [
+      "manager"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm hiring. Senior Engineering Manager, Marketing Engineering (CRM). 8+ years engineering, 3+ managing. Remote US"
+   },
+   "pool": 7991,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "hiring_decisive_rare_must",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:level",
+    "key:company_type"
+   ],
+   "secs": 8.1,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "present",
+    "source": "described",
+    "chars": 198
+   },
+   "contract": {
+    "angles": [
+     "compiler developer",
+     "llvm engineer",
+     "mlir engineer",
+     "compiler optimization engineer"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "field": [
+      "software"
+     ],
+     "metro": [
+      "bay_area"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "prefer": {
+     "company_type": [
+      "other"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "role_family": [
+      "compiler engineer"
+     ],
+     "specialty": [
+      "compiler engineering",
+      "llvm",
+      "mlir"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm hiring. Compiler Engineer. Shipped compiler work in production. Remote US or Bay Area"
+   },
+   "pool": 1892,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  }
+ ]
+}

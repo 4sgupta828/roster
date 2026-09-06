@@ -1,0 +1,146 @@
+{
+ "base": "https://roster-api-production-3405.up.railway.app",
+ "secs": 55,
+ "results": [
+  {
+   "id": "hiring_rich_opening_draft",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:level",
+    "item:comp",
+    "key:company_type"
+   ],
+   "secs": 47.5,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "present",
+    "source": "drafted",
+    "chars": 1245
+   },
+   "contract": {
+    "angles": [
+     "chief technology officer",
+     "head of engineering",
+     "technology leader",
+     "vp of engineering"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "leadership",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "country": [
+      "us"
+     ]
+    },
+    "prefer": {
+     "company_type": [
+      "other"
+     ],
+     "field": [
+      "software"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "role_family": [
+      "cto"
+     ],
+     "work_type": [
+      "executive"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I am looking to hire a CTO for my company (startup) to lead a 10-15 person engineering team. Building distributed cloud systems, ML infra, and streaming services. Remote US or Seattle.. Experience building reliable, secure, and scalable systems.. remotely in the US or Seattle"
+   },
+   "pool": 296330,
+   "handoff_rows": 60,
+   "draft_title": "CTO",
+   "draft_peers": [
+    "VP of Engineering",
+    "VP of Engineering",
+    "VP, Engineering \u2013 HR Technology",
+    "Co-Founding CTO",
+    "Chief Technology Officer (CTO), Artificial Intelligence (AI) Required, Work From Home",
+    "VP Engineering"
+   ]
+  },
+  {
+   "id": "hiring_multi_select_musts",
+   "ok": false,
+   "failures": [
+    "must metro has 1 values (< 2)"
+   ],
+   "notes": [],
+   "asked": [
+    "item:responsibilities",
+    "item:comp",
+    "key:metro"
+   ],
+   "secs": 7.2,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "present",
+    "source": "described",
+    "chars": 101
+   },
+   "contract": {
+    "angles": [
+     "senior platform engineer",
+     "staff engineer",
+     "kubernetes engineer",
+     "observability engineer"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "staff_plus",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "metro": [
+      "bay_area"
+     ]
+    },
+    "prefer": {
+     "field": [
+      "software"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "role_family": [
+      "platform engineer"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm hiring. Staff platform engineer. Go. Full time, hybrid"
+   },
+   "pool": 10972,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  }
+ ]
+}

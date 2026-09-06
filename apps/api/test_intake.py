@@ -186,8 +186,12 @@ def test_intake_endpoint_runs_a_turn_and_the_people_surface_accepts_a_contract(m
                                  "contract": {"kind": "person", "text": "senior engineers", "must": {"level": ["senior"]}}})
     assert r3.status_code == 200, r3.text
     d = r3.json()
-    assert d["people_rows"] and all(p["facets"]["level"] == ["senior"] for p in d["people_rows"])
-    assert d["facet_nav"]["counts"]["level"] == {"senior": 10} and d["facet_nav"]["contract"]["must"] == {"level": ["senior"]}
+    # SMART RELAXING (owner, 2026-09-06): ten seniors are too few for a first search → level relaxes to a preference,
+    # the seniors still rank first, and the rail says so (the ratified must is a chip the user can restore)
+    rows = d["people_rows"]
+    assert rows and all(p["facets"]["level"] == ["senior"] for p in rows[:10]) and len(rows) > 10
+    assert [n["key"] for n in d["facet_nav"]["relaxed"] if n["rule"] == "relaxed"] == ["level"]
+    assert d["facet_nav"]["contract"]["must"] == {} and d["facet_nav"]["contract"]["prefer"]["level"] == ["senior"]
 
 
 def test_intake_endpoint_is_flag_gated(monkeypatch):
@@ -412,7 +416,9 @@ def test_a_plain_talent_map_brief_runs_the_evaluator_and_a_name_lookup_does_not(
     app = create_app(); app.state.facet_store = InMemoryFacetStore(JOBS + PEOPLE, FACET_SCHEMA)
     c = TestClient(app)
     d = c.post("/research", json={"question": "senior engineers in the bay area", "tenant_id": "demo", "surface": "people"}).json()
-    assert d["people_rows"] and all(p["facets"]["level"] == ["senior"] for p in d["people_rows"]) and d["facet_nav"]["contract"]["must"] == {"level": ["senior"]}
+    rows = d["people_rows"]
+    assert rows and all(p["facets"]["level"] == ["senior"] for p in rows[:10]) and len(rows) > 10          # relaxed: seniors first, then the rest
+    assert d["facet_nav"]["contract"]["prefer"]["level"] == ["senior"] and [n["key"] for n in d["facet_nav"]["relaxed"] if n["rule"] == "relaxed"] == ["level"]
     assert "pool of" in (d["coverage_basis"] or {}).get("population_statement", "")
     d2 = c.post("/research", json={"question": "Mukul Gupta at Cisco", "tenant_id": "demo", "surface": "people"}).json()
     assert not d2.get("facet_nav") and "unavailable" in (d2.get("answer") or "")                     # the engine path (no people store in tests)

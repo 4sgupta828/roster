@@ -153,3 +153,43 @@ def test_switched_off_recipes_and_empty_pools_are_left_out_and_a_failed_judge_le
     m = out["merge"]
     assert [r["name"] for r in m["recipes"]] == ["strict", "default"] and m["off"] == ["relaxed:skill"] and m["ladder"] == ["strict", "default", "relaxed:skill"]
     assert m["graded"] == 0 and m["judge_error"] and [r["id"] for r in out["rows"]] == ["p1", "p2", "p8"] and out["rows"][0]["fit"] is None
+
+
+def test_smart_relaxing_demotes_the_least_important_musts_until_the_pool_is_a_good_size_and_notes_each_step():
+    """Owner: 'adjust filters from strict to preferred if results are not sufficient — least important first — strive
+    for a good number of results'. The probe relaxes first (cheap), the search itself relaxes once more when short."""
+    from api.contract_search import relax_to_enough
+    sizes = {("field", "level", "metro", "skill"): 3, ("field", "level", "metro"): 12, ("field", "level"): 90, ("field",): 5000}
+    probes, evals = [], []
+    async def slice_fn(kind, must):
+        probes.append(tuple(sorted(must))); return sizes.get(tuple(sorted(must)), 0)
+    async def evaluate_fn(cd, depth=None):
+        evals.append(tuple(sorted(cd["must"])))
+        n = {("field",): 45, ("field", "level"): 12}.get(tuple(sorted(cd["must"])), 2)
+        return {"rows": [{"id": f"r{i}"} for i in range(n)], "counts": {}, "coverage": {"pool": n}, "contract": cd}
+    c = Contract(kind="person", text="x", must={"field": ["software"], "level": ["senior"], "metro": ["seattle"], "skill": ["go"]})
+    out, notes = _run(relax_to_enough(c, kind="person", user_keys={"metro"}, slice_fn=slice_fn, evaluate_fn=evaluate_fn))
+    steps = [(n["key"], n["user"]) for n in notes if n["rule"] == "relaxed"]
+    # probe: skill (compiled, least important) → 12; level (compiled) → 90; metro (the USER's, last) → 5000 ≥ 200: stop probing
+    assert steps[:3] == [("skill", False), ("level", False), ("metro", True)]
+    assert evals == [("field",)] and len(out["rows"]) == 45                                   # the search ran once, on the relaxed contract
+    summary = notes[-1]; assert summary["rule"] == "relax_summary" and summary["strict_slice"] == 3 and summary["relaxed_keys"] == ["skill", "level", "metro"] and summary["user_relaxed"] == ["metro"]
+    assert out["contract"]["must"] == {"field": ["software"]} and out["contract"]["prefer"]["metro"] == ["seattle"] and out["contract"]["prefer"]["skill"] == ["go"]
+
+
+def test_smart_relaxing_relaxes_once_more_when_the_search_itself_returns_too_few_and_stops_when_enough():
+    from api.contract_search import relax_to_enough
+    async def slice_fn(kind, must): return 5000                                           # the index slice looks fine…
+    evals = []
+    async def evaluate_fn(cd, depth=None):
+        evals.append(tuple(sorted(cd["must"])))
+        n = {("country", "field", "level"): 4, ("country", "field"): 40}.get(tuple(sorted(cd["must"])), 1)      # …but the neighbourhood is thin until level relaxes
+        return {"rows": [{"id": f"r{i}"} for i in range(n)], "counts": {}, "coverage": {}, "contract": cd}
+    c = Contract(kind="job", text="x", must={"field": ["software"], "level": ["senior"], "country": ["us"]})
+    out, notes = _run(relax_to_enough(c, kind="job", user_keys=set(), slice_fn=slice_fn, evaluate_fn=evaluate_fn))
+    assert evals == [("country", "field", "level"), ("country", "field")] and len(out["rows"]) == 40
+    assert [n["key"] for n in notes if n["rule"] == "relaxed"] == ["level"] and "country" in out["contract"]["must"]   # the scope is never relaxed
+    # enough from the start → nothing relaxed, no notes
+    c2 = Contract(kind="job", text="x", must={"field": ["software"], "country": ["us"]})
+    out2, notes2 = _run(relax_to_enough(c2, kind="job", user_keys=set(), slice_fn=slice_fn, evaluate_fn=evaluate_fn))
+    assert notes2 == [] and len(out2["rows"]) == 40

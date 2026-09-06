@@ -1,0 +1,320 @@
+{
+ "base": "https://roster-api-production-3405.up.railway.app",
+ "secs": 79,
+ "summary": {
+  "n": 2,
+  "prec10": {
+   "baseline": 0.06,
+   "merged": 0.34
+  },
+  "prec20": {
+   "baseline": 0.11,
+   "merged": 0.26
+  },
+  "missed": {
+   "baseline": 2,
+   "merged": 0
+  },
+  "gate": {
+   "merged_ge_baseline_share": 1.0,
+   "worse_by_over_0_10": [],
+   "merged_missed_total": 0,
+   "added_p90_secs": 9.8,
+   "pass": false
+  }
+ },
+ "results": [
+  {
+   "id": "seeker_terse_description",
+   "kind": "job",
+   "brief": "I'm looking for my next role. software. Python, Go, Kubernetes. new_york, bay_area",
+   "union": 35,
+   "graded": 35,
+   "rates": {
+    "yes": 3,
+    "partial": 10,
+    "no": 22
+   },
+   "baseline": {
+    "prec10": 0.04,
+    "prec20": 0.1,
+    "missed": 1,
+    "secs": 3.5,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.32,
+    "prec20": 0.32,
+    "missed": 0,
+    "secs": 13.3,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 3,
+      "prec10": 0.12
+     }
+    ],
+    "fits": 3,
+    "weak": false,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "616915",
+      "no",
+      "Application Developer"
+     ],
+     [
+      "617667",
+      "no",
+      "Senior Software Engineer"
+     ],
+     [
+      "167631",
+      "no",
+      "Senior Software Engineer, Full-Stack"
+     ],
+     [
+      "134585",
+      "no",
+      "Application developer"
+     ],
+     [
+      "615826",
+      "no",
+      "Java Developer With UI"
+     ],
+     [
+      "167630",
+      "no",
+      "Staff Software Engineer"
+     ],
+     [
+      "134586",
+      "no",
+      "Application Developer"
+     ],
+     [
+      "121179",
+      "no",
+      "Software Engineer III \u2014 Developer Portal"
+     ],
+     [
+      "91412",
+      "partial",
+      "Staff Software Engineer"
+     ],
+     [
+      "616914",
+      "no",
+      "Senior Software Developer"
+     ]
+    ],
+    "merged": [
+     [
+      "115583",
+      "yes",
+      "Senior Software Engineer - Full Stack"
+     ],
+     [
+      "97233",
+      "yes",
+      "Software Engineer"
+     ],
+     [
+      "295293",
+      "partial",
+      "Software Engineer, Developer Experience "
+     ],
+     [
+      "167631",
+      "no",
+      "Senior Software Engineer, Full-Stack"
+     ],
+     [
+      "167630",
+      "no",
+      "Staff Software Engineer"
+     ],
+     [
+      "91412",
+      "partial",
+      "Staff Software Engineer"
+     ],
+     [
+      "167623",
+      "no",
+      "Senior Software Engineer, Motion Plannin"
+     ],
+     [
+      "158201",
+      "no",
+      "Staff Software Engineer-iOS"
+     ],
+     [
+      "125183",
+      "partial",
+      "Software Engineer"
+     ],
+     [
+      "158200",
+      "partial",
+      "Staff Software Engineer-Backend"
+     ]
+    ]
+   },
+   "lift10": 0.28,
+   "added_secs": 9.8
+  },
+  {
+   "id": "hiring_field_vs_specialty",
+   "kind": "person",
+   "brief": "I'm hiring. Senior Engineering Manager, Marketing Engineering (CRM). 8+ years engineering, 3+ managing. Remote US",
+   "union": 36,
+   "graded": 36,
+   "rates": {
+    "yes": 2,
+    "partial": 7,
+    "no": 27
+   },
+   "baseline": {
+    "prec10": 0.08,
+    "prec20": 0.12,
+    "missed": 1,
+    "secs": 3.0,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.36,
+    "prec20": 0.2,
+    "missed": 0,
+    "secs": 13.4,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 4,
+      "prec10": 0.04
+     }
+    ],
+    "fits": 4,
+    "weak": false,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "github:ccoenraets",
+      "no",
+      "Christophe Coenraets"
+     ],
+     [
+      "github:dcarroll",
+      "no",
+      "Dave Carroll"
+     ],
+     [
+      "github:eperret",
+      "partial",
+      "Eric Perret"
+     ],
+     [
+      "github:daksha121",
+      "no",
+      "daksha121"
+     ],
+     [
+      "github:xingdu1991",
+      "no",
+      "Xing Du"
+     ],
+     [
+      "github:awarshavsky",
+      "no",
+      "Alex Warshavsky"
+     ],
+     [
+      "github:ArKay91",
+      "no",
+      "Aar Kay"
+     ],
+     [
+      "github:jamessanders",
+      "no",
+      "James Sanders"
+     ],
+     [
+      "github:rogercotrina",
+      "partial",
+      "Roger Cotrina"
+     ],
+     [
+      "theorg:ross-galbraith",
+      "no",
+      "Ross Galbraith"
+     ]
+    ],
+    "merged": [
+     [
+      "github:Eutheran",
+      "partial",
+      "Eric"
+     ],
+     [
+      "github:bryce-godfrey",
+      "yes",
+      "Bryce Godfrey"
+     ],
+     [
+      "github:farazkamal",
+      "yes",
+      "Faraz Kamal"
+     ],
+     [
+      "theorg:julien-l",
+      "partial",
+      "Julien L."
+     ],
+     [
+      "github:rogercotrina",
+      "partial",
+      "Roger Cotrina"
+     ],
+     [
+      "theorg:tameem-anwar",
+      "partial",
+      "Tameem Anwar"
+     ],
+     [
+      "theorg:camil-jreige",
+      "no",
+      "Camil Jreige"
+     ],
+     [
+      "theorg:steven-pan",
+      "no",
+      "Steven Pan"
+     ],
+     [
+      "github:danielrussellLA",
+      "partial",
+      "Daniel Russell"
+     ],
+     [
+      "theorg:robert-peters",
+      "no",
+      "Robert Peters"
+     ]
+    ]
+   },
+   "lift10": 0.28,
+   "added_secs": 10.4
+  }
+ ]
+}

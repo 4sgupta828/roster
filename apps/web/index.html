@@ -673,7 +673,9 @@
   .fchip.unknown{color:var(--muted);border-style:dashed;}
   .frail-pills{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.3rem;}
   .frail-apply{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.45rem;padding-top:.4rem;border-top:1px dashed var(--hair);font-size:.76rem;color:var(--muted);}
-  .frail-merge{margin-bottom:.4rem;padding-bottom:.4rem;border-bottom:1px dashed var(--hair);font-size:.74rem;color:var(--muted);}
+  .frail-merge,.frail-relaxed{margin-bottom:.4rem;padding-bottom:.4rem;border-bottom:1px dashed var(--hair);font-size:.74rem;color:var(--muted);}
+  .frail-relaxed-item{display:inline-flex;align-items:center;gap:.25rem;min-height:30px;padding:.15rem .55rem;border:1px solid rgba(var(--gold-rgb),.5);border-radius:999px;color:var(--ink);}
+  .frail-relaxed-item.yours{border-style:dashed;}
   .frail-merge-h{display:flex;flex-wrap:wrap;gap:.35rem;align-items:baseline;margin-bottom:.3rem;}
   .frail-weak{color:var(--gold);font-weight:600;}
   .frail-recipes{display:flex;flex-wrap:wrap;gap:.3rem;}
@@ -3103,7 +3105,7 @@ function peopleRowsMarkup(data){
   window.PEOPLE_RENDERS[data._pid] = data;
   // THE TALENT RAIL (spec §7): the server's contract + counts over the people index ride on `facet_nav`
   // (first turn) or on the turn itself (a saved map / an applied navigation); one id serves the rail
-  if(data.facet_nav && !data.contract){ Object.assign(data, {contract: data.facet_nav.contract, counts: data.facet_nav.counts, coverage: data.facet_nav.coverage, labels: data.facet_nav.labels, merge: data.facet_nav.merge || null}); }
+  if(data.facet_nav && !data.contract){ Object.assign(data, {contract: data.facet_nav.contract, counts: data.facet_nav.counts, coverage: data.facet_nav.coverage, labels: data.facet_nav.labels, merge: data.facet_nav.merge || null, relaxed: data.facet_nav.relaxed || []}); }
   data._jpid = data._pid;
   const railHtml = (isEnum && data.contract && data.counts && typeof facetRailMarkup === "function") ? facetRailMarkup(data) : "";
   const PAGE = 20;
@@ -7732,6 +7734,16 @@ function mergeContract(d, c){
   if(!d.merge) return base;
   return {...base, merge: {mode: "merged", off: [...recipeOff(d)]}};
 }
+// SMART RELAXING (owner, 2026-09-06): too few results → the least important filters became preferences; say which, and
+// that the chip makes them strict again (the rail already shows them as ▲ prefer)
+function relaxedMarkup(d){
+  const notes = (d.relaxed || []).filter(n => n.rule === "relaxed"); if(!notes.length) return "";
+  const sum = (d.relaxed || []).find(n => n.rule === "relax_summary") || {};
+  const L = d.labels || {};
+  const item = n => `<span class="frail-relaxed-item${n.user ? " yours" : ""}">▲ <b>${esc(String(((L.keys||{})[n.key]) || n.key).replace(/_/g," "))}</b> ${esc((n.values||[]).map(v => facetLabel(d, n.key, v)).join(" / "))}${n.user ? ' <span class="tgt-q-hint">(your chip)</span>' : ""}</span>`;
+  const strict = sum.strict_slice != null ? `${sum.strict_slice >= 2001 ? "2000+" : sum.strict_slice} matched every filter` : "few matched every filter";
+  return `<div class="frail-relaxed"><div class="frail-merge-h"><b>Showing more</b> · ${esc(strict)} — these now rank first instead of filtering: <span class="tgt-q-hint">tap a chip to make it a must again</span></div><div class="frail-recipes">${notes.map(item).join("")}</div></div>`;
+}
 function mergeMarkup(d){
   const m = d.merge; if(!m) return "";
   const off = recipeOff(d);
@@ -7781,7 +7793,7 @@ function facetRailMarkup(d){
       <button type="button" class="idgo frail-go" data-jpid="${esc(d._jpid)}">Apply</button><button type="button" class="histbtn frail-reset" data-jpid="${esc(d._jpid)}">Reset</button></div>`
     : `<div class="frail-apply">${d._applied && d._delta ? `<span class="frail-done">Applied ✓ — ${d._delta.after} shown${d._delta.added ? ` · <b>${d._delta.added} new</b>` : ""}${d._delta.removed ? ` · ${d._delta.removed} dropped` : ""}${!d._delta.added && !d._delta.removed ? " · same rows, order may differ" : ""}${(d._delta.prevPool != null && d._delta.pool != null && d._delta.prevPool !== d._delta.pool) ? ` · pool ${d._delta.prevPool} → ${d._delta.pool}` : ""}</span> ${d._delta.added && !d._newFirst ? (() => { const rowsNow = Array.isArray(d.people_rows) ? d.people_rows : (d.jobs||[]); const per = 20, pg = Array.isArray(d.people_rows) ? (d._page||0) : (d._jpage||0); const onPage = rowsNow.slice(pg*per, pg*per+per).filter(r => r._new).length; return `${onPage ? ` <span class="frail-note">${onPage} of them on this page (corner flag)</span>` : ` <span class="frail-note">none of them on this page</span>`} <button type="button" class="histbtn frail-shownew" data-jpid="${esc(d._jpid)}">Show the ${d._delta.added} new first</button>`; })() : ""}` : "Tap chips to stage changes, then apply once. "}${saveBtn}</div>`;
   const empty = (cov.diagnosis && !facetPending(d)) ? diagnosisMarkup({...cov.diagnosis, best_match: cov.best_match}, d._jpid, L) : "";
-  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}">${mergeMarkup(d)}<div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
+  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}">${relaxedMarkup(d)}${mergeMarkup(d)}<div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
 }
 // EMPTY RESULT → which must is doing it (leave-one-out from the evaluator), with one-tap Drop (staged)
 function diagnosisMarkup(diag, jpid, L){
@@ -7823,6 +7835,7 @@ async function facetReevaluate(jpid, contract, save){
     if(!r.ok){ d._busy = false; rerenderRail(jpid); alert(out.detail || "Couldn't apply those changes."); return; }
     d.contract = out.contract; d._draft = null; d.counts = out.counts; d.coverage = out.coverage; d.labels = out.labels || d.labels;
     if(out.merge !== undefined){ d.merge = out.merge || null; } d._recipeOff = null;
+    d.relaxed = [];   // an Apply runs the chips exactly as set — no auto-relaxing on the rail
     // WHAT CHANGED (owner, 2026-09-06): the delta against the rows shown before this Apply, and a "new" badge
     const delta = rowsDelta(prevRows, out.rows || []); const beforeKeys = new Set(prevRows.map(rowKey));
     (out.rows||[]).forEach(r => { r._new = !beforeKeys.has(rowKey(r)); });

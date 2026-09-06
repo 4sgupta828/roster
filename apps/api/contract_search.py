@@ -20,7 +20,8 @@ import json
 from typing import Awaitable, Callable
 
 from roster_kernel.facets import Contract
-from roster_kernel.facets.contract_search import blind, collapsing_musts, cooccurrence_readings, head_precision, order_by_verdicts, recipes, resolve_blind_id, rrf_fuse, survivors
+from roster_kernel.facets.contract_search import (blind, collapsing_musts, cooccurrence_readings, demote, head_precision, order_by_verdicts, recipes, relax_steps,
+                                                   resolve_blind_id, rrf_fuse, survivors)
 
 COOC_KEYS = ("specialty", "skill")
 COOC_TARGET = "field"
@@ -277,3 +278,49 @@ def choice_logger(get_pool):
             await conn.execute("INSERT INTO roster_intake_choice (kind, brief_hash, text, record) VALUES ($1, $2, $3, $4::jsonb)",
                                str(record.get("kind") or ""), str(record.get("brief_hash") or ""), str(record.get("text") or ""), json.dumps(record))
     return log
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# SMART RELAXING (owner, 2026-09-06): "adjust filters from strict to preferred if results are not sufficient — the
+# least important first — and keep going; strive for a good number of results". Cheap first: the must-slice is
+# probed (tens of ms) and relaxed until it holds RELAX_MIN_SLICE; then the search runs, and if it still returns
+# fewer than RELAX_TARGET_ROWS rows one more must relaxes per evaluate (bounded). Every relaxation is a note.
+# ---------------------------------------------------------------------------------------------------------------
+
+async def relax_to_enough(c: Contract, *, kind: str, user_keys: set, slice_fn, evaluate_fn, depth: dict | None = None) -> tuple[dict, list[dict]]:
+    from roster_vertical.intake import RELAX_MAX_EVALUATES, RELAX_MIN_SLICE, RELAX_NEVER, RELAX_ORDER, RELAX_TARGET_ROWS
+    notes: list[dict] = []
+    steps = relax_steps(c, order=RELAX_ORDER, user_keys=set(user_keys or ()), never=RELAX_NEVER)
+    cur = Contract.from_dict(c.to_dict())
+    strict_slice = await _safe_size(slice_fn, kind, cur.must) if cur.must else None
+
+    def _relax_one() -> bool:
+        nonlocal cur
+        if not steps:
+            return False
+        key, is_user = steps.pop(0)
+        vals = list(cur.must.get(key) or [])
+        cur = demote(cur, key)
+        notes.append({"rule": "relaxed", "key": key, "values": vals, "user": is_user, "action": "must → prefer"})
+        return True
+
+    # 1) the index probe: relax until the must-slice is a good size (or nothing is left to relax)
+    size = strict_slice
+    while size is not None and size < RELAX_MIN_SLICE and steps:
+        if not _relax_one():
+            break
+        size = await _safe_size(slice_fn, kind, cur.must) if cur.must else None
+        notes[-1]["slice_after"] = size
+    # 2) the search itself: still short of rows → one more relaxation per evaluate, bounded
+    out = await evaluate_fn(cur.to_dict(), depth=depth) if depth is not None else await evaluate_fn(cur.to_dict())
+    n_eval = 1
+    while len(out.get("rows") or []) < RELAX_TARGET_ROWS and steps and n_eval < RELAX_MAX_EVALUATES:
+        if not _relax_one():
+            break
+        out = await evaluate_fn(cur.to_dict(), depth=depth) if depth is not None else await evaluate_fn(cur.to_dict())
+        n_eval += 1
+        notes[-1]["rows_after"] = len(out.get("rows") or [])
+    if notes:
+        notes.append({"rule": "relax_summary", "strict_slice": strict_slice, "final_slice": size, "rows": len(out.get("rows") or []),
+                      "relaxed_keys": [n["key"] for n in notes if n.get("rule") == "relaxed"], "user_relaxed": [n["key"] for n in notes if n.get("rule") == "relaxed" and n.get("user")]})
+    return out, notes
