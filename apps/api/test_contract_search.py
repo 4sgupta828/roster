@@ -106,7 +106,7 @@ def _merged_fixture():
         calls["slices"].append(dict(must)); return 0 if must.get("field") == ["nowhere"] else 10
     def llm(system, user):
         calls["judge"] += 1
-        assert "BRIEF: hire a cto" in user and "[r1]" in user and "strict" not in user           # blind: no recipe names
+        assert "WORDS: hire a cto" in user and "[r1]" in user and "strict" not in user           # blind: no recipe names
         ids = {}
         for line in user.split("ROWS:", 1)[1].strip().splitlines():
             bid = line.split("]")[0].strip("[")

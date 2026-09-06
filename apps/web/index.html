@@ -5625,7 +5625,9 @@ function routeTriage(route, text, rd){
   if(typeof newConversation === "function") { try{ newConversation(); }catch(e){} }
   INTAKE = keep;
   PENDING_INTAKE_TRANSCRIPT = transcript.map(m => ({role: m.role, text: m.text}));
-  const contract = rd && rd.contract ? rd.contract : null;
+  const contract = rd && rd.contract ? {...rd.contract} : null;
+  // dev switch for the merged search (spec guided-intake §12 step 2) before the server flag is on: localStorage roster_merge=1
+  if(contract && !contract.merge){ try{ if(localStorage.getItem("roster_merge") === "1") contract.merge = {mode: "merged", off: []}; }catch(e){} }
   askQuestion(text || (contract && contract.text) || "", {skipRefine: true, contract});
 }
 // A random sample question for the panel intake placeholder (mirrors pickPlaceholder for Q&A).

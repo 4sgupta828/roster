@@ -31,11 +31,15 @@ def last_error(name: str) -> str:
     return _last_error.get(name, "")
 
 
-def llm_json(system: str, user: str, *, timeout: float = 90.0) -> dict:
-    """Strict JSON from the first healthy provider. Raises RuntimeError when none answers."""
+def llm_json(system: str, user: str, *, timeout: float = 90.0, prefer: str | None = None) -> dict:
+    """Strict JSON from the first healthy provider (`prefer` = a provider name to try first — an eval judge that
+    must differ from the in-product judge). Raises RuntimeError when none answers."""
     errs = []
     now = time.monotonic()
-    for name, endpoint, key, model in providers():
+    order = providers()
+    if prefer:
+        order = [p for p in order if p[0] == prefer] + [p for p in order if p[0] != prefer]
+    for name, endpoint, key, model in order:
         if _skip_until.get(name, 0.0) > now:
             errs.append(f"{name}: cooling down after {_last_error.get(name, 'an error')}")
             continue

@@ -105,7 +105,7 @@ def test_a_merged_contract_runs_the_ladder_grades_the_head_blind_and_keeps_the_r
     calls = []
     def fake_llm(system, user):
         calls.append(user)
-        assert "BRIEF: founder cto" in user and "strict" not in user
+        assert "WORDS: founder cto" in user and "REQUIRED: level: leadership" in user and "strict" not in user
         out = []
         for line in user.split("ROWS:", 1)[1].strip().splitlines():
             bid = line.split("]")[0].strip("[")

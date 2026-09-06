@@ -64,12 +64,38 @@ def handoff(run: Run, c: dict, mode: str) -> tuple[list[dict], float, dict | Non
     return rows, round(time.time() - t0, 1), merge
 
 
+def golden_check(base: str, path: str) -> None:
+    """Judge the frozen rows (shuffled per run inside the endpoint) and report agreement with the human labels.
+    A confirmed set with a recorded baseline fails the run when agreement shifts by more than 5 points."""
+    g = json.load(open(path))
+    rows = [{k: v for k, v in r.items() if k not in ("label", "proposed_why")} for r in g["rows"]]
+    jd = post(base, "/search/judge", {"kind": g["kind"], "brief": g["brief"], "rows": rows, "provider": "alt", "contract": g.get("contract") or {}})
+    v = jd.get("verdicts") or {}
+    labelled = [r for r in g["rows"] if r.get("label")]
+    agree = sum(1 for r in labelled if (v.get(str(r["id"])) or {}).get("fit") == r["label"])
+    pct = round(100 * agree / max(len(labelled), 1), 1)
+    status = "PROPOSED labels — not a drift check until confirmed" if not g.get("confirmed") else ("baseline recorded" if g.get("agreement_baseline") is None else
+              ("DRIFT — fail" if abs(pct - float(g["agreement_baseline"])) > 5 else "ok"))
+    print(f"golden union: {len(labelled)} labelled rows · judge agrees on {agree} ({pct} %) · {status}")
+    for r in labelled:
+        got = (v.get(str(r["id"])) or {}).get("fit")
+        if got != r["label"]:
+            print(f"   disagree {r['id']}: label {r['label']} · judge {got} — {(v.get(str(r['id'])) or {}).get('why', '')}")
+    if g.get("confirmed") and g.get("agreement_baseline") is None:
+        g["agreement_baseline"] = pct; json.dump(g, open(path, "w"), indent=1); print("   agreement baseline recorded")
+    if g.get("confirmed") and g.get("agreement_baseline") is not None and abs(pct - float(g["agreement_baseline"])) > 5:
+        sys.exit(2)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default=os.environ.get("ROSTER_EVAL_BASE", "https://roster-api-production-3405.up.railway.app"))
     ap.add_argument("--only", default="")
     ap.add_argument("--scenarios", default=os.path.join(HERE, "scenarios.jsonl"))
+    ap.add_argument("--golden", default="", help="golden_union.json: judge-drift check only (one judge call)")
     args = ap.parse_args()
+    if args.golden:
+        return golden_check(args.base, args.golden)
     only = {x.strip() for x in args.only.split(",") if x.strip()}
     results = []
     t_all = time.time()
@@ -98,7 +124,9 @@ def main():
         brief = str(c.get("text") or "")
         kind = "job" if run.ready.get("direction") == "job" else "person"
         try:
-            jd = post(args.base, "/search/judge", {"kind": kind, "brief": brief, "rows": _judge_rows(union)}, run.token)
+            # the eval's judge is a DIFFERENT provider from the in-product judge (spec §12.11: agreement bias)
+            jd = post(args.base, "/search/judge", {"kind": kind, "brief": brief, "rows": _judge_rows(union), "provider": "alt",
+                                                   "contract": {k: c.get(k) for k in ("must", "prefer", "center")}}, run.token)
         except urllib.error.HTTPError as e:
             print(f"FAIL  {sc['id']:38s} judge HTTP {e.code}"); run.cleanup(); continue
         verdicts = jd.get("verdicts") or {}
@@ -110,8 +138,10 @@ def main():
                "merged": {"prec10": _prec(merged_rows, verdicts, 10), "prec20": _prec(merged_rows, verdicts, 20), "missed": len(yes_ids - merged_top), "secs": merged_s, "rows": len(merged_rows),
                           "recipes": [{k: r.get(k) for k in ("name", "pool", "evaluated", "head_fits", "prec10")} for r in ((merge or {}).get("recipes") or [])],
                           "fits": (merge or {}).get("fits"), "weak": (merge or {}).get("weak"), "judge_error": (merge or {}).get("judge_error")},
-               "top": {"baseline": [(_rid(r), (verdicts.get(_rid(r)) or {}).get("fit"), str(r.get("title") or r.get("name") or "")[:40]) for r in base_rows[:10]],
-                       "merged": [(_rid(r), (verdicts.get(_rid(r)) or {}).get("fit"), str(r.get("title") or r.get("name") or "")[:40]) for r in merged_rows[:10]]}}
+               "top": {arm: [(_rid(r), (verdicts.get(_rid(r)) or {}).get("fit"), str(r.get("title") or r.get("name") or "")[:40], (verdicts.get(_rid(r)) or {}).get("why", ""), r.get("fit"), r.get("fit_why", ""))
+                             for r in rows_[:10]] for arm, rows_ in (("baseline", base_rows), ("merged", merged_rows))}}
+        rec["brief_full"] = brief; rec["contract"] = {k: c.get(k) for k in ("must", "prefer", "center")}
+        rec["verdicts"] = verdicts; rec["union_rows"] = _judge_rows(union)
         rec["lift10"] = round(rec["merged"]["prec10"] - rec["baseline"]["prec10"], 3)
         rec["added_secs"] = round(merged_s - base_s, 1)
         results.append(rec)

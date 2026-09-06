@@ -196,13 +196,31 @@ SELF_STATED_EVIDENCE = ("", "self_stated", "profile")     # evidence kinds that 
 def judge_prompt(kind: str) -> str:
     rows = "PEOPLE (a candidate each)" if kind == "person" else "OPEN POSTINGS (a role each)"
     brief = "a hiring manager's need" if kind == "person" else "a job seeker's ask"
-    return (f"You judge, row by row, whether each of these {rows} FITS the BRIEF ({brief}). Return ONLY JSON: "
+    return (f"You judge, row by row, whether each of these {rows} FITS the BRIEF ({brief}: the person's own words, then what is REQUIRED "
+            "and what is merely PREFERRED). Return ONLY JSON: "
             "{\"verdicts\": [{\"id\": the row id exactly as shown in brackets (e.g. \"r3\"), \"fit\": \"yes\" | \"partial\" | \"no\", \"why\": ≤ 8 words}]}, one verdict per row. "
-            "yes = the row's role, domain, level tier and place (when the brief states one) all agree with the brief. "
-            "partial = one dimension is off or unstated: a level one step away, an adjacent specialty, a place or level shown as —. "
-            "no = a different role or domain, a different level tier (an individual contributor for an executive brief and the reverse), "
-            "or a resemblance that is keyword-only (the same word in another sense). Judge ONLY from the facts shown on the row; "
-            "— means unknown and unknown is never a 'no' on its own. Never judge from a name.")
+            "yes = the row's role family, domain and level tier agree with the brief and nothing REQUIRED is contradicted. "
+            "partial = the same kind of role but one dimension is off or unstated: a level one step away, an adjacent specialty, a PREFERRED "
+            "skill or place missing, a level or place shown as —. "
+            "no = a different role family or domain, a different level tier (an individual contributor for an executive brief and the reverse), "
+            "something REQUIRED contradicted, or a resemblance that is keyword-only (the same word in another sense). "
+            "Skills are PREFERENCES unless listed as required: a row of the right role and tier that lacks a preferred skill is 'partial', never 'no'. "
+            "Judge ONLY from the facts shown on the row; — means unknown and unknown is never a 'no' on its own. Never judge from a name.")
+
+
+def judge_brief(kind: str, text: str, contract: dict | None) -> str:
+    """The BRIEF the judge reads: the person's own words plus what the ratified contract REQUIRES and PREFERS (the same
+    for every recipe, so the judge stays blind to the recipe while knowing a skill is a wish, not a bar)."""
+    c = contract or {}
+    L = lambda k, vs: ", ".join(option_label(k, str(v)) for v in (vs if isinstance(vs, list) else [vs]))
+    req = "; ".join(f"{k.replace('_', ' ')}: {L(k, v)}" for k, v in (c.get("must") or {}).items() if v)
+    pref = "; ".join(f"{k.replace('_', ' ')}: {L(k, v)}" for k, v in (c.get("prefer") or {}).items() if v)
+    ctr = c.get("center") or {}
+    centre = f"{str(ctr.get('key') or '').replace('_', ' ')} around {option_label(str(ctr.get('key') or ''), str(ctr.get('value') or ''))}" if ctr.get("key") and ctr.get("value") else ""
+    parts = [f"WORDS: {(text or '').strip()[:1200]}", f"REQUIRED: {req or '(nothing beyond the words)'}", f"PREFERRED: {pref or '(none stated)'}"]
+    if centre:
+        parts.append(f"LEVEL: {centre} (a step away is partial)")
+    return "\n".join(parts)
 
 
 def judge_row(kind: str, bid: str, row: dict, line: str = "") -> str:

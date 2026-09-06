@@ -98,3 +98,10 @@ def test_the_judge_row_is_one_shape_for_every_row_with_dashes_for_the_unknown():
     assert "Never judge from a name" in judge_prompt("person") and "OPEN POSTINGS" in judge_prompt("job")
     alts = reading_alternatives([{"rule": "readings", "readings": [{"value": "crm", "field": "software", "share": 0.62}, {"value": "crm", "field": "marketing", "share": 0.21}, {"value": "x", "field": "software", "share": 0.9}]}])
     assert [a["value"] for a in alts] == ["software", "marketing"] and alts[1]["key"] == "field"
+
+
+def test_the_judge_brief_separates_the_words_from_what_is_required_and_preferred():
+    from roster_vertical.intake import judge_brief
+    b = judge_brief("job", "my next role. Python, Go", {"must": {"metro": ["new_york"]}, "prefer": {"skill": ["go", "python"], "level": ["senior"]}, "center": {"key": "level", "value": "senior", "span": 1}})
+    assert b.startswith("WORDS: my next role. Python, Go\nREQUIRED: metro: new york\nPREFERRED: skill: go, python; level: senior\nLEVEL: level around senior")
+    assert "REQUIRED: (nothing beyond the words)" in judge_brief("person", "x", {})

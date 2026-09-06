@@ -153,7 +153,9 @@ async def merged_search(c: Contract, *, kind: str, user_keys: set, notes: list[d
     """One search over several recipes, merged. Returns the evaluate shape (rows / counts / coverage / contract /
     labels — counts and coverage are the ratified contract's, the rail's shared layer) plus `merge`: the recipes
     with their numbers, the judge's tallies, WEAK. Rows carry `fit`, `fit_why`, `found_by`."""
-    from roster_vertical.intake import JUDGE_HEAD, MERGE_RRF_K, RELAXABLE_KEYS, SELF_STATED_EVIDENCE, WEAK_FITS, judge_prompt, judge_row, reading_alternatives
+    from roster_vertical.intake import JUDGE_HEAD, MERGE_RRF_K, RELAXABLE_KEYS, SELF_STATED_EVIDENCE, WEAK_FITS, judge_brief, judge_prompt, judge_row, reading_alternatives
+    import time as _t
+    t0 = _t.monotonic(); timings: dict = {}
     off = [str(x) for x in (off or [])]
     ladder = recipes(c, user_keys=set(user_keys or ()), relaxable_keys=set(RELAXABLE_KEYS), readings=reading_alternatives(notes))
     kept = [r for r in ladder if r.name not in off] or ladder[:1]
@@ -161,9 +163,11 @@ async def merged_search(c: Contract, *, kind: str, user_keys: set, notes: list[d
     surv = survivors(kept, {r.name: n for r, n in zip(kept, sizes)})
     if not surv:
         surv = kept[:1]
+    timings["probe"] = round(_t.monotonic() - t0, 2); t1 = _t.monotonic()
     for r in surv:
         r.contract.limit = top
     outs = await asyncio.gather(*[evaluate_fn(r.contract.to_dict()) for r in surv])
+    timings["evaluate"] = round(_t.monotonic() - t1, 2); t2 = _t.monotonic()
     lists = {r.name: list(o.get("rows") or []) for r, o in zip(surv, outs)}
     fused = rrf_fuse(lists, k=MERGE_RRF_K)
     head = fused[:JUDGE_HEAD]
@@ -174,12 +178,13 @@ async def merged_search(c: Contract, *, kind: str, user_keys: set, notes: list[d
             lines = await lines_fn([_rid(r) for r in head]) or {}
         except Exception:   # noqa: BLE001
             lines = {}
+    timings["lines"] = round(_t.monotonic() - t2, 2); t3 = _t.monotonic()
     seed = int(hashlib.sha1((c.text or "").encode("utf-8")).hexdigest()[:8], 16)
     items, mapping = blind(head, seed=seed, id_of=_rid)
     verdicts: dict = {}
     judge_error = None
     if items:
-        user = ("BRIEF: " + (c.text or "")[:1200] + "\n\nROWS:\n" + "\n".join(judge_row(kind, bid, r, lines.get(_rid(r), "")) for bid, r in items))
+        user = ("BRIEF\n" + judge_brief(kind, c.text or "", c.to_dict()) + "\n\nROWS:\n" + "\n".join(judge_row(kind, bid, r, lines.get(_rid(r), "")) for bid, r in items))
         try:
             d = await asyncio.to_thread(llm_json, judge_prompt(kind), user)
             for v in (d.get("verdicts") or []):
@@ -191,6 +196,7 @@ async def merged_search(c: Contract, *, kind: str, user_keys: set, notes: list[d
                     verdicts[rid] = {"fit": fit, "why": str(v.get("why") or "")[:80]}
         except Exception as e:   # noqa: BLE001 — no judge → fused order stands, honestly ungraded
             judge_error = str(e)[:120]
+    timings["judge"] = round(_t.monotonic() - t3, 2); timings["total"] = round(_t.monotonic() - t0, 2)
     ordered = order_by_verdicts(fused, verdicts, head=JUDGE_HEAD, id_of=_rid)
     weak_ids = {_rid(r) for r in head if all(str(e) in SELF_STATED_EVIDENCE for e in ((r.get("facets") or {}).get("evidence") or [""]))}
     tallies = {k: sum(1 for v in verdicts.values() if v["fit"] == k) for k in ("yes", "partial", "no")}
@@ -210,7 +216,7 @@ async def merged_search(c: Contract, *, kind: str, user_keys: set, notes: list[d
     merge = {"recipes": per_recipe, "off": [n for n in off if any(x.name == n for x in ladder)], "ladder": [x.name for x in ladder],
              "head": len(head), "graded": len(verdicts), "fits": tallies["yes"], "partials": tallies["partial"], "nos": tallies["no"],
              "weak": bool(items) and tallies["yes"] < WEAK_FITS, "judge_error": judge_error,
-             "prec10": head_precision(ordered, verdicts, k=10, weak_ids=weak_ids, id_of=_rid), "union": len(fused)}
+             "prec10": head_precision(ordered, verdicts, k=10, weak_ids=weak_ids, id_of=_rid), "union": len(fused), "timings": timings}
     out = {"rows": rows, "counts": strict.get("counts") or {}, "coverage": dict(strict.get("coverage") or {}), "contract": strict.get("contract") or c.to_dict(),
            "labels": strict.get("labels"), "merge": merge}
     if log_fn is not None:

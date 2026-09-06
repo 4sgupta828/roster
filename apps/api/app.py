@@ -1329,6 +1329,8 @@ class JudgeIn(BaseModel):                  # the blind fit judge (evals): brief 
     kind: str = "person"
     brief: str = Field(min_length=1, max_length=4000)
     rows: list[dict] = Field(default_factory=list, max_length=60)
+    provider: str | None = None           # "alt" = a different provider from the in-product judge (agreement bias, §12.11)
+    contract: dict | None = None          # the ratified contract: what is REQUIRED vs PREFERRED rides into the brief
 
 
 class MapCadenceIn(BaseModel):
@@ -6441,7 +6443,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         """The blind fit judge on its own (spec §12.5 / §12.10 — the paired eval grades both arms' union once, blind).
         Rows are normalized server-side to the judge's fixed shape from a few allowed fields; ≤ 60 rows; one call."""
         from roster_kernel.facets.contract_search import blind, resolve_blind_id
-        from roster_vertical.intake import judge_prompt, judge_row
+        from roster_vertical.intake import judge_brief, judge_prompt, judge_row
         kind = "person" if body.kind == "person" else "job"
         rows = []
         for r in (body.rows or [])[:60]:
@@ -6455,8 +6457,14 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             return {"verdicts": {}, "graded": 0}
         import hashlib as _h
         items, mapping = blind(rows, seed=int(_h.sha1(body.brief.encode("utf-8")).hexdigest()[:8], 16))
-        user = "BRIEF: " + body.brief[:1200] + "\n\nROWS:\n" + "\n".join(judge_row(kind, bid, r, r.get("blurb") or "") for bid, r in items)
-        d = await asyncio.to_thread(getattr(app.state, "intake_llm", None) or _llm_json, judge_prompt(kind), user)
+        user = "BRIEF\n" + judge_brief(kind, body.brief, body.contract) + "\n\nROWS:\n" + "\n".join(judge_row(kind, bid, r, r.get("blurb") or "") for bid, r in items)
+        fn = getattr(app.state, "intake_llm", None) or _llm_json
+        if body.provider == "alt" and getattr(app.state, "intake_llm", None) is None:
+            from api.model_json import llm_json as _lj, providers as _prov
+            names = [p[0] for p in _prov()]
+            alt = names[1] if len(names) > 1 else (names[0] if names else None)
+            fn = (lambda sy, us: _lj(sy, us, timeout=60, prefer=alt))
+        d = await asyncio.to_thread(fn, judge_prompt(kind), user)
         verdicts = {}
         for v in (d.get("verdicts") or []):
             rid = resolve_blind_id(mapping, v.get("id")) if isinstance(v, dict) else None
