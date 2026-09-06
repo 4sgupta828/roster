@@ -936,6 +936,10 @@
   .fdiag-h{font-weight:600;margin-bottom:.3rem;}
   .fdiag-row{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;justify-content:space-between;padding:.15rem 0;}
   .fdiag-drop{min-height:34px;}
+  .frail-done{color:var(--verified);font-weight:600;}
+  .frail-done b{color:var(--gold-strong);}
+  .newtag{font-family:var(--mono);font-size:.56rem;text-transform:uppercase;letter-spacing:.08em;color:var(--gold-strong);border:1px solid rgba(var(--gold-rgb),.55);border-radius:999px;padding:.05rem .4rem;vertical-align:middle;margin-left:.3rem;}
+  .frail.busy .frail-apply::after{content:" running…";color:var(--muted);font-weight:400;}
   @media (max-width:560px){ .tgt-route{min-width:100%;} .tgt-opt{flex:1 1 auto;text-align:center;} }
   /* Intake v2: retrieval-vocabulary chips on the ready card */
   .tgt-chips{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1rem;}
@@ -2929,7 +2933,7 @@ function jobsMarkup(d){
     const fchip = (key, label) => { const v = (jf[key]||[])[0]; if(!v) return ""; const txt = key === "comp" ? (jd.comp || LB[v] || v) : (LB[v] || String(v).replace(/_/g," ")); const pv = String(jp[key]||""); return `<span class="ppl-tag" title="${esc(label)}: ${esc(txt)} — ${esc(PROV[pv.split(':')[0]] || pv || "model facet")}">${esc(txt)}</span>`; };
     const facetLine = Object.keys(jf).length ? `<span class="ppl-tags" style="gap:.25rem;">${fchip("field","Field")}${fchip("function","Function")}${fchip("level","Level")}${fchip("work_type","Work type")}${fchip("work_mode","Work mode")}${fchip("employment_type","Employment")}${fchip("comp","Compensation")}${fchip("company_type","Company type")}</span>` : "";
     return `<div class="ppl-card job-card" data-jref="${esc(String(jref))}" title="Click for a summary of this posting">${jsave}<span class="ppl-body">
-      <span class="ppl-name">${esc(j.title)}${pct}</span>
+      <span class="ppl-name">${esc(j.title)}${pct}${j._new ? ` <span class="newtag" title="Not in the previous result">new</span>` : ""}</span>
       <span class="ppl-blurb">${co}${j.source?` · via ${esc(j.source)}`:""}${jr}</span>
       ${loc||dept?`<span class="ppl-tags">${loc}${dept}</span>`:""}
       ${facetLine}
@@ -3043,9 +3047,10 @@ function peopleRowsMarkup(data){
     const saveBtn = `<button type="button" class="rsave" data-kind="person" data-ref="${esc(ref)}" data-label="${esc(p.name||"")}" data-sub="${esc((p.blurb||"").slice(0,140))}" data-url="${esc(profileUrl||"")}" title="Save to a shortlist">☆</button>`;
     const reachBtn = `<button type="button" class="rsave rmsg" data-ref="${esc(ref)}" title="Reach out on their shared channels">✉</button>`;
     const acts = `<div class="ppl-acts">${saveBtn}${reachBtn}</div>`;
+    const newTag = p._new ? ` <span class="newtag" title="Not in the previous result">new</span>` : "";
     const nameHtml = (profileUrl
-      ? `<a class="ppl-name" href="${esc(profileUrl)}" target="_blank" rel="noopener noreferrer">${esc(p.name)}<span class="ppl-ext">↗</span></a>`
-      : `<span class="ppl-name">${esc(p.name)}</span>`);
+      ? `<a class="ppl-name" href="${esc(profileUrl)}" target="_blank" rel="noopener noreferrer">${esc(p.name)}<span class="ppl-ext">↗</span></a>${newTag}`
+      : `<span class="ppl-name">${esc(p.name)}</span>${newTag}`);
     // LinkedIn HEADLINE (self-stated, quoted from a search-engine snippet — never read from
     // linkedin.com) + how well it fits the brief; shown once the cohort enrichment has run.
     const liH = (p.linkedin && p.linkedin.headline) || (attr("linkedin_headline").display || "");
@@ -7717,7 +7722,7 @@ function facetRailMarkup(d){
   const saveBtn = (d._map_id && d._map_owner && d._applied) ? `<button type="button" class="histbtn frail-save" data-jpid="${esc(d._jpid)}" title="Record this navigated view as a revision of the map (same link)">💾 Save these filters to the map</button>` : "";
   const applyBar = n ? `<div class="frail-apply"><b>${n} change${n===1?"":"s"} pending</b> — nothing runs until you apply.
       <button type="button" class="idgo frail-go" data-jpid="${esc(d._jpid)}">Apply</button><button type="button" class="histbtn frail-reset" data-jpid="${esc(d._jpid)}">Reset</button></div>`
-    : `<div class="frail-apply">Tap chips to stage changes, then apply once.${d._applied ? ` <span style="color:var(--verified)">Applied ✓</span>` : ""} ${saveBtn}</div>`;
+    : `<div class="frail-apply">${d._applied && d._delta ? `<span class="frail-done">Applied ✓ — ${d._delta.after} shown${d._delta.added ? ` · <b>${d._delta.added} new</b>` : ""}${d._delta.removed ? ` · ${d._delta.removed} dropped` : ""}${!d._delta.added && !d._delta.removed ? " · same rows, order may differ" : ""}${(d._delta.prevPool != null && d._delta.pool != null && d._delta.prevPool !== d._delta.pool) ? ` · pool ${d._delta.prevPool} → ${d._delta.pool}` : ""}</span> ` : "Tap chips to stage changes, then apply once. "}${saveBtn}</div>`;
   const empty = (cov.diagnosis && !facetPending(d)) ? diagnosisMarkup({...cov.diagnosis, best_match: cov.best_match}, d._jpid, L) : "";
   return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}"><div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
 }
@@ -7741,9 +7746,18 @@ function rerenderRail(jpid){
   const el = document.querySelector(`.frail[data-jpid="${CSS.escape(jpid)}"]`); if(!el) return;
   el.outerHTML = facetRailMarkup(d);
 }
+function rowKey(r){ return String(r.entity_id || r.id || ((r.company||"")+"|"+(r.title||"")+"|"+(r.location||""))); }
+function rowsDelta(before, after){
+  const b = new Set((before||[]).map(rowKey)), a = new Set((after||[]).map(rowKey));
+  let added = 0, kept = 0; a.forEach(k => { if(b.has(k)) kept++; else added++; });
+  let removed = 0; b.forEach(k => { if(!a.has(k)) removed++; });
+  return {added, removed, kept, before: b.size, after: a.size, newKeys: a};
+}
 async function facetReevaluate(jpid, contract, save){
   const d = facetRenderOf(jpid); if(!d) return;
-  d._busy = true; d._applied = false; rerenderRail(jpid);
+  const prevRows = Array.isArray(d.people_rows) ? d.people_rows.slice() : (d.jobs||[]).slice();
+  const prevPool = (d.coverage||{}).pool;
+  d._busy = true; d._applied = false; d._delta = null; rerenderRail(jpid);
   try{
     const r = d._map_id
       ? await fetch(`/maps/${encodeURIComponent(d._map_id)}/navigate`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({contract, save: !!save, t: d._map_token||""})})
@@ -7751,6 +7765,10 @@ async function facetReevaluate(jpid, contract, save){
     const out = await r.json();
     if(!r.ok){ d._busy = false; rerenderRail(jpid); alert(out.detail || "Couldn't apply those changes."); return; }
     d.contract = out.contract; d._draft = null; d.counts = out.counts; d.coverage = out.coverage; d.labels = out.labels || d.labels;
+    // WHAT CHANGED (owner, 2026-09-06): the delta against the rows shown before this Apply, and a "new" badge
+    const delta = rowsDelta(prevRows, out.rows || []); const beforeKeys = new Set(prevRows.map(rowKey));
+    (out.rows||[]).forEach(r => { r._new = !beforeKeys.has(rowKey(r)); });
+    d._delta = {...delta, prevPool: prevPool, pool: (out.coverage||{}).pool};
     if((out.contract||{}).kind === "person" || Array.isArray(d.people_rows)){
       // TALENT: the evaluator's rows replace the cohort (card-shaped, evidence attached); paging restarts
       d.people_rows = out.rows || []; d._page = 0; d._busy = false; d._applied = true; d._reranked = false;
