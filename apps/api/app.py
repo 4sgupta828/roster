@@ -2050,6 +2050,30 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             app.state._gap_thread = t
 
     @app.on_event("startup")
+    async def _warm_facet_slices() -> None:
+        """WARM-UP (2026-09-05): the first evaluate after a deploy paid ~25 s of cold database buffers on the facet
+        table and the embedding client's start; warm the common slices (all, the selector country) for both kinds,
+        and one embedding, in the background so the first user does not."""
+        if not os.environ.get("ROSTER_CORPUS_DSN") or not facet_evaluator_enabled():
+            return
+
+        async def _warm():
+            await asyncio.sleep(5)
+            try:
+                from api.people_population import embed_query
+                await asyncio.to_thread(embed_query, "warm up")
+            except Exception:   # noqa: BLE001
+                pass
+            for kind in ("job", "person"):
+                for must in ({}, {"country": ["us"]}):
+                    try:
+                        await _facet_nav(kind, text="", must=must, scope={"country": "us"})
+                    except Exception:   # noqa: BLE001
+                        pass
+            print("[facets] warm-up done", flush=True)
+        app.state._facet_warm_task = asyncio.create_task(_warm())
+
+    @app.on_event("startup")
     async def _start_map_refresh_loop() -> None:
         """KEEP-FRESH loop (ROSTER_MAP_REFRESH_LOOP=1, default on): every 10 minutes refresh the maps whose
         cadence is due, capped at ROSTER_MAP_REFRESH_MAX_DAY per day (a talent-map re-run costs cents; a

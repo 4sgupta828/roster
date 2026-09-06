@@ -353,6 +353,11 @@ Nothing is deleted before its replacement runs behind the flag on prod for one d
   whenever the compile names a role / field / level / skill / place; the old engine keeps person-name lookups
   (a compile with only a company, or nothing) and follow-up refinement turns (`refine_facets` / `prior_person`).
   The People tab's evidence chips → `must evidence`; its level selector → `center`; the selector country → `must`.
+- Latency (2026-09-05): counts materialize the slice once (temp table), SAMPLE above 40k entities (1-in-N hash,
+  scaled, `coverage.counts_sampled` → "counts ≈" on the rail) and cache 10 min per must-set inside the store;
+  retrieval legs run concurrently, prefer legs only for the two heaviest non-set keys. People evaluate: 1–4 s
+  uncached, a Talent brief end to end ≈ 10 s; the first touch after a deploy is cold (DB buffers) — the API warms
+  the common slices at startup.
 - Known gaps: `role_family` pills show the key label only; the pool for a brief with no musts is the semantic
   top-K (cap ≈ limit × 6), so counts are index-wide while rows are the nearest; navigation on a map with no
   contract (saved before this work) says so and asks for a fresh search.
