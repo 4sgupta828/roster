@@ -216,3 +216,21 @@ def test_with_text_the_pool_is_the_semantic_neighbourhood_only():
     assert [r["id"] for r in out["rows"]] == ["r1"] and out["coverage"]["legs"]["enumerate"] == 0
     out2 = asyncio.new_event_loop().run_until_complete(evaluate(Contract(kind="e", must={"c": ["us"]}, rank_by="lv"), Store(rows, sch), sch))
     assert [r["id"] for r in out2["rows"]] == ["r2", "r1"]                                  # no text → enumerate, ordinal desc
+
+
+def test_an_empty_slice_names_the_must_that_empties_it():
+    import asyncio
+    from roster_kernel.facets import Contract, FacetKey, FacetSchema, FacetType, InMemoryFacetStore, evaluate
+    sch = FacetSchema(keys=(FacetKey(key="lv", type=FacetType.ordinal, kinds=("e",), values=("a", "b", "c")),
+                            FacetKey(key="ct", type=FacetType.categorical, kinds=("e",), values=("x", "y")),
+                            FacetKey(key="m", type=FacetType.set, kinds=("e",))))
+    rows = [{"id": f"r{i}", "kind": "e", "sim": 0.5, "facets": {"lv": ["a"], "ct": ["x"], "m": ["p"]}} for i in range(20)]
+    rows += [{"id": "z", "kind": "e", "sim": 0.5, "facets": {"lv": ["c"], "ct": ["y"], "m": ["q"]}}]
+    st = InMemoryFacetStore(rows, sch)
+    out = asyncio.new_event_loop().run_until_complete(evaluate(Contract(kind="e", must={"lv": ["a"], "ct": ["y"], "m": ["p"]}), st, sch))
+    assert out["rows"] == []
+    d = out["coverage"]["diagnosis"]
+    assert d["pool"] == 0 and d["keys"][0]["key"] == "ct" and d["keys"][0]["without"] == 20 and d["keys"][0]["alone"] == 1
+    assert {k["key"] for k in d["keys"]} == {"lv", "ct", "m"}
+    ok = asyncio.new_event_loop().run_until_complete(evaluate(Contract(kind="e", must={"lv": ["a"]}), st, sch))
+    assert "diagnosis" not in ok["coverage"]                                           # a healthy slice is not diagnosed

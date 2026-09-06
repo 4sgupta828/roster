@@ -127,4 +127,40 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
     counts = await store.counts(contract.kind, must, schema, depth=depth)
     coverage = {"pool": len(rows), "legs": legs, "excluded": len(excl), "unknown": {k.key: unknown_by_key.get(k.key, 0) for k in schema.for_kind(contract.kind) if k.navigable and k.type is not FacetType.set},
                 "noise_floor": floor}
+    # an EMPTY (or near-empty) slice with musts → say which must is doing it (leave-one-out; a few counts calls)
+    slice_total = pool_from_counts(counts, schema, contract.kind)
+    if must and (not rows or (slice_total is not None and slice_total < 5)):
+        try:
+            coverage["diagnosis"] = await diagnose_musts(contract, lambda k, m: store.counts(k, m, schema), schema)
+        except Exception:   # noqa: BLE001 — a diagnosis is an aid
+            pass
     return {"rows": rows[: int(contract.limit)], "counts": counts, "coverage": coverage, "contract": contract.to_dict()}
+
+
+def pool_from_counts(counts: dict | None, schema: FacetSchema, kind: str) -> int | None:
+    """The must-slice size read off the counts: the total (known + unknown) of any navigable single-valued key.
+    None when the counts carry no such key."""
+    for k in schema.for_kind(kind):
+        if k.navigable and k.type is not FacetType.set and not k.via and (counts or {}).get(k.key):
+            return int(sum(int(v) for v in counts[k.key].values()))
+    return None
+
+
+async def diagnose_musts(contract: Contract, counts_fn, schema: FacetSchema) -> dict:
+    """WHY is the slice empty (or nearly)? Leave-one-out over the musts: the slice size with each must removed,
+    and with each must alone. `counts_fn(kind, must) -> counts` is the store's counts (one call per must, twice).
+    The caller words it; this only measures. Keys sorted by how much removing them restores."""
+    must = dict(contract.must or {})
+    kind = contract.kind
+    base = pool_from_counts(await counts_fn(kind, must), schema, kind) or 0
+    keys = []
+    for key in must:
+        without = {k: v for k, v in must.items() if k != key}
+        alone = {key: must[key]}
+        n_without = pool_from_counts(await counts_fn(kind, without), schema, kind) or 0
+        n_alone = pool_from_counts(await counts_fn(kind, alone), schema, kind) or 0
+        vals = must[key]
+        keys.append({"key": key, "values": (list(vals) if isinstance(vals, list) else vals), "without": n_without, "alone": n_alone,
+                     "label": (schema.key(key).label if schema.key(key) else key)})
+    keys.sort(key=lambda d: (-d["without"], d["alone"]))
+    return {"pool": base, "keys": keys}

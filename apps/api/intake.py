@@ -160,7 +160,7 @@ class IntakeService:
             c.center = {"key": "level", "value": lv, "span": 1}
         return c.to_dict()
 
-    def _ready(self, st: IntakeState, counts: dict, transcript: list, note: str = "") -> dict:
+    async def _ready(self, st: IntakeState, counts: dict, transcript: list, note: str = "") -> dict:
         V = self._vocab()
         st.contract = self._with_intent(st, str(getattr(self, "_opening", "") or ""))
         c = Contract.from_dict(st.contract)
@@ -168,8 +168,16 @@ class IntakeService:
         if errs:                                                                 # never hand off an illegal contract
             c = Contract(kind=c.kind, text=c.text, scope=c.scope, limit=c.limit); st.contract = c.to_dict()
         understood = V.understood_words(st.direction, st.contract, st.answers)
+        pool = self._pool(counts)
+        diagnosis = None
+        if pool < 5 and (c.must or {}) and self.counts_fn is not None:
+            try:
+                from roster_kernel.facets import diagnose_musts
+                diagnosis = await diagnose_musts(c, self.counts_fn, self.schema)
+            except Exception:   # noqa: BLE001
+                diagnosis = None
         return {"direction": st.direction, "search_kind": V.SEARCH_KIND.get(st.direction), "understood": understood, "contract": st.contract,
-                "counts": counts, "pool": self._pool(counts), "artifact": dict(st.artifact), "advice": self._advice(st, counts),
+                "counts": counts, "pool": pool, "diagnosis": diagnosis, "artifact": dict(st.artifact), "advice": self._advice(st, counts),
                 "checklist": dict(st.checklist), "answers": dict(st.answers), "note": note,
                 "offer_improve": any(v == "answered" for v in st.checklist.values()),
                 "transcript_audit": transcript[-TRANSCRIPT_CAP:]}
@@ -217,7 +225,7 @@ class IntakeService:
             st2 = search_now_state(st)
             counts = await self._counts(st2) if st2.contract else {}
             st = st2
-            return pack("ready", ready=self._ready(st, counts, transcript))
+            return pack("ready", ready=await self._ready(st, counts, transcript))
 
         # 1) DIRECTION
         if not st.direction:
@@ -250,6 +258,15 @@ class IntakeService:
                 if b and b.get("text"):
                     text, source, brief_id = str(b["text"]), "saved", int(b["id"])
             elif av == "draft" and st.artifact.get("kind") == "jd" and self.draft_fn is not None:
+                if len(opening) >= 40:
+                    # the opening words already name the role ("hire a CTO for my startup to lead a 10–15 person team…"):
+                    # draft from them now instead of asking again
+                    try:
+                        draft = await self.draft_fn(opening, {"your words": opening})
+                    except Exception:   # noqa: BLE001
+                        draft = None
+                    if draft:
+                        return pack("artifact", question=self._draft_question(draft))
                 q = {"kind": "draft_context", "name": "jd", "key": "", "words": V.DRAFT_CONTEXT_WORDS, "hint": "one or two sentences is plenty",
                      "options": [], "free_text": True, "klass": ""}
                 return pack("artifact", question=q)
@@ -257,13 +274,14 @@ class IntakeService:
                 text, source = str(draft["text"]), "drafted"
                 brief_id = (answer or {}).get("brief_id")
             elif pending and pending.get("kind") == "draft_context" and message and self.draft_fn is not None:
+                role_text = (opening + ". " + message).strip(". ") if opening and opening != message else message   # never the reply alone ("Keep going")
                 try:
-                    draft = await self.draft_fn(message, {"context": message})
+                    draft = await self.draft_fn(role_text, {"your words": opening, "added": message} if opening else {"your words": message})
                 except Exception:   # noqa: BLE001
                     draft = None
                 if draft:
                     return pack("artifact", question=self._draft_question(draft))
-                text, source = message, "described"                                  # no draft → the words are the JD for now
+                text, source = role_text, "described"                                # no draft → the words are the JD for now
             elif pending and pending.get("kind") == "draft" and message and draft and self.redraft_fn is not None:
                 try:
                     draft = await self.redraft_fn(draft, message)
@@ -315,11 +333,11 @@ class IntakeService:
                 except Exception:   # noqa: BLE001 — fail-safe READY (spec §3): never a dead end
                     counts = await self._counts(st)
                     st = search_now_state(st)
-                    return pack("ready", ready=self._ready(st, counts, transcript, note="I couldn't read that reply, so here is the search with what I have — adjust it with the chips."))
+                    return pack("ready", ready=await self._ready(st, counts, transcript, note="I couldn't read that reply, so here is the search with what I have — adjust it with the chips."))
         counts = await self._counts(st)
         q = self._next(st, counts)
         if q is None:
-            return pack("ready", ready=self._ready(st, counts, transcript))
+            return pack("ready", ready=await self._ready(st, counts, transcript))
         return pack("questions", question=self._question_payload(q, st))
 
     async def improve(self, *, state: dict) -> dict:

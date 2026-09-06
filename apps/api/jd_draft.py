@@ -108,7 +108,7 @@ def render_text(draft: dict) -> str:
 async def build_jd_draft(*, role_text: str, context: dict, evaluate_fn: Callable[[dict], Awaitable[dict]],
                          summaries_fn: Callable[[list[dict]], Awaitable[dict]], compile_fn: Callable[..., Contract],
                          llm_json: Callable[[str, str], dict], n_peers: int = 10, pool: int = 40, share: float = 0.30,
-                         prefer: dict | None = None) -> dict:
+                         prefer: dict | None = None, min_match: int = 35) -> dict:
     from roster_vertical.intake import draft_prompt, group_prompt
     # 1) peers
     try:
@@ -125,7 +125,10 @@ async def build_jd_draft(*, role_text: str, context: dict, evaluate_fn: Callable
         for k, v in prefer.items():
             c.prefer.setdefault(k, list(v))
     out = await evaluate_fn(c.to_dict())
-    peers = dedupe_peers(list(out.get("rows") or []), n_peers)
+    # only postings that actually resemble the role count as peers (calibrated match above the noise floor);
+    # "Keep going" as a role text once produced ten ICU-nurse peers
+    relevant = [r for r in (out.get("rows") or []) if r.get("match_pct") is None or int(r.get("match_pct") or 0) >= min_match]
+    peers = dedupe_peers(relevant, n_peers)
     # 2) requirement lines from the peers' summaries
     summaries = await summaries_fn(peers) if peers else {}
     lines = peer_lines(peers, summaries)
@@ -140,7 +143,8 @@ async def build_jd_draft(*, role_text: str, context: dict, evaluate_fn: Callable
             centre, optional = [], []
     # 3) the draft
     ctx_lines = [f"{k.replace('_', ' ')}: {v}" for k, v in (context or {}).items() if v]
-    user = ("MANAGER'S CONTEXT AND MUST-HAVES (cite as \"you\"):\n" + ("\n".join(ctx_lines) if ctx_lines else role_text) + "\n\n"
+    user = ("MANAGER'S ROLE — the title, level and team come from HERE (cite as \"you\"): " + role_text[:600] + "\n"
+            + "MANAGER'S CONTEXT AND MUST-HAVES (cite as \"you\"):\n" + ("\n".join(ctx_lines) if ctx_lines else "(none beyond the role text)") + "\n\n"
             + "CENTRE (recurs across peers):\n" + ("\n".join(f"{g['id']} [{g['kind']}] {g['label']} — {g['count']} of {len(peers)} peers" for g in centre) or "(none — draft from the manager's words only)")
             + "\n\nSOME PEERS ALSO ASK:\n" + ("\n".join(f"{g['id']} [{g['kind']}] {g['label']} — {g['count']} of {len(peers)}" for g in optional[:12]) or "(none)"))
     try:

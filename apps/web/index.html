@@ -929,6 +929,10 @@
   .tgt-added{background:rgba(var(--gold-rgb),.16);border-radius:4px;}
   .tgt-improve-offer{margin-top:.7rem;}
   .briefrow{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.4rem 0;border-bottom:1px solid var(--hair);font-size:.86rem;}
+  .fdiag{background:rgba(var(--gold-rgb),.08);border:1px solid rgba(var(--gold-rgb),.4);border-radius:10px;padding:.55rem .7rem;margin:.3rem 0 .6rem;font-size:.8rem;line-height:1.45;}
+  .fdiag-h{font-weight:600;margin-bottom:.3rem;}
+  .fdiag-row{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;justify-content:space-between;padding:.15rem 0;}
+  .fdiag-drop{min-height:34px;}
   @media (max-width:560px){ .tgt-route{min-width:100%;} .tgt-opt{flex:1 1 auto;text-align:center;} }
   /* Intake v2: retrieval-vocabulary chips on the ready card */
   .tgt-chips{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1rem;}
@@ -5532,6 +5536,7 @@ function renderTriageReady(rd){
       <div class="tgt-refined">${esc(rd.understood || "")}</div>
       <div class="tgt-understood">${esc(artLine)}</div>
       <div class="frail-pills" style="margin-bottom:.8rem;">${chips.join("") || '<span class="tgt-q-hint">No filters — the words alone rank the results.</span>'}</div>
+      ${rd.diagnosis && (rd.pool||0) < 5 ? diagnosisMarkup(rd.diagnosis, "__ready__", null) : ""}
       ${advice ? `<ul class="tgt-advice">${advice}</ul>` : ""}
       <div class="tgt-routes">${dirBtn}</div>
       ${improve}
@@ -5541,6 +5546,20 @@ function renderTriageReady(rd){
   tbody().querySelectorAll(".tgt-route").forEach(b => b.addEventListener("click", () => routeTriage(b.dataset.route, (c.text || rd.understood || ""), rd)));
   const rs = $("#tgt-restart"); if(rs) rs.addEventListener("click", () => setMode("triage", {fresh:true}));
   const ib = $("#tgt-improve"); if(ib) ib.addEventListener("click", () => intakeImprove(rd));
+  tbody().querySelectorAll(".fdiag-drop").forEach(b => b.addEventListener("click", async () => {
+    // drop the must from the ratified contract, re-count, re-render the card
+    let vals = []; try{ vals = JSON.parse(b.dataset.values); }catch(err){}
+    const c2 = JSON.parse(JSON.stringify(rd.contract || {})); c2.must = c2.must || {};
+    if(Array.isArray(vals)){ c2.must[b.dataset.key] = (c2.must[b.dataset.key]||[]).filter(v => !vals.map(String).includes(String(v))); if(!c2.must[b.dataset.key].length) delete c2.must[b.dataset.key]; }
+    else delete c2.must[b.dataset.key];
+    rd.contract = c2;
+    try{
+      const r = await fetch("/search/evaluate", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({contract: c2})});
+      const out = await r.json();
+      if(r.ok){ rd.contract = out.contract; rd.counts = out.counts; rd.pool = (out.coverage||{}).pool || 0; rd.diagnosis = (out.coverage||{}).diagnosis || null; }
+    }catch(err){}
+    INTAKE.ready = rd; renderTriageReady(rd);
+  }));
   triageScroll();
 }
 // IMPROVE & SAVE (spec §2.2): a fuller artifact from the original + the answers only; the added lines are marked;
@@ -7684,7 +7703,20 @@ function facetRailMarkup(d){
   const applyBar = n ? `<div class="frail-apply"><b>${n} change${n===1?"":"s"} pending</b> — nothing runs until you apply.
       <button type="button" class="idgo frail-go" data-jpid="${esc(d._jpid)}">Apply</button><button type="button" class="histbtn frail-reset" data-jpid="${esc(d._jpid)}">Reset</button></div>`
     : `<div class="frail-apply">Tap chips to stage changes, then apply once.${d._applied ? ` <span style="color:var(--verified)">Applied ✓</span>` : ""} ${saveBtn}</div>`;
-  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}"><div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
+  const empty = (cov.diagnosis && !facetPending(d)) ? diagnosisMarkup(cov.diagnosis, d._jpid, L) : "";
+  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}"><div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
+}
+// EMPTY RESULT → which must is doing it (leave-one-out from the evaluator), with one-tap Drop (staged)
+function diagnosisMarkup(diag, jpid, L){
+  if(!diag || !(diag.keys||[]).length) return "";
+  const lab = (k, v) => { const vl = ((L||{}).values||{})[v]; return vl || String(v).replace(/_/g, " "); };
+  const rows = diag.keys.slice(0, 5).map(k => {
+    const vals = Array.isArray(k.values) ? k.values.map(v => lab(k.key, v)).join(" / ") : JSON.stringify(k.values);
+    const gain = k.without - (diag.pool||0);
+    return `<div class="fdiag-row"><span>● <b>${esc(((L||{}).keys||{})[k.key] || k.label || k.key)}</b>: ${esc(vals)} — without it <b>${k.without.toLocaleString()}</b>${gain > 0 ? "" : " (not the cause)"}</span>
+      ${gain > 0 ? `<button type="button" class="histbtn fdiag-drop" data-jpid="${esc(jpid)}" data-key="${esc(k.key)}" data-values="${esc(JSON.stringify(k.values))}">Drop</button>` : ""}</div>`;
+  }).join("");
+  return `<div class="fdiag"><div class="fdiag-h">${diag.pool ? `Only ${diag.pool} match all of these` : "Nothing matches all of these"} — the filters doing it, most first:</div>${rows}<div class="tgt-q-hint">Drop stages the change; Apply runs it. A dropped filter can still rank: tap its chip to ▲ prefer.</div></div>`;
 }
 function rerenderRail(jpid){
   const d = facetRenderOf(jpid); if(!d) return;
@@ -7722,6 +7754,13 @@ document.addEventListener("click", (e)=>{
   if(sv){ e.preventDefault(); const d = facetRenderOf(sv.dataset.jpid); if(d && d.contract) facetReevaluate(sv.dataset.jpid, d.contract, true); return; }
   const rs = e.target.closest && e.target.closest(".frail-reset");
   if(rs){ e.preventDefault(); const d = facetRenderOf(rs.dataset.jpid); if(d){ d._draft = null; rerenderRail(rs.dataset.jpid); } return; }
+  const dr = e.target.closest && e.target.closest(".fdiag-drop");
+  if(dr){ e.preventDefault(); const d = facetRenderOf(dr.dataset.jpid); if(!d || !d.contract) return;
+    let vals = []; try{ vals = JSON.parse(dr.dataset.values); }catch(err){}
+    let c = facetDraft(d);
+    if(Array.isArray(vals)) vals.forEach(v => { c = facetEdit(c, dr.dataset.key, v, "off"); });
+    else { c = JSON.parse(JSON.stringify(c)); if(c.must) delete c.must[dr.dataset.key]; }      // a numeric range must
+    d._draft = c; rerenderRail(dr.dataset.jpid); return; }
   const ch = e.target.closest && e.target.closest(".fchip, .fpill button");
   if(!ch || ch.disabled) return;
   e.preventDefault(); e.stopPropagation();

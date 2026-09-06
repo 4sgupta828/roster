@@ -116,3 +116,18 @@ def test_peers_are_the_similarity_neighbourhood_only_the_field_filters():
         return Contract(kind=kind, text=text, must={"field": ["software"], "metro": ["san_francisco"], "skill": ["kafka", "ledger"]}, limit=limit)
     _run(build_jd_draft(role_text="payments engineer", context={}, evaluate_fn=evaluate_fn, summaries_fn=summaries_fn, compile_fn=strict, llm_json=FakeLLM()))
     assert seen["must"] == {"field": ["software"]} and sorted(seen["prefer"]["skill"]) == ["kafka", "ledger"] and seen["prefer"]["metro"] == ["san_francisco"]
+
+
+def test_peers_below_the_relevance_floor_do_not_form_a_centre():
+    """'Keep going' as a role text once drafted an ICU-nurse JD from ten irrelevant 'peers'."""
+    low = [dict(r, match_pct=8) for r in ROWS]
+    async def evaluate_fn(c): return {"rows": low}
+    async def summaries_fn(peers): return _summaries(peers)
+    class OnlyDraft(FakeLLM):
+        def __call__(self, system, user):
+            if "group" in system and "requirement lines" in system:
+                raise AssertionError("no grouping on irrelevant peers")
+            assert "MANAGER'S ROLE" in user and "hire a CTO" in user
+            return {"title": "CTO", "summary": "s", "responsibilities": [], "must_have": [{"text": "led a 10–15 person team", "source": "you"}], "nice_to_have": []}
+    d = _run(build_jd_draft(role_text="hire a CTO for my startup to lead a 10-15 person team", context={}, evaluate_fn=evaluate_fn, summaries_fn=summaries_fn, compile_fn=_compile, llm_json=OnlyDraft()))
+    assert d["sparse"] and d["peers"] == [] and d["title"] == "CTO" and d["must_have"][0]["support"] == {"you": True}

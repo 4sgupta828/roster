@@ -343,3 +343,36 @@ def test_chip_answers_appear_in_the_transcript_in_conversation_order():
     assert ("user", "senior") in roles
     i = roles.index(("user", "senior"))
     assert roles[i - 1][0] == "assistant" and roles[i + 1][0] == "assistant"      # question · answer · next question
+
+
+def test_an_empty_ready_names_the_must_to_drop():
+    s = _service()
+    out = _run(s.step(message="I'm hiring", state=None))
+    jd = "Backend Engineer, Payments. " + "You will own our ledger services and money movement. " * 5
+    out = _run(s.step(message=jd, state=out["state"]))
+    # force an impossible combination through answers: level leadership AND metro 'nowhere'
+    out = _run(s.step(answer={"name": out["question"]["name"], "value": "leadership" if out["question"]["name"] == "level" else out["question"]["options"][0][0]}, state=out["state"]))
+    st = out["state"]; st["kernel"]["contract"]["must"]["metro"] = ["nowhere"]
+    out = _run(s.step(search_now=True, state=st))
+    rd = out["ready"]
+    assert rd["pool"] == 0 and rd["diagnosis"] and rd["diagnosis"]["keys"][0]["key"] == "metro"
+    assert rd["diagnosis"]["keys"][0]["without"] > 0
+
+
+def test_a_rich_opening_drafts_without_the_context_question_and_a_reply_never_replaces_it():
+    seen = []
+    async def draft_fn(role_text, context):
+        seen.append(role_text); return {"title": "CTO", "text": "CTO\n\nMust have\n- led a team\n", "must_have": [], "peers": [], "centre": [], "optional": [], "market": {}, "sparse": True}
+    s = _service(); s.draft_fn = draft_fn
+    opening = "I am looking to hire CTO for my company (startup) to lead 10-15 people engineering team. Distributed cloud systems, ML infra, streaming."
+    out = _run(s.step(message=opening, state=None))
+    assert out["state"]["kernel"]["direction"] == "candidate"
+    out = _run(s.step(answer={"name": "jd", "value": "draft"}, state=out["state"]))
+    assert out["question"]["kind"] == "draft" and seen and "hire CTO" in seen[0]          # no context question: the opening carries the role
+    # a thin opening still asks, and the reply is COMBINED with the opening
+    seen.clear(); s2 = _service(); s2.draft_fn = draft_fn
+    out = _run(s2.step(message="I'm hiring", state=None))
+    out = _run(s2.step(answer={"name": "jd", "value": "draft"}, state=out["state"]))
+    assert out["question"]["kind"] == "draft_context"
+    out = _run(s2.step(message="Keep going", state=out["state"]))
+    assert out["question"]["kind"] == "draft" and seen and seen[0].startswith("I'm hiring")
