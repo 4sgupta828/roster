@@ -102,8 +102,8 @@ def _merged_fixture():
         if "skill" in cd["must"]:
             return "strict" if "field" in cd["must"] else "default"
         return "relaxed:skill"
-    async def evaluate_fn(cd):
-        calls["evaluate"].append(cd); n = name_of(cd)
+    async def evaluate_fn(cd, depth=None):
+        calls["evaluate"].append({**cd, "_depth": depth}); n = name_of(cd)
         return {"rows": rows[n], "counts": {"field": {"software": 5}}, "coverage": {"pool": len(rows[n])}, "contract": cd, "labels": {"values": {}}}
     async def slice_fn(kind, must):
         calls["slices"].append(dict(must)); return 0 if must.get("field") == ["nowhere"] else 10
@@ -134,7 +134,7 @@ def test_merged_search_fuses_survivors_judges_the_head_blind_and_orders_fits_fir
     notes = [{"rule": "readings", "readings": [{"value": "crm", "field": "marketing", "share": 0.3}]}]
     out = _run(merged_search(c, kind="person", user_keys=set(), notes=notes, evaluate_fn=evaluate_fn, slice_fn=slice_fn, llm_json=llm, lines_fn=lines_fn, log_fn=log_fn))
     m = out["merge"]
-    assert [r["name"] for r in m["recipes"]] == ["strict", "default", "relaxed:skill", "reading:field=marketing"] and calls["judge"] == 2   # two concurrent batches
+    assert [r["name"] for r in m["recipes"]] == ["strict", "default", "relaxed:skill", "reading:field=marketing"] and calls["judge"] == __import__("roster_vertical.intake", fromlist=["JUDGE_BATCHES"]).JUDGE_BATCHES   # concurrent batches
     ids = [r["id"] for r in out["rows"]]
     assert ids[:3] == ["p1", "p3", "p9"] or ids[:3] == ["p1", "p9", "p3"]                      # fits first (p1 agreed by two recipes)
     assert ids[-1] == "p5" and out["rows"][-1]["fit"] == "no"                                    # the 'no' sinks with its verdict
@@ -142,6 +142,7 @@ def test_merged_search_fuses_survivors_judges_the_head_blind_and_orders_fits_fir
     assert m["fits"] == 3 and m["nos"] == 1 and m["graded"] == 9 and m["weak"] is False and m["union"] == 9
     assert out["counts"] == {"field": {"software": 5}} and out["contract"]["must"] == {"field": ["software"], "skill": ["kafka"]}   # the rail keeps the ratified contract
     assert calls["log"] and calls["log"][0]["tallies"]["yes"] == 3 and calls["log"][0]["recipes"][0]["name"] == "strict"
+    assert calls["evaluate"][0]["_depth"] is None and all(e["_depth"] == {"counts": False} for e in calls["evaluate"][1:])   # counts once, for the ratified contract
 
 
 def test_switched_off_recipes_and_empty_pools_are_left_out_and_a_failed_judge_leaves_fused_order():

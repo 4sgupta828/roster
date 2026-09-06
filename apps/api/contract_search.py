@@ -167,7 +167,8 @@ async def merged_search(c: Contract, *, kind: str, user_keys: set, notes: list[d
     timings["probe"] = round(_t.monotonic() - t0, 2); t1 = _t.monotonic()
     for r in surv:
         r.contract.limit = top
-    outs = await asyncio.gather(*[evaluate_fn(r.contract.to_dict()) for r in surv])
+    # only the ratified contract's counts feed the rail; the other recipes return rows only (their slice counts are the slow part)
+    outs = await asyncio.gather(*[(evaluate_fn(r.contract.to_dict()) if i == 0 else evaluate_fn(r.contract.to_dict(), depth={"counts": False})) for i, r in enumerate(surv)])
     timings["evaluate"] = round(_t.monotonic() - t1, 2); t2 = _t.monotonic()
     lists = {r.name: list(o.get("rows") or []) for r, o in zip(surv, outs)}
     fused = rrf_fuse(lists, k=MERGE_RRF_K)

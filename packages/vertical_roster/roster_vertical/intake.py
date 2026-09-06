@@ -188,7 +188,7 @@ LEVEL_WORK_TYPES = {"leadership": ("executive", "founder", "manager")}
 # the DEFAULT recipe: the compile's own reading of these keys ranks instead of filtering (the user's chips never move)
 LADDER_DEFAULT_KEYS = ("field", "function", "work_type", "company_type", "employment_type", "level")
 JUDGE_HEAD = 40               # fused rows graded by the blind judge
-JUDGE_BATCHES = 2             # the head is graded in this many concurrent calls (wall time, not cost)
+JUDGE_BATCHES = 3             # the head is graded in this many concurrent calls (wall time, not cost)
 MERGE_RRF_K = 60
 JUDGE_PARTIAL = 0.4           # a partial fit's weight in head precision (inflation guard)
 JUDGE_WEAK_YES = 0.8          # a 'yes' on a row whose evidence is only self-stated

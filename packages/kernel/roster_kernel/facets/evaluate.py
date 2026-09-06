@@ -156,7 +156,8 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
                 return (0, -max(idx)) if idx else (1, 0)
             rows.sort(key=lambda r: (_ord(r), -r["score"], str(r.get("id"))))
     # 5) COUNTS over the must-filtered index slice (the store's job) + COVERAGE
-    counts = await store.counts(contract.kind, must, schema, depth=depth)
+    # depth {"counts": False} = rows only (a caller that merges several evaluates keeps ONE contract's counts)
+    counts = {} if (depth or {}).get("counts") is False else await store.counts(contract.kind, must, schema, depth=depth)
     coverage = {"pool": len(rows), "legs": legs, "excluded": len(excl), "unknown": {k.key: unknown_by_key.get(k.key, 0) for k in schema.for_kind(contract.kind) if k.navigable and k.type is not FacetType.set},
                 "noise_floor": floor}
     # an EMPTY (or near-empty) slice with musts → say which must is doing it (leave-one-out; a few counts calls)
