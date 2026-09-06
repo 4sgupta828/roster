@@ -340,6 +340,14 @@ Nothing is deleted before its replacement runs behind the flag on prod for one d
   `max_scan_tuples` 40k) so a must no longer truncates recall to the first 200 candidates; small must-slices take
   an exact-distance path; `ix_rs_job_facet_eid` makes the job must correlation indexable. Schema guidance: a
   "founding engineer" is an early hire (ic, level as stated), not leadership — 503 founding-titled postings re-read.
+- Ranking law v2 (owner report "field has no influence", 2026-09-05): rank = calibrated match points + BOUNDED
+  preference points (weight × 50 per hit, ≤ 3 hits per key) − avoid points − centre steps; and every preferred key
+  gets its OWN retrieval leg (the nearest rows holding a preferred value join the pool), because a preference that
+  never reaches the pool cannot rank. `field` is the strongest signal both ways (prefer 0.25 = 12.5 points per
+  hit; avoid 0.30). Verified: prefer field=marketing pulls marketing-field managers into positions 4 and 6 of a
+  CRM search; must field=marketing yields exactly the 9 matching managers. Vocabulary note: "marketing
+  engineering" is field=software + specialty / skills (CRM, Salesforce), not field=marketing (that selects
+  marketers) — the rail's Skills / Specialty chips are the right lever there.
 - Known gaps: `role_family` pills show the key label only; the pool for a brief with no musts is the semantic
   top-K (cap ≈ limit × 6), so counts are index-wide while rows are the nearest; navigation on a map with no
   contract (saved before this work) says so and asks for a fresh search.
