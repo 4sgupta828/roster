@@ -79,6 +79,7 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
     for r in rows:
         sim = float(r.get("sim") or 0.0)
         score, reasons = sim, []
+        avoid_pen = 0.0
         for key, vals in (contract.prefer or {}).items():
             hits = [v for v in _vals(r, key) if v in {str(x) for x in vals}]
             if hits:
@@ -88,7 +89,8 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
             hits = [v for v in _vals(r, key) if v in {str(x) for x in vals}]
             if hits:
                 n = min(len(hits), w.max_hits_per_key)
-                score -= n * float(w.avoid.get(key, w.default_avoid)); reasons.append(f"avoid {_label(schema, key)}: " + ", ".join(hits[:3]))
+                pen = n * float(w.avoid.get(key, w.default_avoid))
+                score -= pen; avoid_pen += pen; reasons.append(f"avoid {_label(schema, key)}: " + ", ".join(hits[:3]))
         if ckey:
             have = _vals(r, ckey)
             d = min((schema.ordinal_distance(ckey, h, cval) for h in have if schema.ordinal_distance(ckey, h, cval) is not None), default=None)
@@ -105,11 +107,19 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
                 unknown_by_key[k.key] = unknown_by_key.get(k.key, 0) + 1
         r["score"] = round(score, 6)
         r["match_pct"] = calibrated_pct(sim, floor)
+        # the relevance BAND: similarity less the avoid penalties (an avoid is a judgment that crosses bands — the
+        # wrong field ranks below the right one however similar); prefers and the centre only reorder within it
+        r["_band"] = int(calibrated_pct(sim - avoid_pen, floor)) // 5
         r["reasons"] = reasons
-    # 4) RANK
+    # 4) RANK — with text, RELEVANCE is the primary axis: 5-point bands of the calibrated match; preferences,
+    # avoids and the centre reorder WITHIN a band (a +0.1 bonus per preferred value must never lift a 25 %
+    # match above a 60 % one — prod 2026-09-05: generic managers with repos outranked the Salesforce people)
     rb = contract.rank_by or "match"
     if rb == "match":
-        rows.sort(key=lambda r: (-r["score"], str(r.get("id"))))
+        if contract.text:
+            rows.sort(key=lambda r: (-int(r.get("_band", 0)), -r["score"], str(r.get("id"))))
+        else:
+            rows.sort(key=lambda r: (-r["score"], str(r.get("id"))))
     else:
         k = schema.key(rb)
         if k is not None and k.type is FacetType.numeric:
@@ -135,10 +145,13 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
     coverage["weak"] = weak
     if must and (not rows or weak or (slice_total is not None and slice_total < 5)):
         try:
-            coverage["diagnosis"] = await diagnose_musts(contract, lambda k, m: store.counts(k, m, schema), schema)
+            coverage["diagnosis"] = await diagnose_musts(contract, lambda k, m: store.counts(k, m, schema), schema,
+                                                         semantic_fn=(lambda k, t, m: store.semantic(k, t, m, cap=60)) if weak else None, floor=floor)
             coverage["diagnosis"]["reason"] = "empty" if not rows else ("weak" if weak else "small")
         except Exception:   # noqa: BLE001 — a diagnosis is an aid
             pass
+    for r in rows:
+        r.pop("_band", None)
     return {"rows": rows[: int(contract.limit)], "counts": counts, "coverage": coverage, "contract": contract.to_dict()}
 
 
@@ -151,10 +164,11 @@ def pool_from_counts(counts: dict | None, schema: FacetSchema, kind: str) -> int
     return None
 
 
-async def diagnose_musts(contract: Contract, counts_fn, schema: FacetSchema) -> dict:
-    """WHY is the slice empty (or nearly)? Leave-one-out over the musts: the slice size with each must removed,
-    and with each must alone. `counts_fn(kind, must) -> counts` is the store's counts (one call per must, twice).
-    The caller words it; this only measures. Keys sorted by how much removing them restores."""
+async def diagnose_musts(contract: Contract, counts_fn, schema: FacetSchema, semantic_fn=None, floor: float | None = None) -> dict:
+    """WHY is the result empty, tiny or WEAK? Leave-one-out over the musts: the slice size with each must removed
+    and with each alone (`counts_fn(kind, must) -> counts`), and — when `semantic_fn(kind, text, must) -> rows`
+    is given and the contract has text — the BEST calibrated match without each must. The caller words it; this
+    only measures. Keys sorted by the best match restored, then by the rows restored."""
     must = dict(contract.must or {})
     kind = contract.kind
     base = pool_from_counts(await counts_fn(kind, must), schema, kind) or 0
@@ -165,7 +179,14 @@ async def diagnose_musts(contract: Contract, counts_fn, schema: FacetSchema) -> 
         n_without = pool_from_counts(await counts_fn(kind, without), schema, kind) or 0
         n_alone = pool_from_counts(await counts_fn(kind, alone), schema, kind) or 0
         vals = must[key]
-        keys.append({"key": key, "values": (list(vals) if isinstance(vals, list) else vals), "without": n_without, "alone": n_alone,
-                     "label": (schema.key(key).label if schema.key(key) else key)})
-    keys.sort(key=lambda d: (-d["without"], d["alone"]))
+        item = {"key": key, "values": (list(vals) if isinstance(vals, list) else vals), "without": n_without, "alone": n_alone,
+                "label": (schema.key(key).label if schema.key(key) else key)}
+        if semantic_fn is not None and contract.text:
+            try:
+                rows = await semantic_fn(kind, contract.text, without)
+                item["best_without"] = max((calibrated_pct(float(r.get("sim") or 0.0), floor) for r in rows), default=0)
+            except Exception:   # noqa: BLE001
+                pass
+        keys.append(item)
+    keys.sort(key=lambda d: (-d.get("best_without", 0), -d["without"], d["alone"]))
     return {"pool": base, "keys": keys}

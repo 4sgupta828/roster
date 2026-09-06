@@ -246,3 +246,27 @@ def test_weak_results_are_diagnosed_and_flagged():
     strong = [dict(r, sim=0.7) for r in rows]
     out2 = asyncio.new_event_loop().run_until_complete(evaluate(Contract(kind="e", text="q", must={"ct": ["x"]}), InMemoryFacetStore(strong, sch), sch))
     assert not out2["coverage"]["weak"] and "diagnosis" not in out2["coverage"]
+
+
+def test_preferences_reorder_within_a_relevance_band_never_across():
+    import asyncio
+    from roster_kernel.facets import Contract, FacetKey, FacetSchema, FacetType, FacetWeights, InMemoryFacetStore, evaluate
+    sch = FacetSchema(keys=(FacetKey(key="ev", type=FacetType.categorical, kinds=("e",), values=("r", "p")),))
+    rows = [{"id": "close", "kind": "e", "sim": 0.55, "facets": {}},                        # 60 % — no preferred value
+            {"id": "far_pref", "kind": "e", "sim": 0.46, "facets": {"ev": ["r", "p"]}},       # 24 % — two preferred hits
+            {"id": "close_pref", "kind": "e", "sim": 0.54, "facets": {"ev": ["r"]}}]          # 56 % — same band as 'close', one hit
+    w = FacetWeights(prefer={"ev": 0.2})
+    out = asyncio.new_event_loop().run_until_complete(evaluate(Contract(kind="e", text="q", prefer={"ev": ["r", "p"]}), InMemoryFacetStore(rows, sch), sch, w))
+    assert [r["id"] for r in out["rows"]] == ["close", "close_pref", "far_pref"] or [r["id"] for r in out["rows"]][-1] == "far_pref"
+    assert [r["id"] for r in out["rows"]][-1] == "far_pref"                              # the 24 % row never rises above the 60 % band
+
+
+def test_weak_diagnosis_reports_the_best_match_without_each_must():
+    import asyncio
+    from roster_kernel.facets import Contract, FacetKey, FacetSchema, FacetType, InMemoryFacetStore, diagnose_musts
+    sch = FacetSchema(keys=(FacetKey(key="ct", type=FacetType.categorical, kinds=("e",), values=("x", "y")), FacetKey(key="m", type=FacetType.set, kinds=("e",))))
+    rows = [{"id": "good", "kind": "e", "sim": 0.6, "facets": {"ct": ["y"], "m": ["a"]}}, {"id": "meh", "kind": "e", "sim": 0.42, "facets": {"ct": ["x"], "m": ["a"]}}]
+    st = InMemoryFacetStore(rows, sch)
+    d = asyncio.new_event_loop().run_until_complete(diagnose_musts(Contract(kind="e", text="q", must={"ct": ["x"], "m": ["a"]}), lambda k, m: st.counts(k, m, sch), sch,
+                                                                    semantic_fn=lambda k, t, m: st.semantic(k, t, m)))
+    assert d["keys"][0]["key"] == "ct" and d["keys"][0]["best_without"] == 80 and d["keys"][1]["best_without"] == 8

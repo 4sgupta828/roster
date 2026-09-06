@@ -7728,7 +7728,8 @@ function diagnosisMarkup(diag, jpid, L){
   const rows = diag.keys.slice(0, 5).map(k => {
     const vals = Array.isArray(k.values) ? k.values.map(v => lab(k.key, v)).join(" / ") : JSON.stringify(k.values);
     const gain = k.without - (diag.pool||0);
-    return `<div class="fdiag-row"><span>● <b>${esc(((L||{}).keys||{})[k.key] || k.label || k.key)}</b>: ${esc(vals)} — without it <b>${k.without.toLocaleString()}</b>${gain > 0 ? "" : " (not the cause)"}</span>
+    const best = (k.best_without != null) ? ` · best match <b>${k.best_without}%</b>` : "";
+    return `<div class="fdiag-row"><span>● <b>${esc(((L||{}).keys||{})[k.key] || k.label || k.key)}</b>: ${esc(vals)} — without it <b>${k.without.toLocaleString()}</b>${best}${gain > 0 || k.best_without != null ? "" : " (not the cause)"}</span>
       ${gain > 0 ? `<button type="button" class="histbtn fdiag-drop" data-jpid="${esc(jpid)}" data-key="${esc(k.key)}" data-values="${esc(JSON.stringify(k.values))}">Drop</button>` : ""}</div>`;
   }).join("");
   const head = diag.reason === "weak" ? `Weak matches — the closest is ${diag.best_match != null ? diag.best_match + "%" : "low"}. The filters keeping closer people out, most first:`
