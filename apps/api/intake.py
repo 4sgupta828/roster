@@ -135,7 +135,11 @@ class IntakeService:
                 v = ", ".join(str(x) for x in v[:6])
             return str(v or "").strip()
         parts = [str(opening or "").strip()[:200]]
-        for k in ("title", "current_role", "field", "skills", "must_skills", "specialty", "location", "target_level"):
+        # a job seeker's CURRENT title is a fact about them, not the ask ("Founder in Residence" pulled founder roles);
+        # it only stands in when the user gave no words of their own
+        keys = ("title", "field", "skills", "must_skills", "specialty", "location", "target_level") if (parts[0] and st.direction == "job") \
+            else ("title", "current_role", "field", "skills", "must_skills", "specialty", "location", "target_level")
+        for k in keys:
             v = one(k)
             if v and v.lower() not in parts[0].lower():
                 parts.append(V.option_label(k, v) if k in ("field", "target_level") else v)

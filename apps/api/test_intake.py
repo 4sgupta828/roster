@@ -322,3 +322,12 @@ def test_the_search_text_is_the_conversations_intent_not_the_artifact_and_level_
     assert c["center"] == {"key": "level", "value": "leadership", "span": 1} and "level" not in c["must"]
     assert len(c["text"]) <= 400 and "engineering leadership role in ML infra" in c["text"] and "feature stores" not in c["text"]
     assert "centred on leadership" in rd["understood"]
+
+
+def test_the_current_title_never_becomes_the_search_when_the_user_said_what_they_want():
+    resume = "Sam Doe. Founder in Residence at Studio X (2024–now). Before: Head of ML Infrastructure. Kubernetes, Ray, feature stores."
+    s = _service(profile={"_resume_text": resume})
+    out = _run(s.step(message="looking for a hands-on engineering leadership role in ML infra", state=None, direction="job", user={"id": "u1"}))
+    out = _run(s.step(search_now=True, state=out["state"]))
+    text = out["ready"]["contract"]["text"].lower()
+    assert "founder in residence" not in text and "ml infra" in text

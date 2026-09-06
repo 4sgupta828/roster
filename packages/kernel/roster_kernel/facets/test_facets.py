@@ -200,3 +200,19 @@ def test_via_relation_facets_filter_and_count_like_own_facets():
     out = _run(evaluate(Contract(kind="thing", text="q", must={"maker_tier": ["a"]}, limit=10), store, s, FacetWeights()))
     assert [r["id"] for r in out["rows"]] == ["t1"] and out["counts"]["maker_tier"] == {"a": 1}
     assert count_rows(_rows(), s, "thing")["maker_tier"] == {"a": 1, UNKNOWN: 4}
+
+
+def test_with_text_the_pool_is_the_semantic_neighbourhood_only():
+    """A must + text never pulls unrelated rows in through the enumerate leg (prod 2026-09-05: rank_by level put
+    'Store Manager' first because enumerate added it with sim 0)."""
+    import asyncio
+    from roster_kernel.facets import Contract, FacetKey, FacetSchema, FacetType, InMemoryFacetStore, evaluate
+    sch = FacetSchema(keys=(FacetKey(key="lv", type=FacetType.ordinal, kinds=("e",), values=("a", "b", "c")), FacetKey(key="c", type=FacetType.set, kinds=("e",))))
+    rows = [{"id": "r1", "kind": "e", "sim": 0.9, "facets": {"lv": ["a"], "c": ["us"]}}, {"id": "r2", "kind": "e", "sim": 0.0, "facets": {"lv": ["c"], "c": ["us"]}}]
+    class Store(InMemoryFacetStore):
+        async def semantic(self, kind, text, must, *, cap=400):
+            return [dict(r) for r in self._filtered(kind, must) if float(r.get("sim") or 0) > 0][:cap]
+    out = asyncio.new_event_loop().run_until_complete(evaluate(Contract(kind="e", text="q", must={"c": ["us"]}, rank_by="lv"), Store(rows, sch), sch))
+    assert [r["id"] for r in out["rows"]] == ["r1"] and out["coverage"]["legs"]["enumerate"] == 0
+    out2 = asyncio.new_event_loop().run_until_complete(evaluate(Contract(kind="e", must={"c": ["us"]}, rank_by="lv"), Store(rows, sch), sch))
+    assert [r["id"] for r in out2["rows"]] == ["r2", "r1"]                                  # no text → enumerate, ordinal desc

@@ -59,7 +59,9 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
         _take(await store.semantic(contract.kind, contract.text, must, cap=cap), "semantic")
         for a in (contract.angles or [])[:5]:
             _take(await store.semantic(contract.kind, str(a), must, cap=cap // 2), "angles")
-    if must or not contract.text:
+    if not contract.text:
+        # no text → the must-slice itself is the pool. WITH text the pool is the semantic neighbourhood only: an
+        # enumerate leg would pour unrelated rows (sim 0) into it, and rank_by an ordinal then sorts them first
         _take(await store.enumerate(contract.kind, must, cap=cap), "enumerate")
     # 2) the contract is the law: re-filter (leaky-pool invariant) + explicit exclusions
     excl = {str(x) for x in (contract.exclude_ids or [])}
