@@ -5361,6 +5361,7 @@ function triageMsgHtml(m){ return `<div class="tgt-msg ${m.role==='user'?'user':
 let INTAKE = {state: null, busy: false, last: null, ready: null};
 function renderTriage(fresh){
   if(fresh){ INTAKE = {state: null, busy: false, last: null, ready: null}; TRIAGE = {transcript: [], busy: false, refined: "", register: "", urgent: false}; q.value = ""; autoGrow(); }
+  if(!fresh && INTAKE.ready){ renderTriageReady(INTAKE.ready); return; }   // coming back to the tab after a hand-off: the ready card, not a dead transcript
   const transcript = (INTAKE.state && INTAKE.state.transcript) || [];
   document.body.classList.toggle("triage-live", transcript.length > 0);
   const pending = INTAKE.last && INTAKE.last.question;
@@ -6719,11 +6720,18 @@ function newConversation(){
   window.ACTIVE_MAP = null;            // …and leaves any saved-map view
   PEOPLE_CTX = null; JOBS_CTX = null; PENDING_PERSON = null; PENDING_CTX = ""; EVIDENCE_KINDS = new Set(); JOB_MUST = new Set(); LEVEL = ""; LEVEL_SPAN = 1; renderEvFilters();  // …and both tabs' refinement conversations start fresh
   GUIDED_REFINED = false;
+  // Guided intake state goes too — whichever tab is showing (a stale intake must never greet the next visit)
+  INTAKE = {state: null, busy: false, last: null, ready: null};
+  TRIAGE = {transcript: [], refined: "", register: "", urgent: false, busy: false};
+  PENDING_INTAKE_TRANSCRIPT = null;
   document.body.classList.remove("chatting"); out.style.paddingBottom = "";   // back to landing layout
   out.innerHTML = "";
   q.value=""; q.style.height="auto";
   if(APP_MODE === "panel"){ closePanel(); return; }   // New chat from panel → back to Q&A landing
-  if(APP_MODE === "triage"){ TRIAGE = {transcript: [], busy: false, refined: "", register: "", urgent: false}; setMode("qa"); return; }
+  if(APP_MODE === "triage"){                          // New search ON the Guided tab: a fresh intake, same tab
+    renderTriage(true); q.setAttribute("placeholder", "Tell me what you're after — a role for you, or a hire for your team…");
+    window.scrollTo({top:0}); q.focus(); return;
+  }
   try{ history.replaceState(null, "", location.pathname + location.search); }catch(e){}
   q.setAttribute("placeholder", pickPlaceholder());  // fresh question each New chat
   window.scrollTo({top:0}); q.focus();
