@@ -531,6 +531,23 @@ marginal drop needs absolute scarcity (< 1,000) → ADOPTED; bimodal co-occurren
 `slice_size` probe (tens of ms); U from `answers` / `asked`; people judge needs one batched profile fetch;
 jobs disjunction = two readings; ladder after post-compile edits; two caches — all folded in.
 
+### 12.12b SMART RELAXING (owner, 2026-09-06 — LIVE, no flag)
+
+"Adjust filters from strict to preferred if results are not sufficient, the least important first, and keep going; strive
+for a good number of results — few results close the user's mind." Mechanics: kernel `relax_steps` / `demote` (pure;
+the vertical supplies the importance order), app `relax_to_enough`: the must-slice is probed (tens of ms) and relaxed
+until it holds `RELAX_MIN_SLICE` (200); then the search runs and, while it returns fewer than `RELAX_TARGET_ROWS` (30),
+one more must relaxes per evaluate (≤ 3 evaluates). Order (least → most important): skill, specialty, role_family,
+evidence, company_type, employment_type, comp, work_mode, work_type, function, metro, state, company, level. The
+compile's musts go before the user's own chips; `country` (the scope) and `field` (the domain) never relax — a
+different field is not "more results". A relaxed must becomes a PREFERENCE (ranks first), never an avoid; dropping a
+preference would not add a row (preferences never shrink the pool), so must → prefer is the whole loop. Where: every
+FIRST search (Guided hand-offs, plain Jobs / Talent, résumé matches, `/search/evaluate` with `relax: true`); a rail
+Apply never relaxes — the chips run as set. The rail's "Showing more" block names each relaxed filter (the user's own
+marked), and its chip already sits at ▲ prefer so one tap restores it. Eval: `impossible_musts_diagnosed` expects a
+relaxed hand-off with rows. Seen while building: the compile once read "public company" as a company NAME — a must on
+a key the loop could not relax returned zero rows, hence `company` in the order.
+
 ### 12.13 Delivery order
 
 Status 2026-09-06: **step 1 LIVE** — `apps/api/contract_search.py` (`index_aware`), kernel
