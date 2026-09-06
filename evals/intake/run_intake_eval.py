@@ -191,6 +191,19 @@ class Run:
         for v in e.get("musts_exclude_values") or []:
             if any(v in [str(x) for x in vals] for vals in (c.get("must") or {}).values() if isinstance(vals, list)):
                 F(f"must carries {v!r}")
+        for key in e.get("must_excludes_keys") or []:
+            if key in (c.get("must") or {}):
+                F(f"must still carries {key!r} ({c['must'][key]}) — the place-or-mode rule did not fire")
+        for v in e.get("must_field_not") or []:
+            if v in [str(x) for x in ((c.get("must") or {}).get("field") or [])]:
+                F(f"field must is {v!r} — the co-occurrence correction did not fire")
+        if "keeps_specific_constraint_any" in e:
+            keys = set(c.get("must") or {}) | set(c.get("prefer") or {})
+            if not any(k in keys for k in e["keeps_specific_constraint_any"]):
+                F(f"no specific constraint survived among {e['keeps_specific_constraint_any']}: must={list((c.get('must') or {}).keys())} prefer={list((c.get('prefer') or {}).keys())}")
+        for rule in e.get("notes_rules_include") or []:
+            if not any(n.get("rule") == rule for n in ((self.ready or {}).get("notes") or [])):
+                F(f"no {rule!r} note on the ready card ({[n.get('rule') for n in (self.ready or {}).get('notes') or []]})")
         if "skill_musts_max" in e and len((c.get("must") or {}).get("skill") or []) > e["skill_musts_max"]:
             F(f"{len(c['must']['skill'])} skill musts (> {e['skill_musts_max']})")
         if "musts_max_keys" in e and len(c.get("must") or {}) > e["musts_max_keys"]:

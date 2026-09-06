@@ -54,6 +54,10 @@ CHECKLIST: dict[str, tuple[Item, ...]] = {
     ),
 }
 
+# Keys a compiled must may be DEMOTED on when it collapses the pool (spec §12.4.2): open-phrase / many-valued sets.
+# Geo keys are set-typed too but are promises the index keeps — they are relaxed only by the place-or-mode rule.
+RELAXABLE_KEYS = ("skill", "specialty", "role_family")
+
 # Contract keys the intake must know before a search runs (asked regardless of the corpus) and the keys it may
 # ask about when the pool is split on them (spec §0.2).
 REQUIRED_KEYS = {"job": ["field", "level", "metro"], "candidate": ["field", "level", "metro"]}

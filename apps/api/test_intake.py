@@ -416,3 +416,33 @@ def test_a_plain_talent_map_brief_runs_the_evaluator_and_a_name_lookup_does_not(
     assert "pool of" in (d["coverage_basis"] or {}).get("population_statement", "")
     d2 = c.post("/research", json={"question": "Mukul Gupta at Cisco", "tenant_id": "demo", "surface": "people"}).json()
     assert not d2.get("facet_nav") and "unavailable" in (d2.get("answer") or "")                     # the engine path (no people store in tests)
+
+
+def test_the_index_aware_step_runs_at_compile_and_at_ready_and_its_notes_reach_the_card():
+    calls = []
+    async def ia(c, *, kind, user_keys, place_or_mode):
+        calls.append((kind, set(user_keys), place_or_mode))
+        c2 = Contract.from_dict(c.to_dict())
+        if "metro" in c2.must and "metro" not in user_keys:
+            c2.prefer["metro"] = c2.must.pop("metro")
+            return c2, [{"rule": "place_or_mode", "key": "metro", "action": "must → prefer", "why": "remote or Seattle"}]
+        return c2, []
+    s = _service(); s.index_aware_fn = ia
+    def compile_fn(kind, text, *, limit=60, scope=None, extras=None):
+        if isinstance(extras, dict): extras["place_or_mode"] = True
+        return Contract(kind=kind, text=text[:200], must={"field": ["software"], "metro": ["seattle"]}, limit=limit)
+    s.compile_fn = compile_fn
+    out = _run(s.step(message="I'm hiring", state=None))
+    out = _run(s.step(message="Backend Engineer, Payments. Remote US or Seattle. " + "Own our ledger services. " * 8, state=out["state"]))
+    k = out["state"]["kernel"]
+    assert "metro" not in k["contract"]["must"] and k["contract"]["prefer"]["metro"] == ["seattle"]
+    assert calls and calls[0][2] is True and out["state"]["notes"][0]["rule"] == "place_or_mode"
+    # answering the metro question makes it the user's own → the next index-aware pass sees it in U
+    while out["stage"] != "ready" and out["question"]["name"] != "location":
+        out = _run(s.step(answer={"name": out["question"]["name"], "value": "__decline__"}, state=out["state"]))
+    if out["stage"] != "ready":
+        out = _run(s.step(answer={"name": "location", "value": "seattle"}, state=out["state"]))
+    out = _run(s.step(search_now=True, state=out["state"]))
+    rd = out["ready"]
+    assert rd["notes"] and rd["notes"][0]["rule"] == "place_or_mode"
+    assert any("metro" in uk for _, uk, _ in calls[1:]) or rd["contract"]["must"].get("metro") == ["seattle"]

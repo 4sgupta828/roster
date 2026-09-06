@@ -943,6 +943,8 @@
   .ppl-card.is-new{border-color:rgba(var(--gold-rgb),.6);}
   .ppl-card.is-new .ppl-acts{top:1.55rem;}
   .frail-note{color:var(--muted);font-weight:400;}
+  .tgt-adjust{border:1px dashed var(--hair);border-radius:10px;padding:.45rem .7rem;margin:.2rem 0 .7rem;font-size:.82rem;line-height:1.5;}
+  .tgt-adjust-row{padding:.1rem 0;}
   .frail.busy .frail-apply::after{content:" running…";color:var(--muted);font-weight:400;}
   @media (max-width:560px){ .tgt-route{min-width:100%;} .tgt-opt{flex:1 1 auto;text-align:center;} }
   /* Intake v2: retrieval-vocabulary chips on the ready card */
@@ -5547,6 +5549,8 @@ function renderTriageReady(rd){
       <div class="tgt-refined">${esc(rd.understood || "")}</div>
       <div class="tgt-understood">${esc(artLine)}</div>
       <div class="frail-pills" style="margin-bottom:.8rem;">${chips.join("") || '<span class="tgt-q-hint">No filters — the words alone rank the results.</span>'}</div>
+      ${(rd.notes||[]).filter(n => n.action).length ? `<div class="tgt-adjust"><div class="tgt-draft-h">Adjusted against the index</div>${rd.notes.filter(n => n.action).map(n => `<div class="tgt-adjust-row">● <b>${esc(String(n.key||"").replace(/_/g," "))}</b> ${esc(String((n.values||[]).join(" / ")))} — ${esc(n.action)} <span class="tgt-q-hint">${esc(n.why||"")}</span></div>`).join("")}</div>` : ""}
+      ${(rd.u_diagnostics||[]).length && (rd.pool||0) < 50 ? `<div class="tgt-adjust"><div class="tgt-draft-h">Your own filters</div>${rd.u_diagnostics.map(k => `<div class="tgt-adjust-row">● <b>${esc(String(k.label||k.key))}</b>: ${esc(Array.isArray(k.values) ? k.values.join(" / ") : "")} — with it ${rd.pool||0}, without it <b>${(k.without||0).toLocaleString()}</b>${k.best_without != null ? ` (best match ${k.best_without}%)` : ""} <span class="tgt-q-hint">kept as you set it — drop it on the rail if you want</span></div>`).join("")}</div>` : ""}
       ${rd.diagnosis && (rd.pool||0) < 5 ? diagnosisMarkup(rd.diagnosis, "__ready__", null) : ""}
       ${advice ? `<ul class="tgt-advice">${advice}</ul>` : ""}
       <div class="tgt-routes">${dirBtn}</div>
@@ -7344,14 +7348,15 @@ async function maybeNudgeApplyProfile(){
     const r = await fetch("/me/profile", {headers: authHeaders()});
     if(!r.ok){ el.hidden = true; return; }                       // an expired session is not "no profile"
     const d = await r.json(); const p = d.profile || {};
-    const named = !!(p.first_name || p.last_name || p.full_name);
-    if(d.resume || (p.email && named && p.us_authorized_to_work) || (named && p.email && p.phone)){ el.hidden = true; try{ localStorage.setItem(key, "3"); }catch(e){} return; }
+    // the stored profile may be nested (sections) — count real leaves anywhere, not top-level names only
+    const leaves = (o, n = 0) => { for(const v of Object.values(o || {})){ if(v && typeof v === "object") n = leaves(v, n); else if(typeof v === "string" && v.trim().length > 1) n++; } return n; };
+    if(d.resume || leaves(p) >= 3){ el.hidden = true; try{ localStorage.setItem(key, "3"); }catch(e){} return; }
   }catch(e){ return; }
   el.hidden = false;
   try{ localStorage.setItem(key, String(n + 1)); }catch(e){}
 }
 $("#nudgego") && $("#nudgego").addEventListener("click", ()=>{ $("#nudge").hidden = true; openApply(); });
-$("#nudgelater") && $("#nudgelater").addEventListener("click", ()=>{ $("#nudge").hidden = true; });
+$("#nudgelater") && $("#nudgelater").addEventListener("click", ()=>{ $("#nudge").hidden = true; try{ localStorage.setItem("nudge_" + ((USER && USER.email) || ""), "3"); }catch(e){} });   // Later means not again
 setTimeout(maybeNudgeApplyProfile, 1200);
 function updateAuthUI(){
   if(!ACCOUNTS_ENABLED) return;

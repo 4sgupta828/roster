@@ -243,6 +243,23 @@ class FacetSQLStore:
 
     SMALL_SLICE = 2000
 
+    async def slice_size(self, kind: str, must: dict, *, cap: int = 2000) -> int:
+        """A LIMIT-bounded size of the must-slice (≤ cap means exact; cap + 1 means "at least that many") — the
+        cheap probe contract search fans out over (tens of ms with the per-key index; spec §12.4)."""
+        await self.ensure_schema()
+        pool = await self._conn()
+        pargs: list = []
+        if kind == "job":
+            cl = self._must_sql("('job:' || j.id::text)", must, pargs)
+            base = "SELECT 1 FROM rs_job j WHERE j.closed_at IS NULL"
+        else:
+            cl = self._must_sql("e.entity_id", must, pargs)
+            base = "SELECT 1 FROM rs_entity e WHERE e.kind = 'person' AND e.status = 'active'"
+        pargs.append(int(cap) + 1)
+        async with pool.acquire() as conn:
+            n = await conn.fetchval(f"SELECT count(*) FROM ({base}" + "".join(" AND " + c for c in cl) + f" LIMIT ${len(pargs)}) x", *pargs)
+        return int(n or 0)
+
     async def _vector_session(self, conn, *, filtered: bool) -> None:
         """HNSW settings for this transaction. A FILTERED scan (musts) uses pgvector's iterative scan so the index
         keeps walking until enough rows pass the filter (prod 2026-09-05: a `country=us` must returned 28 of 360

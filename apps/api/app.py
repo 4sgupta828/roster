@@ -2949,8 +2949,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 if not _c.text:
                     _c.text = body.question or ""
             else:
-                _c = await asyncio.to_thread(compile_contract, "job", body.question or "", _facet_schema(), _llm_json, limit=80, scope=_scope)
+                _ex: dict = {}
+                _c = await asyncio.to_thread(compile_contract, "job", body.question or "", _facet_schema(), _llm_json, limit=80, scope=_scope, extras=_ex)
                 _moved = downgrade_uncovered_musts(_c, await _facet_coverage("job"))
+                _c, _ia_notes = await _index_aware(_c, kind="job", user_keys=set(k for k in ("work_mode", "company_type", "level") if body.job_must), place_or_mode=bool(_ex.get("place_or_mode")))
             if body.levels and body.levels[0]:
                 _c.center = {"key": "level", "value": body.levels[0], "span": int(body.level_span)}
             for _m in (body.job_must or []):
@@ -4019,8 +4021,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     from api.facets_engine import compile_contract, downgrade_uncovered_musts
                     _q = (question_text or body.question or "").strip()
                     _scope_c = ((body.country or "us").strip().lower() if people_geo_scope_enabled() else "")
-                    _c = await asyncio.to_thread(compile_contract, "person", _q, _facet_schema(), _llm_json, limit=200, scope={"country": _scope_c} if _scope_c else {})
+                    _ex: dict = {}
+                    _c = await asyncio.to_thread(compile_contract, "person", _q, _facet_schema(), _llm_json, limit=200, scope={"country": _scope_c} if _scope_c else {}, extras=_ex)
                     downgrade_uncovered_musts(_c, await _facet_coverage("person"))
+                    _c, _ia_notes = await _index_aware(_c, kind="person", place_or_mode=bool(_ex.get("place_or_mode")))
                     _signal = [k for k in list(_c.must) + list(_c.prefer) if k != "company"]
                     if _signal or _c.center:                       # a role / field / level / skill / place was named → the evaluator
                         if _scope_c and not _c.must.get("country"):
@@ -6070,6 +6074,21 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         from api.model_json import llm_json
         return llm_json(system, user, timeout=60)
 
+    async def _index_aware(c, *, kind: str, user_keys: set | None = None, place_or_mode: bool = False):
+        """The deterministic index-aware step after a compile (docs/specs/guided-intake.md §12 step 1): a place named
+        with a mode ranks; a collapsing compiled must on a relaxable key is demoted; a specialty's home field corrects
+        an unsupported field. Returns (contract, notes); a failure returns the contract untouched."""
+        from api.contract_search import index_aware
+        store = _facet_store()
+        if store is None:
+            return c, []
+        try:
+            return await index_aware(c, kind=kind, schema=_facet_schema(), user_keys=set(user_keys or ()),
+                                     slice_fn=lambda k, m: store.slice_size(k, m), counts_fn=lambda k, m: store.counts(k, m, _facet_schema()),
+                                     coverage=await _facet_coverage(kind), place_or_mode=place_or_mode)
+        except Exception:   # noqa: BLE001
+            return c, []
+
     async def _facet_coverage(kind: str) -> dict[str, float]:
         """Share of entities with a KNOWN value per navigable key (index-wide, cached an hour) — the number
         that decides whether a compiled must can be a promise."""
@@ -6250,8 +6269,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             nav = await _facet_nav(kind, text="", must=must, scope={"country": (body.country or "us").lower()})
             return (nav or {}).get("counts") or {}
 
-        def compile_fn(kind: str, text: str, *, limit: int = 60, scope: dict | None = None):
-            return compile_contract(kind, text, _facet_schema(), _llm_json, limit=limit, scope=scope or {"country": (body.country or "us").lower()})
+        def compile_fn(kind: str, text: str, *, limit: int = 60, scope: dict | None = None, extras: dict | None = None):
+            return compile_contract(kind, text, _facet_schema(), _llm_json, limit=limit, scope=scope or {"country": (body.country or "us").lower()}, extras=extras)
 
         async def profile_fn(u: dict | None) -> dict | None:
             if acc is None or not u:
@@ -6260,7 +6279,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
 
         svc = getattr(app.state, "intake_service", None) or IntakeService(schema=_facet_schema(), llm_json=getattr(app.state, "intake_llm", None) or _llm_json,
                                                                               counts_fn=counts_fn, compile_fn=compile_fn, profile_fn=profile_fn, jd_fetch_fn=_fetch_jd_text,
-                                                                              briefs_fn=_briefs_fn_for(acc), draft_fn=_draft_fn(compile_fn), redraft_fn=_redraft_fn())
+                                                                              briefs_fn=_briefs_fn_for(acc), draft_fn=_draft_fn(compile_fn), redraft_fn=_redraft_fn(),
+                                                                              index_aware_fn=_index_aware)
         att_texts = []
         if body.attachments:
             try:

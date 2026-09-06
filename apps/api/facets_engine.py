@@ -132,21 +132,27 @@ _COMPILE_SYS = ("You compile a search brief into a facet CONTRACT. Return STRICT
                 "role or a field the brief merely describes is a PREFERENCE, not a must), prefer (object: key → values that should rank higher — the role, "
                 "field, function, work type and level the brief describes go here), avoid (object: key → values to rank down), center (object {key, value, "
                 "span} for ONE ordinal key when the brief names a level, span 1), angles (2–4 alternative phrasings or adjacent titles that would surface "
-                "strong matches), intent (one sentence). Use ONLY the keys and vocabularies listed; omit what the brief does not say; never invent constraints.")
+                "strong matches), intent (one sentence), place_or_mode (true when the brief names a place as an ALTERNATIVE to remote / hybrid — "
+                "'remote or Seattle', 'hybrid in NYC or fully remote' — so the place must not be a hard filter). Use ONLY the keys and vocabularies "
+                "listed; omit what the brief does not say; never invent constraints.")
 
 # A must is a promise the index must be able to keep: open-vocabulary keys (free phrases) cannot be promised
 # exactly, so a compiled must on them becomes a prefer — except the employer and named skills, which ARE exact.
 _EXACT_SET_KEYS = ("company", "skill", "country", "state", "metro")
 
 
-def compile_contract(kind: str, text: str, schema: FacetSchema, llm_json, *, limit: int = 60, scope: dict | None = None) -> Contract:
+def compile_contract(kind: str, text: str, schema: FacetSchema, llm_json, *, limit: int = 60, scope: dict | None = None, extras: dict | None = None) -> Contract:
     """Brief → contract via the model, validated by the schema: illegal keys / values are DROPPED (with the
-    brief's text and angles kept), so a compile can only narrow legally, never fail."""
+    brief's text and angles kept), so a compile can only narrow legally, never fail. `extras`, when given, receives
+    the model's side readings (`place_or_mode`, `intent`) for the index-aware step."""
     c = Contract(kind=kind, text=(text or "").strip(), limit=limit, scope=dict(scope or {}))
     try:
         out = llm_json(_COMPILE_SYS + "\n\nKEYS:\n" + schema.to_prompt_block(kind), json.dumps({"brief": text}))
     except Exception:   # noqa: BLE001
         return c
+    if isinstance(extras, dict):
+        extras["place_or_mode"] = bool(out.get("place_or_mode"))
+        extras["intent"] = str(out.get("intent") or "")
     for section in ("must", "prefer", "avoid"):
         for key, vals in (out.get(section) or {}).items():
             k = schema.key(key)

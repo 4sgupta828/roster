@@ -19,7 +19,7 @@ _URL_RX = re.compile(r"https?://\S+")
 class IntakeService:
     def __init__(self, *, schema, llm_json: Callable[[str, str], dict], counts_fn: Callable[[str, dict], Awaitable[dict]],
                  compile_fn: Callable[..., Contract], profile_fn: Callable[[dict | None], Awaitable[dict | None]] | None = None,
-                 jd_fetch_fn: Callable[[str], str] | None = None, briefs_fn=None, draft_fn=None, redraft_fn=None):
+                 jd_fetch_fn: Callable[[str], str] | None = None, briefs_fn=None, draft_fn=None, redraft_fn=None, index_aware_fn=None):
         self.schema = schema
         self.llm_json = llm_json
         self.counts_fn = counts_fn
@@ -29,6 +29,7 @@ class IntakeService:
         self.briefs_fn = briefs_fn          # async (user) → the account's saved briefs (JDs) — the "which JD" question
         self.draft_fn = draft_fn            # async (role_text, context) → a JD draft (api.jd_draft.build_jd_draft, app-wired)
         self.redraft_fn = redraft_fn        # async (draft, change) → the draft with the change applied
+        self.index_aware_fn = index_aware_fn  # async (contract, kind=, user_keys=, place_or_mode=) → (contract, notes): spec §12 step 1
 
     # ---------------- helpers ----------------
     def _vocab(self):
@@ -166,20 +167,36 @@ class IntakeService:
         V = self._vocab()
         st.contract = self._with_intent(st, str(getattr(self, "_opening", "") or ""))
         c = Contract.from_dict(st.contract)
+        notes = list(getattr(self, "_notes", []) or [])
+        if self.index_aware_fn is not None:
+            try:
+                kind = V.SEARCH_KIND.get(st.direction, "job")
+                c, n2 = await self.index_aware_fn(c, kind=kind, user_keys=self.user_keys(st), place_or_mode=bool(getattr(self, "_place_or_mode", False)))
+                st.contract = c.to_dict()
+                seen = {(x.get("rule"), x.get("key")) for x in notes}
+                notes += [x for x in n2 if (x.get("rule"), x.get("key")) not in seen]
+                counts = await self._counts(st)                       # the pool may have moved
+            except Exception:   # noqa: BLE001
+                pass
         errs = validate_contract(c, self.schema)
         if errs:                                                                 # never hand off an illegal contract
             c = Contract(kind=c.kind, text=c.text, scope=c.scope, limit=c.limit); st.contract = c.to_dict()
         understood = V.understood_words(st.direction, st.contract, st.answers)
         pool = self._pool(counts)
         diagnosis = None
-        if pool < 5 and (c.must or {}) and self.counts_fn is not None:
+        if pool < 50 and (c.must or {}) and self.counts_fn is not None:
             try:
                 from roster_kernel.facets import diagnose_musts
                 diagnosis = await diagnose_musts(c, self.counts_fn, self.schema)
             except Exception:   # noqa: BLE001
                 diagnosis = None
+        # U DIAGNOSTICS: when the pool is small or weak, what the user's OWN filters cost (never relaxed for them)
+        u_diag = None
+        if diagnosis and self.user_keys(st):
+            uk = self.user_keys(st)
+            u_diag = [k for k in (diagnosis.get("keys") or []) if k.get("key") in uk]
         return {"direction": st.direction, "search_kind": V.SEARCH_KIND.get(st.direction), "understood": understood, "contract": st.contract,
-                "counts": counts, "pool": pool, "diagnosis": diagnosis, "artifact": dict(st.artifact), "advice": self._advice(st, counts),
+                "counts": counts, "pool": pool, "diagnosis": diagnosis, "u_diagnostics": u_diag, "notes": notes, "artifact": dict(st.artifact), "advice": self._advice(st, counts),
                 "checklist": dict(st.checklist), "answers": dict(st.answers), "note": note,
                 "offer_improve": any(v == "answered" for v in st.checklist.values()),
                 "transcript_audit": transcript[-TRANSCRIPT_CAP:]}
@@ -197,6 +214,9 @@ class IntakeService:
         message = (message or "").strip()
         opening = str(state.get("opening") or "")
         self._opening = opening
+        state_notes = list(state.get("notes") or [])
+        self._notes = list(state_notes)
+        self._place_or_mode = bool(state.get("place_or_mode"))
         if answer is not None and not message:
             # a chip answer is a user turn too (the FE shows it; the audit transcript must agree)
             av = answer.get("value")
@@ -220,7 +240,8 @@ class IntakeService:
                 ready["transcript_audit"] = transcript[-TRANSCRIPT_CAP:]
             st.stage = stage if stage != "questions" else st.stage
             return {"stage": stage, "question": question, "ready": ready, "note": note,
-                    "state": {"kernel": st.to_dict(), "transcript": transcript[-TRANSCRIPT_CAP:], "pending": question, "artifact_text": artifact_text[:ARTIFACT_CAP], "draft": draft, "opening": opening[:400]}}
+                    "state": {"kernel": st.to_dict(), "transcript": transcript[-TRANSCRIPT_CAP:], "pending": question, "artifact_text": artifact_text[:ARTIFACT_CAP], "draft": draft, "opening": opening[:400],
+                              "notes": list(getattr(self, "_notes", []) or state_notes or [])[:8], "place_or_mode": bool(getattr(self, "_place_or_mode", False))}}
 
         # SEARCH NOW: ready with what is known, from any stage
         if search_now:
@@ -304,8 +325,9 @@ class IntakeService:
             if brief_id is not None:
                 st.artifact["brief_id"] = int(brief_id)
             await self._read_completeness(st, artifact_text)
-            self._compile(st, artifact_text, message)
+            await self._compile(st, artifact_text, message)
             st.contract = self._with_intent(st, opening)
+            state_notes = list(getattr(self, "_notes", []) or [])
             st.stage = "questions"
             pending = None
             message = ""                                                       # the artifact text is not an answer
@@ -449,14 +471,34 @@ class IntakeService:
             else:
                 st.checklist[name] = "missing"
 
-    def _compile(self, st: IntakeState, artifact_text: str, words: str) -> None:
+    def user_keys(self, st: IntakeState) -> set:
+        """The contract keys the USER set (answers to asked questions → the item's key, or the key itself) — the
+        constraints the index-aware step never relaxes."""
+        V = self._vocab()
+        artifact = V.ARTIFACT_FOR.get(st.direction, "")
+        out = set()
+        for name in st.asked:
+            v = st.answers.get(name)
+            if v in (None, "", []):
+                continue
+            it = V.item(artifact, name)
+            key = (it.key if it else None) or (name if self.schema.key(name) is not None else None)
+            if key:
+                out.add(key)
+        return out
+
+    async def _compile(self, st: IntakeState, artifact_text: str, words: str) -> None:
         V = self._vocab()
         kind = V.SEARCH_KIND.get(st.direction, "job")
         text = (words + "\n" + artifact_text).strip() if words and words != artifact_text else artifact_text
+        extras: dict = {}
         try:
+            c = self.compile_fn(kind, text[:4000], limit=60, scope={}, extras=extras)
+        except TypeError:
             c = self.compile_fn(kind, text[:4000], limit=60, scope={})
         except Exception:   # noqa: BLE001
             c = Contract(kind=kind, text=text[:500])
+        self._place_or_mode = bool(extras.get("place_or_mode"))
         if validate_contract(c, self.schema):
             c = Contract(kind=kind, text=c.text, limit=c.limit)
         # a résumé's employer is not where the seeker wants to be; a JD's own company is not where candidates
@@ -475,6 +517,13 @@ class IntakeService:
             fv = c.must.pop("function", None)
             if isinstance(fv, list):
                 c.prefer["function"] = sorted(set(list(c.prefer.get("function") or []) + [str(v) for v in fv]))
+        # INDEX-AWARE (spec §12 step 1): measured against the index before anything runs
+        self._notes = []
+        if self.index_aware_fn is not None:
+            try:
+                c, self._notes = await self.index_aware_fn(c, kind=kind, user_keys=self.user_keys(st), place_or_mode=self._place_or_mode)
+            except Exception:   # noqa: BLE001
+                self._notes = []
         if st.direction == "job":
             # a résumé states FACTS (what the seeker did): they rank; only the seeker's WANTS filter (asked later)
             keep = {"field", "metro", "state", "country", "work_mode", "employment_type", "comp"}
