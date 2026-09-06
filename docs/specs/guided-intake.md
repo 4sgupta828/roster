@@ -362,3 +362,69 @@ line on the rail. Prerequisite chore: move the `rs_job` facet columns' DDL into 
   they are sent), advice on the result's rail (§5), the "search the other side" offer, the persona eval harness
   (§7), peer-matching by the manager's company type (§4 step 1 `prefer`), a JD-draft entry from the Account card.
   People evaluate with musts ≈ 10 s (the person semantic leg) — next perf item.
+
+---
+
+## 12. Contract SEARCH — choosing the combination of constraints by measuring, not guessing (DRAFT, 2026-09-06)
+
+Owner: "Guided does a brute-force job at mapping intent to a search. The hard part is WHAT COMBINATION of flags
+gives the most relevant results — not guessing and throwing it at search."
+
+### 12.1 The problem, precisely
+
+The compile step turns a brief into ONE contract by rules (open phrases → prefer, low coverage → prefer, field
+and geo → must, skills ≤ 2 → must …). Those rules never look at the index. Whether `field=marketing` or
+`specialty=crm` is the reading that finds marketing-engineering managers, whether `work_type=manager` should
+filter or rank, whether "Seattle or remote" should be a metro must — depends on what the corpus holds and how
+it was extracted. Only the index can answer, so the contract must be CHOSEN against the index.
+
+### 12.2 The mechanism
+
+    brief + answers  →  CANDIDATE contracts (a ladder + alternative readings)
+                     →  evaluate each (cheap: counts + top-40)
+                     →  JUDGE a sample of each result set against the brief (one batched model call)
+                     →  pick by objective (expected relevant results, under the user's own musts)
+                     →  READY card shows the pick AND the alternatives with their numbers
+
+1. **Candidates** (code, from the compiled contract C and the user's explicit constraints U — chips / answers):
+   - `strict`: every named dimension a must (field, work_type, level as must, metro, skills ≤ 2, evidence if named).
+   - `default`: today's rules (field + geo must; the rest prefer; level centres).
+   - `loose`: only U as musts; everything else prefers.
+   - `readings`: the compile's alternative readings — the model returns up to 3 `readings`, each a different
+     mapping of the same brief onto schema keys (e.g. "marketing engineering" → {field: software, specialty:
+     crm} vs {field: marketing}); each becomes a `default`-shaped variant.
+   Cap: ≤ 6 candidates. U is never relaxed by a candidate — the user's own musts hold in all of them.
+2. **Evaluate each** (concurrently; counts cached per must-set): pool size, best match, the top 40.
+3. **Judge** (model, meaning): ONE call with the brief and, per candidate, 8 sampled rows from its top 20 (name,
+   blurb / title, facets) → `{candidate: [{row, fit: yes | partial | no, why}]}`. The judge sees identity-bearing
+   text (never bare scores) and rates fit to the BRIEF, not to the contract. ≈ 3–4k tokens, DeepSeek ≈ $0.002.
+4. **Objective** (code): `expected_relevant = precision(yes + ½·partial) × min(pool, 200)`, tie-break by precision.
+   A candidate whose pool < 5 is out unless every candidate is tiny. A candidate that violates U is out.
+5. **Ratify**: the READY card shows the chosen reading in words ("reading: software field, CRM specialty, managers
+   rank first") with its numbers, and the runners-up as one line each ("stricter: 9 people, 8 of 8 fit · looser:
+   2,900, 6 of 20 fit") — each tappable to switch. The rail then works on whichever was picked.
+6. **Learn** (later): log the pick, the alternatives and what the user changed on the rail afterwards; a rail edit
+   right after hand-off is a labelled miss, feeding the default rules and the judge prompt.
+
+### 12.3 Where it lives
+
+- kernel `facets/contract_search.py` (new): the ladder builder over opaque keys (which sections to move), the
+  objective, the selection — pure. No vocabulary.
+- vertical `intake.py`: the `readings` compile prompt (alternative mappings), the judge prompt, the ladder policy
+  (which keys count as "named dimensions", the skill cap).
+- app `intake.py`: `_choose_contract(brief, C, U)` at READY (and on `search_now`); `/intake/step` returns
+  `ready.alternatives`; the FE ready card renders them; switching re-runs only the hand-off.
+
+### 12.4 Cost, latency, gates
+
+Per READY: ≤ 6 evaluates (counts cached; semantic legs ≈ 1–3 s each, concurrent) + one judge call ≈ $0.002 →
+≈ 4–8 s added to the ready step. Off by default behind `ROSTER_INTAKE_CONTRACT_SEARCH=1` until the eval set
+shows it beats the single compile (the eval gains a `relevance@20` check: the judge's verdict on the hand-off's
+top 20 for each scenario, reported per run).
+
+### 12.5 Panel questions
+
+1. Is the objective right (expected relevant results), or should precision dominate above a pool floor?
+2. Judge on 8 rows × 6 candidates — enough signal? Better: judge the UNION once and score candidates by overlap?
+3. Should the ladder also vary the semantic text (intent words vs. artifact facts) as a dimension?
+4. Risk: the judge favours candidates whose rows carry richer blurbs (visibility bias). Mitigation?
