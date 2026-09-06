@@ -139,3 +139,45 @@ def test_a_role_text_that_names_no_role_reads_no_peers():
     def norole(kind, text, *, limit=60, scope=None): return Contract(kind=kind, text=text, limit=limit)
     d = _run(build_jd_draft(role_text="I'm hiring. Keep going", context={}, evaluate_fn=evaluate_fn, summaries_fn=summaries_fn, compile_fn=norole, llm_json=FakeLLM()))
     assert d["no_role"] and d["sparse"] and d["peers"] == [] and d["must_have"] == []
+
+
+def test_peers_share_the_roles_tier_and_a_contradicting_work_type_is_dropped():
+    """A CTO draft once read IC infra postings as peers: the compile had demoted level to a preference and kept 'ic'."""
+    seen = {}
+    async def evaluate_fn(c): seen.update(c); return {"rows": ROWS}
+    async def summaries_fn(peers): return _summaries(peers)
+    def cto(kind, text, *, limit=60, scope=None):
+        return Contract(kind=kind, text=text, must={"field": ["software"], "level": ["leadership"], "company": ["startup"], "metro": ["seattle"]},
+                        prefer={"work_type": ["ic"], "function": ["engineering"]}, limit=limit)
+    _run(build_jd_draft(role_text="hire a CTO to lead a 10-15 person team", context={}, evaluate_fn=evaluate_fn, summaries_fn=summaries_fn, compile_fn=cto, llm_json=FakeLLM()))
+    assert seen["must"] == {"field": ["software"], "level": ["leadership"]}
+    assert "work_type" not in seen["prefer"] and seen["prefer"]["company"] == ["startup"] and seen["prefer"]["metro"] == ["seattle"]
+
+
+def test_a_thin_tier_slice_falls_back_to_the_domain_only():
+    calls = []
+    async def evaluate_fn(c):
+        calls.append(dict(c["must"]))
+        return {"rows": ROWS[:2]} if "level" in c["must"] else {"rows": ROWS}
+    async def summaries_fn(peers): return _summaries(peers)
+    def senior(kind, text, *, limit=60, scope=None):
+        return Contract(kind=kind, text=text, must={"field": ["software"], "level": ["senior"]}, limit=limit)
+    d = _run(build_jd_draft(role_text="senior payments engineer", context={}, evaluate_fn=evaluate_fn, summaries_fn=summaries_fn, compile_fn=senior, llm_json=FakeLLM()))
+    assert calls == [{"field": ["software"], "level": ["senior"]}, {"field": ["software"]}] and len(d["peers"]) == 10 and not d["sparse"]
+
+
+def test_a_draft_that_cites_nothing_as_you_is_asked_once_more():
+    async def evaluate_fn(c): return {"rows": ROWS}
+    async def summaries_fn(peers): return _summaries(peers)
+    class Forgetful(FakeLLM):
+        def __call__(self, system, user):
+            if "You write a job description" in system:
+                self.calls.append("draft")
+                if "cited no line as \"you\"" not in user:
+                    return {"title": "Senior Backend Engineer", "summary": "s", "responsibilities": [], "must_have": [{"text": "Go or Python", "source": "g1"}], "nice_to_have": []}
+                return {"title": "Senior Backend Engineer", "summary": "s", "responsibilities": [],
+                        "must_have": [{"text": "Built a ledger in production", "source": "you"}, {"text": "Go or Python", "source": "g1"}], "nice_to_have": []}
+            return super().__call__(system, user)
+    llm = Forgetful()
+    d = _run(build_jd_draft(role_text="payments engineer who has built a ledger", context={"your words": "must have built a ledger"}, evaluate_fn=evaluate_fn, summaries_fn=summaries_fn, compile_fn=_compile, llm_json=llm))
+    assert llm.calls.count("draft") == 2 and any((x.get("support") or {}).get("you") for x in d["must_have"])

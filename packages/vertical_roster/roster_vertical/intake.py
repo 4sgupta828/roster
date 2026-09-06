@@ -173,6 +173,21 @@ def understood_words(direction: str, contract: dict, answers: dict | None = None
 JD_SECTIONS = ("summary", "responsibilities", "must_have", "nice_to_have")
 JD_PEER_SHARE = 0.30          # a requirement group is the CENTRE when it recurs in ≥ this share of peers
 JD_PEERS = 10                 # peers kept after dedupe by company
+JD_PEER_MUST_KEYS = ("field", "level")   # a role's peers share its DOMAIN and its TIER; everything else only ranks
+JD_PEERS_MIN = 5              # fewer relevant peers than this at the stated tier → the tier is relaxed (domain only)
+# a stated tier rules out work types that contradict it (a CTO's peers are never individual-contributor postings)
+LEVEL_WORK_TYPES = {"leadership": ("executive", "founder", "manager")}
+
+
+def peer_work_types(levels: list[str] | None, work_types: list[str] | None) -> list[str]:
+    """The preferred work types that agree with the stated level(s); unconstrained levels keep them all."""
+    allowed = None
+    for lv in (levels or []):
+        if lv in LEVEL_WORK_TYPES:
+            allowed = set(LEVEL_WORK_TYPES[lv]) if allowed is None else allowed | set(LEVEL_WORK_TYPES[lv])
+    if allowed is None:
+        return list(work_types or [])
+    return [w for w in (work_types or []) if w in allowed]
 
 DRAFT_CONTEXT_WORDS = ("Three things so the draft is yours, not generic: the title and level, where the role is (metro or remote), "
                        "and any must-have from your side. Add team or company context if you like.")

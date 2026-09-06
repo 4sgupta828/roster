@@ -133,7 +133,8 @@ _COMPILE_SYS = ("You compile a search brief into a facet CONTRACT. Return STRICT
                 "field, function, work type and level the brief describes go here), avoid (object: key → values to rank down), center (object {key, value, "
                 "span} for ONE ordinal key when the brief names a level, span 1), angles (2–4 alternative phrasings or adjacent titles that would surface "
                 "strong matches), intent (one sentence), place_or_mode (true when the brief names a place as an ALTERNATIVE to remote / hybrid — "
-                "'remote or Seattle', 'hybrid in NYC or fully remote' — so the place must not be a hard filter). Use ONLY the keys and vocabularies "
+                "'remote or Seattle', 'hybrid in NYC or fully remote' — so the place must not be a hard filter), work_mode ('remote' | 'hybrid' | "
+                "'onsite' | null — the mode the brief states, whichever kind is being searched). Use ONLY the keys and vocabularies "
                 "listed; omit what the brief does not say; never invent constraints.")
 
 # A must is a promise the index must be able to keep: open-vocabulary keys (free phrases) cannot be promised
@@ -153,6 +154,8 @@ def compile_contract(kind: str, text: str, schema: FacetSchema, llm_json, *, lim
     if isinstance(extras, dict):
         extras["place_or_mode"] = bool(out.get("place_or_mode"))
         extras["intent"] = str(out.get("intent") or "")
+        wm = str(out.get("work_mode") or "").strip().lower()
+        extras["work_mode"] = wm if wm in ("remote", "hybrid", "onsite") else ""
     for section in ("must", "prefer", "avoid"):
         for key, vals in (out.get(section) or {}).items():
             k = schema.key(key)

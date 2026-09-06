@@ -531,6 +531,15 @@ jobs disjunction = two readings; ladder after post-compile edits; two caches —
 
 ### 12.13 Delivery order
 
+Status 2026-09-06: **step 1 LIVE** — `apps/api/contract_search.py` (`index_aware`), kernel
+`facets/contract_search.py` (collapse under the viability floor of 20, co-occurrence share / lift / support, RRF
+fusion ready for step 2), `FacetSQLStore.slice_size` (bounded probe), the compile's side readings
+(`place_or_mode`, `work_mode`), wired into the Guided intake (at compile and again at READY with the user's own
+keys), the plain Talent brief and the plain Jobs brief; the ready card shows "Adjusted against the index" and
+"Your own filters". A remote role is never asked for a metro and "remote US" means the country. Eval scenarios:
+`hiring_place_or_mode`, `hiring_field_vs_specialty`, `hiring_decisive_rare_must` (all passing). Step 2 (fusion +
+blind judge + alternatives) not started.
+
 1. **Index-aware compile (deterministic, no model, no flag)** — the disjunction rule, collapsing-must demotion
    with the 12.4.2 conditions, co-occurrence readings (the best-lift data reading replaces a model field only when
    the model's field has < 10 % support among the specialty's carriers; otherwise both become alternatives on the

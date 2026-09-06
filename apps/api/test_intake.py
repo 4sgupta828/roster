@@ -446,3 +446,19 @@ def test_the_index_aware_step_runs_at_compile_and_at_ready_and_its_notes_reach_t
     rd = out["ready"]
     assert rd["notes"] and rd["notes"][0]["rule"] == "place_or_mode"
     assert any("metro" in uk for _, uk, _ in calls[1:]) or rd["contract"]["must"].get("metro") == ["seattle"]
+
+
+def test_a_remote_role_is_never_asked_for_a_metro_and_means_the_scope_country():
+    s = _service()
+    def compile_fn(kind, text, *, limit=60, scope=None, extras=None):
+        if isinstance(extras, dict): extras["work_mode"] = "remote"
+        return Contract(kind=kind, text=text[:200], must={"field": ["software"], "metro": ["bangalore"]}, limit=limit, scope={"country": "us"})
+    s.compile_fn = compile_fn
+    out = _run(s.step(message="I'm hiring", state=None))
+    out = _run(s.step(message="Senior Engineering Manager, Marketing Engineering. Remote US. " + "Lead the Salesforce platform team. " * 6, state=out["state"]))
+    k = out["state"]["kernel"]
+    assert "metro" not in k["contract"]["must"] and k["contract"]["must"].get("country") == ["us"]
+    asked = []
+    while out["stage"] != "ready" and len(asked) < 8:
+        asked.append(out["question"]["name"]); out = _run(s.step(answer={"name": out["question"]["name"], "value": "__decline__"}, state=out["state"]))
+    assert "metro" not in asked and "location" not in asked

@@ -79,3 +79,11 @@ def test_direction_prompt_treats_a_bare_title_list_as_ambiguous():
     from roster_vertical.intake import direction_prompt
     p = direction_prompt()
     assert "ambiguous" in p and "Never guess" in p and "hiring" in p and "looking" in p
+
+
+def test_a_stated_leadership_tier_rules_out_ic_peers_but_an_unmarked_tier_keeps_every_work_type():
+    from roster_vertical.intake import peer_work_types
+    assert peer_work_types(["leadership"], ["ic"]) == []
+    assert peer_work_types(["leadership"], ["ic", "executive"]) == ["executive"]
+    assert peer_work_types(["senior"], ["ic"]) == ["ic"]
+    assert peer_work_types([], ["ic", "manager"]) == ["ic", "manager"]

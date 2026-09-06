@@ -99,7 +99,9 @@ class IntakeService:
         for it in V.CHECKLIST.get(artifact, ()):
             if it.key and it.key in counts and it.name not in counts_for:
                 counts_for[it.name] = counts[it.key]
-        return next_question(st, required_items=V.required_items(artifact), required_keys=V.REQUIRED_KEYS.get(st.direction, []),
+        req_items = [i for i in V.required_items(artifact) if not (getattr(self, "_remote", False) and i == "location")]
+        req_keys = [k for k in V.REQUIRED_KEYS.get(st.direction, []) if not (getattr(self, "_remote", False) and k == "metro")]
+        return next_question(st, required_items=req_items, required_keys=req_keys,
                              optional_keys=V.OPTIONAL_KEYS.get(st.direction, []), counts=counts_for)
 
     def _apply(self, st: IntakeState, q: Question, value, *, mode: str | None = None) -> IntakeState:
@@ -217,6 +219,7 @@ class IntakeService:
         state_notes = list(state.get("notes") or [])
         self._notes = list(state_notes)
         self._place_or_mode = bool(state.get("place_or_mode"))
+        self._remote = bool(state.get("remote"))
         if answer is not None and not message:
             # a chip answer is a user turn too (the FE shows it; the audit transcript must agree)
             av = answer.get("value")
@@ -241,7 +244,7 @@ class IntakeService:
             st.stage = stage if stage != "questions" else st.stage
             return {"stage": stage, "question": question, "ready": ready, "note": note,
                     "state": {"kernel": st.to_dict(), "transcript": transcript[-TRANSCRIPT_CAP:], "pending": question, "artifact_text": artifact_text[:ARTIFACT_CAP], "draft": draft, "opening": opening[:400],
-                              "notes": list(getattr(self, "_notes", []) or state_notes or [])[:8], "place_or_mode": bool(getattr(self, "_place_or_mode", False))}}
+                              "notes": list(getattr(self, "_notes", []) or state_notes or [])[:8], "place_or_mode": bool(getattr(self, "_place_or_mode", False)), "remote": bool(getattr(self, "_remote", False))}}
 
         # SEARCH NOW: ready with what is known, from any stage
         if search_now:
@@ -499,6 +502,7 @@ class IntakeService:
         except Exception:   # noqa: BLE001
             c = Contract(kind=kind, text=text[:500])
         self._place_or_mode = bool(extras.get("place_or_mode"))
+        self._remote = str(extras.get("work_mode") or "") == "remote"
         if validate_contract(c, self.schema):
             c = Contract(kind=kind, text=c.text, limit=c.limit)
         # a résumé's employer is not where the seeker wants to be; a JD's own company is not where candidates
@@ -517,6 +521,13 @@ class IntakeService:
             fv = c.must.pop("function", None)
             if isinstance(fv, list):
                 c.prefer["function"] = sorted(set(list(c.prefer.get("function") or []) + [str(v) for v in fv]))
+        if self._remote:
+            # a REMOTE role has no metro to ask for: the place, if any, only ranks; "remote US" means the country
+            mv = c.must.pop("metro", None)
+            if isinstance(mv, list) and mv:
+                c.prefer["metro"] = sorted(set(list(c.prefer.get("metro") or []) + [str(v) for v in mv]))
+            if "country" not in c.must and (c.scope or {}).get("country"):
+                c.must["country"] = [str(c.scope["country"])]
         # INDEX-AWARE (spec §12 step 1): measured against the index before anything runs
         self._notes = []
         if self.index_aware_fn is not None:

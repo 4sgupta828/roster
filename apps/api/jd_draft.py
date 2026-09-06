@@ -85,6 +85,11 @@ def _cited(lines: list, centre: list[dict], optional: list[dict]) -> list[dict]:
     return out
 
 
+def _has_you(d: dict) -> bool:
+    return any(str((ln or {}).get("source") or "").strip().lower() == "you" for k in ("responsibilities", "must_have", "nice_to_have")
+               for ln in ((d or {}).get(k) or []) if isinstance(ln, dict))
+
+
 def render_text(draft: dict) -> str:
     """The saved JD text: sections with lines; support is kept in `lines`, not in the prose."""
     parts = [draft.get("title") or "Role", ""]
@@ -109,7 +114,7 @@ async def build_jd_draft(*, role_text: str, context: dict, evaluate_fn: Callable
                          summaries_fn: Callable[[list[dict]], Awaitable[dict]], compile_fn: Callable[..., Contract],
                          llm_json: Callable[[str, str], dict], n_peers: int = 10, pool: int = 40, share: float = 0.30,
                          prefer: dict | None = None, min_match: int = 35) -> dict:
-    from roster_vertical.intake import draft_prompt, group_prompt
+    from roster_vertical.intake import JD_PEER_MUST_KEYS, JD_PEERS_MIN, draft_prompt, group_prompt, peer_work_types
     # 1) peers
     try:
         c = compile_fn("job", role_text, limit=pool, scope={})
@@ -124,19 +129,36 @@ async def build_jd_draft(*, role_text: str, context: dict, evaluate_fn: Callable
                  "sources": {"posting_ids": [], "role_text": role_text[:500], "context": dict(context or {})}}
         draft["text"] = render_text(draft)
         return draft
-    # peers are the role's similarity NEIGHBOURHOOD: only the field filters; every other compiled must only ranks
-    for k in [k for k in list(c.must.keys()) if k != "field"]:
+    # peers are the role's similarity NEIGHBOURHOOD at its own TIER: the domain and the stated level filter; every other
+    # compiled must only ranks (a CTO's peers were once IC infra engineers because level had been demoted to a preference)
+    for k in [k for k in list(c.must.keys()) if k not in JD_PEER_MUST_KEYS]:
         vals = c.must.pop(k)
         if isinstance(vals, list):
             c.prefer[k] = sorted(set(list(c.prefer.get(k) or []) + [str(v) for v in vals]))
     if prefer:
         for k, v in prefer.items():
             c.prefer.setdefault(k, list(v))
-    out = await evaluate_fn(c.to_dict())
-    # only postings that actually resemble the role count as peers (calibrated match above the noise floor);
-    # "Keep going" as a role text once produced ten ICU-nurse peers
-    relevant = [r for r in (out.get("rows") or []) if r.get("match_pct") is None or int(r.get("match_pct") or 0) >= min_match]
-    peers = dedupe_peers(relevant, n_peers)
+    # a preferred work type that contradicts the stated tier is the compiler's slip, not the manager's wish
+    if "work_type" in c.prefer:
+        kept = peer_work_types(list(c.must.get("level") or []), list(c.prefer.get("work_type") or []))
+        if kept:
+            c.prefer["work_type"] = kept
+        else:
+            c.prefer.pop("work_type", None)
+
+    async def _peers_for(contract: Contract) -> list[dict]:
+        out = await evaluate_fn(contract.to_dict())
+        # only postings that actually resemble the role count as peers (calibrated match above the noise floor);
+        # "Keep going" as a role text once produced ten ICU-nurse peers
+        relevant = [r for r in (out.get("rows") or []) if r.get("match_pct") is None or int(r.get("match_pct") or 0) >= min_match]
+        return dedupe_peers(relevant, n_peers)
+
+    peers = await _peers_for(c)
+    if len(peers) < JD_PEERS_MIN and "level" in c.must:
+        # too few postings at the stated tier: read the domain's neighbourhood and let the tier rank
+        lv = c.must.pop("level")
+        c.prefer["level"] = sorted(set(list(c.prefer.get("level") or []) + [str(v) for v in lv]))
+        peers = await _peers_for(c)
     # 2) requirement lines from the peers' summaries
     summaries = await summaries_fn(peers) if peers else {}
     lines = peer_lines(peers, summaries)
@@ -159,6 +181,13 @@ async def build_jd_draft(*, role_text: str, context: dict, evaluate_fn: Callable
         d = await asyncio.to_thread(llm_json, draft_prompt(), user)
     except Exception:   # noqa: BLE001
         d = {}
+    if not _has_you(d):
+        # the manager's own words must reach the draft; one more ask with the omission named, never an invented line
+        try:
+            d = await asyncio.to_thread(llm_json, draft_prompt(), user + "\n\nYOUR PREVIOUS DRAFT cited no line as \"you\". The manager's role text "
+                                        "and must-haves above MUST yield at least one must_have or responsibility line with source \"you\" (their words, tightened).")
+        except Exception:   # noqa: BLE001
+            pass
     draft = {"title": str(d.get("title") or context.get("title") or role_text[:80]).strip(), "summary": str(d.get("summary") or "").strip()[:600],
              "responsibilities": _cited(d.get("responsibilities") or [], centre, optional), "must_have": _cited(d.get("must_have") or [], centre, optional),
              "nice_to_have": _cited(d.get("nice_to_have") or [], centre, optional),
