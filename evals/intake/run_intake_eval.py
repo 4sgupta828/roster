@@ -198,6 +198,9 @@ class Run:
         for key, n in (e.get("must_lists_min") or {}).items():
             if len((c.get("must") or {}).get(key) or []) < n:
                 F(f"must {key} has {len((c.get('must') or {}).get(key) or [])} values (< {n})")
+        for key, n in (e.get("prefer_lists_min") or {}).items():
+            if len((c.get("prefer") or {}).get(key) or []) < n:
+                F(f"prefer {key} has {len((c.get('prefer') or {}).get(key) or [])} values (< {n})")
         if e.get("ready") and not self.ready:
             F("never READY")
         if "pool_max" in e and self.ready and (self.ready.get("pool") or 0) > e["pool_max"]:
