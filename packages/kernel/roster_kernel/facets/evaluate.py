@@ -57,17 +57,27 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
                 pool[rid] = dict(r)
 
     if contract.text:
-        _take(await store.semantic(contract.kind, contract.text, must, cap=cap), "semantic")
+        import asyncio as _aio
+        jobs = [("semantic", store.semantic(contract.kind, contract.text, must, cap=cap))]
         for a in (contract.angles or [])[:5]:
-            _take(await store.semantic(contract.kind, str(a), must, cap=cap // 2), "angles")
-        # PREFER legs: a preferred value must reach the pool to be ranked at all — the nearest rows that HOLD each
+            jobs.append(("angles", store.semantic(contract.kind, str(a), must, cap=cap // 2)))
+        # PREFER legs: a preferred value must reach the pool to be ranked at all — the nearest rows that HOLD a
         # preferred value join the neighbourhood (a `field: marketing` preference once changed nothing because no
-        # marketing-field row was among the nearest 360)
+        # marketing-field row was among the nearest 360). The two heaviest non-set preferred keys get a leg (set
+        # keys — skills, specialties — are fuzzy tokens and too many); all legs run concurrently.
         legs["prefer"] = 0
-        for key, vals in list((contract.prefer or {}).items())[:4]:
-            if not isinstance(vals, list) or not vals or key in must:
+        cands = [(float(w.prefer.get(key, w.default_prefer)), key, vals) for key, vals in (contract.prefer or {}).items()
+                 if isinstance(vals, list) and vals and key not in must and (schema.key(key) is None or schema.key(key).type is not FacetType.set)]
+        cands.sort(key=lambda x: -x[0])
+        for _, key, vals in cands[:2]:
+            jobs.append(("prefer", store.semantic(contract.kind, contract.text, {**must, key: list(vals)}, cap=max(cap // 4, 40))))
+        results = await _aio.gather(*[c for _, c in jobs], return_exceptions=True)
+        for (leg, _), res in zip(jobs, results):
+            if isinstance(res, Exception):
+                if leg == "semantic":
+                    raise res
                 continue
-            _take(await store.semantic(contract.kind, contract.text, {**must, key: list(vals)}, cap=max(cap // 4, 40)), "prefer")
+            _take(res, leg)
     if not contract.text:
         # no text → the must-slice itself is the pool. WITH text the pool is the semantic neighbourhood only: an
         # enumerate leg would pour unrelated rows (sim 0) into it, and rank_by an ordinal then sorts them first
