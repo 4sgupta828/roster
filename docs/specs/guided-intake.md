@@ -444,23 +444,31 @@ Cost: ≤ 9 slice sizes + ≤ 3 co-occurrence counts + one marginal-drop set, co
   guard), and a yes whose row carries only self-stated / no evidence counts 0.8; `prec3` likewise on its top 3;
   `missed` = judged-yes rows in the union absent from its top 20.
 
-### 12.6 Selection (code)
+### 12.6 Merge, don't pick (owner, 2026-09-06: "different recipes are each partially good — pick the best results
+across recipes and rank them together with an impartial judge")
 
-Lexicographic with a recall guard:
-1. drop candidates that violate U; drop pools < 5 (if all are < 5, keep the largest and flag);
-2. rank by `prec10 − 0.02 × missed` (a candidate that hides judged-relevant people another candidate found pays
-   for each);
-3. **recall guard**: a candidate whose pool is ≥ 20× the leader's and whose adjusted prec10 is within 0.10 of
-   the leader wins (six perfect people do not beat 2,000 people at 0.9);
-4. ties within 0.05 → the stricter candidate (more musts); then prec3; then pool.
-WEAK: when the winner's prec10 < 0.3, the pick STANDS (best precision), the card says "few in the index fit
-this brief", shows the strict alternative and the relax reasons, and — when prec3 is also < 0.34 — asks ONE
-clarifying question instead of presenting READY as ready (the intake has budget for it).
+Selection of ONE recipe is replaced by FUSION of the survivors:
+1. **Union** the survivors' top-K (K = 60) — every row remembers which recipes surfaced it and at what rank.
+2. **Fuse** by reciprocal rank fusion (RRF, k = 60) across recipes — code, no model, parameter-light; a row
+   several recipes agree on rises; a row only a loose recipe found sits lower. Recipe weights are equal in v1
+   (a recipe's judged head precision may weight it later).
+3. **Judge the head**: the top 40 of the fused list graded blind against the BRIEF (12.5's protocol and row
+   shape). Order = fits, then partial fits, then the ungraded tail in fused order; rows judged "no" fall below
+   the tail with a note. The card shows the verdict as a labelled model read ("reads as a fit — model"), never as
+   a fact, and shows WHY the row surfaced (which readings; the user's own chips).
+4. **The rail over the merged pool**: counts run over the union of the recipes' must-slices; the user's chips
+   are the SHARED layer every recipe honours (a chip edit re-runs the fusion); readings appear as toggles
+   ("software + CRM", "marketing", "strict") the user can switch off — replacing "switch to an alternative".
+5. **Recall guard and WEAK** become simpler: nothing is thrown away, so six perfect people and two thousand good
+   ones coexist in order; WEAK = fewer than 3 judged fits in the head → say so and ask one clarifying question.
+
+Why this beats picking: no recipe has to be right on its own; the judge does the one thing only it can (fit to
+the brief), on the rows where it matters (the head); the tail is honest about being ungraded.
 
 ### 12.7 Ratification, U diagnostics, learning
 
-READY card: "Reading: software field · CRM specialty · managers rank first — 312 people, 8 of 10 fit", the
-runners-up one line each with their numbers, tappable to switch before or after the hand-off; a U line when U
+READY card: the readings that fed the merge, one line each with their numbers ("software + CRM — 312 people ·
+marketing — 9 · strict — 3"), each a toggle; the merged head's fit count ("31 of 40 graded fit"); a U line when U
 hurts: "your must 'evidence: repos' leaves 17 — without it 412 (best match 65 %)". Learning log
 (`roster_intake_choice`, additive): brief hash, candidates with numbers, the pick, judge verdict counts, and any
 rail edit within 10 min of the hand-off (a labelled miss). v1 reads the log only in the eval report.
