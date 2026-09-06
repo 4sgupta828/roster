@@ -187,6 +187,15 @@ class IntakeService:
         message = (message or "").strip()
         opening = str(state.get("opening") or "")
         self._opening = opening
+        if answer is not None and not message:
+            # a chip answer is a user turn too (the FE shows it; the audit transcript must agree)
+            av = answer.get("value")
+            label = ("Prefer not to say" if av in (None, "", "__decline__") else ", ".join(str(x) for x in av) if isinstance(av, (list, tuple)) else str(av))
+            if str(answer.get("name") or "") == "jd" and label in ("accept", "save"):
+                label = "Use this JD"
+            transcript.append({"role": "user", "text": label.replace("_", " ")[:MSG_CAP]})
+        elif direction and not message and not st.direction:
+            transcript.append({"role": "user", "text": "I'm looking for a role" if direction == "job" else "I'm hiring"})
         if message:
             transcript.append({"role": "user", "text": message[:MSG_CAP]})
             if not opening and len(message) < 400:

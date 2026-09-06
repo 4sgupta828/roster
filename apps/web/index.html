@@ -5461,7 +5461,20 @@ async function submitTriage(text, extra){
   if(typeof voiceHush === "function") voiceHush();
   q.value = ""; autoGrow();
   const thread = $("#tgt-thread");
-  if(text && thread){ const u = document.createElement("div"); u.className = "tgt-msg user"; u.textContent = text; thread.appendChild(u); }
+  // CONVERSATION ORDER: the pending question card folds into the thread as a bubble, then the user's message,
+  // then "thinking…" last — never a stale card below the new turn
+  const pendingQ = INTAKE.last && INTAKE.last.question;
+  const card = tbody().querySelector(".tgt-q"); if(card) card.remove();
+  const wrapLine = tbody().querySelector(".tgt-wrapline"); if(wrapLine) wrapLine.remove();
+  if(thread && pendingQ && pendingQ.words && !(thread.lastElementChild && thread.lastElementChild.classList.contains("bot") && thread.lastElementChild.textContent === pendingQ.words)){
+    const qb = document.createElement("div"); qb.className = "tgt-msg bot"; qb.textContent = pendingQ.words; thread.appendChild(qb);
+  }
+  if(thread){
+    const u = document.createElement("div"); u.className = "tgt-msg user";
+    u.textContent = text || (extra.search_now ? "Search now with what I have" : extra.direction ? (extra.direction === "job" ? "I'm looking for a role" : "I'm hiring")
+                    : (extra.answer ? (Array.isArray(extra.answer.value) ? extra.answer.value.join(", ") : String(extra.answer.value === "__decline__" ? "Prefer not to say" : extra.answer.value)).replace(/_/g, " ") : ""));
+    if(u.textContent) thread.appendChild(u);
+  }
   const think = document.createElement("div"); think.className = "tgt-msg bot thinking"; think.textContent = extra.search_now ? "wrapping up…" : "thinking…";
   if(thread){ thread.appendChild(think); } triageScroll();
   INTAKE.busy = true;

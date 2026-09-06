@@ -331,3 +331,15 @@ def test_the_current_title_never_becomes_the_search_when_the_user_said_what_they
     out = _run(s.step(search_now=True, state=out["state"]))
     text = out["ready"]["contract"]["text"].lower()
     assert "founder in residence" not in text and "ml infra" in text
+
+
+def test_chip_answers_appear_in_the_transcript_in_conversation_order():
+    s = _service()
+    out = _run(s.step(message="", state=None, direction="job"))
+    out = _run(s.step(message="Software engineer, Acme, 2019 to now. Python, Go.", state=out["state"]))
+    out = _run(s.step(answer={"name": "level", "value": "senior"}, state=out["state"]))
+    roles = [(m["role"], m["text"][:30]) for m in out["state"]["transcript"]]
+    assert roles[0] == ("user", "I'm looking for a role")
+    assert ("user", "senior") in roles
+    i = roles.index(("user", "senior"))
+    assert roles[i - 1][0] == "assistant" and roles[i + 1][0] == "assistant"      # question · answer · next question
