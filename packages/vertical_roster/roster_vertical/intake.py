@@ -188,7 +188,7 @@ LEVEL_WORK_TYPES = {"leadership": ("executive", "founder", "manager")}
 # SMART RELAXING (owner, 2026-09-06): too few results → musts relax to preferences, LEAST important first, the compile's
 # before the user's own chips, until the pool is a good size. A relaxed must still ranks first; nothing becomes an avoid.
 RELAX_ORDER = ("skill", "specialty", "role_family", "evidence", "company_type", "employment_type", "comp", "work_mode",
-               "work_type", "function", "metro", "state", "level")               # least → most important
+               "work_type", "function", "metro", "state", "company", "level")    # least → most important; a named company after the place
 RELAX_NEVER = ("country", "field")  # the scope and the domain are promises: a different field is not "more results"
 RELAX_MIN_SLICE = 200               # the must-slice the index should hold before the search runs (cheap probe)
 RELAX_TARGET_ROWS = 30              # and the rows the search should actually return (one more relaxation when short)
