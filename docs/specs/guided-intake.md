@@ -365,66 +365,137 @@ line on the rail. Prerequisite chore: move the `rs_job` facet columns' DDL into 
 
 ---
 
-## 12. Contract SEARCH — choosing the combination of constraints by measuring, not guessing (DRAFT, 2026-09-06)
+## 12. Contract SEARCH — choosing the combination of constraints by measuring, not guessing (v2, 2026-09-06, panel-revised)
 
 Owner: "Guided does a brute-force job at mapping intent to a search. The hard part is WHAT COMBINATION of flags
-gives the most relevant results — not guessing and throwing it at search."
+gives the most relevant results — not guessing and throwing it at search. This is the smartest part of the
+product." Panel v1 (Codex, Gemini): the draft's objective would pick broad noisy pools; a per-candidate sampled
+judge is high-variance and biased toward rich blurbs; candidate generation must be INDEX-DRIVEN, not a ladder
+around one guess; probe at compile time; keep latency in seconds. All adopted below.
 
 ### 12.1 The problem, precisely
 
-The compile step turns a brief into ONE contract by rules (open phrases → prefer, low coverage → prefer, field
-and geo → must, skills ≤ 2 → must …). Those rules never look at the index. Whether `field=marketing` or
-`specialty=crm` is the reading that finds marketing-engineering managers, whether `work_type=manager` should
-filter or rank, whether "Seattle or remote" should be a metro must — depends on what the corpus holds and how
-it was extracted. Only the index can answer, so the contract must be CHOSEN against the index.
+A brief maps onto the schema in several defensible ways (a READING): "marketing engineering manager, CRM,
+Salesforce" is {field: software, specialty: crm, work_type: manager} or {field: marketing}; "remote US or
+Seattle" is a place-or-mode disjunction the contract grammar cannot AND. And for a given reading, each named
+dimension can FILTER or RANK (a POLICY). Which (reading, policy) finds the relevant people depends on what the
+index holds and how it was extracted — only the index can tell. Today one model call picks both blind.
 
-### 12.2 The mechanism
+### 12.2 Three inputs, kept apart
 
-    brief + answers  →  CANDIDATE contracts (a ladder + alternative readings)
-                     →  evaluate each (cheap: counts + top-40)
-                     →  JUDGE a sample of each result set against the brief (one batched model call)
-                     →  pick by objective (expected relevant results, under the user's own musts)
-                     →  READY card shows the pick AND the alternatives with their numbers
+- **U — the user's own constraints** (chips they set to must, answers to required questions, rail edits).
+  Inviolable: every candidate carries U; nothing relaxes U.
+- **R — readings of the brief**: interpretations onto schema keys. Two sources: the MODEL (meaning: up to three
+  distinct mappings where the brief is ambiguous) and the DATA (co-occurrence: where the brief's specialties /
+  skills actually live in the index — see 12.4).
+- **P — policies**: which named dimensions filter and which rank: `strict` (all named dims must), `default`
+  (field + geo must, the rest prefer, level centres), `loose` (only U must, all else prefer), and
+  `relaxed` (strict minus the musts that collapse the pool — from the marginal-drop probe).
 
-1. **Candidates** (code, from the compiled contract C and the user's explicit constraints U — chips / answers):
-   - `strict`: every named dimension a must (field, work_type, level as must, metro, skills ≤ 2, evidence if named).
-   - `default`: today's rules (field + geo must; the rest prefer; level centres).
-   - `loose`: only U as musts; everything else prefers.
-   - `readings`: the compile's alternative readings — the model returns up to 3 `readings`, each a different
-     mapping of the same brief onto schema keys (e.g. "marketing engineering" → {field: software, specialty:
-     crm} vs {field: marketing}); each becomes a `default`-shaped variant.
-   Cap: ≤ 6 candidates. U is never relaxed by a candidate — the user's own musts hold in all of them.
-2. **Evaluate each** (concurrently; counts cached per must-set): pool size, best match, the top 40.
-3. **Judge** (model, meaning): ONE call with the brief and, per candidate, 8 sampled rows from its top 20 (name,
-   blurb / title, facets) → `{candidate: [{row, fit: yes | partial | no, why}]}`. The judge sees identity-bearing
-   text (never bare scores) and rates fit to the BRIEF, not to the contract. ≈ 3–4k tokens, DeepSeek ≈ $0.002.
-4. **Objective** (code): `expected_relevant = precision(yes + ½·partial) × min(pool, 200)`, tie-break by precision.
-   A candidate whose pool < 5 is out unless every candidate is tiny. A candidate that violates U is out.
-5. **Ratify**: the READY card shows the chosen reading in words ("reading: software field, CRM specialty, managers
-   rank first") with its numbers, and the runners-up as one line each ("stricter: 9 people, 8 of 8 fit · looser:
-   2,900, 6 of 20 fit") — each tappable to switch. The rail then works on whichever was picked.
-6. **Learn** (later): log the pick, the alternatives and what the user changed on the rail afterwards; a rail edit
-   right after hand-off is a labelled miss, feeding the default rules and the judge prompt.
+A candidate = C(r, p) ∪ U. Cap 9 before probing; typically 4–6 survive.
 
-### 12.3 Where it lives
+### 12.3 The pipeline
 
-- kernel `facets/contract_search.py` (new): the ladder builder over opaque keys (which sections to move), the
-  objective, the selection — pure. No vocabulary.
-- vertical `intake.py`: the `readings` compile prompt (alternative mappings), the judge prompt, the ladder policy
-  (which keys count as "named dimensions", the skill cap).
-- app `intake.py`: `_choose_contract(brief, C, U)` at READY (and on `search_now`); `/intake/step` returns
-  `ready.alternatives`; the FE ready card renders them; switching re-runs only the hand-off.
+    brief + answers + U
+      → readings R (one compile call returns ≤ 3; + co-occurrence readings from data)
+      → candidates C(r, p) ∪ U
+      → STRUCTURAL PROBES (code; counts, cached; concurrent): pool, marginal drop per must, viability
+      → survivors' top-10 each → ONE blind judge call over the normalized UNION
+      → SELECT: precision-first above a viability floor; stricter wins ties
+      → READY card: the pick in words + numbers; alternatives one tap away
+      → after hand-off: rail edits within 10 min are labelled misses (learning log)
 
-### 12.4 Cost, latency, gates
+### 12.4 Structural probes (code, cheap, deterministic)
 
-Per READY: ≤ 6 evaluates (counts cached; semantic legs ≈ 1–3 s each, concurrent) + one judge call ≈ $0.002 →
-≈ 4–8 s added to the ready step. Off by default behind `ROSTER_INTAKE_CONTRACT_SEARCH=1` until the eval set
-shows it beats the single compile (the eval gains a `relevance@20` check: the judge's verdict on the hand-off's
-top 20 for each scenario, reported per run).
+1. **Pool per candidate** — `store.counts` total (cached per must-set; sampled above 40k; small slices exact).
+   Viable iff pool ≥ 5 (all-tiny → keep the largest). A pool above 50k with no U must is "unfiltered" — allowed,
+   but it can only win on precision.
+2. **Marginal drop** — `diagnose_musts` on the strict candidate: a must whose removal multiplies the pool by
+   ≥ 5× and is not in U is "collapsing" → demoted to prefer in `relaxed`. This is what stops `metro=seattle`
+   from emptying a "remote US or Seattle" search without a model in the loop.
+3. **Co-occurrence reading** — for each specialty / skill value the brief names (≤ 3), one counts call with
+   must={specialty|skill: [v]} → the `field` (and `function`, `work_type`) distribution among people who carry
+   it. When the majority field differs from the model's reading, a DATA reading {field: majority, specialty: v}
+   is added. "crm" living 70 % in field=software makes {field: software, specialty: crm} a candidate even if the
+   model only offered {field: marketing}.
+4. **Disjunction rule** — a place named alongside a mode ("remote or Seattle", "hybrid in NYC") becomes a metro
+   PREFER, never a must, unless U says otherwise; for people there is no work-mode key, so the mode is a note on
+   the card, not a constraint.
 
-### 12.5 Panel questions
+Cost: ≤ 9 pools + ≤ 3 co-occurrence + 1 marginal-drop set ≈ 15 counts calls, cached by must-set, concurrent:
+≈ 1–3 s (sampled slices ≈ 1 s; exact small slices ≈ 0.1 s). No model.
 
-1. Is the objective right (expected relevant results), or should precision dominate above a pool floor?
-2. Judge on 8 rows × 6 candidates — enough signal? Better: judge the UNION once and score candidates by overlap?
-3. Should the ladder also vary the semantic text (intent words vs. artifact facts) as a dimension?
-4. Risk: the judge favours candidates whose rows carry richer blurbs (visibility bias). Mitigation?
+### 12.5 The judge (model, meaning, once)
+
+- Input: the BRIEF (the user's words + their answers, never the contract) and the UNION of the survivors' top-10
+  rows, de-duplicated, shuffled, BLIND to which candidate produced them, in one normalized shape per row:
+  `{id, role line (title / current role), company, facets: field · function · level · work_type · metro,
+  skills/specialties (≤ 5), snippet ≤ 140 chars, evidence kind}` — the same fields for every row, missing values
+  shown as "—" (the visibility-bias mitigation).
+- Output: per row `{fit: yes | partial | no, why (≤ 8 words)}`. ≈ 25–35 rows × ~70 tokens ≈ 3k tokens ≈ $0.002,
+  ≈ 1.5 s.
+- Candidate score (code): precision@10 = (yes + ½·partial) / 10 over ITS top 10, read off the union verdicts;
+  plus precision@3 for the head.
+
+### 12.6 Selection (code)
+
+Lexicographic: (1) honours U; (2) viable (pool ≥ 5); (3) precision@10 desc; (4) precision@3 desc;
+(5) stricter (more musts) desc; (6) pool desc. If the best precision@10 < 0.3, the pick is flagged WEAK
+("few people in the index fit this brief") and the strictest viable candidate is chosen — small and honest beats
+large and noisy. Ties within 0.05 go to the stricter candidate.
+
+### 12.7 Ratification and learning
+
+READY card: "Reading: software field · CRM specialty · managers rank first — 312 people, 8 of 10 fit" and one
+line per runner-up ("field = marketing — 9 people, 2 of 10 fit" · "everything ranks — 2,900 people, 4 of 10
+fit"), each tappable to switch before or after the hand-off. The rail then works on the chosen contract.
+Learning log (`roster_intake_choice`, additive): brief hash, candidates with their numbers, the pick, and any
+rail edit within 10 min of the hand-off (a labelled miss) — the data that tunes the default policy and the
+reading prompt later. No automatic behaviour change from the log in v1.
+
+### 12.8 Where it lives
+
+| Piece | Where | Domain words? |
+|---|---|---|
+| Ladder over opaque keys (strict / default / loose / relaxed), viability, the objective and selection, marginal-drop demotion | `packages/kernel/roster_kernel/facets/contract_search.py` (new, pure) | No |
+| Readings compile prompt (≤ 3 mappings), judge prompt + row normalization spec, the disjunction rule, which keys are "named dimensions", skill cap | `packages/vertical_roster/roster_vertical/intake.py` | Yes |
+| Orchestration: probes (counts), co-occurrence, evaluate survivors, judge, select; `ready.alternatives`; the learning log | `apps/api/contract_search.py` (new) + `apps/api/intake.py` (`_ready`) | neutral |
+| Ready card alternatives; switch; miss logging on rail edits | `apps/web/index.html` | — |
+
+### 12.9 Budget, latency, gates
+
+Per READY ≈ 2–5 s added (probes concurrent, one judge call) and ≈ $0.002–0.004. Behind
+`ROSTER_INTAKE_CONTRACT_SEARCH=1`; on by default only when the paired eval (12.10) shows the lift. Probes start
+while the last question is being answered so the ready step feels immediate.
+
+### 12.10 Evaluation — paired, blind, per scenario
+
+The eval set gains a paired check per scenario: BASELINE (single compile, today) vs SELECTED (12.6). The union
+of both top-20s is judged blind against the brief; report precision@10 / @20 for each, the lift, and "missed
+obvious relevant" (rows judged yes that some candidate surfaced but the selected top-20 lacks). Gate to turn the
+flag on: selected ≥ baseline on ≥ 80 % of scenarios and never worse by more than 0.10 precision@10. New
+scenarios for the failure classes the owner hit: field-vs-specialty ambiguity, place-or-mode disjunction, a title
+that is also an employer name ("Salesforce"), a JD whose must-haves are all skills.
+
+### 12.11 Panel verdicts (v1 → v2)
+
+Codex: objective must be precision-first above a pool floor (ADOPTED 12.6); judge the union blind, normalize
+rows, aggregate in code (ADOPTED 12.5); build the index-aware contract debugger first — marginal drop, top facet
+distributions, deterministic gates (ADOPTED as 12.4, and it ships FIRST — see 12.12); vary the semantic text in
+a capped way (DEFERRED: a separate experiment, not mixed into the ladder — Gemini's objection holds that mixing
+variables hides causes); paired eval with missed-relevant (ADOPTED 12.10).
+Gemini: the objective was catastrophic (ADOPTED); latency wall (ADOPTED: probes not evaluates, one judge call,
+pre-run during the last answer, flag-gated); semantic echo chamber — the judge sees only what the ranker surfaced
+(MITIGATED: the union includes strict candidates' rows the semantic leg alone would not rank; structural probes
+carry recall information the judge cannot); pre-flight probing at compile time (ADOPTED 12.4: code probes;
+the model proposes readings, code measures — no tool-calling loop needed); structured judge rows (ADOPTED).
+
+### 12.12 Delivery order
+
+1. **Index-aware compile (no model, no flag)**: disjunction rule, marginal-drop demotion of collapsing musts not
+   in U, co-occurrence reading when the brief names specialties/skills — folded into today's single compile
+   path. Fixes the empty-pool and wrong-field classes now. Eval scenarios for them.
+2. **Contract search behind the flag**: ladder + probes + blind union judge + selection + ready-card alternatives
+   + learning log. Paired eval; turn on when the gate passes.
+3. **Learning**: read the log; tune default policy weights and the readings prompt; consider a small learned
+   prior per field/function for which dimensions filter.
