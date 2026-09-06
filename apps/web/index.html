@@ -4890,7 +4890,7 @@ function renderEvidence(data, note){
     (rows || `<div class="empty">No matching evidence for that query.</div>`);
 }
 
-// ---- attachments (image / PDF / DICOM → visual context) ----
+// ---- attachments (image / PDF / text → the search or the intake) ----
 const readAsBase64 = file => new Promise((res,rej)=>{
   const r = new FileReader();
   r.onload = () => res(String(r.result).split(",")[1] || "");
