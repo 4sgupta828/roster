@@ -85,3 +85,10 @@ def test_merged_order_is_fits_then_partials_then_ungraded_tail_then_nos():
     assert [r["id"] for r in out] == ["e2", "e3", "e1", "e4", "e5", "e6", "e7", "e0"]
     assert out[0]["_fit"] == "yes" and out[3]["_fit"] is None and out[-1]["_fit"] == "no" and out[-1]["_why"] == "other"
     assert head_precision(out, verdicts, k=5, weak_ids={"e3"}) == round((1 + 0.8 + 0.4) / 5, 3)
+
+
+def test_a_judges_id_is_resolved_however_it_writes_it():
+    from roster_kernel.facets.contract_search import blind, resolve_blind_id
+    _, mapping = blind([{"id": "e0"}, {"id": "e1"}, {"id": "e2"}], seed=1)
+    assert resolve_blind_id(mapping, "r2") == mapping["r2"] and resolve_blind_id(mapping, 2) == mapping["r2"]
+    assert resolve_blind_id(mapping, "[R3]") == mapping["r3"] and resolve_blind_id(mapping, "x9") is None and resolve_blind_id(mapping, "") is None

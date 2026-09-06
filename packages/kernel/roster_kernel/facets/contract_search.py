@@ -194,6 +194,16 @@ def blind(rows: list[dict], *, seed: int = 0, id_of=None) -> tuple[list[tuple[st
     return items, mapping
 
 
+def resolve_blind_id(mapping: dict, raw) -> str | None:
+    """The real id behind a judge's id as written: 'r3', '[r3]', 'R3', 3 or '3' all mean the third blind row."""
+    t = str(raw if raw is not None else "").strip().strip("[]").strip().lower()
+    if not t:
+        return None
+    if t.isdigit():
+        t = "r" + t
+    return mapping.get(t)
+
+
 def order_by_verdicts(fused: list[dict], verdicts: dict, *, head: int, id_of=None) -> list[dict]:
     """Merged order: judged fits, then partial fits, then the ungraded tail in fused order; rows judged 'no' sink
     below the tail with the verdict attached. Every row carries `_fit` (yes | partial | no | None) and `_why`."""

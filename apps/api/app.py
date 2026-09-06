@@ -6440,7 +6440,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     async def search_judge(body: JudgeIn) -> dict:
         """The blind fit judge on its own (spec §12.5 / §12.10 — the paired eval grades both arms' union once, blind).
         Rows are normalized server-side to the judge's fixed shape from a few allowed fields; ≤ 60 rows; one call."""
-        from roster_kernel.facets.contract_search import blind
+        from roster_kernel.facets.contract_search import blind, resolve_blind_id
         from roster_vertical.intake import judge_prompt, judge_row
         kind = "person" if body.kind == "person" else "job"
         rows = []
@@ -6459,8 +6459,9 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         d = await asyncio.to_thread(getattr(app.state, "intake_llm", None) or _llm_json, judge_prompt(kind), user)
         verdicts = {}
         for v in (d.get("verdicts") or []):
-            if isinstance(v, dict) and mapping.get(str(v.get("id") or "")) and str(v.get("fit") or "").lower() in ("yes", "partial", "no"):
-                verdicts[mapping[str(v["id"])]] = {"fit": str(v["fit"]).lower(), "why": str(v.get("why") or "")[:80]}
+            rid = resolve_blind_id(mapping, v.get("id")) if isinstance(v, dict) else None
+            if rid and str(v.get("fit") or "").lower() in ("yes", "partial", "no"):
+                verdicts[rid] = {"fit": str(v["fit"]).lower(), "why": str(v.get("why") or "")[:80]}
         return {"verdicts": verdicts, "graded": len(verdicts)}
 
     @app.post("/admin/facets/project-people")

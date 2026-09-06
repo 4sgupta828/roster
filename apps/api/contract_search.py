@@ -20,7 +20,7 @@ import json
 from typing import Awaitable, Callable
 
 from roster_kernel.facets import Contract
-from roster_kernel.facets.contract_search import blind, collapsing_musts, cooccurrence_readings, head_precision, order_by_verdicts, recipes, rrf_fuse, survivors
+from roster_kernel.facets.contract_search import blind, collapsing_musts, cooccurrence_readings, head_precision, order_by_verdicts, recipes, resolve_blind_id, rrf_fuse, survivors
 
 COOC_KEYS = ("specialty", "skill")
 COOC_TARGET = "field"
@@ -185,7 +185,7 @@ async def merged_search(c: Contract, *, kind: str, user_keys: set, notes: list[d
             for v in (d.get("verdicts") or []):
                 if not isinstance(v, dict):
                     continue
-                rid = mapping.get(str(v.get("id") or ""))
+                rid = resolve_blind_id(mapping, v.get("id"))
                 fit = str(v.get("fit") or "").lower()
                 if rid and fit in ("yes", "partial", "no"):
                     verdicts[rid] = {"fit": fit, "why": str(v.get("why") or "")[:80]}

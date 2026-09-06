@@ -197,7 +197,7 @@ def judge_prompt(kind: str) -> str:
     rows = "PEOPLE (a candidate each)" if kind == "person" else "OPEN POSTINGS (a role each)"
     brief = "a hiring manager's need" if kind == "person" else "a job seeker's ask"
     return (f"You judge, row by row, whether each of these {rows} FITS the BRIEF ({brief}). Return ONLY JSON: "
-            "{\"verdicts\": [{\"id\": the row id, \"fit\": \"yes\" | \"partial\" | \"no\", \"why\": ≤ 8 words}]}, one verdict per row. "
+            "{\"verdicts\": [{\"id\": the row id exactly as shown in brackets (e.g. \"r3\"), \"fit\": \"yes\" | \"partial\" | \"no\", \"why\": ≤ 8 words}]}, one verdict per row. "
             "yes = the row's role, domain, level tier and place (when the brief states one) all agree with the brief. "
             "partial = one dimension is off or unstated: a level one step away, an adjacent specialty, a place or level shown as —. "
             "no = a different role or domain, a different level tier (an individual contributor for an executive brief and the reverse), "
