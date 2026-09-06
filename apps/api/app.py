@@ -4042,7 +4042,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     _ex: dict = {}
                     import time as _ptm
                     _p0 = _ptm.monotonic()
-                    _c = await asyncio.to_thread(compile_contract, "person", _q, _facet_schema(), _llm_json, limit=200, scope={"country": _scope_c} if _scope_c else {}, extras=_ex)
+                    _c = await asyncio.to_thread(compile_contract, "person", _q, _facet_schema(), _llm_json, limit=100, scope={"country": _scope_c} if _scope_c else {}, extras=_ex)
                     _p1 = _ptm.monotonic()
                     downgrade_uncovered_musts(_c, await _facet_coverage("person"))
                     _p2 = _ptm.monotonic()

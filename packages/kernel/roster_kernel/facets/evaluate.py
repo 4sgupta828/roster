@@ -44,7 +44,9 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
     # 1) POOL — every leg is asked with the musts; the union keeps the best similarity per id
     pool: dict[str, dict] = {}
     legs = {"semantic": 0, "enumerate": 0, "angles": 0, "prefer": 0}
-    cap = max(int(contract.limit) * 6, 200)
+    # the neighbourhood per leg: a few times the limit is enough for the facet re-rank (6× once pulled 1,200 filtered
+    # rows for a 200-row page on a 400k index — every leg an iterative index walk); `depth.cap_mult` overrides
+    cap = max(int(contract.limit) * int((depth or {}).get("cap_mult") or 4), 160)
 
     def _take(rows: list[dict], leg: str) -> None:
         for r in rows:
@@ -59,7 +61,7 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
     if contract.text:
         import asyncio as _aio
         jobs = [("semantic", store.semantic(contract.kind, contract.text, must, cap=cap))]
-        for a in (contract.angles or [])[:5]:
+        for a in (contract.angles or [])[:3]:
             jobs.append(("angles", store.semantic(contract.kind, str(a), must, cap=cap // 2)))
         # PREFER legs: a preferred value must reach the pool to be ranked at all — the nearest rows that HOLD a
         # preferred value join the neighbourhood (a `field: marketing` preference once changed nothing because no

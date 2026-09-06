@@ -274,7 +274,7 @@ def test_a_preferred_value_reaches_the_pool_through_its_own_leg():
             calls.append((dict(must), cap)); return await super().semantic(kind, text, must, cap=cap)
     out = asyncio.new_event_loop().run_until_complete(evaluate(Contract(kind="e", text="q", prefer={"fd": ["m"]}, limit=10), Store(rows, sch), sch))
     assert any(m.get("fd") == ["m"] for m, _ in calls) and out["coverage"]["legs"]["prefer"] >= 1
-    assert out["coverage"]["pool"] == 201                                                  # the nearest 200 plus the marketing row its own leg brought in
+    assert out["coverage"]["pool"] == 161                                                  # the nearest 160 (the neighbourhood floor) plus the marketing row its own leg brought in
 
 
 def test_weak_diagnosis_reports_the_best_match_without_each_must():
