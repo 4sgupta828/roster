@@ -302,6 +302,10 @@
   .consent-q{color:var(--muted);opacity:.7;font-size:.7rem;cursor:help;}
 
   /* identity gate (name + email at landing) */
+  /* THE hidden ATTRIBUTE ALWAYS WINS (owner, 2026-09-06: the Apply-profile nudge stayed on screen with hidden=true because
+     .nudge's display:flex outranked the UA's [hidden] rule; the same bug hid nothing on #bellcount, the mic, attach). One
+     rule instead of per-element patches: an element marked hidden is not displayed, whatever its display class says. */
+  [hidden]{display:none!important;}
   .idmodal[hidden]{display:none;}
   .idmodal{position:fixed;inset:0;z-index:70;background:rgba(4,10,20,.82);
     -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);display:grid;place-items:center;padding:1.2rem;}
