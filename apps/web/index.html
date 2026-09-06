@@ -7729,9 +7729,9 @@ function mergeContract(d, c){
 function mergeMarkup(d){
   const m = d.merge; if(!m) return "";
   const off = recipeOff(d);
-  const words = n => n === "strict" ? "as ratified" : n === "loose" ? "every relaxable filter ranks" : n.startsWith("relaxed:") ? `without ${n.slice(8).replace(/_/g," ")} as a filter` : n.startsWith("reading:") ? n.slice(8).replace("=", " = ").replace(/_/g," ") : n;
+  const words = n => n === "strict" ? "as ratified" : n === "default" ? "compiled reading ranks, not filters" : n === "loose" ? "every relaxable filter ranks" : n.startsWith("relaxed:") ? `without ${n.slice(8).replace(/_/g," ")} as a filter` : n.startsWith("reading:") ? n.slice(8).replace("=", " = ").replace(/_/g," ") : n;
   const recipes = (m.ladder||[]).map(n => { const r = (m.recipes||[]).find(x => x.name === n); const isOff = off.has(n);
-    return `<button type="button" class="frail-recipe${isOff?" off":""}" data-jpid="${esc(d._jpid)}" data-name="${esc(n)}" title="${esc(r ? `${r.pool != null ? r.pool + " in its pool" : "not run"} · ${r.head_fits||0} of its rows judged a fit` : (isOff ? "switched off — tap to include" : "no rows survived"))}">${isOff ? "✕ " : "✓ "}${esc(words(n))}${r && r.pool != null ? ` <span class="frail-note">${r.pool}</span>` : ""}</button>`; }).join("");
+    return `<button type="button" class="frail-recipe${isOff?" off":""}" data-jpid="${esc(d._jpid)}" data-name="${esc(n)}" title="${esc(r ? `${r.pool != null ? (r.pool >= 2001 ? "2000+" : r.pool) + " in its pool" : "not run"} · ${r.head_fits||0} of its rows judged a fit` : (isOff ? "switched off — tap to include" : "no rows survived"))}">${isOff ? "✕ " : "✓ "}${esc(words(n))}${r && r.pool != null ? ` <span class="frail-note">${r.pool >= 2001 ? "2000+" : r.pool}</span>` : ""}</button>`; }).join("");
   const graded = m.graded ? `${m.fits} of ${m.graded} graded read as a fit` : (m.judge_error ? "the judge did not run — fused order shown" : "nothing graded");
   return `<div class="frail-merge"><div class="frail-merge-h"><b>Merged ${(m.recipes||[]).length} reading${(m.recipes||[]).length===1?"":"s"}</b> · ${graded}${m.weak ? ` · <span class="frail-weak">weak — few fits; add a detail or drop a filter</span>` : ""} <span class="tgt-q-hint">model read, not a fact</span></div><div class="frail-recipes">${recipes}</div></div>`;
 }

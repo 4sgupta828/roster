@@ -208,7 +208,9 @@ def judge_prompt(kind: str) -> str:
             "no = a different role family or domain, a different level tier (an individual contributor for an executive brief and the reverse), "
             "something REQUIRED contradicted, or a resemblance that is keyword-only (the same word in another sense). "
             "Skills are PREFERENCES unless listed as required: a row of the right role and tier that lacks a preferred skill is 'partial', never 'no'. "
-            "Judge ONLY from the facts shown on the row; — means unknown and unknown is never a 'no' on its own. Never judge from a name.")
+            "Judge ONLY from the facts shown on the row: when a facet shows — but the row's own role line states it (\"Senior Software "
+            "Engineer at X\" states the role and a senior level), read it from the role line; — with nothing stated means unknown, and "
+            "unknown is never a 'no' on its own. Never judge from a name.")
 
 
 def judge_brief(kind: str, text: str, contract: dict | None) -> str:

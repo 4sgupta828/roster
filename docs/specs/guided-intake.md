@@ -304,7 +304,7 @@ line on the rail. Prerequisite chore: move the `rs_job` facet columns' DDL into 
 
 ## 11. Status (2026-09-05, end of session) — START HERE next session
 
-> 2026-09-06: v1 + v1.1 + §12 step 1 live; intake battery 18/18 (see §12.13 for the latest fixes). Next: §12 step 2.
+> 2026-09-06: v1 + v1.1 + §12 step 1 live; intake battery 18/18; §12 step 2 BUILT behind `ROSTER_INTAKE_CONTRACT_SEARCH` (off) — see §12.13 for the paired numbers and the human-label gate.
 
 - **v1 intake core LIVE** on prod behind `ROSTER_GUIDED_INTAKE=1` (needs `ROSTER_FACET_EVALUATOR=1`): the ◍ Guided
   TAB (first, beside Talent Map / Jobs Map / Q&A — never a separate mode bar), `POST /intake/step` (stateless;
@@ -552,6 +552,31 @@ step owns it); non-answer words ("missing", "not stated") are never an answer no
 that is also place-or-mode leaves the metro to the index-aware step, and the place-or-mode reading is noted even
 when the compile already left the place under prefer. Throwaway accounts: `evals/intake/sweep_throwaways.py`
 (in-container).
+
+**Step 2 BUILT, flag OFF (2026-09-06, later):** `roster_kernel/facets/contract_search.py` (recipes ladder strict /
+default / relaxed:<key> / loose / reading:<key>=<value>, survivors, blind batching, `resolve_blind_id`,
+`order_by_verdicts`, `head_precision`), vertical judge prompt + one normalized row shape + `judge_brief` (words +
+REQUIRED vs PREFERRED — skills are wishes), `LADDER_DEFAULT_KEYS`, `apps/api/contract_search.py:merged_search`
+(RRF k=60, head 40 graded in 3 concurrent batches on `ROSTER_JUDGE_PROVIDER`=openai, rows carry fit / fit_why /
+found_by, learning log `roster_intake_choice`), `_run_contract` on the people + jobs hand-offs and
+`/search/evaluate` (flag `ROSTER_INTAKE_CONTRACT_SEARCH` or `contract.merge.mode`), `POST /search/judge`
+(bounded, blind, `provider=alt`), rail "Merged N readings" line with recipe toggles staged to Apply, fit chips on
+cards (labelled model read), FE dev switch `localStorage roster_merge=1`. Verified at 390 px (no overflow, toggles
+re-run). Generalized while here: the tier-consistency rule (a preferred work type contradicting the stated level is
+dropped) now lives in the index-aware step for every search, not only JD peers; a ratified contract wins over the
+résumé-on-file match in `/jobs` (it was silently replaced).
+
+Paired eval `evals/intake/paired_eval.py` (eval judge = the OTHER provider, DeepSeek; run
+`runs/paired-20260906-120322.json`, 17 scenarios): prec10 0.14 → 0.28, prec20 0.14 → 0.20, missed 14 → 2, merged ≥
+baseline on 94 %, one scenario worse by > 0.10 (`hiring_decisive_rare_must`, 0 judged fits either way), added p90
+6.3 s (people evaluates on cold compiled slices run 18–22 s on their own — the evaluator, not the merge; the judge
+is ≈ 3 s). GATE NOT MET yet, and the numbers are model-vs-model: the eval judge grades most rows "no" (yes rate
+0–7 per union of ~35) and disagrees with the in-product judge, so nothing here counts until the golden union has
+HUMAN labels — `evals/intake/golden_union_people.json` and `golden_union_jobs.json` are seeded with PROPOSED
+labels for the owner to confirm (`paired_eval.py --golden <file>` runs the drift check). Fusion engaged on only
+4 / 17 scenarios (after the intake few compiled musts remain; readings need compiled specialties) — the judge's
+re-ranking is most of the lift so far. Not done: rail edits within 10 min logged as misses; probes started while
+the last question is answered; ≥ 30 scenarios.
 
 1. **Index-aware compile (deterministic, no model, no flag)** — the disjunction rule, collapsing-must demotion
    with the 12.4.2 conditions, co-occurrence readings (the best-lift data reading replaces a model field only when
