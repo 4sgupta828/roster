@@ -7651,7 +7651,7 @@ function facetRailMarkup(d){
   }).join("");
   const pills = [];
   for(const m of ["must","prefer","avoid"]) for(const [key, vals] of Object.entries(c[m]||{})) for(const v of (Array.isArray(vals) ? vals : [JSON.stringify(vals)]))
-    pills.push(`<span class="fpill">${m === "must" ? "●" : m === "prefer" ? "▲" : "▼"} ${esc((L.keys||{})[key]||key)}: ${esc(facetLabel(d, key, v))}<button type="button" data-jpid="${esc(d._jpid)}" data-key="${esc(key)}" data-value="${esc(v)}" data-mode="off" title="remove">✕</button></span>`);
+    pills.push(`<span class="fpill">${m === "must" ? "●" : m === "prefer" ? "▲" : "▼"} ${esc((L.keys||{})[key]||key)}: ${esc(facetLabel(d, key, v))}<button type="button" data-jpid="${esc(d._jpid)}" data-key="${esc(key)}" data-value="${esc(v)}" data-mode="off" title="Stop using this chip. To HIDE these results instead, tap the chip in the rows above until it shows ▼ avoid">✕</button></span>`);
   const rankable = (L.order||[]).filter(k => ["numeric","ordinal"].includes((L.types||{})[k]));
   const rank = `<label>rank by <select data-jpid="${esc(d._jpid)}" class="frank"><option value="match"${(c.rank_by||"match")==="match"?" selected":""}>match</option>${rankable.map(k => `<option value="${esc(k)}"${c.rank_by===k?" selected":""}>${esc((L.keys||{})[k]||k)}</option>`).join("")}</select></label>`;
   const cov = d.coverage || {};
@@ -7660,7 +7660,7 @@ function facetRailMarkup(d){
   const applyBar = n ? `<div class="frail-apply"><b>${n} change${n===1?"":"s"} pending</b> — nothing runs until you apply.
       <button type="button" class="idgo frail-go" data-jpid="${esc(d._jpid)}">Apply</button><button type="button" class="histbtn frail-reset" data-jpid="${esc(d._jpid)}">Reset</button></div>`
     : `<div class="frail-apply">Tap chips to stage changes, then apply once.${d._applied ? ` <span style="color:var(--verified)">Applied ✓</span>` : ""} ${saveBtn}</div>`;
-  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}"><div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""} ${rank}<span style="margin-left:auto;">● must · ▲ prefer · ▼ avoid</span></div>${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
+  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}"><div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
 }
 function rerenderRail(jpid){
   const d = facetRenderOf(jpid); if(!d) return;

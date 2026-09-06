@@ -334,6 +334,12 @@ Nothing is deleted before its replacement runs behind the flag on prod for one d
 - Step 5 PARTIAL: company `type` facets from lookup data are LIVE (`scripts/company_facets.py`, curated
   `data/company_sets.json` dated 2026-09); eval traps in `apps/api/test_facet_traps.py`; provenance labels on
   cards. Not done: hierarchical geo; golden-eval run with the flag on; deleting old scorers.
+- Evaluator rules learned in prod (2026-09-05, owner report "removed founder, still founder jobs; rank by level
+  shows IC"): WITH text the pool is the semantic neighbourhood ONLY — no enumerate leg (it poured sim-0 rows in and
+  `rank_by` an ordinal sorted them first); filtered semantic legs use pgvector's iterative scan (`relaxed_order`,
+  `max_scan_tuples` 40k) so a must no longer truncates recall to the first 200 candidates; small must-slices take
+  an exact-distance path; `ix_rs_job_facet_eid` makes the job must correlation indexable. Schema guidance: a
+  "founding engineer" is an early hire (ic, level as stated), not leadership — 503 founding-titled postings re-read.
 - Known gaps: `role_family` pills show the key label only; the pool for a brief with no musts is the semantic
   top-K (cap ≈ limit × 6), so counts are index-wide while rows are the nearest; navigation on a map with no
   contract (saved before this work) says so and asks for a fresh search.
