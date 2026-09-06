@@ -284,7 +284,7 @@
   .sessions .stab[aria-selected="true"]{color:var(--gold);border-bottom-color:var(--gold);}
   .sessions .stab:focus-visible{outline:2px solid var(--gold);outline-offset:2px;}
 
-  /* image/PDF/DICOM attachments (vision) */
+  /* image / PDF attachments */
   #camera{display:none !important;}   /* camera / photo capture retired (owner, 2026-09-04) */
   button.attach{flex:none;width:44px;height:44px;border-radius:50%;cursor:pointer;background:transparent;
     border:1px solid var(--hair);color:var(--muted);display:grid;place-items:center;transition:.12s;}
@@ -1863,7 +1863,7 @@
         </svg>
       </button>
     </div>
-    <input type="file" id="file" accept="image/*,.pdf,application/pdf,.dcm,application/dicom" multiple hidden />
+    <input type="file" id="file" accept="image/*,.pdf,application/pdf,.txt,text/plain" multiple hidden />
     <div class="attns" id="attns" hidden></div>
     <!-- ONE slim control bar — intent lives in tooltips, not prose (minimal landing page) -->
     <div class="ctlbar">
@@ -2398,7 +2398,7 @@ const out = $("#out"), go = $("#go"), q = $("#q");
 let SOURCES = [];
 let VIDEO_ENABLED = false;
 let STRUCTURED = false;     // render the answer as markdown sections (server-authoritative)
-let VISION_ENABLED = false; // image/PDF/DICOM upload → visual-context research
+let VISION_ENABLED = false; // image reading for attachments (résumé / JD PDFs work without it)
 let LAYMAN_ENABLED = false; // on-demand plain-language re-explanation
 let TERMS_ENABLED = false;  // on-demand key-term explanations + the accumulating All Terms glossary
 let VOICE_INTAKE_ENABLED = false; // hands-free guided intake (speak answers, hear questions)
