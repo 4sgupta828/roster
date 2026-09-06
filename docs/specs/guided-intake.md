@@ -340,6 +340,24 @@ line on the rail. Prerequisite chore: move the `rs_job` facet columns' DDL into 
   location), ≤ 400 chars, never the artifact body (`IntakeService.intent_text`, recomputed at READY); the artifact
   only feeds the checklist. Level from the conversation CENTRES the ranking (`center: level`, span 1) instead of
   filtering, per the standing "level is a preference" rule. Multi-select UX: a chip tap stages, "Answer ✓" sends.
+- **Eval set (owner ask, 2026-09-05): `evals/intake/`** — `scenarios.jsonl` (15 persona-scripted conversations:
+  seekers with / without a résumé, terse and rich, ambiguous title list, "Founder in Residence", search-now early,
+  decline everything; hiring managers with a full / thin / linked JD, saved JDs, a rich opening → draft, a thin
+  opening + "Keep going", multi-select musts; impossible musts; improve-and-save) and `run_intake_eval.py`, which
+  drives `/intake/step` on a live API and scores CONTENT: direction, artifact path, over-asking / repeats, items
+  the artifact stated are never asked, intent text (≤ 400 chars, opening words in, artifact body out), level
+  centres, no company constraint, skill-must cap, draft title / citations / peer relevance / redraft, empty-result
+  diagnosis, hand-off rows (strict for hiring flows), latency caps, improve text. Seeded scenarios use
+  `@roster.test` throwaways (their user rows are swept in the DB afterwards). ≈ $0.15 / run; `runs/` keeps the
+  record. Findings it produced the same day: the CTO draft took 316 s (sequential peer summaries → concurrent,
+  53 s) and handed off 0 candidates (function=engineering must; evidence as a required must) → function ranks,
+  evidence is OPTIONAL for hiring; "Keep going" drafted recruiter postings → a role text that compiles to no
+  field / role reads no peers and re-asks.
+- **Ranking rule (owner report: "none of the results are relevant"):** with text, RELEVANCE is the primary axis —
+  5-point bands of the calibrated match; prefers and the centre reorder WITHIN a band; an avoid lowers the band.
+  Weak results (best match < 45 %) are flagged and diagnosed like empty ones, with the best match WITHOUT each
+  must, so the user sees which filter keeps the closer people out (a Bay Area + manager CRM search: dropping
+  the metro raises the best match from 43 % to 65 %).
 - NOT yet built: server-held intake sessions / `roster_intake` (state is FE-held; attachments are parsed per turn
   they are sent), advice on the result's rail (§5), the "search the other side" offer, the persona eval harness
   (§7), peer-matching by the manager's company type (§4 step 1 `prefer`), a JD-draft entry from the Account card.
