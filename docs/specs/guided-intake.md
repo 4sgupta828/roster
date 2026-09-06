@@ -334,6 +334,12 @@ line on the rail. Prerequisite chore: move the `rs_job` facet columns' DDL into 
   Direction read returns null for a bare title list (asks). A pasted JD's > 2 skill musts rank instead of AND-filter.
   The first-run nudge respects a résumé on file and never fires on an expired session. Verified on prod
   (signed-out browser flows at 1280 / 390; briefs + improve + résumé-on-file via a throwaway account, deleted).
+- **Owner report (session #b08fa55c, 2026-09-05): "Guided throws everything into the jobs search; results all over
+  the place."** Root cause: the contract's semantic `text` was the whole artifact (the résumé). Fix: the search text
+  is the conversation's INTENT — the user's opening words + the answers (role / title, field, skills, specialty,
+  location), ≤ 400 chars, never the artifact body (`IntakeService.intent_text`, recomputed at READY); the artifact
+  only feeds the checklist. Level from the conversation CENTRES the ranking (`center: level`, span 1) instead of
+  filtering, per the standing "level is a preference" rule. Multi-select UX: a chip tap stages, "Answer ✓" sends.
 - NOT yet built: server-held intake sessions / `roster_intake` (state is FE-held; attachments are parsed per turn
   they are sent), advice on the result's rail (§5), the "search the other side" offer, the persona eval harness
   (§7), peer-matching by the manager's company type (§4 step 1 `prefer`), a JD-draft entry from the Account card.
