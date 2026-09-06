@@ -106,3 +106,13 @@ def test_redraft_applies_a_change_in_words_and_keeps_the_citation_rule():
     d2 = _run(redraft(d, "add Kafka as a must, drop the nice-to-haves", Changer()))
     assert [x["text"] for x in d2["must_have"]] == ["Kafka", "Go or Python"] and d2["nice_to_have"] == []
     assert d2["sources"]["changes"] == ["add Kafka as a must, drop the nice-to-haves"] and "- Kafka" in d2["text"]
+
+
+def test_peers_are_the_similarity_neighbourhood_only_the_field_filters():
+    seen = {}
+    async def evaluate_fn(c): seen.update(c); return {"rows": ROWS}
+    async def summaries_fn(peers): return _summaries(peers)
+    def strict(kind, text, *, limit=60, scope=None):
+        return Contract(kind=kind, text=text, must={"field": ["software"], "metro": ["san_francisco"], "skill": ["kafka", "ledger"]}, limit=limit)
+    _run(build_jd_draft(role_text="payments engineer", context={}, evaluate_fn=evaluate_fn, summaries_fn=summaries_fn, compile_fn=strict, llm_json=FakeLLM()))
+    assert seen["must"] == {"field": ["software"]} and sorted(seen["prefer"]["skill"]) == ["kafka", "ledger"] and seen["prefer"]["metro"] == ["san_francisco"]

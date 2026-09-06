@@ -386,6 +386,14 @@ class IntakeService:
         # come from — the intake never constrains `company` (the rail can, explicitly)
         for section in (c.must, c.prefer, c.avoid):
             section.pop("company", None)
+        if st.direction == "candidate":
+            # a JD names many skills; ANDing them all empties the pool. More than two skill / specialty musts → they
+            # rank; the manager's explicit must-haves (the checklist question) still land as musts later.
+            for key in ("skill", "specialty"):
+                vals = c.must.get(key)
+                if isinstance(vals, list) and len(vals) > 2:
+                    c.prefer[key] = sorted(set(list(c.prefer.get(key) or []) + [str(v) for v in vals]))
+                    del c.must[key]
         if st.direction == "job":
             # a résumé states FACTS (what the seeker did): they rank; only the seeker's WANTS filter (asked later)
             keep = {"field", "metro", "state", "country", "work_mode", "employment_type", "comp"}

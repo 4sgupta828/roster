@@ -116,6 +116,11 @@ async def build_jd_draft(*, role_text: str, context: dict, evaluate_fn: Callable
     except Exception:   # noqa: BLE001
         c = Contract(kind="job", text=role_text[:500], limit=pool)
     c.limit = pool
+    # peers are the role's similarity NEIGHBOURHOOD: only the field filters; every other compiled must only ranks
+    for k in [k for k in list(c.must.keys()) if k != "field"]:
+        vals = c.must.pop(k)
+        if isinstance(vals, list):
+            c.prefer[k] = sorted(set(list(c.prefer.get(k) or []) + [str(v) for v in vals]))
     if prefer:
         for k, v in prefer.items():
             c.prefer.setdefault(k, list(v))
