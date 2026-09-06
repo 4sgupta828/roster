@@ -2961,9 +2961,13 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     _c.text = body.question or ""
             else:
                 _ex: dict = {}
+                import time as _jtm
+                _j0 = _jtm.monotonic()
                 _c = await asyncio.to_thread(compile_contract, "job", body.question or "", _facet_schema(), _llm_json, limit=80, scope=_scope, extras=_ex)
+                _j1 = _jtm.monotonic()
                 _moved = downgrade_uncovered_musts(_c, await _facet_coverage("job"))
                 _c, _ia_notes = await _index_aware(_c, kind="job", user_keys=set(k for k in ("work_mode", "company_type", "level") if body.job_must), place_or_mode=bool(_ex.get("place_or_mode")))
+                _plain_t = {"plain.compile": round(_j1 - _j0, 2), "plain.coverage_and_index_aware": round(_jtm.monotonic() - _j1, 2)}
             if body.levels and body.levels[0]:
                 _c.center = {"key": "level", "value": body.levels[0], "span": int(body.level_span)}
             for _m in (body.job_must or []):
@@ -2974,7 +2978,9 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 elif _m == "leadership":
                     _c.must.setdefault("level", []).append("leadership")
             _out = (await _run_contract({**dict(body.contract), **_c.to_dict()}, "job", relax=True)) if body.contract \
-                else (await _run_contract({**_c.to_dict(), "user_keys": [k for k in ("work_mode", "company_type", "level") if body.job_must]}, "job", relax=True))
+                else (await _run_contract({**_c.to_dict(), "user_keys": [k for k in ("work_mode", "company_type", "level") if body.job_must], "notes": list(_ia_notes or []),
+                                           "place_or_mode": bool(_ex.get("place_or_mode"))}, "job", relax=True))
+            _out["timings"] = {**(_out.get("timings") or {}), **(_plain_t if not body.contract else {})}
             _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display", "fit", "fit_why", "found_by")},
                       "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in _out["rows"]]
             stats = await store.jobs_stats()
@@ -2984,7 +2990,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             bc["contract"] = _out["contract"]; bc["counts"] = _out["counts"]; bc["coverage"] = _out["coverage"]
             return {"jobs": _rows, "count": len(_rows), "query": {}, "semantic": True, "stats": stats, "geo_scope": None, "session_id": sid,
                     "must": None, "level_pref": None, "brief_contract": bc, "contract": _out["contract"], "counts": _out["counts"], "coverage": _out["coverage"],
-                    "labels": _out.get("labels"), "merge": _out.get("merge"), "relaxed": _out.get("relaxed") or [], "note": f"evaluator — {_out['coverage'].get('pool', 0)} candidates"}
+                    "labels": _out.get("labels"), "merge": _out.get("merge"), "relaxed": _out.get("relaxed") or [], "timings": _out.get("timings") or {}, "note": f"evaluator — {_out['coverage'].get('pool', 0)} candidates"}
         # AGENTIC mode (flag): LLM expands the query into multiple angles → multi-leg retrieval → rerank
         if agentic_jobs_enabled():
             from api.people_population import agentic_job_search, parse_job_query
@@ -4034,9 +4040,14 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     _q = (question_text or body.question or "").strip()
                     _scope_c = ((body.country or "us").strip().lower() if people_geo_scope_enabled() else "")
                     _ex: dict = {}
+                    import time as _ptm
+                    _p0 = _ptm.monotonic()
                     _c = await asyncio.to_thread(compile_contract, "person", _q, _facet_schema(), _llm_json, limit=200, scope={"country": _scope_c} if _scope_c else {}, extras=_ex)
+                    _p1 = _ptm.monotonic()
                     downgrade_uncovered_musts(_c, await _facet_coverage("person"))
+                    _p2 = _ptm.monotonic()
                     _c, _ia_notes = await _index_aware(_c, kind="person", place_or_mode=bool(_ex.get("place_or_mode")))
+                    _plain_t = {"plain.compile": round(_p1 - _p0, 2), "plain.coverage": round(_p2 - _p1, 2), "plain.index_aware": round(_ptm.monotonic() - _p2, 2)}
                     _signal = [k for k in list(_c.must) + list(_c.prefer) if k != "company"]
                     if _signal or _c.center:                       # a role / field / level / skill / place was named → the evaluator
                         if _scope_c and not _c.must.get("country"):
@@ -4045,7 +4056,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                             _c.must["evidence"] = [str(x) for x in body.evidence_kinds]
                         if body.levels and body.levels[0]:
                             _c.center = {"key": "level", "value": str(body.levels[0]), "span": int(body.level_span)}
-                        return await _people_contract_route({**_c.to_dict(), "user_keys": (["evidence"] if body.evidence_kinds else [])}), {"kind": "contract"}
+                        return await _people_contract_route({**_c.to_dict(), "user_keys": (["evidence"] if body.evidence_kinds else []), "notes": list(_ia_notes or []),
+                                                             "place_or_mode": bool(_ex.get("place_or_mode")), "timings": _plain_t}), {"kind": "contract"}
                 except HTTPException:
                     raise
                 except Exception:   # noqa: BLE001 — the engine is the fallback, never a dead end
@@ -4128,7 +4140,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             if on_event is not None:
                 await on_event({"type": "people", "count": len(rows)})
             nav = {"contract": out["contract"], "counts": out["counts"], "coverage": out["coverage"], "labels": out.get("labels"), "merge": out.get("merge"),
-                   "relaxed": out.get("relaxed") or [], "timings": {"search": round(_t1 - _t0, 2), "hydrate": round(_t2 - _t1, 2)}}
+                   "relaxed": out.get("relaxed") or [], "timings": {"search": round(_t1 - _t0, 2), "hydrate": round(_t2 - _t1, 2), **{f"search.{k}": v for k, v in (out.get("timings") or {}).items()}, **((cdict or {}).get("timings") or {})}}
             _cc = out["contract"]; _cv = out.get("coverage") or {}
             _lab = (out.get("labels") or {}).get("values") or {}
             _words = lambda vals: [(_lab.get(str(v)) or str(v).replace("_", " ")) for v in (vals if isinstance(vals, list) else [str(vals)])]
@@ -6163,6 +6175,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         c = dict(cdict or {}); c["kind"] = kind
         user_keys = {str(k) for k in (c.get("user_keys") or [])}
         relaxed_notes: list = []
+        import time as _tm
+        _tt = {"t0": _tm.monotonic()}
         if relax:
             store0 = _facet_store()
 
@@ -6173,6 +6187,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 out, relaxed_notes = await relax_to_enough(Contract.from_dict(c), kind=kind, user_keys=user_keys, slice_fn=_slice0, evaluate_fn=_evaluate_contract, depth=depth)
                 out["relaxed"] = relaxed_notes
                 out["contract"] = {**(out.get("contract") or {}), "user_keys": sorted(user_keys), "notes": list(c.get("notes") or []), "relaxed": relaxed_notes}
+                out["timings"] = {"relax_and_evaluate": round(_tm.monotonic() - _tt["t0"], 2), "relaxed_steps": len([n for n in relaxed_notes if n.get("rule") == "relaxed"])}
                 return out
             # merged: relax the base contract first (the strict recipe starts from a viable pool), then the ladder
             _probe, relaxed_notes = await relax_to_enough(Contract.from_dict(c), kind=kind, user_keys=user_keys, slice_fn=_slice0,
@@ -6180,9 +6195,12 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             if relaxed_notes:
                 c = {**c, **{k: v for k, v in (_probe.get("contract") or {}).items() if k in ("must", "prefer")}}
         if mode != "merged":
-            return await _evaluate_contract(c, depth=depth)
+            out = await _evaluate_contract(c, depth=depth)
+            out["timings"] = {"evaluate": round(_tm.monotonic() - _tt["t0"], 2)}
+            return out
         con = Contract.from_dict(c)
         notes = [n for n in (c.get("notes") or []) if isinstance(n, dict)]
+        _tt["ia0"] = _tm.monotonic()
         if "notes" not in c:          # a contract that never went through the index-aware step (the intake's did — its notes ride along, even empty)
             try:
                 _, notes = await _index_aware(Contract.from_dict(c), kind=kind, user_keys=user_keys, place_or_mode=bool(c.get("place_or_mode")))
