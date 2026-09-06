@@ -299,3 +299,26 @@ def test_improve_uses_only_the_original_and_the_answers():
     imp = _run(s.improve(state=out["state"]))
     assert imp["kind"] == "profile" and "Level: senior" in imp["text"]
     assert imp["added"] == ["Level: senior", "Prefers remote roles"]                  # a claimed addition absent from the text is dropped
+
+
+def test_the_search_text_is_the_conversations_intent_not_the_artifact_and_level_centres():
+    """Prod 2026-09-05: the Jobs hand-off ran with the whole résumé as the semantic text → results all over the
+    place. The contract's text must be the opening words + the answers (short); the artifact only feeds the
+    checklist; the level answer centres the ranking instead of filtering."""
+    resume = "Sam Doe\nSan Francisco\nHead of ML Infrastructure at Acme (2019–now). " + "Built training platforms, feature stores, Kubernetes, Ray. " * 40
+    s = _service(profile={"_resume_text": resume})
+    out = _run(s.step(message="looking for a hands-on engineering leadership role in ML infra", state=None, direction="job", user={"id": "u1"}))
+    k = out["state"]["kernel"]
+    assert len(k["contract"]["text"]) <= 400 and "feature stores" not in k["contract"]["text"]
+    assert "engineering leadership role in ML infra" in k["contract"]["text"]
+    # walk to ready answering level with 'leadership'
+    steps = 0
+    while out["stage"] != "ready" and steps < 8:
+        steps += 1
+        q = out["question"]
+        val = "leadership" if q["name"] == "level" else (q["options"][0][0] if q.get("options") else "__decline__")
+        out = _run(s.step(answer={"name": q["name"], "value": val}, state=out["state"]))
+    rd = out["ready"]; c = rd["contract"]
+    assert c["center"] == {"key": "level", "value": "leadership", "span": 1} and "level" not in c["must"]
+    assert len(c["text"]) <= 400 and "engineering leadership role in ML infra" in c["text"] and "feature stores" not in c["text"]
+    assert "centred on leadership" in rd["understood"]

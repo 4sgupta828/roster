@@ -151,7 +151,7 @@ def understood_words(direction: str, contract: dict, answers: dict | None = None
         parts.append("preferring " + ", ".join(prefers))
     ctr = c.get("center") or {}
     if ctr.get("key"):
-        parts.append(f"centred on {option_label(ctr['key'], str(ctr.get('value')))} {ctr['key'].replace('_', ' ')}")
+        parts.append(f"centred on {option_label(ctr['key'], str(ctr.get('value')))}" + (f" {ctr['key'].replace('_', ' ')}" if ctr['key'] != "level" else ""))
     a = answers or {}
     comp = a.get("comp")
     comp = comp[0] if isinstance(comp, (list, tuple)) and comp else comp

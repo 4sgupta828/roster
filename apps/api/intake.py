@@ -123,8 +123,42 @@ class IntakeService:
             return apply_answer(st, q, None)                                    # an illegal value never constrains
         return apply_answer(st, q, legal if len(legal) > 1 else legal[0], mode=m)
 
+    def intent_text(self, st: IntakeState, opening: str) -> str:
+        """The semantic text the search runs on: the user's opening words + what the conversation established
+        (role / title, field, skills, specialty, location) — never the artifact body (spec §0.3: facts feed the
+        checklist; the search follows the intent)."""
+        V = self._vocab()
+        a = st.answers or {}
+        def one(k):
+            v = a.get(k)
+            if isinstance(v, (list, tuple)):
+                v = ", ".join(str(x) for x in v[:6])
+            return str(v or "").strip()
+        parts = [str(opening or "").strip()[:200]]
+        for k in ("title", "current_role", "field", "skills", "must_skills", "specialty", "location", "target_level"):
+            v = one(k)
+            if v and v.lower() not in parts[0].lower():
+                parts.append(V.option_label(k, v) if k in ("field", "target_level") else v)
+        return ". ".join(x for x in parts if x)[:400]
+
+    def _with_intent(self, st: IntakeState, opening: str) -> dict:
+        c = Contract.from_dict(st.contract)
+        c.text = self.intent_text(st, opening) or c.text[:200]
+        # LEVEL centres the ranking (a preference, never a gate — the product's standing rule); the answer may
+        # have landed as a must or prefer through the checklist / key question
+        lv = None
+        for section in (c.must, c.prefer):
+            vals = section.get("level")
+            if isinstance(vals, list) and vals:
+                lv = lv or str(vals[0])
+        if lv and self.schema.key("level") is not None and self.schema.validate_value("level", lv):
+            c.must.pop("level", None)
+            c.center = {"key": "level", "value": lv, "span": 1}
+        return c.to_dict()
+
     def _ready(self, st: IntakeState, counts: dict, transcript: list, note: str = "") -> dict:
         V = self._vocab()
+        st.contract = self._with_intent(st, str(getattr(self, "_opening", "") or ""))
         c = Contract.from_dict(st.contract)
         errs = validate_contract(c, self.schema)
         if errs:                                                                 # never hand off an illegal contract
@@ -147,8 +181,13 @@ class IntakeService:
         artifact_text = str(state.get("artifact_text") or "")
         draft = state.get("draft") or None
         message = (message or "").strip()
+        opening = str(state.get("opening") or "")
+        self._opening = opening
         if message:
             transcript.append({"role": "user", "text": message[:MSG_CAP]})
+            if not opening and len(message) < 400:
+                opening = message                                      # the user's own words for the search
+                self._opening = opening
 
         def pack(stage: str, question: dict | None = None, ready: dict | None = None, note: str = "") -> dict:
             if question:
@@ -158,7 +197,7 @@ class IntakeService:
                 ready["transcript_audit"] = transcript[-TRANSCRIPT_CAP:]
             st.stage = stage if stage != "questions" else st.stage
             return {"stage": stage, "question": question, "ready": ready, "note": note,
-                    "state": {"kernel": st.to_dict(), "transcript": transcript[-TRANSCRIPT_CAP:], "pending": question, "artifact_text": artifact_text[:ARTIFACT_CAP], "draft": draft}}
+                    "state": {"kernel": st.to_dict(), "transcript": transcript[-TRANSCRIPT_CAP:], "pending": question, "artifact_text": artifact_text[:ARTIFACT_CAP], "draft": draft, "opening": opening[:400]}}
 
         # SEARCH NOW: ready with what is known, from any stage
         if search_now:
@@ -229,6 +268,7 @@ class IntakeService:
                 st.artifact["brief_id"] = int(brief_id)
             await self._read_completeness(st, artifact_text)
             self._compile(st, artifact_text, message)
+            st.contract = self._with_intent(st, opening)
             st.stage = "questions"
             pending = None
             message = ""                                                       # the artifact text is not an answer
