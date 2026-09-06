@@ -199,7 +199,10 @@ class IntakeService:
         if diagnosis and self.user_keys(st):
             uk = self.user_keys(st)
             u_diag = [k for k in (diagnosis.get("keys") or []) if k.get("key") in uk]
-        return {"direction": st.direction, "search_kind": V.SEARCH_KIND.get(st.direction), "understood": understood, "contract": st.contract,
+        # the hand-off contract carries the user's own keys and the index-aware notes: the merged search (spec §12 step 2)
+        # never relaxes U and reads the readings as alternative recipes
+        handoff = {**st.contract, "user_keys": sorted(self.user_keys(st)), "notes": notes, "place_or_mode": bool(getattr(self, "_place_or_mode", False))}
+        return {"direction": st.direction, "search_kind": V.SEARCH_KIND.get(st.direction), "understood": understood, "contract": handoff,
                 "counts": counts, "pool": pool, "diagnosis": diagnosis, "u_diagnostics": u_diag, "notes": notes, "artifact": dict(st.artifact), "advice": self._advice(st, counts),
                 "checklist": dict(st.checklist), "answers": dict(st.answers), "note": note,
                 "offer_improve": any(v == "answered" for v in st.checklist.values()),

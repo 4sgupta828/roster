@@ -87,3 +87,14 @@ def test_a_stated_leadership_tier_rules_out_ic_peers_but_an_unmarked_tier_keeps_
     assert peer_work_types(["leadership"], ["ic", "executive"]) == ["executive"]
     assert peer_work_types(["senior"], ["ic"]) == ["ic"]
     assert peer_work_types([], ["ic", "manager"]) == ["ic", "manager"]
+
+
+def test_the_judge_row_is_one_shape_for_every_row_with_dashes_for_the_unknown():
+    from roster_vertical.intake import judge_row, judge_prompt, reading_alternatives
+    person = judge_row("person", "r1", {"facets": {"field": ["software"], "level": ["leadership"], "skill": ["go", "kafka", "k8s", "x"]}}, "CTO at Acme — bio words — Focus: infra")
+    assert person.startswith("[r1] CTO at Acme · — · field software · function — · level leadership · — · — · skills: go, kafka, k8s")
+    job = judge_row("job", "r2", {"title": "Staff Engineer", "company": "big_co", "location": "Seattle, WA", "facets": {}})
+    assert "[r2] Staff Engineer · big co · field — · function — · level — · — · — · skills: — · Seattle, WA · evidence: —" == job
+    assert "Never judge from a name" in judge_prompt("person") and "OPEN POSTINGS" in judge_prompt("job")
+    alts = reading_alternatives([{"rule": "readings", "readings": [{"value": "crm", "field": "software", "share": 0.62}, {"value": "crm", "field": "marketing", "share": 0.21}, {"value": "x", "field": "software", "share": 0.9}]}])
+    assert [a["value"] for a in alts] == ["software", "marketing"] and alts[1]["key"] == "field"

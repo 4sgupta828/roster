@@ -184,6 +184,61 @@ JD_PEERS_MIN = 5              # fewer relevant peers than this at the stated tie
 LEVEL_WORK_TYPES = {"leadership": ("executive", "founder", "manager")}
 
 
+# ---- contract search step 2 (spec §12.5 / §12.6): the judge's vocabulary and weights ------------------------------
+JUDGE_HEAD = 40               # fused rows graded by the one blind judge call
+MERGE_RRF_K = 60
+JUDGE_PARTIAL = 0.4           # a partial fit's weight in head precision (inflation guard)
+JUDGE_WEAK_YES = 0.8          # a 'yes' on a row whose evidence is only self-stated
+WEAK_FITS = 3                 # fewer judged fits than this in the head → WEAK: say so, ask one clarifying question
+SELF_STATED_EVIDENCE = ("", "self_stated", "profile")     # evidence kinds that carry no public proof
+
+
+def judge_prompt(kind: str) -> str:
+    rows = "PEOPLE (a candidate each)" if kind == "person" else "OPEN POSTINGS (a role each)"
+    brief = "a hiring manager's need" if kind == "person" else "a job seeker's ask"
+    return (f"You judge, row by row, whether each of these {rows} FITS the BRIEF ({brief}). Return ONLY JSON: "
+            "{\"verdicts\": [{\"id\": the row id, \"fit\": \"yes\" | \"partial\" | \"no\", \"why\": ≤ 8 words}]}, one verdict per row. "
+            "yes = the row's role, domain, level tier and place (when the brief states one) all agree with the brief. "
+            "partial = one dimension is off or unstated: a level one step away, an adjacent specialty, a place or level shown as —. "
+            "no = a different role or domain, a different level tier (an individual contributor for an executive brief and the reverse), "
+            "or a resemblance that is keyword-only (the same word in another sense). Judge ONLY from the facts shown on the row; "
+            "— means unknown and unknown is never a 'no' on its own. Never judge from a name.")
+
+
+def judge_row(kind: str, bid: str, row: dict, line: str = "") -> str:
+    """One normalized line per row, the same shape for every row (spec §12.5): role line · company · field ·
+    function · level · work type · metro · skills / specialties ≤ 5 · snippet ≤ 140 · evidence kind. Missing = —."""
+    f = row.get("facets") or {}
+    first = lambda k: str((f.get(k) or ["—"])[0] or "—").replace("_", " ")
+    many = lambda k, n: ", ".join(str(x).replace("_", " ") for x in (f.get(k) or [])[:n]) or "—"
+    if kind == "person":
+        role = (line or "").split(" — ")[0].strip() or "—"
+        snippet = (line or "")[:140] or "—"
+        company = "—"
+    else:
+        role = str(row.get("title") or "—")
+        company = str(row.get("company") or "—").replace("_", " ")
+        snippet = str(row.get("location") or "—")
+    ev = many("evidence", 3)
+    skills = ", ".join(x for x in (many("skill", 3), many("specialty", 2)) if x != "—") or "—"
+    return (f"[{bid}] {role} · {company} · field {first('field')} · function {first('function')} · level {first('level')} · {first('work_type')} "
+            f"· {first('metro')} · skills: {skills} · {snippet} · evidence: {ev}")
+
+
+def reading_alternatives(notes: list[dict] | None) -> list[dict]:
+    """The index-aware step's co-occurrence readings as alternative (key, value) recipes for the ladder."""
+    out, seen = [], set()
+    for n in (notes or []):
+        if n.get("rule") != "readings":
+            continue
+        for r in (n.get("readings") or []):
+            fld = str(r.get("field") or "")
+            if fld and fld not in seen:
+                seen.add(fld)
+                out.append({"key": "field", "value": fld, "why": f"'{r.get('value')}' lives {int(float(r.get('share') or 0) * 100)} % in {fld}"})
+    return out
+
+
 def peer_work_types(levels: list[str] | None, work_types: list[str] | None) -> list[str]:
     """The preferred work types that agree with the stated level(s); unconstrained levels keep them all."""
     allowed = None

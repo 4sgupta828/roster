@@ -70,3 +70,82 @@ def test_cooccurrence_corrects_a_field_the_carriers_do_not_support_and_records_r
     # the user's own field is never corrected
     c3, _ = _run(index_aware(c, kind="person", schema=FACET_SCHEMA, user_keys={"field"}, slice_fn=slice_fn, counts_fn=counts_fn, coverage={"field": 0.7}))
     assert c3.must["field"] == ["marketing"]
+
+
+def test_a_preferred_work_type_that_contradicts_the_stated_level_is_dropped_everywhere_with_a_note():
+    c = Contract(kind="person", text="hire a cto", must={"field": ["software"], "level": ["leadership"]}, prefer={"work_type": ["ic"], "function": ["engineering"]})
+    slice_fn, counts_fn = _fake_index({}, {})
+    c2, notes = _run(index_aware(c, kind="person", schema=FACET_SCHEMA, user_keys=set(), slice_fn=slice_fn, counts_fn=counts_fn, coverage={}))
+    assert "work_type" not in c2.prefer and notes[0]["rule"] == "tier" and notes[0]["values"] == ["ic"]
+    c3, n3 = _run(index_aware(Contract(kind="person", text="x", must={"field": ["software"]}, center={"key": "level", "value": "leadership", "span": 1}, prefer={"work_type": ["ic", "executive"]}),
+                              kind="person", schema=FACET_SCHEMA, user_keys=set(), slice_fn=slice_fn, counts_fn=counts_fn, coverage={}))
+    assert c3.prefer["work_type"] == ["executive"]
+    c4, n4 = _run(index_aware(Contract(kind="person", text="x", must={"level": ["leadership"]}, prefer={"work_type": ["ic"]}), kind="person", schema=FACET_SCHEMA,
+                              user_keys={"work_type"}, slice_fn=slice_fn, counts_fn=counts_fn, coverage={}))
+    assert c4.prefer["work_type"] == ["ic"] and not n4                                          # the user's own chip holds
+
+
+def _merged_fixture():
+    """A fake index where the strict recipe finds two rows, the relaxed recipe finds six more (two of them the
+    judge calls fits, one a 'no'), and a field reading finds one row nobody else has."""
+    from api.contract_search import merged_search
+    calls = {"evaluate": [], "judge": 0, "slices": [], "log": []}
+    rows = {
+        "strict": [{"id": "p1", "facets": {"field": ["software"], "level": ["leadership"], "evidence": ["repos"]}}, {"id": "p2", "facets": {"field": ["software"]}}],
+        "relaxed:skill": [{"id": "p1", "facets": {}}, {"id": "p3", "facets": {}}, {"id": "p4", "facets": {}}, {"id": "p5", "facets": {}}, {"id": "p6", "facets": {}}, {"id": "p7", "facets": {}}],
+        "reading:field=marketing": [{"id": "p9", "facets": {"field": ["marketing"]}}],
+    }
+    def name_of(cd):
+        if cd["must"].get("field") == ["marketing"]:
+            return "reading:field=marketing"
+        return "strict" if "skill" in cd["must"] else "relaxed:skill"
+    async def evaluate_fn(cd):
+        calls["evaluate"].append(cd); n = name_of(cd)
+        return {"rows": rows[n], "counts": {"field": {"software": 5}}, "coverage": {"pool": len(rows[n])}, "contract": cd, "labels": {"values": {}}}
+    async def slice_fn(kind, must):
+        calls["slices"].append(dict(must)); return 0 if must.get("field") == ["nowhere"] else 10
+    def llm(system, user):
+        calls["judge"] += 1
+        assert "BRIEF: hire a cto" in user and "[r1]" in user and "strict" not in user           # blind: no recipe names
+        ids = {}
+        for line in user.split("ROWS:", 1)[1].strip().splitlines():
+            bid = line.split("]")[0].strip("[")
+            ids[bid] = line
+        # the judge reads the lines; the test maps by the person line we passed (role line = the id)
+        out = []
+        for bid, line in ids.items():
+            rid = line.split("] ", 1)[1].split(" · ")[0]
+            fit = {"p1": "yes", "p3": "yes", "p4": "partial", "p5": "no", "p9": "yes"}.get(rid, "partial")
+            out.append({"id": bid, "fit": fit, "why": f"{rid} {fit}"})
+        return {"verdicts": out}
+    async def lines_fn(ids):
+        return {i: f"{i} — words" for i in ids}
+    async def log_fn(rec):
+        calls["log"].append(rec)
+    return merged_search, calls, evaluate_fn, slice_fn, llm, lines_fn, log_fn
+
+
+def test_merged_search_fuses_survivors_judges_the_head_blind_and_orders_fits_first():
+    merged_search, calls, evaluate_fn, slice_fn, llm, lines_fn, log_fn = _merged_fixture()
+    c = Contract(kind="person", text="hire a cto", must={"field": ["software"], "skill": ["kafka"]}, prefer={"function": ["engineering"]})
+    notes = [{"rule": "readings", "readings": [{"value": "crm", "field": "marketing", "share": 0.3}]}]
+    out = _run(merged_search(c, kind="person", user_keys=set(), notes=notes, evaluate_fn=evaluate_fn, slice_fn=slice_fn, llm_json=llm, lines_fn=lines_fn, log_fn=log_fn))
+    m = out["merge"]
+    assert [r["name"] for r in m["recipes"]] == ["strict", "relaxed:skill", "reading:field=marketing"] and calls["judge"] == 1
+    ids = [r["id"] for r in out["rows"]]
+    assert ids[:3] == ["p1", "p3", "p9"] or ids[:3] == ["p1", "p9", "p3"]                      # fits first (p1 agreed by two recipes)
+    assert ids[-1] == "p5" and out["rows"][-1]["fit"] == "no"                                    # the 'no' sinks with its verdict
+    assert out["rows"][0]["found_by"] == {"strict": 1, "relaxed:skill": 1} and out["rows"][0]["fit_why"] == "p1 yes"
+    assert m["fits"] == 3 and m["nos"] == 1 and m["graded"] == 8 and m["weak"] is False and m["union"] == 8
+    assert out["counts"] == {"field": {"software": 5}} and out["contract"]["must"] == {"field": ["software"], "skill": ["kafka"]}   # the rail keeps the ratified contract
+    assert calls["log"] and calls["log"][0]["tallies"]["yes"] == 3 and calls["log"][0]["recipes"][0]["name"] == "strict"
+
+
+def test_switched_off_recipes_and_empty_pools_are_left_out_and_a_failed_judge_leaves_fused_order():
+    merged_search, calls, evaluate_fn, slice_fn, llm, lines_fn, log_fn = _merged_fixture()
+    c = Contract(kind="person", text="hire a cto", must={"field": ["software"], "skill": ["kafka"]})
+    def broken(system, user): raise RuntimeError("provider down")
+    out = _run(merged_search(c, kind="person", user_keys=set(), notes=[], evaluate_fn=evaluate_fn, slice_fn=slice_fn, llm_json=broken, lines_fn=lines_fn, off=["relaxed:skill"]))
+    m = out["merge"]
+    assert [r["name"] for r in m["recipes"]] == ["strict"] and m["off"] == ["relaxed:skill"] and m["ladder"] == ["strict", "relaxed:skill"]
+    assert m["graded"] == 0 and m["judge_error"] and [r["id"] for r in out["rows"]] == ["p1", "p2"] and out["rows"][0]["fit"] is None

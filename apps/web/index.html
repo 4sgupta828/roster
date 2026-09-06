@@ -669,6 +669,16 @@
   .fchip.unknown{color:var(--muted);border-style:dashed;}
   .frail-pills{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.3rem;}
   .frail-apply{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.45rem;padding-top:.4rem;border-top:1px dashed var(--hair);font-size:.76rem;color:var(--muted);}
+  .frail-merge{margin-bottom:.4rem;padding-bottom:.4rem;border-bottom:1px dashed var(--hair);font-size:.74rem;color:var(--muted);}
+  .frail-merge-h{display:flex;flex-wrap:wrap;gap:.35rem;align-items:baseline;margin-bottom:.3rem;}
+  .frail-weak{color:var(--gold);font-weight:600;}
+  .frail-recipes{display:flex;flex-wrap:wrap;gap:.3rem;}
+  .frail-recipe{font:inherit;font-size:.72rem;min-height:34px;padding:.2rem .55rem;border:1px solid var(--hair);border-radius:999px;background:var(--panel);color:var(--ink);cursor:pointer;}
+  .frail-recipe.off{opacity:.55;text-decoration:line-through;}
+  .frail-recipe .frail-note{color:var(--muted);}
+  .ppl-fit{font-size:.7rem;border-radius:999px;padding:.05rem .5rem;border:1px solid var(--hair);color:var(--muted);white-space:nowrap;}
+  .ppl-fit.fit-yes{border-color:rgba(var(--gold-rgb),.6);color:var(--gold);font-weight:600;}
+  .ppl-fit.fit-no{opacity:.75;}
   .frail-apply .idgo{width:auto;padding:.4rem .9rem;min-height:36px;}
   .frail-apply .histbtn{min-height:36px;}
   .frail.busy{opacity:.6;pointer-events:none;}
@@ -2938,11 +2948,13 @@ function jobsMarkup(d){
     const PROV = {posting:"read from the posting", ats_field:"from the job board", lookup:"lookup data", profile:"from the profile"};
     const fchip = (key, label) => { const v = (jf[key]||[])[0]; if(!v) return ""; const txt = key === "comp" ? (jd.comp || LB[v] || v) : (LB[v] || String(v).replace(/_/g," ")); const pv = String(jp[key]||""); return `<span class="ppl-tag" title="${esc(label)}: ${esc(txt)} — ${esc(PROV[pv.split(':')[0]] || pv || "model facet")}">${esc(txt)}</span>`; };
     const facetLine = Object.keys(jf).length ? `<span class="ppl-tags" style="gap:.25rem;">${fchip("field","Field")}${fchip("function","Function")}${fchip("level","Level")}${fchip("work_type","Work type")}${fchip("work_mode","Work mode")}${fchip("employment_type","Employment")}${fchip("comp","Compensation")}${fchip("company_type","Company type")}</span>` : "";
+    const fitChip = fitChipHtml(j);
     return `<div class="ppl-card job-card${j._new ? " is-new" : ""}" data-jref="${esc(String(jref))}" title="Click for a summary of this posting">${j._new ? `<span class="newflag" title="Not in the previous result">new</span>` : ""}${jsave}<span class="ppl-body">
       <span class="ppl-name">${esc(j.title)}${pct}</span>
       <span class="ppl-blurb">${co}${j.source?` · via ${esc(j.source)}`:""}${jr}</span>
       ${loc||dept?`<span class="ppl-tags">${loc}${dept}</span>`:""}
       ${facetLine}
+      ${fitChip?`<span class="ppl-tags">${fitChip}</span>`:""}
       ${apply||intro?`<span class="ppl-links">${apply}${intro}${prep}</span>`:""}<span class="js-prepbox" data-ref="${esc(String(jref))}"></span><span class="js-introbox" data-ref="${esc(String(jref))}"></span>${typeof jobFeedbackMarkup==="function" ? jobFeedbackMarkup(String(jref), j) : ""}<span class="js-sumbox" data-ref="${esc(String(jref))}">${typeof openSummaryMarkup==="function"?openSummaryMarkup(jref, j):""}</span></span></div>`;
   }).join("");
   const at = (q.company&&q.company.length)?` at ${esc(q.company.join(", ").replace(/_/g," "))}`:"";
@@ -3063,11 +3075,13 @@ function peopleRowsMarkup(data){
     // the headline is the evidence; no wording-fit verdict (it read as noise: "does not obviously fit")
     const liLine = liH ? `<span class="ppl-li" title="The person's own LinkedIn headline, quoted from a search-engine snippet (self-stated)">in “${esc(liH)}”</span>`
       : "";   // no headline → nothing on the card (a 'not found / ambiguous' line is noise; the panel's Unconfirmed line covers it)
+    const fitChip = fitChipHtml(p);
     return `<div class="ppl-card person-card${p._new ? " is-new" : ""}" data-ref="${esc(ref)}" title="Click for the evidence behind this card">${p._new ? `<span class="newflag" title="Not in the previous result">new</span>` : ""}${acts}${avatar}
       <span class="ppl-body">
         ${nameHtml}
         ${p.blurb?`<span class="ppl-blurb">${esc(p.blurb)}</span>`:(title?`<span class="ppl-title">${esc(title)}</span>`:"")}
         ${liLine}
+        ${fitChip?`<span class="ppl-tags">${fitChip}</span>`:""}
         ${tags?`<span class="ppl-tags">${tags}</span>`:""}
         ${evPill?`<span class="ppl-ev">${evPill}</span>`:""}
         ${fpStrip}
@@ -3083,7 +3097,7 @@ function peopleRowsMarkup(data){
   window.PEOPLE_RENDERS[data._pid] = data;
   // THE TALENT RAIL (spec §7): the server's contract + counts over the people index ride on `facet_nav`
   // (first turn) or on the turn itself (a saved map / an applied navigation); one id serves the rail
-  if(data.facet_nav && !data.contract){ Object.assign(data, {contract: data.facet_nav.contract, counts: data.facet_nav.counts, coverage: data.facet_nav.coverage, labels: data.facet_nav.labels}); }
+  if(data.facet_nav && !data.contract){ Object.assign(data, {contract: data.facet_nav.contract, counts: data.facet_nav.counts, coverage: data.facet_nav.coverage, labels: data.facet_nav.labels, merge: data.facet_nav.merge || null}); }
   data._jpid = data._pid;
   const railHtml = (isEnum && data.contract && data.counts && typeof facetRailMarkup === "function") ? facetRailMarkup(data) : "";
   const PAGE = 20;
@@ -7697,6 +7711,28 @@ function facetLabel(d, key, value){
   return vl || String(value).replace(/_/g, " ");
 }
 function facetRenderOf(id){ return (window.JOBS_RENDERS||{})[id] || (window.PEOPLE_RENDERS||{})[id] || null; }
+// MERGED SEARCH (spec guided-intake §12 step 2): the judge's read is a labelled MODEL read on the card, never a fact.
+function fitChipHtml(r){
+  if(!r || !r.fit) return "";
+  const words = r.fit === "yes" ? "reads as a fit" : r.fit === "partial" ? "partial fit" : "not a fit";
+  const by = r.found_by && Object.keys(r.found_by).length ? ` · found by ${Object.keys(r.found_by).map(k => k.replace(/^reading:/, "").replace(/^relaxed:/, "without ")).join(", ")}` : "";
+  return `<span class="ppl-fit fit-${esc(r.fit)}" title="${esc((r.fit_why||"") + " — a model read against your brief, not a fact" + by)}">${words} · model</span>`;
+}
+function recipeOff(d){ return d._recipeOff || new Set(((d.merge||{}).off)||[]); }
+function mergeContract(d, c){
+  const base = c || d.contract || {};
+  if(!d.merge) return base;
+  return {...base, merge: {mode: "merged", off: [...recipeOff(d)]}};
+}
+function mergeMarkup(d){
+  const m = d.merge; if(!m) return "";
+  const off = recipeOff(d);
+  const words = n => n === "strict" ? "as ratified" : n === "loose" ? "every relaxable filter ranks" : n.startsWith("relaxed:") ? `without ${n.slice(8).replace(/_/g," ")} as a filter` : n.startsWith("reading:") ? n.slice(8).replace("=", " = ").replace(/_/g," ") : n;
+  const recipes = (m.ladder||[]).map(n => { const r = (m.recipes||[]).find(x => x.name === n); const isOff = off.has(n);
+    return `<button type="button" class="frail-recipe${isOff?" off":""}" data-jpid="${esc(d._jpid)}" data-name="${esc(n)}" title="${esc(r ? `${r.pool != null ? r.pool + " in its pool" : "not run"} · ${r.head_fits||0} of its rows judged a fit` : (isOff ? "switched off — tap to include" : "no rows survived"))}">${isOff ? "✕ " : "✓ "}${esc(words(n))}${r && r.pool != null ? ` <span class="frail-note">${r.pool}</span>` : ""}</button>`; }).join("");
+  const graded = m.graded ? `${m.fits} of ${m.graded} graded read as a fit` : (m.judge_error ? "the judge did not run — fused order shown" : "nothing graded");
+  return `<div class="frail-merge"><div class="frail-merge-h"><b>Merged ${(m.recipes||[]).length} reading${(m.recipes||[]).length===1?"":"s"}</b> · ${graded}${m.weak ? ` · <span class="frail-weak">weak — few fits; add a detail or drop a filter</span>` : ""} <span class="tgt-q-hint">model read, not a fact</span></div><div class="frail-recipes">${recipes}</div></div>`;
+}
 function facetDraft(d){ return d._draft || d.contract || {}; }
 function facetPending(d){   // how many chip states differ between the draft and the applied contract
   const a = d.contract || {}, b = d._draft; if(!b) return 0;
@@ -7705,6 +7741,11 @@ function facetPending(d){   // how many chip states differ between the draft and
   for(const k of keys){ const vals = new Set(); for(const m of ["must","prefer","avoid"]) for(const o of [a[m]||{}, b[m]||{}]) for(const v of (Array.isArray(o[k]) ? o[k] : [])) vals.add(String(v));
     for(const v of vals) if(facetState(a, k, v) !== facetState(b, k, v)) n++; }
   if((a.rank_by||"match") !== (b.rank_by||"match")) n++;
+  return n;
+}
+function facetPendingAll(d){
+  let n = facetPending(d);
+  if(d.merge && d._recipeOff){ const was = new Set((d.merge.off||[])); const now = d._recipeOff; was.forEach(x => { if(!now.has(x)) n++; }); now.forEach(x => { if(!was.has(x)) n++; }); }
   return n;
 }
 function facetRailMarkup(d){
@@ -7726,13 +7767,13 @@ function facetRailMarkup(d){
   const rankable = (L.order||[]).filter(k => ["numeric","ordinal"].includes((L.types||{})[k]));
   const rank = `<label>rank by <select data-jpid="${esc(d._jpid)}" class="frank"><option value="match"${(c.rank_by||"match")==="match"?" selected":""}>match</option>${rankable.map(k => `<option value="${esc(k)}"${c.rank_by===k?" selected":""}>${esc((L.keys||{})[k]||k)}</option>`).join("")}</select></label>`;
   const cov = d.coverage || {};
-  const n = facetPending(d);
+  const n = facetPendingAll(d);
   const saveBtn = (d._map_id && d._map_owner && d._applied) ? `<button type="button" class="histbtn frail-save" data-jpid="${esc(d._jpid)}" title="Record this navigated view as a revision of the map (same link)">💾 Save these filters to the map</button>` : "";
   const applyBar = n ? `<div class="frail-apply"><b>${n} change${n===1?"":"s"} pending</b> — nothing runs until you apply.
       <button type="button" class="idgo frail-go" data-jpid="${esc(d._jpid)}">Apply</button><button type="button" class="histbtn frail-reset" data-jpid="${esc(d._jpid)}">Reset</button></div>`
     : `<div class="frail-apply">${d._applied && d._delta ? `<span class="frail-done">Applied ✓ — ${d._delta.after} shown${d._delta.added ? ` · <b>${d._delta.added} new</b>` : ""}${d._delta.removed ? ` · ${d._delta.removed} dropped` : ""}${!d._delta.added && !d._delta.removed ? " · same rows, order may differ" : ""}${(d._delta.prevPool != null && d._delta.pool != null && d._delta.prevPool !== d._delta.pool) ? ` · pool ${d._delta.prevPool} → ${d._delta.pool}` : ""}</span> ${d._delta.added && !d._newFirst ? (() => { const rowsNow = Array.isArray(d.people_rows) ? d.people_rows : (d.jobs||[]); const per = 20, pg = Array.isArray(d.people_rows) ? (d._page||0) : (d._jpage||0); const onPage = rowsNow.slice(pg*per, pg*per+per).filter(r => r._new).length; return `${onPage ? ` <span class="frail-note">${onPage} of them on this page (corner flag)</span>` : ` <span class="frail-note">none of them on this page</span>`} <button type="button" class="histbtn frail-shownew" data-jpid="${esc(d._jpid)}">Show the ${d._delta.added} new first</button>`; })() : ""}` : "Tap chips to stage changes, then apply once. "}${saveBtn}</div>`;
   const empty = (cov.diagnosis && !facetPending(d)) ? diagnosisMarkup({...cov.diagnosis, best_match: cov.best_match}, d._jpid, L) : "";
-  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}"><div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
+  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}">${mergeMarkup(d)}<div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
 }
 // EMPTY RESULT → which must is doing it (leave-one-out from the evaluator), with one-tap Drop (staged)
 function diagnosisMarkup(diag, jpid, L){
@@ -7773,6 +7814,7 @@ async function facetReevaluate(jpid, contract, save){
     const out = await r.json();
     if(!r.ok){ d._busy = false; rerenderRail(jpid); alert(out.detail || "Couldn't apply those changes."); return; }
     d.contract = out.contract; d._draft = null; d.counts = out.counts; d.coverage = out.coverage; d.labels = out.labels || d.labels;
+    if(out.merge !== undefined){ d.merge = out.merge || null; } d._recipeOff = null;
     // WHAT CHANGED (owner, 2026-09-06): the delta against the rows shown before this Apply, and a "new" badge
     const delta = rowsDelta(prevRows, out.rows || []); const beforeKeys = new Set(prevRows.map(rowKey));
     (out.rows||[]).forEach(r => { r._new = !beforeKeys.has(rowKey(r)); });
@@ -7793,7 +7835,9 @@ async function facetReevaluate(jpid, contract, save){
 }
 document.addEventListener("click", (e)=>{
   const go = e.target.closest && e.target.closest(".frail-go");
-  if(go){ e.preventDefault(); const d = facetRenderOf(go.dataset.jpid); if(d && d._draft) facetReevaluate(go.dataset.jpid, d._draft); return; }
+  if(go){ e.preventDefault(); const d = facetRenderOf(go.dataset.jpid); if(d && (d._draft || d._recipeOff)) facetReevaluate(go.dataset.jpid, mergeContract(d, d._draft || d.contract)); return; }
+  const rc = e.target.closest && e.target.closest(".frail-recipe");
+  if(rc){ e.preventDefault(); const d = facetRenderOf(rc.dataset.jpid); if(d && d.merge){ const off = new Set(recipeOff(d)); if(off.has(rc.dataset.name)) off.delete(rc.dataset.name); else off.add(rc.dataset.name); d._recipeOff = off; rerenderRail(rc.dataset.jpid); } return; }
   const sv = e.target.closest && e.target.closest(".frail-save");
   if(sv){ e.preventDefault(); const d = facetRenderOf(sv.dataset.jpid); if(d && d.contract) facetReevaluate(sv.dataset.jpid, d.contract, true); return; }
   const rs = e.target.closest && e.target.closest(".frail-reset");

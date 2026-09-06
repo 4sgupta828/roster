@@ -14,13 +14,17 @@ live in the kernel mechanics:
 Every change is recorded in `notes` so the ready card can say what happened and why."""
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import json
 from typing import Awaitable, Callable
 
 from roster_kernel.facets import Contract
-from roster_kernel.facets.contract_search import collapsing_musts, cooccurrence_readings
+from roster_kernel.facets.contract_search import blind, collapsing_musts, cooccurrence_readings, head_precision, order_by_verdicts, recipes, rrf_fuse, survivors
 
 COOC_KEYS = ("specialty", "skill")
 COOC_TARGET = "field"
+TIER_KEY, TIER_VIEW = "level", "work_type"     # two views of one tier: a stated level rules out contradicting work types
 
 
 async def index_aware(c: Contract, *, kind: str, schema, user_keys: set, slice_fn: Callable[[str, dict], Awaitable[int]],
@@ -36,6 +40,23 @@ async def index_aware(c: Contract, *, kind: str, schema, user_keys: set, slice_f
         if isinstance(vals, list) and vals:
             c.prefer[key] = sorted(set([str(v) for v in (c.prefer.get(key) or [])] + [str(v) for v in vals]))
         notes.append({"rule": rule, "key": key, "values": vals, "why": why, "action": "must → prefer"})
+
+    # 0) tier consistency: a preferred work type that contradicts the stated level is the compiler's slip, not a
+    # wish (a CTO brief once preferred 'ic' and pulled individual contributors everywhere it ran)
+    if TIER_VIEW in c.prefer and TIER_VIEW not in user_keys:
+        from roster_vertical.intake import peer_work_types
+        levels = [str(v) for v in (c.must.get(TIER_KEY) or [])] + [str(v) for v in (c.prefer.get(TIER_KEY) or [])]
+        if c.center and str(c.center.get("key")) == TIER_KEY and c.center.get("value"):
+            levels.append(str(c.center["value"]))
+        before = [str(v) for v in (c.prefer.get(TIER_VIEW) or [])]
+        kept = peer_work_types(levels, before)
+        if kept != before:
+            if kept:
+                c.prefer[TIER_VIEW] = kept
+            else:
+                c.prefer.pop(TIER_VIEW, None)
+            notes.append({"rule": "tier", "key": TIER_VIEW, "values": [v for v in before if v not in kept], "action": "dropped",
+                          "why": f"contradicts the stated {TIER_KEY} ({', '.join(sorted(set(levels)))})"})
 
     # 1) disjunction: a place alongside a mode ranks, never filters (unless the user set it). The reading is noted
     # even when the compile already left the place under prefer — the card says why the place is not a filter
@@ -111,3 +132,132 @@ async def index_aware(c: Contract, *, kind: str, schema, user_keys: set, slice_f
     if readings:
         notes.append({"rule": "readings", "readings": readings[:6]})
     return c, notes
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# STEP 2 — MERGED SEARCH (spec §12.3, §12.5, §12.6): recipes → probes → survivors evaluated → RRF fusion → one blind
+# judge over the head → merged order. Flag ROSTER_INTAKE_CONTRACT_SEARCH or a per-request `merge` on the contract.
+# ---------------------------------------------------------------------------------------------------------------
+
+def merge_options(cdict: dict | None) -> dict:
+    """The per-request merge options riding on a contract dict: {"mode": "merged" | "single" | None, "off": [recipe
+    names switched off]}. Unknown keys are ignored by Contract.from_dict, so they travel with the contract."""
+    m = (cdict or {}).get("merge") if isinstance((cdict or {}).get("merge"), dict) else {}
+    mode = str(m.get("mode") or "").lower() or None
+    return {"mode": mode if mode in ("merged", "single") else None, "off": [str(x) for x in (m.get("off") or []) if str(x)][:8]}
+
+
+async def merged_search(c: Contract, *, kind: str, user_keys: set, notes: list[dict] | None, evaluate_fn: Callable[[dict], Awaitable[dict]],
+                        slice_fn: Callable[[str, dict], Awaitable[int]], llm_json: Callable[[str, str], dict], lines_fn=None,
+                        off: list[str] | None = None, top: int = 60, log_fn=None) -> dict:
+    """One search over several recipes, merged. Returns the evaluate shape (rows / counts / coverage / contract /
+    labels — counts and coverage are the ratified contract's, the rail's shared layer) plus `merge`: the recipes
+    with their numbers, the judge's tallies, WEAK. Rows carry `fit`, `fit_why`, `found_by`."""
+    from roster_vertical.intake import JUDGE_HEAD, MERGE_RRF_K, RELAXABLE_KEYS, SELF_STATED_EVIDENCE, WEAK_FITS, judge_prompt, judge_row, reading_alternatives
+    off = [str(x) for x in (off or [])]
+    ladder = recipes(c, user_keys=set(user_keys or ()), relaxable_keys=set(RELAXABLE_KEYS), readings=reading_alternatives(notes))
+    kept = [r for r in ladder if r.name not in off] or ladder[:1]
+    sizes = await asyncio.gather(*[_safe_size(slice_fn, kind, r.contract.must) for r in kept])
+    surv = survivors(kept, {r.name: n for r, n in zip(kept, sizes)})
+    if not surv:
+        surv = kept[:1]
+    for r in surv:
+        r.contract.limit = top
+    outs = await asyncio.gather(*[evaluate_fn(r.contract.to_dict()) for r in surv])
+    lists = {r.name: list(o.get("rows") or []) for r, o in zip(surv, outs)}
+    fused = rrf_fuse(lists, k=MERGE_RRF_K)
+    head = fused[:JUDGE_HEAD]
+    # the judge: blind, normalized, once
+    lines = {}
+    if kind == "person" and lines_fn is not None and head:
+        try:
+            lines = await lines_fn([_rid(r) for r in head]) or {}
+        except Exception:   # noqa: BLE001
+            lines = {}
+    seed = int(hashlib.sha1((c.text or "").encode("utf-8")).hexdigest()[:8], 16)
+    items, mapping = blind(head, seed=seed, id_of=_rid)
+    verdicts: dict = {}
+    judge_error = None
+    if items:
+        user = ("BRIEF: " + (c.text or "")[:1200] + "\n\nROWS:\n" + "\n".join(judge_row(kind, bid, r, lines.get(_rid(r), "")) for bid, r in items))
+        try:
+            d = await asyncio.to_thread(llm_json, judge_prompt(kind), user)
+            for v in (d.get("verdicts") or []):
+                if not isinstance(v, dict):
+                    continue
+                rid = mapping.get(str(v.get("id") or ""))
+                fit = str(v.get("fit") or "").lower()
+                if rid and fit in ("yes", "partial", "no"):
+                    verdicts[rid] = {"fit": fit, "why": str(v.get("why") or "")[:80]}
+        except Exception as e:   # noqa: BLE001 — no judge → fused order stands, honestly ungraded
+            judge_error = str(e)[:120]
+    ordered = order_by_verdicts(fused, verdicts, head=JUDGE_HEAD, id_of=_rid)
+    weak_ids = {_rid(r) for r in head if all(str(e) in SELF_STATED_EVIDENCE for e in ((r.get("facets") or {}).get("evidence") or [""]))}
+    tallies = {k: sum(1 for v in verdicts.values() if v["fit"] == k) for k in ("yes", "partial", "no")}
+    per_recipe = []
+    for r, o in zip(surv, outs):
+        rows_r = lists[r.name]
+        ids_r = {_rid(x) for x in rows_r}
+        per_recipe.append({"name": r.name, "why": r.why, "pool": r.pool if r.pool is not None else (o.get("coverage") or {}).get("pool"),
+                           "evaluated": len(rows_r), "head_fits": sum(1 for rid, v in verdicts.items() if v["fit"] == "yes" and rid in ids_r),
+                           "prec10": head_precision(rows_r, verdicts, k=10, weak_ids=weak_ids, id_of=_rid), "must": r.contract.must, "prefer": r.contract.prefer})
+    strict = outs[0]
+    rows = []
+    for r in ordered[:top]:
+        r = dict(r)
+        r["fit"] = r.pop("_fit", None); r["fit_why"] = r.pop("_why", ""); r["found_by"] = r.pop("_found_by", {}); r.pop("_fused", None)
+        rows.append(r)
+    merge = {"recipes": per_recipe, "off": [n for n in off if any(x.name == n for x in ladder)], "ladder": [x.name for x in ladder],
+             "head": len(head), "graded": len(verdicts), "fits": tallies["yes"], "partials": tallies["partial"], "nos": tallies["no"],
+             "weak": bool(items) and tallies["yes"] < WEAK_FITS, "judge_error": judge_error,
+             "prec10": head_precision(ordered, verdicts, k=10, weak_ids=weak_ids, id_of=_rid), "union": len(fused)}
+    out = {"rows": rows, "counts": strict.get("counts") or {}, "coverage": dict(strict.get("coverage") or {}), "contract": strict.get("contract") or c.to_dict(),
+           "labels": strict.get("labels"), "merge": merge}
+    if log_fn is not None:
+        try:
+            await log_fn({"kind": kind, "brief_hash": hashlib.sha1((c.text or "").encode("utf-8")).hexdigest()[:16], "text": (c.text or "")[:300],
+                          "recipes": [{k: v for k, v in x.items() if k not in ("must", "prefer")} for x in per_recipe], "tallies": tallies, "weak": merge["weak"], "off": merge["off"]})
+        except Exception:   # noqa: BLE001 — the log is an aid
+            pass
+    return out
+
+
+def _rid(r: dict) -> str:
+    return str(r.get("id") or r.get("entity_id") or "")
+
+
+async def _safe_size(slice_fn, kind, must):
+    try:
+        return await slice_fn(kind, dict(must))
+    except Exception:   # noqa: BLE001
+        return None
+
+
+_LOG_DDL = """
+CREATE TABLE IF NOT EXISTS roster_intake_choice (
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  kind TEXT NOT NULL,
+  brief_hash TEXT NOT NULL,
+  text TEXT,
+  record JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_ric_created ON roster_intake_choice (created_at DESC);
+"""
+
+
+def choice_logger(get_pool):
+    """The learning log (spec §12.7, additive DDL): one row per merged search with the recipes' numbers and the
+    judge's tallies. v1 reads it only in the eval report."""
+    state = {"ddl": False}
+
+    async def log(record: dict) -> None:
+        pool = await get_pool()
+        if pool is None:
+            return
+        async with pool.acquire() as conn:
+            if not state["ddl"]:
+                await conn.execute(_LOG_DDL); state["ddl"] = True
+            await conn.execute("INSERT INTO roster_intake_choice (kind, brief_hash, text, record) VALUES ($1, $2, $3, $4::jsonb)",
+                               str(record.get("kind") or ""), str(record.get("brief_hash") or ""), str(record.get("text") or ""), json.dumps(record))
+    return log

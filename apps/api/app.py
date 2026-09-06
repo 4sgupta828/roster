@@ -1325,6 +1325,12 @@ class EvaluateIn(BaseModel):               # contract → rows + counts + covera
     depth: dict | None = None
 
 
+class JudgeIn(BaseModel):                  # the blind fit judge (evals): brief + up to 60 rows → verdicts
+    kind: str = "person"
+    brief: str = Field(min_length=1, max_length=4000)
+    rows: list[dict] = Field(default_factory=list, max_length=60)
+
+
 class MapCadenceIn(BaseModel):
     every: str = "off"                # off | daily | weekly — keep this map fresh on a cadence (owner)
 
@@ -2962,8 +2968,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     _c.must.setdefault("company_type", []).append("fortune500" if _m == "f500" else _m)
                 elif _m == "leadership":
                     _c.must.setdefault("level", []).append("leadership")
-            _out = await _evaluate_contract(_c.to_dict())
-            _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display")},
+            _out = (await _run_contract({**dict(body.contract), **_c.to_dict()}, "job")) if body.contract else (await _evaluate_contract(_c.to_dict()))
+            _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display", "fit", "fit_why", "found_by")},
                       "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in _out["rows"]]
             stats = await store.jobs_stats()
             sid = await _save_job_session(_rows, {"title_keywords": [], "company": [], "location": ""})
@@ -2972,7 +2978,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             bc["contract"] = _out["contract"]; bc["counts"] = _out["counts"]; bc["coverage"] = _out["coverage"]
             return {"jobs": _rows, "count": len(_rows), "query": {}, "semantic": True, "stats": stats, "geo_scope": None, "session_id": sid,
                     "must": None, "level_pref": None, "brief_contract": bc, "contract": _out["contract"], "counts": _out["counts"], "coverage": _out["coverage"],
-                    "labels": _out.get("labels"), "note": f"evaluator — {_out['coverage'].get('pool', 0)} candidates"}
+                    "labels": _out.get("labels"), "merge": _out.get("merge"), "note": f"evaluator — {_out['coverage'].get('pool', 0)} candidates"}
         # AGENTIC mode (flag): LLM expands the query into multiple angles → multi-leg retrieval → rerank
         if agentic_jobs_enabled():
             from api.people_population import agentic_job_search, parse_job_query
@@ -4107,11 +4113,11 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             c = dict(cdict or {}); c["kind"] = "person"
             if not c.get("text"):
                 c["text"] = body.question or ""
-            out = await _evaluate_contract(c)
+            out = await _run_contract(c, "person")
             rows = await _hydrate_people(out.get("rows") or [])
             if on_event is not None:
                 await on_event({"type": "people", "count": len(rows)})
-            nav = {"contract": out["contract"], "counts": out["counts"], "coverage": out["coverage"], "labels": out.get("labels")}
+            nav = {"contract": out["contract"], "counts": out["counts"], "coverage": out["coverage"], "labels": out.get("labels"), "merge": out.get("merge")}
             _cc = out["contract"]; _cv = out.get("coverage") or {}
             _lab = (out.get("labels") or {}).get("values") or {}
             _words = lambda vals: [(_lab.get(str(v)) or str(v).replace("_", " ")) for v in (vals if isinstance(vals, list) else [str(vals)])]
@@ -6046,6 +6052,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     def facet_evaluator_enabled() -> bool:
         return os.environ.get("ROSTER_FACET_EVALUATOR", "").lower() in ("1", "true", "yes")
 
+    def contract_search_enabled() -> bool:
+        """Spec guided-intake §12 step 2: a ratified contract runs as several recipes, fused, with one blind judge."""
+        return os.environ.get("ROSTER_INTAKE_CONTRACT_SEARCH", "").lower() in ("1", "true", "yes")
+
     def _facet_schema():
         return load_active_vertical().extraction_schema
 
@@ -6110,6 +6120,50 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             cov[key] = 1.0 - (d.get("unknown", 0) / total)
         cache[kind] = (_time.monotonic(), cov); app.state._facet_cov = cache
         return cov
+
+    async def _people_lines(ids: list[str]) -> dict:
+        """ONE batched profile fetch for the judge's role lines (people rows carry only facets otherwise)."""
+        cs = _claim_store_cached()
+        if cs is None or not ids:
+            return {}
+        from api.people_population import rows_to_people
+        raw = await cs.people_by_ids(ids)
+        return {p["entity_id"]: str(p.get("blurb") or "") for p in rows_to_people(raw)}
+
+    async def _run_contract(cdict: dict, kind: str, *, depth: dict | None = None) -> dict:
+        """A ratified contract → rows. Single evaluate by default; MERGED (spec §12 step 2: recipes fused + one
+        blind judge) when the flag is on or the contract carries merge.mode = "merged". The merged result keeps
+        the ratified contract's counts / coverage for the rail and returns `merge` (recipes, tallies, WEAK)."""
+        from api.contract_search import choice_logger, merge_options, merged_search
+        opts = merge_options(cdict)
+        mode = opts["mode"] or ("merged" if contract_search_enabled() else "single")
+        c = dict(cdict or {}); c["kind"] = kind
+        if mode != "merged":
+            return await _evaluate_contract(c, depth=depth)
+        from roster_kernel.facets import Contract
+        con = Contract.from_dict(c)
+        user_keys = {str(k) for k in (c.get("user_keys") or [])}
+        notes = [n for n in (c.get("notes") or []) if isinstance(n, dict)]
+        if not notes:
+            try:
+                _, notes = await _index_aware(Contract.from_dict(c), kind=kind, user_keys=user_keys, place_or_mode=bool(c.get("place_or_mode")))
+            except Exception:   # noqa: BLE001
+                notes = []
+        store = _facet_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="the index is unavailable right now")
+
+        async def slice_fn(k: str, must: dict) -> int | None:
+            fn = getattr(store, "slice_size", None)
+            return (await fn(k, must)) if fn is not None else None
+        cs = _claim_store_cached()
+        log_fn = choice_logger(cs._get_pool) if cs is not None else None
+        out = await merged_search(con, kind=kind, user_keys=user_keys, notes=notes, evaluate_fn=_evaluate_contract, slice_fn=slice_fn,
+                                  llm_json=getattr(app.state, "intake_llm", None) or _llm_json, lines_fn=_people_lines, off=opts["off"], log_fn=log_fn)
+        # the options ride back on the contract so a rail edit re-runs the SAME kind of search
+        out["contract"] = {**(out.get("contract") or {}), "user_keys": sorted(user_keys), "notes": notes, "place_or_mode": bool(c.get("place_or_mode")),
+                           "merge": {"mode": "merged", "off": list(opts["off"])}}
+        return out
 
     async def _evaluate_contract(cdict: dict, *, depth: dict | None = None) -> dict:
         from roster_kernel.facets import Contract, evaluate
@@ -6362,7 +6416,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         for r, eid in zip(rows, ids):
             card = cards.get(eid) or {"entity_id": eid, "name": r.get("name") or eid, "blurb": "", "attributes": [], "links": [], "citation": None, "evidence": {}}
             card = {**card, "entity_id": eid, "facets": r.get("facets") or {}, "display": r.get("display") or {}, "provenance": r.get("provenance") or {},
-                    "match_pct": r.get("match_pct"), "reasons": r.get("reasons") or [], "score": r.get("score")}
+                    "match_pct": r.get("match_pct"), "reasons": r.get("reasons") or [], "score": r.get("score"),
+                    "fit": r.get("fit"), "fit_why": r.get("fit_why") or "", "found_by": r.get("found_by") or {}}
             out.append(card)
         if cs is not None and out:
             try:
@@ -6376,10 +6431,37 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     async def search_evaluate(body: EvaluateIn) -> dict:
         """Contract → rows + counts + coverage. Deterministic for a given index state (no model call).
         People rows come back card-shaped (the Talent surface renders them as is)."""
-        out = await _evaluate_contract(body.contract, depth=body.depth)
+        out = await _run_contract(body.contract, str((body.contract or {}).get("kind") or "job"), depth=body.depth)
         if (body.contract or {}).get("kind") == "person":
             out["rows"] = await _hydrate_people(out.get("rows") or [])
         return out
+
+    @app.post("/search/judge")
+    async def search_judge(body: JudgeIn) -> dict:
+        """The blind fit judge on its own (spec §12.5 / §12.10 — the paired eval grades both arms' union once, blind).
+        Rows are normalized server-side to the judge's fixed shape from a few allowed fields; ≤ 60 rows; one call."""
+        from roster_kernel.facets.contract_search import blind
+        from roster_vertical.intake import judge_prompt, judge_row
+        kind = "person" if body.kind == "person" else "job"
+        rows = []
+        for r in (body.rows or [])[:60]:
+            if not isinstance(r, dict):
+                continue
+            rows.append({"id": str(r.get("id") or r.get("entity_id") or "")[:80], "title": str(r.get("title") or "")[:120], "company": str(r.get("company") or "")[:80],
+                         "location": str(r.get("location") or "")[:80], "blurb": str(r.get("blurb") or "")[:200],
+                         "facets": {str(k)[:32]: [str(x)[:40] for x in v][:6] for k, v in (r.get("facets") or {}).items() if isinstance(v, list)}})
+        rows = [r for r in rows if r["id"]]
+        if not rows:
+            return {"verdicts": {}, "graded": 0}
+        import hashlib as _h
+        items, mapping = blind(rows, seed=int(_h.sha1(body.brief.encode("utf-8")).hexdigest()[:8], 16))
+        user = "BRIEF: " + body.brief[:1200] + "\n\nROWS:\n" + "\n".join(judge_row(kind, bid, r, r.get("blurb") or "") for bid, r in items)
+        d = await asyncio.to_thread(getattr(app.state, "intake_llm", None) or _llm_json, judge_prompt(kind), user)
+        verdicts = {}
+        for v in (d.get("verdicts") or []):
+            if isinstance(v, dict) and mapping.get(str(v.get("id") or "")) and str(v.get("fit") or "").lower() in ("yes", "partial", "no"):
+                verdicts[mapping[str(v["id"])]] = {"fit": str(v["fit"]).lower(), "why": str(v.get("why") or "")[:80]}
+        return {"verdicts": verdicts, "graded": len(verdicts)}
 
     @app.post("/admin/facets/project-people")
     async def admin_facets_project_people(x_admin_token: str = Header(default="")) -> dict:

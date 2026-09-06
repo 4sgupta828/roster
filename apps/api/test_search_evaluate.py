@@ -95,3 +95,50 @@ def test_legacy_people_projection_endpoint_needs_the_admin_token(monkeypatch):
     monkeypatch.setenv("ROSTER_ADMIN_TOKEN", "secret")
     c = _client()
     assert c.post("/admin/facets/project-people").status_code == 401
+
+
+def test_a_merged_contract_runs_the_ladder_grades_the_head_blind_and_keeps_the_rail_on_the_ratified_contract():
+    """Spec guided-intake §12 step 2 through the endpoint: merge.mode = merged → recipes fused, one judge call,
+    rows carry fit / found_by, counts stay the ratified contract's, the options ride back on the contract."""
+    app = create_app()
+    app.state.facet_store = InMemoryFacetStore(ROWS, FACET_SCHEMA)
+    calls = []
+    def fake_llm(system, user):
+        calls.append(user)
+        assert "BRIEF: founder cto" in user and "strict" not in user
+        out = []
+        for line in user.split("ROWS:", 1)[1].strip().splitlines():
+            bid = line.split("]")[0].strip("[")
+            out.append({"id": bid, "fit": "yes" if "Founding CTO" in line else ("no" if "Turbomachinery" in line else "partial"), "why": "read"})
+        return {"verdicts": out}
+    app.state.intake_llm = fake_llm
+    c = TestClient(app)
+    body = {"contract": {"kind": "job", "text": "founder cto", "must": {"level": ["leadership"], "skill": ["rust"]}, "user_keys": ["level"],
+                         "merge": {"mode": "merged", "off": []}}}
+    r = c.post("/search/evaluate", json=body)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    m = d["merge"]
+    assert [x["name"] for x in m["recipes"]][0] == "strict" and "relaxed:skill" in m["ladder"] and len(calls) == 1
+    assert d["rows"][0]["id"] == "j1" and d["rows"][0]["fit"] == "yes" and d["rows"][-1]["fit"] == "no" and d["rows"][-1]["id"] == "j3"
+    assert d["contract"]["merge"] == {"mode": "merged", "off": []} and d["contract"]["user_keys"] == ["level"]
+    # switching a recipe off leaves it out of the merge but on the ladder
+    r2 = c.post("/search/evaluate", json={"contract": {**body["contract"], "merge": {"mode": "merged", "off": ["relaxed:skill"]}}})
+    m2 = r2.json()["merge"]
+    assert m2["off"] == ["relaxed:skill"] and all(x["name"] != "relaxed:skill" for x in m2["recipes"])
+
+
+def test_the_judge_endpoint_grades_normalized_rows_blind():
+    app = create_app()
+    seen = {}
+    def fake_llm(system, user):
+        seen["user"] = user
+        return {"verdicts": [{"id": bid, "fit": "yes", "why": "ok"} for bid in ("r1", "r2")] + [{"id": "r9", "fit": "yes"}]}
+    app.state.intake_llm = fake_llm
+    c = TestClient(app)
+    r = c.post("/search/judge", json={"kind": "person", "brief": "hire a cto", "rows": [{"entity_id": "p1", "blurb": "CTO at Acme — words", "facets": {"level": ["leadership"]}},
+                                                                                        {"id": "p2", "blurb": "Engineer", "facets": {"skill": ["go"]}, "name": "Someone"}]})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["graded"] == 2 and set(d["verdicts"]) == {"p1", "p2"} and d["verdicts"]["p1"]["fit"] == "yes"
+    assert "Someone" not in seen["user"] and "level leadership" in seen["user"]                      # names never reach the judge
