@@ -210,7 +210,7 @@ class FacetSQLStore:
         args: list = [qv]
         async with pool.acquire() as conn:
             async with conn.transaction():
-                await conn.execute("SET LOCAL hnsw.ef_search = 200")
+                await self._vector_session(conn, filtered=bool(must))
                 if kind == "job":
                     cl = self._must_sql("('job:' || j.id::text)", must, args)
                     where = "j.embedding IS NOT NULL AND j.closed_at IS NULL" + "".join(" AND " + c for c in cl)
@@ -242,6 +242,20 @@ class FacetSQLStore:
             return await self._attach_facets(conn, kind, out)
 
     SMALL_SLICE = 2000
+
+    async def _vector_session(self, conn, *, filtered: bool) -> None:
+        """HNSW settings for this transaction. A FILTERED scan (musts) uses pgvector's iterative scan so the index
+        keeps walking until enough rows pass the filter (prod 2026-09-05: a `country=us` must returned 28 of 360
+        nearest because only 28 of the first 200 candidates were US). The GUCs exist once the extension library
+        is loaded, so a vector expression runs first; unsupported settings are skipped."""
+        try:
+            await conn.execute("SELECT '[1]'::vector")
+            await conn.execute("SET LOCAL hnsw.ef_search = 200" if not filtered else "SET LOCAL hnsw.ef_search = 400")
+            if filtered:
+                await conn.execute("SET LOCAL hnsw.iterative_scan = relaxed_order")
+                await conn.execute("SET LOCAL hnsw.max_scan_tuples = 40000")
+        except Exception:   # noqa: BLE001 — older pgvector: plain scan
+            pass
 
     async def _slice_is_small(self, conn, base_sql: str, ent: str, must: dict) -> bool:
         """Cheap probe with its own parameters: does the must-slice hold at most SMALL_SLICE rows? (LIMIT-bounded,
