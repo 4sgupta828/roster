@@ -6087,20 +6087,24 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 rows = await conn.fetch("SELECT id, body FROM rs_job WHERE id = ANY($1::bigint[])", [int(p["id"]) for p in missing if str(p.get("id")).isdigit()])
             bodies = {int(r["id"]): str(r["body"] or "") for r in rows}
             llm = build_llm(mode=resolve_mode())
-            for p in missing:
+            sem = asyncio.Semaphore(5)
+
+            async def _one(p):
                 body = bodies.get(int(p["id"])) if str(p.get("id")).isdigit() else ""
                 if not body or len(body) < 200:
-                    continue
-                try:
-                    sm = await build_job_summary(body, llm, title=str(p.get("title") or ""), company=str(p.get("company") or ""))
-                except Exception:   # noqa: BLE001
-                    sm = None
+                    return
+                async with sem:
+                    try:
+                        sm = await build_job_summary(body, llm, title=str(p.get("title") or ""), company=str(p.get("company") or ""))
+                    except Exception:   # noqa: BLE001
+                        sm = None
                 if sm:
                     out[str(p.get("id"))] = sm
                     try:
                         await store_job_summary(pool, str(p.get("url") or ""), sm)
                     except Exception:   # noqa: BLE001
                         pass
+            await asyncio.gather(*[_one(p) for p in missing])          # ten peers in parallel, not one after another
         return out
 
     def _draft_fn(compile_fn):

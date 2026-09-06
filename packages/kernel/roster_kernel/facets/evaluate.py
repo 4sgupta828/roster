@@ -129,9 +129,14 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
                 "noise_floor": floor}
     # an EMPTY (or near-empty) slice with musts → say which must is doing it (leave-one-out; a few counts calls)
     slice_total = pool_from_counts(counts, schema, contract.kind)
-    if must and (not rows or (slice_total is not None and slice_total < 5)):
+    best = max((int(r.get("match_pct") or 0) for r in rows), default=0)
+    weak = bool(rows) and bool(contract.text) and best < 45
+    coverage["best_match"] = best
+    coverage["weak"] = weak
+    if must and (not rows or weak or (slice_total is not None and slice_total < 5)):
         try:
             coverage["diagnosis"] = await diagnose_musts(contract, lambda k, m: store.counts(k, m, schema), schema)
+            coverage["diagnosis"]["reason"] = "empty" if not rows else ("weak" if weak else "small")
         except Exception:   # noqa: BLE001 — a diagnosis is an aid
             pass
     return {"rows": rows[: int(contract.limit)], "counts": counts, "coverage": coverage, "contract": contract.to_dict()}

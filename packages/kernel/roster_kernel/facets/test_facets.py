@@ -234,3 +234,15 @@ def test_an_empty_slice_names_the_must_that_empties_it():
     assert {k["key"] for k in d["keys"]} == {"lv", "ct", "m"}
     ok = asyncio.new_event_loop().run_until_complete(evaluate(Contract(kind="e", must={"lv": ["a"]}), st, sch))
     assert "diagnosis" not in ok["coverage"]                                           # a healthy slice is not diagnosed
+
+
+def test_weak_results_are_diagnosed_and_flagged():
+    import asyncio
+    from roster_kernel.facets import Contract, FacetKey, FacetSchema, FacetType, InMemoryFacetStore, evaluate
+    sch = FacetSchema(keys=(FacetKey(key="ct", type=FacetType.categorical, kinds=("e",), values=("x", "y")),))
+    rows = [{"id": f"r{i}", "kind": "e", "sim": 0.42, "facets": {"ct": ["x"]}} for i in range(6)]          # barely above the floor → weak
+    out = asyncio.new_event_loop().run_until_complete(evaluate(Contract(kind="e", text="q", must={"ct": ["x"]}), InMemoryFacetStore(rows, sch), sch))
+    assert out["rows"] and out["coverage"]["weak"] and out["coverage"]["diagnosis"]["reason"] == "weak"
+    strong = [dict(r, sim=0.7) for r in rows]
+    out2 = asyncio.new_event_loop().run_until_complete(evaluate(Contract(kind="e", text="q", must={"ct": ["x"]}), InMemoryFacetStore(strong, sch), sch))
+    assert not out2["coverage"]["weak"] and "diagnosis" not in out2["coverage"]

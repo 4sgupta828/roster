@@ -141,6 +141,8 @@ class IntakeService:
             else ("title", "current_role", "field", "skills", "must_skills", "specialty", "location", "target_level")
         for k in keys:
             v = one(k)
+            if v.lower() in ("not stated", "unknown", "undisclosed", "n/a", "none", "prefer not to say"):
+                continue
             if v and v.lower() not in parts[0].lower():
                 parts.append(V.option_label(k, v) if k in ("field", "target_level") else v)
         return ". ".join(x for x in parts if x)[:400]
@@ -279,6 +281,10 @@ class IntakeService:
                     draft = await self.draft_fn(role_text, {"your words": opening, "added": message} if opening else {"your words": message})
                 except Exception:   # noqa: BLE001
                     draft = None
+                if draft and draft.get("no_role"):
+                    q = {"kind": "draft_context", "name": "jd", "key": "", "words": "I need at least the role to draft from — the title and level, e.g. “senior backend engineer, payments, SF or remote”. What is the hire?",
+                         "hint": "", "options": [], "free_text": True, "klass": ""}
+                    return pack("artifact", question=q)
                 if draft:
                     return pack("artifact", question=self._draft_question(draft))
                 text, source = role_text, "described"                                # no draft → the words are the JD for now
@@ -459,12 +465,16 @@ class IntakeService:
             section.pop("company", None)
         if st.direction == "candidate":
             # a JD names many skills; ANDing them all empties the pool. More than two skill / specialty musts → they
-            # rank; the manager's explicit must-haves (the checklist question) still land as musts later.
+            # rank; the manager's explicit must-haves (the checklist question) still land as musts later. `function`
+            # ranks too: a CTO's function in the people index is 'executive', a JD compiles it as 'engineering'.
             for key in ("skill", "specialty"):
                 vals = c.must.get(key)
                 if isinstance(vals, list) and len(vals) > 2:
                     c.prefer[key] = sorted(set(list(c.prefer.get(key) or []) + [str(v) for v in vals]))
                     del c.must[key]
+            fv = c.must.pop("function", None)
+            if isinstance(fv, list):
+                c.prefer["function"] = sorted(set(list(c.prefer.get("function") or []) + [str(v) for v in fv]))
         if st.direction == "job":
             # a résumé states FACTS (what the seeker did): they rank; only the seeker's WANTS filter (asked later)
             keep = {"field", "metro", "state", "country", "work_mode", "employment_type", "comp"}

@@ -56,15 +56,17 @@ CHECKLIST: dict[str, tuple[Item, ...]] = {
 
 # Contract keys the intake must know before a search runs (asked regardless of the corpus) and the keys it may
 # ask about when the pool is split on them (spec §0.2).
-REQUIRED_KEYS = {"job": ["field", "level", "metro"], "candidate": ["field", "level", "metro", "evidence"]}
+REQUIRED_KEYS = {"job": ["field", "level", "metro"], "candidate": ["field", "level", "metro"]}
+# evidence is OPTIONAL for a hiring flow: proof of work ranks candidates first; as a must it emptied a CRM /
+# marketing-engineering search of everyone relevant (owner report 2026-09-05). The rail can still require it.
 OPTIONAL_KEYS = {"job": ["company_type", "work_mode", "function", "employment_type"],
-                 "candidate": ["company_type", "work_type", "function", "years"]}
+                 "candidate": ["evidence", "company_type", "work_type", "function", "years"]}
 
 QUESTION_WORDS: dict[str, dict] = {
     "field": {"job": "Which field should the roles be in?", "candidate": "Which field is the role in?"},
     "level": {"job": "What level of role?", "candidate": "What level is the hire?"},
     "metro": {"job": "Which metro — or remote?", "candidate": "Which metro is the role in?"},
-    "evidence": {"candidate": "Must candidates have public work — repos, papers, talks?", "job": "Should roles favour teams with public work?"},
+    "evidence": {"candidate": "Should candidates with public work — repos, papers, talks — rank first?", "job": "Should roles favour teams with public work?"},
     "company_type": {"job": "Any preference on company type?", "candidate": "Should candidates come from a particular company type?"},
     "work_mode": {"job": "Remote, hybrid, or on-site?", "candidate": "Remote, hybrid, or on-site?"},
     "function": {"job": "Which kind of work day to day?", "candidate": "Which kind of work day to day?"},

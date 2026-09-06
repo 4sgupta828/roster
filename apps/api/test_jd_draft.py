@@ -131,3 +131,11 @@ def test_peers_below_the_relevance_floor_do_not_form_a_centre():
             return {"title": "CTO", "summary": "s", "responsibilities": [], "must_have": [{"text": "led a 10–15 person team", "source": "you"}], "nice_to_have": []}
     d = _run(build_jd_draft(role_text="hire a CTO for my startup to lead a 10-15 person team", context={}, evaluate_fn=evaluate_fn, summaries_fn=summaries_fn, compile_fn=_compile, llm_json=OnlyDraft()))
     assert d["sparse"] and d["peers"] == [] and d["title"] == "CTO" and d["must_have"][0]["support"] == {"you": True}
+
+
+def test_a_role_text_that_names_no_role_reads_no_peers():
+    async def evaluate_fn(c): raise AssertionError("no peer search without a role")
+    async def summaries_fn(peers): return {}
+    def norole(kind, text, *, limit=60, scope=None): return Contract(kind=kind, text=text, limit=limit)
+    d = _run(build_jd_draft(role_text="I'm hiring. Keep going", context={}, evaluate_fn=evaluate_fn, summaries_fn=summaries_fn, compile_fn=norole, llm_json=FakeLLM()))
+    assert d["no_role"] and d["sparse"] and d["peers"] == [] and d["must_have"] == []

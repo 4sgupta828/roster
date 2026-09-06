@@ -116,6 +116,14 @@ async def build_jd_draft(*, role_text: str, context: dict, evaluate_fn: Callable
     except Exception:   # noqa: BLE001
         c = Contract(kind="job", text=role_text[:500], limit=pool)
     c.limit = pool
+    named_role = bool(c.must.get("field") or c.prefer.get("field") or c.prefer.get("role_family") or c.must.get("role_family") or c.prefer.get("specialty"))
+    if not named_role:
+        # "I'm hiring. Keep going" names no role: no neighbourhood to read (it once drafted from recruiter postings)
+        draft = {"title": str(context.get("title") or role_text[:80]).strip(), "summary": "", "responsibilities": [], "must_have": [], "nice_to_have": [],
+                 "peers": [], "centre": [], "optional": [], "market": market_signal([]), "sparse": True, "no_role": True,
+                 "sources": {"posting_ids": [], "role_text": role_text[:500], "context": dict(context or {})}}
+        draft["text"] = render_text(draft)
+        return draft
     # peers are the role's similarity NEIGHBOURHOOD: only the field filters; every other compiled must only ranks
     for k in [k for k in list(c.must.keys()) if k != "field"]:
         vals = c.must.pop(k)

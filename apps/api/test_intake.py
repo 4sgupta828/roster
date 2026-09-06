@@ -376,3 +376,22 @@ def test_a_rich_opening_drafts_without_the_context_question_and_a_reply_never_re
     assert out["question"]["kind"] == "draft_context"
     out = _run(s2.step(message="Keep going", state=out["state"]))
     assert out["question"]["kind"] == "draft" and seen and seen[0].startswith("I'm hiring")
+
+
+def test_a_reply_that_names_no_role_is_asked_again_and_function_never_filters_candidates():
+    async def draft_fn(role_text, context):
+        return {"title": role_text[:20], "text": "", "must_have": [], "peers": [], "centre": [], "optional": [], "market": {}, "sparse": True, "no_role": True}
+    s = _service(); s.draft_fn = draft_fn
+    out = _run(s.step(message="I'm hiring", state=None))
+    out = _run(s.step(answer={"name": "jd", "value": "draft"}, state=out["state"]))
+    out = _run(s.step(message="Keep going", state=out["state"]))
+    assert out["question"]["kind"] == "draft_context" and "at least the role" in out["question"]["words"]
+    # a pasted JD compiling to function=engineering must → prefer for a candidate search
+    s2 = _service()
+    def compile_fn(kind, text, *, limit=60, scope=None):
+        return Contract(kind=kind, text=text[:200], must={"field": ["software"], "function": ["engineering"]}, limit=limit)
+    s2.compile_fn = compile_fn
+    out = _run(s2.step(message="I'm hiring", state=None))
+    out = _run(s2.step(message="Backend Engineer, Payments. " + "own our ledger services. " * 8, state=out["state"]))
+    c = out["state"]["kernel"]["contract"]
+    assert "function" not in c["must"] and c["prefer"]["function"] == ["engineering"] and c["must"]["field"] == ["software"]

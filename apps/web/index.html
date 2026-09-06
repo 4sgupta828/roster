@@ -929,6 +929,9 @@
   .tgt-added{background:rgba(var(--gold-rgb),.16);border-radius:4px;}
   .tgt-improve-offer{margin-top:.7rem;}
   .briefrow{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.4rem 0;border-bottom:1px solid var(--hair);font-size:.86rem;}
+  .brief-open{font:inherit;background:transparent;border:0;padding:0;color:var(--ink);cursor:pointer;text-align:left;min-height:40px;}
+  .brief-open:hover b{text-decoration:underline;}
+  .brief-body{flex-basis:100%;}
   .fdiag{background:rgba(var(--gold-rgb),.08);border:1px solid rgba(var(--gold-rgb),.4);border-radius:10px;padding:.55rem .7rem;margin:.3rem 0 .6rem;font-size:.8rem;line-height:1.45;}
   .fdiag-h{font-weight:600;margin-bottom:.3rem;}
   .fdiag-row{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;justify-content:space-between;padding:.15rem 0;}
@@ -7420,8 +7423,20 @@ async function renderBriefs(){
     const r = await fetch("/me/briefs", {headers: authHeaders()}); if(!r.ok){ el.innerHTML = `<span class="acctmuted">none yet</span>`; return; }
     const bs = (await r.json()).briefs || [];
     if(!bs.length){ el.innerHTML = `<span class="acctmuted">none yet</span>`; return; }
-    el.innerHTML = bs.map(b => `<div class="briefrow" data-id="${b.id}"><b>${esc(b.title || b.role_key)}</b> <span class="acctmuted">${b.kind === "resume" ? "résumé" : "JD"} · v${b.version} · ${esc(String(b.updated_at||"").slice(0,10))}${b.kind === "jd" ? " · " + esc(b.role_key) : ""}</span>
-      ${b.kind === "jd" ? `<button type="button" class="histbtn brief-find" data-id="${b.id}">🗺 Find candidates</button>` : ""}<button type="button" class="histbtn brief-del" data-id="${b.id}">✕</button></div>`).join("");
+    el.innerHTML = bs.map(b => `<div class="briefrow" data-id="${b.id}"><button type="button" class="brief-open" data-id="${b.id}" title="Open"><b>${esc(b.title || b.role_key)}</b> ▾</button> <span class="acctmuted">${b.kind === "resume" ? "résumé" : "JD"} · v${b.version} · ${esc(String(b.updated_at||"").slice(0,10))}${b.kind === "jd" ? " · " + esc(b.role_key) : ""}</span>
+      ${b.kind === "jd" ? `<button type="button" class="histbtn brief-find" data-id="${b.id}">🗺 Find candidates</button>` : ""}<button type="button" class="histbtn brief-del" data-id="${b.id}" title="Delete this version">✕</button>
+      <div class="brief-body" data-id="${b.id}" hidden></div></div>`).join("");
+    el.querySelectorAll(".brief-open").forEach(x => x.addEventListener("click", async () => {
+      const box = el.querySelector(`.brief-body[data-id="${x.dataset.id}"]`); if(!box) return;
+      if(!box.hidden){ box.hidden = true; return; }
+      box.hidden = false; box.innerHTML = `<span class="acctmuted">loading…</span>`;
+      try{
+        const r = await fetch(`/me/briefs/${x.dataset.id}`, {headers: authHeaders()}); const d = await r.json(); const bb = d.brief || {};
+        const lines = (bb.structured && bb.structured.draft) ? "" : "";
+        box.innerHTML = `<pre class="tgt-pre">${esc(bb.text || "")}</pre><div class="tgt-opts"><button type="button" class="histbtn brief-copy">Copy text</button>${bb.sources && bb.sources.posting_ids && bb.sources.posting_ids.length ? `<span class="acctmuted">drafted from ${bb.sources.posting_ids.length} peer postings</span>` : ""}${bb.sources && bb.sources.conversation ? `<span class="acctmuted">improved from a Guided conversation</span>` : ""}</div>`;
+        box.querySelector(".brief-copy").addEventListener("click", async () => { try{ await navigator.clipboard.writeText(bb.text || ""); }catch(e){} });
+      }catch(e){ box.innerHTML = `<span class="acctmuted">couldn't load</span>`; }
+    }));
     el.querySelectorAll(".brief-del").forEach(x => x.addEventListener("click", async () => { await fetch(`/me/briefs/${x.dataset.id}`, {method: "DELETE", headers: authHeaders()}); renderBriefs(); }));
     el.querySelectorAll(".brief-find").forEach(x => x.addEventListener("click", () => {
       const back = $("#savedclose"); if(back) back.click();
@@ -7703,7 +7718,7 @@ function facetRailMarkup(d){
   const applyBar = n ? `<div class="frail-apply"><b>${n} change${n===1?"":"s"} pending</b> — nothing runs until you apply.
       <button type="button" class="idgo frail-go" data-jpid="${esc(d._jpid)}">Apply</button><button type="button" class="histbtn frail-reset" data-jpid="${esc(d._jpid)}">Reset</button></div>`
     : `<div class="frail-apply">Tap chips to stage changes, then apply once.${d._applied ? ` <span style="color:var(--verified)">Applied ✓</span>` : ""} ${saveBtn}</div>`;
-  const empty = (cov.diagnosis && !facetPending(d)) ? diagnosisMarkup(cov.diagnosis, d._jpid, L) : "";
+  const empty = (cov.diagnosis && !facetPending(d)) ? diagnosisMarkup({...cov.diagnosis, best_match: cov.best_match}, d._jpid, L) : "";
   return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}"><div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
 }
 // EMPTY RESULT → which must is doing it (leave-one-out from the evaluator), with one-tap Drop (staged)
@@ -7716,7 +7731,9 @@ function diagnosisMarkup(diag, jpid, L){
     return `<div class="fdiag-row"><span>● <b>${esc(((L||{}).keys||{})[k.key] || k.label || k.key)}</b>: ${esc(vals)} — without it <b>${k.without.toLocaleString()}</b>${gain > 0 ? "" : " (not the cause)"}</span>
       ${gain > 0 ? `<button type="button" class="histbtn fdiag-drop" data-jpid="${esc(jpid)}" data-key="${esc(k.key)}" data-values="${esc(JSON.stringify(k.values))}">Drop</button>` : ""}</div>`;
   }).join("");
-  return `<div class="fdiag"><div class="fdiag-h">${diag.pool ? `Only ${diag.pool} match all of these` : "Nothing matches all of these"} — the filters doing it, most first:</div>${rows}<div class="tgt-q-hint">Drop stages the change; Apply runs it. A dropped filter can still rank: tap its chip to ▲ prefer.</div></div>`;
+  const head = diag.reason === "weak" ? `Weak matches — the closest is ${diag.best_match != null ? diag.best_match + "%" : "low"}. The filters keeping closer people out, most first:`
+             : (diag.pool ? `Only ${diag.pool} match all of these — the filters doing it, most first:` : "Nothing matches all of these — the filters doing it, most first:");
+  return `<div class="fdiag"><div class="fdiag-h">${head}</div>${rows}<div class="tgt-q-hint">Drop stages the change; Apply runs it. A dropped filter can still rank: tap its chip to ▲ prefer.</div></div>`;
 }
 function rerenderRail(jpid){
   const d = facetRenderOf(jpid); if(!d) return;
