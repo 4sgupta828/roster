@@ -153,7 +153,7 @@ async def merged_search(c: Contract, *, kind: str, user_keys: set, notes: list[d
     """One search over several recipes, merged. Returns the evaluate shape (rows / counts / coverage / contract /
     labels — counts and coverage are the ratified contract's, the rail's shared layer) plus `merge`: the recipes
     with their numbers, the judge's tallies, WEAK. Rows carry `fit`, `fit_why`, `found_by`."""
-    from roster_vertical.intake import (JUDGE_HEAD, LADDER_DEFAULT_KEYS, MERGE_RRF_K, RELAXABLE_KEYS, SELF_STATED_EVIDENCE, WEAK_FITS, judge_brief, judge_prompt,
+    from roster_vertical.intake import (JUDGE_BATCHES, JUDGE_HEAD, LADDER_DEFAULT_KEYS, MERGE_RRF_K, RELAXABLE_KEYS, SELF_STATED_EVIDENCE, WEAK_FITS, judge_brief, judge_prompt,
                                         judge_row, reading_alternatives)
     import time as _t
     t0 = _t.monotonic(); timings: dict = {}
@@ -185,9 +185,19 @@ async def merged_search(c: Contract, *, kind: str, user_keys: set, notes: list[d
     verdicts: dict = {}
     judge_error = None
     if items:
-        user = ("BRIEF\n" + judge_brief(kind, c.text or "", c.to_dict()) + "\n\nROWS:\n" + "\n".join(judge_row(kind, bid, r, lines.get(_rid(r), "")) for bid, r in items))
-        try:
-            d = await asyncio.to_thread(llm_json, judge_prompt(kind), user)
+        # the head is graded in JUDGE_BATCHES concurrent calls (same rows, same brief, same cost — a fraction of the wall time)
+        brief_txt = "BRIEF\n" + judge_brief(kind, c.text or "", c.to_dict())
+        n_b = max(1, min(JUDGE_BATCHES, len(items)))
+        batches = [items[i::n_b] for i in range(n_b)]
+
+        async def _grade(batch):
+            user = brief_txt + "\n\nROWS:\n" + "\n".join(judge_row(kind, bid, r, lines.get(_rid(r), "")) for bid, r in batch)
+            return await asyncio.to_thread(llm_json, judge_prompt(kind), user)
+        results = await asyncio.gather(*[_grade(b) for b in batches], return_exceptions=True)
+        for d in results:
+            if isinstance(d, Exception):      # a failed batch leaves its rows ungraded; the fused order stands for them
+                judge_error = str(d)[:120]
+                continue
             for v in (d.get("verdicts") or []):
                 if not isinstance(v, dict):
                     continue
@@ -195,8 +205,6 @@ async def merged_search(c: Contract, *, kind: str, user_keys: set, notes: list[d
                 fit = str(v.get("fit") or "").lower()
                 if rid and fit in ("yes", "partial", "no"):
                     verdicts[rid] = {"fit": fit, "why": str(v.get("why") or "")[:80]}
-        except Exception as e:   # noqa: BLE001 — no judge → fused order stands, honestly ungraded
-            judge_error = str(e)[:120]
     timings["judge"] = round(_t.monotonic() - t3, 2); timings["total"] = round(_t.monotonic() - t0, 2)
     ordered = order_by_verdicts(fused, verdicts, head=JUDGE_HEAD, id_of=_rid)
     weak_ids = {_rid(r) for r in head if all(str(e) in SELF_STATED_EVIDENCE for e in ((r.get("facets") or {}).get("evidence") or [""]))}

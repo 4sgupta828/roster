@@ -4117,11 +4117,16 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             c = dict(cdict or {}); c["kind"] = "person"
             if not c.get("text"):
                 c["text"] = body.question or ""
+            import time as _time
+            _t0 = _time.monotonic()
             out = await _run_contract(c, "person")
+            _t1 = _time.monotonic()
             rows = await _hydrate_people(out.get("rows") or [])
+            _t2 = _time.monotonic()
             if on_event is not None:
                 await on_event({"type": "people", "count": len(rows)})
-            nav = {"contract": out["contract"], "counts": out["counts"], "coverage": out["coverage"], "labels": out.get("labels"), "merge": out.get("merge")}
+            nav = {"contract": out["contract"], "counts": out["counts"], "coverage": out["coverage"], "labels": out.get("labels"), "merge": out.get("merge"),
+                   "timings": {"search": round(_t1 - _t0, 2), "hydrate": round(_t2 - _t1, 2)}}
             _cc = out["contract"]; _cv = out.get("coverage") or {}
             _lab = (out.get("labels") or {}).get("values") or {}
             _words = lambda vals: [(_lab.get(str(v)) or str(v).replace("_", " ")) for v in (vals if isinstance(vals, list) else [str(vals)])]
@@ -4142,6 +4147,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                                    **({"intake_transcript": [{"role": str(m.get("role") or ""), "text": str(m.get("text") or "")[:2000]} for m in (body.intake_transcript or [])[:40] if isinstance(m, dict) and m.get("text")]} if body.intake_transcript else {})})
                 except Exception:   # noqa: BLE001
                     sid = None
+            nav["timings"]["save"] = round(_time.monotonic() - _t2, 2)
             return ResearchOut(grounded=True, answer="", claims=[], coverage_gaps=[], rejected=0, people_rows=rows, coverage_basis=cov, facet_nav=nav, session_id=sid)
 
         # ---- Q&A INTENT ROUTER (flag ROSTER_QA_ROUTER, default OFF — Rule 20) ----------------
@@ -6156,7 +6162,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         con = Contract.from_dict(c)
         user_keys = {str(k) for k in (c.get("user_keys") or [])}
         notes = [n for n in (c.get("notes") or []) if isinstance(n, dict)]
-        if not notes:
+        if "notes" not in c:          # a contract that never went through the index-aware step (the intake's did — its notes ride along, even empty)
             try:
                 _, notes = await _index_aware(Contract.from_dict(c), kind=kind, user_keys=user_keys, place_or_mode=bool(c.get("place_or_mode")))
             except Exception:   # noqa: BLE001

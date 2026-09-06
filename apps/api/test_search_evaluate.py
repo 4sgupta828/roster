@@ -119,7 +119,7 @@ def test_a_merged_contract_runs_the_ladder_grades_the_head_blind_and_keeps_the_r
     assert r.status_code == 200, r.text
     d = r.json()
     m = d["merge"]
-    assert [x["name"] for x in m["recipes"]][0] == "strict" and "relaxed:skill" in m["ladder"] and len(calls) == 1
+    assert [x["name"] for x in m["recipes"]][0] == "strict" and "relaxed:skill" in m["ladder"] and len(calls) == 2   # the head is graded in two concurrent batches
     assert d["rows"][0]["id"] == "j1" and d["rows"][0]["fit"] == "yes" and d["rows"][-1]["fit"] == "no" and d["rows"][-1]["id"] == "j3"
     assert d["contract"]["merge"] == {"mode": "merged", "off": []} and d["contract"]["user_keys"] == ["level"]
     # switching a recipe off leaves it out of the merge but on the ladder

@@ -109,7 +109,7 @@ def _merged_fixture():
         calls["slices"].append(dict(must)); return 0 if must.get("field") == ["nowhere"] else 10
     def llm(system, user):
         calls["judge"] += 1
-        assert "WORDS: hire a cto" in user and "[r1]" in user and "strict" not in user           # blind: no recipe names
+        assert "WORDS: hire a cto" in user and "[r" in user and "strict" not in user             # blind: no recipe names
         ids = {}
         for line in user.split("ROWS:", 1)[1].strip().splitlines():
             bid = line.split("]")[0].strip("[")
@@ -134,7 +134,7 @@ def test_merged_search_fuses_survivors_judges_the_head_blind_and_orders_fits_fir
     notes = [{"rule": "readings", "readings": [{"value": "crm", "field": "marketing", "share": 0.3}]}]
     out = _run(merged_search(c, kind="person", user_keys=set(), notes=notes, evaluate_fn=evaluate_fn, slice_fn=slice_fn, llm_json=llm, lines_fn=lines_fn, log_fn=log_fn))
     m = out["merge"]
-    assert [r["name"] for r in m["recipes"]] == ["strict", "default", "relaxed:skill", "reading:field=marketing"] and calls["judge"] == 1
+    assert [r["name"] for r in m["recipes"]] == ["strict", "default", "relaxed:skill", "reading:field=marketing"] and calls["judge"] == 2   # two concurrent batches
     ids = [r["id"] for r in out["rows"]]
     assert ids[:3] == ["p1", "p3", "p9"] or ids[:3] == ["p1", "p9", "p3"]                      # fits first (p1 agreed by two recipes)
     assert ids[-1] == "p5" and out["rows"][-1]["fit"] == "no"                                    # the 'no' sinks with its verdict

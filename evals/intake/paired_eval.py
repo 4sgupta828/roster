@@ -143,7 +143,7 @@ def main():
                "baseline": {"prec10": _prec(base_rows, verdicts, 10), "prec20": _prec(base_rows, verdicts, 20), "missed": len(yes_ids - base_top), "secs": base_s, "rows": len(base_rows)},
                "merged": {"prec10": _prec(merged_rows, verdicts, 10), "prec20": _prec(merged_rows, verdicts, 20), "missed": len(yes_ids - merged_top), "secs": merged_s, "rows": len(merged_rows),
                           "recipes": [{k: r.get(k) for k in ("name", "pool", "evaluated", "head_fits", "prec10")} for r in ((merge or {}).get("recipes") or [])],
-                          "fits": (merge or {}).get("fits"), "weak": (merge or {}).get("weak"), "judge_error": (merge or {}).get("judge_error")},
+                          "fits": (merge or {}).get("fits"), "weak": (merge or {}).get("weak"), "judge_error": (merge or {}).get("judge_error"), "timings": (merge or {}).get("timings")},
                "top": {arm: [(_rid(r), (verdicts.get(_rid(r)) or {}).get("fit"), str(r.get("title") or r.get("name") or "")[:40], (verdicts.get(_rid(r)) or {}).get("why", ""), r.get("fit"), r.get("fit_why", ""))
                              for r in rows_[:10]] for arm, rows_ in (("baseline", base_rows), ("merged", merged_rows))}}
         rec["brief_full"] = brief; rec["contract"] = {k: c.get(k) for k in ("must", "prefer", "center")}
