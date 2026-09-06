@@ -7722,7 +7722,7 @@ function facetRailMarkup(d){
   const saveBtn = (d._map_id && d._map_owner && d._applied) ? `<button type="button" class="histbtn frail-save" data-jpid="${esc(d._jpid)}" title="Record this navigated view as a revision of the map (same link)">💾 Save these filters to the map</button>` : "";
   const applyBar = n ? `<div class="frail-apply"><b>${n} change${n===1?"":"s"} pending</b> — nothing runs until you apply.
       <button type="button" class="idgo frail-go" data-jpid="${esc(d._jpid)}">Apply</button><button type="button" class="histbtn frail-reset" data-jpid="${esc(d._jpid)}">Reset</button></div>`
-    : `<div class="frail-apply">${d._applied && d._delta ? `<span class="frail-done">Applied ✓ — ${d._delta.after} shown${d._delta.added ? ` · <b>${d._delta.added} new</b>` : ""}${d._delta.removed ? ` · ${d._delta.removed} dropped` : ""}${!d._delta.added && !d._delta.removed ? " · same rows, order may differ" : ""}${(d._delta.prevPool != null && d._delta.pool != null && d._delta.prevPool !== d._delta.pool) ? ` · pool ${d._delta.prevPool} → ${d._delta.pool}` : ""}</span> ` : "Tap chips to stage changes, then apply once. "}${saveBtn}</div>`;
+    : `<div class="frail-apply">${d._applied && d._delta ? `<span class="frail-done">Applied ✓ — ${d._delta.after} shown${d._delta.added ? ` · <b>${d._delta.added} new</b>` : ""}${d._delta.removed ? ` · ${d._delta.removed} dropped` : ""}${!d._delta.added && !d._delta.removed ? " · same rows, order may differ" : ""}${(d._delta.prevPool != null && d._delta.pool != null && d._delta.prevPool !== d._delta.pool) ? ` · pool ${d._delta.prevPool} → ${d._delta.pool}` : ""}</span> ${d._delta.added && !d._newFirst ? `<button type="button" class="histbtn frail-shownew" data-jpid="${esc(d._jpid)}">Show the ${d._delta.added} new first</button>` : ""}` : "Tap chips to stage changes, then apply once. "}${saveBtn}</div>`;
   const empty = (cov.diagnosis && !facetPending(d)) ? diagnosisMarkup({...cov.diagnosis, best_match: cov.best_match}, d._jpid, L) : "";
   return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}"><div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
 }
@@ -7757,7 +7757,7 @@ async function facetReevaluate(jpid, contract, save){
   const d = facetRenderOf(jpid); if(!d) return;
   const prevRows = Array.isArray(d.people_rows) ? d.people_rows.slice() : (d.jobs||[]).slice();
   const prevPool = (d.coverage||{}).pool;
-  d._busy = true; d._applied = false; d._delta = null; rerenderRail(jpid);
+  d._busy = true; d._applied = false; d._delta = null; d._newFirst = false; rerenderRail(jpid);
   try{
     const r = d._map_id
       ? await fetch(`/maps/${encodeURIComponent(d._map_id)}/navigate`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({contract, save: !!save, t: d._map_token||""})})
@@ -7790,6 +7790,13 @@ document.addEventListener("click", (e)=>{
   if(sv){ e.preventDefault(); const d = facetRenderOf(sv.dataset.jpid); if(d && d.contract) facetReevaluate(sv.dataset.jpid, d.contract, true); return; }
   const rs = e.target.closest && e.target.closest(".frail-reset");
   if(rs){ e.preventDefault(); const d = facetRenderOf(rs.dataset.jpid); if(d){ d._draft = null; rerenderRail(rs.dataset.jpid); } return; }
+  const sn = e.target.closest && e.target.closest(".frail-shownew");
+  if(sn){ e.preventDefault(); const d = facetRenderOf(sn.dataset.jpid); if(!d) return;
+    const key = Array.isArray(d.people_rows) ? "people_rows" : "jobs";
+    d[key] = (d[key]||[]).slice().sort((x, y) => (y._new ? 1 : 0) - (x._new ? 1 : 0));   // stable: new rows first, order kept within
+    d._newFirst = true;
+    if(key === "people_rows"){ d._page = 0; gotoPeoplePage(d._pid, 0); } else { d._jpage = 0; gotoJobsPage(sn.dataset.jpid, 0); }
+    return; }
   const dr = e.target.closest && e.target.closest(".fdiag-drop");
   if(dr){ e.preventDefault(); const d = facetRenderOf(dr.dataset.jpid); if(!d || !d.contract) return;
     let vals = []; try{ vals = JSON.parse(dr.dataset.values); }catch(err){}
