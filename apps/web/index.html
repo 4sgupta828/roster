@@ -1842,7 +1842,7 @@
           <circle cx="12" cy="13" r="4"/>
         </svg>
       </button>
-      <button class="attach" id="attach" type="button" hidden aria-label="Attach image, PDF, or DICOM">
+      <button class="attach" id="attach" type="button" aria-label="Attach a résumé, a job description, or a PDF">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3 3 0 0 1 4.24 4.24l-9.2 9.19a1 1 0 0 1-1.41-1.41l8.49-8.49"/>
@@ -2654,6 +2654,8 @@ async function loadConfig(){
     // Past-Sessions tabs — session-kind (Quick Q&A | Expert Panel), built from whichever flags are
     // on. Panels get their own tab so they don't clutter the Q&A list.
     buildSessionTabs();
+    // the attach button is always on: Jobs takes a résumé, Guided takes a résumé or a JD (it was only ever visible
+    // by accident of a CSS defeat of the hidden attribute — fixed 2026-09-06; vision only adds image reading)
     if(VISION_ENABLED){
       $("#attach").hidden = false;
       // camera / photo capture retired (owner, 2026-09-04): an inherited affordance with no use in Jobs / Q&A / Talent Map
