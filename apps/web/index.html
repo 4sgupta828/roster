@@ -5557,10 +5557,12 @@ async function intakeImprove(rd){
 // the rail already reflecting the contract. The intake transcript rides the resulting turn as an audit field.
 function routeTriage(route, text, rd){
   const transcript = (INTAKE.state && INTAKE.state.transcript) || [];
-  PENDING_INTAKE_TRANSCRIPT = transcript.map(m => ({role: m.role, text: m.text}));
+  const keep = INTAKE;                                   // the target tab starts a fresh thread; the intake itself stays (come back for the other search)
   setMode("qa");
   if(typeof setSearchMode === "function") setSearchMode(route === "people" ? "people" : "jobs");
   if(typeof newConversation === "function") { try{ newConversation(); }catch(e){} }
+  INTAKE = keep;
+  PENDING_INTAKE_TRANSCRIPT = transcript.map(m => ({role: m.role, text: m.text}));
   const contract = rd && rd.contract ? rd.contract : null;
   askQuestion(text || (contract && contract.text) || "", {skipRefine: true, contract});
 }
