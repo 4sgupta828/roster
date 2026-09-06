@@ -320,7 +320,21 @@ line on the rail. Prerequisite chore: move the `rs_job` facet columns' DDL into 
   people re-extraction had been failing 100/100 batches silently and resumed after the fix. Postgres: the must
   clauses correlate on `('job:' || j.id::text)` — the expression index `ix_rs_job_facet_eid` (now in the store
   DDL) took counts from 30 s to 0.1 s. Small must-slices take an exact-distance semantic path (probe ≤ 2000).
-- NOT yet built: v1.1 JD draft from peer summaries (§4), improve-and-save (§2.2), multiple JDs by `role_key`,
-  `roster_brief` / `roster_intake` tables (state is FE-held; attachments are parsed per turn they are sent),
-  advice on the result's rail (§5), the "search the other side" offer, the persona eval harness (§7), the
-  first-run nudge entry point. People evaluate with musts ≈ 10 s (the person semantic leg) — next perf item.
+- **v1.1 LIVE (later the same day):** JD DRAFT from the centre of peer postings (`apps/api/jd_draft.py`: peers = the
+  role's similarity neighbourhood — only `field` filters — deduped by company, 10 kept; requirement lines from
+  `rs_job_summary` (built on demand for peers without one); one model call groups equivalent lines; centre = groups
+  in ≥ 30 % of peers; one model call drafts; every line cites a group or "you"; uncited lines are dropped; market
+  signal from the peers' facets; changes in words → `redraft`; "Use this JD" / "Save to my account & use").
+  SAVED BRIEFS: `roster_brief` (kind jd | resume, `role_key` = field/function/level/title-slug from the JD's own
+  facets; the same key = next version; `GET/POST/DELETE /me/briefs`; Account → "Saved briefs" card with "Find
+  candidates" that opens Guided on that JD; the intake asks "Which hire is this for?" when the account holds JDs).
+  IMPROVE-AND-SAVE: `POST /intake/improve` (original + answers only; added lines verified to appear in the text
+  and highlighted; Save → a brief; a résumé also becomes the résumé on file via `set_resume_text`). MULTI-SELECT
+  chips (owner): chips toggle, "Answer with N ✓" sends a list; the service accepts lists for items and keys.
+  Direction read returns null for a bare title list (asks). A pasted JD's > 2 skill musts rank instead of AND-filter.
+  The first-run nudge respects a résumé on file and never fires on an expired session. Verified on prod
+  (signed-out browser flows at 1280 / 390; briefs + improve + résumé-on-file via a throwaway account, deleted).
+- NOT yet built: server-held intake sessions / `roster_intake` (state is FE-held; attachments are parsed per turn
+  they are sent), advice on the result's rail (§5), the "search the other side" offer, the persona eval harness
+  (§7), peer-matching by the manager's company type (§4 step 1 `prefer`), a JD-draft entry from the Account card.
+  People evaluate with musts ≈ 10 s (the person semantic leg) — next perf item.
