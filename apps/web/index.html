@@ -2748,6 +2748,7 @@ async function runJobs(question, opts){
     if(d.session_id && !THREAD.session_id) THREAD.session_id = d.session_id;   // the shareable link, like people
     THREAD.turns.push({question, kind: "jobs", jobs: d.jobs||[], query: d.query||{},
                        contract: d.contract||null, counts: d.counts||null, coverage: d.coverage||null, labels: d.labels||null,   // the evaluator's rail
+                       relaxed: d.relaxed||[], merge: d.merge||null,                                       // smart relaxing notes; merged-search recipes
                        stats: d.stats||{}, semantic: d.semantic, geo_scope: d.geo_scope||null,
                        related_jobs: d.related_jobs||[], company_indexed: d.company_indexed,
                        agentic: !!d.agentic, intent: d.intent||"", query_angles: d.query_angles||[],
