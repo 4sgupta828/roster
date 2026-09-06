@@ -304,6 +304,8 @@ line on the rail. Prerequisite chore: move the `rs_job` facet columns' DDL into 
 
 ## 11. Status (2026-09-05, end of session) — START HERE next session
 
+> 2026-09-06: v1 + v1.1 + §12 step 1 live; intake battery 18/18 (see §12.13 for the latest fixes). Next: §12 step 2.
+
 - **v1 intake core LIVE** on prod behind `ROSTER_GUIDED_INTAKE=1` (needs `ROSTER_FACET_EVALUATOR=1`): the ◍ Guided
   TAB (first, beside Talent Map / Jobs Map / Q&A — never a separate mode bar), `POST /intake/step` (stateless;
   `state` rides the request; artifact text capped at 6k), kernel gates `roster_kernel/facets/intake.py` (9 tests),
@@ -539,6 +541,17 @@ keys), the plain Talent brief and the plain Jobs brief; the ready card shows "Ad
 "Your own filters". A remote role is never asked for a metro and "remote US" means the country. Eval scenarios:
 `hiring_place_or_mode`, `hiring_field_vs_specialty`, `hiring_decisive_rare_must` (all passing). Step 2 (fusion +
 blind judge + alternatives) not started.
+
+Later 2026-09-06 (battery **18/18**, run `evals/intake/runs/intake-20260906-103324.json`): (a) JD-draft peers share
+the role's DOMAIN and its TIER — `field` and the stated `level` filter (fallback to field only under 5 peers); a
+preferred work type that contradicts the tier is dropped (`roster_vertical.intake.peer_work_types`); a draft with
+no "you" line is asked once more with the omission named (a CTO draft had read IC infra postings). (b) What the
+artifact STATES reaches the contract as a schema TOKEN: the completeness read returns `tokens` per stated
+closed-vocabulary item and that token replaces the compile's read for the key (`field` excepted — the index-aware
+step owns it); non-answer words ("missing", "not stated") are never an answer nor search text. (c) A remote role
+that is also place-or-mode leaves the metro to the index-aware step, and the place-or-mode reading is noted even
+when the compile already left the place under prefer. Throwaway accounts: `evals/intake/sweep_throwaways.py`
+(in-container).
 
 1. **Index-aware compile (deterministic, no model, no flag)** — the disjunction rule, collapsing-must demotion
    with the 12.4.2 conditions, co-occurrence readings (the best-lift data reading replaces a model field only when
