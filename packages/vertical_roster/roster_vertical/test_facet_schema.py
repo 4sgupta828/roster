@@ -42,7 +42,7 @@ def test_prompt_block_shows_vocabularies_and_hides_via_keys():
 
 
 def test_weights_cover_rankable_keys_and_version_is_stable():
-    assert FACET_WEIGHTS.avoid["field"] == 0.20 and FACET_WEIGHTS.prefer["skill"] == 0.05
+    assert FACET_WEIGHTS.avoid["field"] == 0.30 and FACET_WEIGHTS.prefer["field"] == 0.25 and FACET_WEIGHTS.prefer["skill"] == 0.06   # field is the strongest signal both ways
     assert SCHEMA_VERSION == FACET_SCHEMA.version() and len(SCHEMA_VERSION) == 12
     assert VALUE_LABELS["staff_plus"] == "staff+"
 

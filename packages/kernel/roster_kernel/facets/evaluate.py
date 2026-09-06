@@ -10,6 +10,7 @@ from .schema import UNKNOWN, FacetSchema, FacetType
 from .store import FacetStore, _vals, matches_must
 
 _DEFAULT_FLOOR, _SPAN = 0.40, 0.25
+POINTS_PER_SIM = 50.0            # weight (similarity units) → points on the 0–100 calibrated match scale
 
 
 @dataclass
@@ -42,7 +43,7 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
     must = contract.must or {}
     # 1) POOL — every leg is asked with the musts; the union keeps the best similarity per id
     pool: dict[str, dict] = {}
-    legs = {"semantic": 0, "enumerate": 0, "angles": 0}
+    legs = {"semantic": 0, "enumerate": 0, "angles": 0, "prefer": 0}
     cap = max(int(contract.limit) * 6, 200)
 
     def _take(rows: list[dict], leg: str) -> None:
@@ -59,6 +60,14 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
         _take(await store.semantic(contract.kind, contract.text, must, cap=cap), "semantic")
         for a in (contract.angles or [])[:5]:
             _take(await store.semantic(contract.kind, str(a), must, cap=cap // 2), "angles")
+        # PREFER legs: a preferred value must reach the pool to be ranked at all — the nearest rows that HOLD each
+        # preferred value join the neighbourhood (a `field: marketing` preference once changed nothing because no
+        # marketing-field row was among the nearest 360)
+        legs["prefer"] = 0
+        for key, vals in list((contract.prefer or {}).items())[:4]:
+            if not isinstance(vals, list) or not vals or key in must:
+                continue
+            _take(await store.semantic(contract.kind, contract.text, {**must, key: list(vals)}, cap=max(cap // 4, 40)), "prefer")
     if not contract.text:
         # no text → the must-slice itself is the pool. WITH text the pool is the semantic neighbourhood only: an
         # enumerate leg would pour unrelated rows (sim 0) into it, and rank_by an ordinal then sorts them first
@@ -107,9 +116,12 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
                 unknown_by_key[k.key] = unknown_by_key.get(k.key, 0) + 1
         r["score"] = round(score, 6)
         r["match_pct"] = calibrated_pct(sim, floor)
-        # the relevance BAND: similarity less the avoid penalties (an avoid is a judgment that crosses bands — the
-        # wrong field ranks below the right one however similar); prefers and the centre only reorder within it
-        r["_band"] = int(calibrated_pct(sim - avoid_pen, floor)) // 5
+        # RANK SCORE on the calibrated scale: match points + BOUNDED preference points − avoid points − centre steps.
+        # Weights are in similarity units; POINTS_PER_SIM puts them on the 0–100 match scale so a preference is worth
+        # a few points (a 0.10 weight = 5 points per hit, ≤ 3 hits), never the 40 points a raw 0.10 of similarity
+        # meant under calibration — a 25 % match with two preferred values stays below a 60 % match, while a strong
+        # preference (field) can lift a 55 % row above a 60 % one
+        r["_rank"] = float(r["match_pct"]) + (score - sim) * POINTS_PER_SIM
         r["reasons"] = reasons
     # 4) RANK — with text, RELEVANCE is the primary axis: 5-point bands of the calibrated match; preferences,
     # avoids and the centre reorder WITHIN a band (a +0.1 bonus per preferred value must never lift a 25 %
@@ -117,7 +129,7 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
     rb = contract.rank_by or "match"
     if rb == "match":
         if contract.text:
-            rows.sort(key=lambda r: (-int(r.get("_band", 0)), -r["score"], str(r.get("id"))))
+            rows.sort(key=lambda r: (-r.get("_rank", 0.0), -r["score"], str(r.get("id"))))
         else:
             rows.sort(key=lambda r: (-r["score"], str(r.get("id"))))
     else:
@@ -151,7 +163,7 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
         except Exception:   # noqa: BLE001 — a diagnosis is an aid
             pass
     for r in rows:
-        r.pop("_band", None)
+        r.pop("_rank", None)
     return {"rows": rows[: int(contract.limit)], "counts": counts, "coverage": coverage, "contract": contract.to_dict()}
 
 

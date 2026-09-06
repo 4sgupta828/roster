@@ -248,17 +248,33 @@ def test_weak_results_are_diagnosed_and_flagged():
     assert not out2["coverage"]["weak"] and "diagnosis" not in out2["coverage"]
 
 
-def test_preferences_reorder_within_a_relevance_band_never_across():
+def test_preference_points_are_bounded_but_a_strong_preference_can_lift_a_close_row():
     import asyncio
     from roster_kernel.facets import Contract, FacetKey, FacetSchema, FacetType, FacetWeights, InMemoryFacetStore, evaluate
-    sch = FacetSchema(keys=(FacetKey(key="ev", type=FacetType.categorical, kinds=("e",), values=("r", "p")),))
-    rows = [{"id": "close", "kind": "e", "sim": 0.55, "facets": {}},                        # 60 % — no preferred value
-            {"id": "far_pref", "kind": "e", "sim": 0.46, "facets": {"ev": ["r", "p"]}},       # 24 % — two preferred hits
-            {"id": "close_pref", "kind": "e", "sim": 0.54, "facets": {"ev": ["r"]}}]          # 56 % — same band as 'close', one hit
-    w = FacetWeights(prefer={"ev": 0.2})
-    out = asyncio.new_event_loop().run_until_complete(evaluate(Contract(kind="e", text="q", prefer={"ev": ["r", "p"]}), InMemoryFacetStore(rows, sch), sch, w))
-    assert [r["id"] for r in out["rows"]] == ["close", "close_pref", "far_pref"] or [r["id"] for r in out["rows"]][-1] == "far_pref"
-    assert [r["id"] for r in out["rows"]][-1] == "far_pref"                              # the 24 % row never rises above the 60 % band
+    sch = FacetSchema(keys=(FacetKey(key="ev", type=FacetType.categorical, kinds=("e",), values=("r", "p")), FacetKey(key="fd", type=FacetType.categorical, kinds=("e",), values=("m", "s"))))
+    rows = [{"id": "close", "kind": "e", "sim": 0.55, "facets": {"fd": ["s"]}},                     # 60 %
+            {"id": "far_pref", "kind": "e", "sim": 0.46, "facets": {"ev": ["r", "p"]}},             # 24 % + two small hits
+            {"id": "near_field", "kind": "e", "sim": 0.53, "facets": {"fd": ["m"]}}]                # 52 % + the strong field hit
+    w = FacetWeights(prefer={"ev": 0.10, "fd": 0.25})
+    out = asyncio.new_event_loop().run_until_complete(evaluate(Contract(kind="e", text="q", prefer={"ev": ["r", "p"], "fd": ["m"]}), InMemoryFacetStore(rows, sch), sch, w))
+    ids = [r["id"] for r in out["rows"]]
+    assert ids[-1] == "far_pref"                       # 24 + 10 = 34 never passes 60
+    assert ids[0] == "near_field"                      # 52 + 12.5 = 64.5 passes 60: a strong preference lifts a close row
+
+
+def test_a_preferred_value_reaches_the_pool_through_its_own_leg():
+    import asyncio
+    from roster_kernel.facets import Contract, FacetKey, FacetSchema, FacetType, InMemoryFacetStore, evaluate
+    sch = FacetSchema(keys=(FacetKey(key="fd", type=FacetType.categorical, kinds=("e",), values=("m", "s")),))
+    rows = [{"id": f"s{i}", "kind": "e", "sim": 0.7 - i * 0.0005, "facets": {"fd": ["s"]}} for i in range(300)]
+    rows.append({"id": "mkt", "kind": "e", "sim": 0.50, "facets": {"fd": ["m"]}})                  # outside the nearest 200
+    calls = []
+    class Store(InMemoryFacetStore):
+        async def semantic(self, kind, text, must, *, cap=400):
+            calls.append((dict(must), cap)); return await super().semantic(kind, text, must, cap=cap)
+    out = asyncio.new_event_loop().run_until_complete(evaluate(Contract(kind="e", text="q", prefer={"fd": ["m"]}, limit=10), Store(rows, sch), sch))
+    assert any(m.get("fd") == ["m"] for m, _ in calls) and out["coverage"]["legs"]["prefer"] >= 1
+    assert out["coverage"]["pool"] == 201                                                  # the nearest 200 plus the marketing row its own leg brought in
 
 
 def test_weak_diagnosis_reports_the_best_match_without_each_must():

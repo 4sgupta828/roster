@@ -79,9 +79,9 @@ FACET_SCHEMA = FacetSchema(keys=(
 # Ranking weights (the small table of judgment the evaluator applies). Prefer / avoid per hit; the centre
 # penalty per ordinal step beyond the span. Values mirror the bonuses the surfaces used before unification.
 FACET_WEIGHTS = FacetWeights(
-    prefer={"metro": 0.15, "state": 0.15, "country": 0.10, "work_mode": 0.15, "company_type": 0.12, "company": 0.15, "skill": 0.05,
-            "role_family": 0.10, "specialty": 0.05, "evidence": 0.10, "level": 0.12},
-    avoid={"field": 0.20, "function": 0.10, "level": 0.10, "metro": 0.10, "work_mode": 0.10, "company": 0.15, "company_type": 0.10},
+    prefer={"field": 0.25, "function": 0.15, "metro": 0.15, "state": 0.15, "country": 0.10, "work_mode": 0.15, "company_type": 0.12, "company": 0.15,
+            "skill": 0.06, "role_family": 0.10, "specialty": 0.08, "evidence": 0.10, "level": 0.12},
+    avoid={"field": 0.30, "function": 0.15, "level": 0.10, "metro": 0.10, "work_mode": 0.10, "company": 0.15, "company_type": 0.10},
     default_prefer=0.10, default_avoid=0.10, center_per_step=0.06, max_hits_per_key=3)
 
 SCHEMA_VERSION = FACET_SCHEMA.version()
