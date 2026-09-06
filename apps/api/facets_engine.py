@@ -133,7 +133,7 @@ _COMPILE_SYS = ("You compile a search brief into a facet CONTRACT. Return STRICT
                 "field, function, work type and level the brief describes go here), avoid (object: key → values to rank down), center (object {key, value, "
                 "span} for ONE ordinal key when the brief names a level, span 1), angles (2–4 alternative phrasings or adjacent titles that would surface "
                 "strong matches), intent (one sentence), place_or_mode (true when the brief names a place as an ALTERNATIVE to remote / hybrid — "
-                "'remote or Seattle', 'hybrid in NYC or fully remote' — so the place must not be a hard filter), work_mode ('remote' | 'hybrid' | "
+                "'remote or Seattle', 'hybrid in NYC or fully remote' — the place then goes under prefer, it ranks and never filters), work_mode ('remote' | 'hybrid' | "
                 "'onsite' | null — the mode the brief states, whichever kind is being searched). Use ONLY the keys and vocabularies "
                 "listed; omit what the brief does not say; never invent constraints.")
 

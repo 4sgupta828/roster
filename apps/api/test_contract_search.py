@@ -31,6 +31,10 @@ def test_a_place_named_with_a_mode_ranks_never_filters_unless_the_user_set_it():
     assert "metro" not in c2.must and c2.prefer["metro"] == ["seattle"] and notes[0]["rule"] == "place_or_mode"
     c3, _ = _run(index_aware(c, kind="person", schema=FACET_SCHEMA, user_keys={"metro"}, slice_fn=slice_fn, counts_fn=counts_fn, coverage={}, place_or_mode=True))
     assert c3.must["metro"] == ["seattle"]                                                         # the user's own chip holds
+    # the compile may already have left the place under prefer (or dropped it): the reading is still on the card
+    c4, n4 = _run(index_aware(Contract(kind="person", text="remote us or seattle", must={"country": ["us"]}, prefer={"metro": ["seattle"]}), kind="person", schema=FACET_SCHEMA,
+                              user_keys=set(), slice_fn=slice_fn, counts_fn=counts_fn, coverage={}, place_or_mode=True))
+    assert "metro" not in c4.must and n4[0]["rule"] == "place_or_mode" and n4[0]["action"] == "ranks" and n4[0]["values"] == ["seattle"]
 
 
 def test_a_collapsing_compiled_must_is_demoted_only_under_scarcity_and_on_a_relaxable_key():

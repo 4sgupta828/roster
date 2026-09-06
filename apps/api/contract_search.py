@@ -37,9 +37,14 @@ async def index_aware(c: Contract, *, kind: str, schema, user_keys: set, slice_f
             c.prefer[key] = sorted(set([str(v) for v in (c.prefer.get(key) or [])] + [str(v) for v in vals]))
         notes.append({"rule": rule, "key": key, "values": vals, "why": why, "action": "must → prefer"})
 
-    # 1) disjunction: a place alongside a mode ranks, never filters (unless the user set it)
-    if place_or_mode and "metro" in c.must and "metro" not in user_keys:
-        _to_prefer("metro", "the brief names the place as an alternative to remote / hybrid", "place_or_mode")
+    # 1) disjunction: a place alongside a mode ranks, never filters (unless the user set it). The reading is noted
+    # even when the compile already left the place under prefer — the card says why the place is not a filter
+    if place_or_mode and "metro" not in user_keys:
+        if "metro" in c.must:
+            _to_prefer("metro", "the brief names the place as an alternative to remote / hybrid", "place_or_mode")
+        else:
+            notes.append({"rule": "place_or_mode", "key": "metro", "values": list(c.prefer.get("metro") or []),
+                          "why": "the brief names the place as an alternative to remote / hybrid", "action": "ranks"})
 
     # 2) collapsing musts (scarcity-gated, relaxable keys only)
     compiled = [k for k in c.must if k not in user_keys]
