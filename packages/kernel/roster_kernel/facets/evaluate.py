@@ -41,6 +41,8 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
     if errs:
         raise ValueError("; ".join(errs))
     must = contract.must or {}
+    import time as _time
+    _t = {"start": _time.monotonic()}
     # 1) POOL — every leg is asked with the musts; the union keeps the best similarity per id
     pool: dict[str, dict] = {}
     legs = {"semantic": 0, "enumerate": 0, "angles": 0, "prefer": 0}
@@ -84,6 +86,7 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
         # no text → the must-slice itself is the pool. WITH text the pool is the semantic neighbourhood only: an
         # enumerate leg would pour unrelated rows (sim 0) into it, and rank_by an ordinal then sorts them first
         _take(await store.enumerate(contract.kind, must, cap=cap), "enumerate")
+    _t["legs"] = round(_time.monotonic() - _t["start"], 2)
     # 2) the contract is the law: re-filter (leaky-pool invariant) + explicit exclusions
     excl = {str(x) for x in (contract.exclude_ids or [])}
     rows = [r for rid, r in pool.items() if rid not in excl and matches_must(r, must, schema)]
@@ -159,7 +162,9 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
             rows.sort(key=lambda r: (_ord(r), -r["score"], str(r.get("id"))))
     # 5) COUNTS over the must-filtered index slice (the store's job) + COVERAGE
     # depth {"counts": False} = rows only (a caller that merges several evaluates keeps ONE contract's counts)
+    _t["c0"] = _time.monotonic()
     counts = {} if (depth or {}).get("counts") is False else await store.counts(contract.kind, must, schema, depth=depth)
+    _t["counts"] = round(_time.monotonic() - _t["c0"], 2)
     coverage = {"pool": len(rows), "legs": legs, "excluded": len(excl), "unknown": {k.key: unknown_by_key.get(k.key, 0) for k in schema.for_kind(contract.kind) if k.navigable and k.type is not FacetType.set},
                 "noise_floor": floor}
     # an EMPTY (or near-empty) slice with musts → say which must is doing it (leave-one-out; a few counts calls)
@@ -177,6 +182,7 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
             pass
     for r in rows:
         r.pop("_rank", None)
+    coverage["timings"] = {"legs": _t["legs"], "counts": _t["counts"], "total": round(_time.monotonic() - _t["start"], 2)}
     return {"rows": rows[: int(contract.limit)], "counts": counts, "coverage": coverage, "contract": contract.to_dict()}
 
 
