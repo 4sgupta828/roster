@@ -185,6 +185,8 @@ LEVEL_WORK_TYPES = {"leadership": ("executive", "founder", "manager")}
 
 
 # ---- contract search step 2 (spec §12.5 / §12.6): the judge's vocabulary and weights ------------------------------
+# the DEFAULT recipe: the compile's own reading of these keys ranks instead of filtering (the user's chips never move)
+LADDER_DEFAULT_KEYS = ("field", "function", "work_type", "company_type", "employment_type", "level")
 JUDGE_HEAD = 40               # fused rows graded by the one blind judge call
 MERGE_RRF_K = 60
 JUDGE_PARTIAL = 0.4           # a partial fit's weight in head precision (inflation guard)

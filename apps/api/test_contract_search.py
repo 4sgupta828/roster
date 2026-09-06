@@ -94,11 +94,14 @@ def _merged_fixture():
         "strict": [{"id": "p1", "facets": {"field": ["software"], "level": ["leadership"], "evidence": ["repos"]}}, {"id": "p2", "facets": {"field": ["software"]}}],
         "relaxed:skill": [{"id": "p1", "facets": {}}, {"id": "p3", "facets": {}}, {"id": "p4", "facets": {}}, {"id": "p5", "facets": {}}, {"id": "p6", "facets": {}}, {"id": "p7", "facets": {}}],
         "reading:field=marketing": [{"id": "p9", "facets": {"field": ["marketing"]}}],
+        "default": [{"id": "p1", "facets": {}}, {"id": "p8", "facets": {}}],
     }
     def name_of(cd):
         if cd["must"].get("field") == ["marketing"]:
             return "reading:field=marketing"
-        return "strict" if "skill" in cd["must"] else "relaxed:skill"
+        if "skill" in cd["must"]:
+            return "strict" if "field" in cd["must"] else "default"
+        return "relaxed:skill"
     async def evaluate_fn(cd):
         calls["evaluate"].append(cd); n = name_of(cd)
         return {"rows": rows[n], "counts": {"field": {"software": 5}}, "coverage": {"pool": len(rows[n])}, "contract": cd, "labels": {"values": {}}}
@@ -131,12 +134,12 @@ def test_merged_search_fuses_survivors_judges_the_head_blind_and_orders_fits_fir
     notes = [{"rule": "readings", "readings": [{"value": "crm", "field": "marketing", "share": 0.3}]}]
     out = _run(merged_search(c, kind="person", user_keys=set(), notes=notes, evaluate_fn=evaluate_fn, slice_fn=slice_fn, llm_json=llm, lines_fn=lines_fn, log_fn=log_fn))
     m = out["merge"]
-    assert [r["name"] for r in m["recipes"]] == ["strict", "relaxed:skill", "reading:field=marketing"] and calls["judge"] == 1
+    assert [r["name"] for r in m["recipes"]] == ["strict", "default", "relaxed:skill", "reading:field=marketing"] and calls["judge"] == 1
     ids = [r["id"] for r in out["rows"]]
     assert ids[:3] == ["p1", "p3", "p9"] or ids[:3] == ["p1", "p9", "p3"]                      # fits first (p1 agreed by two recipes)
     assert ids[-1] == "p5" and out["rows"][-1]["fit"] == "no"                                    # the 'no' sinks with its verdict
-    assert out["rows"][0]["found_by"] == {"strict": 1, "relaxed:skill": 1} and out["rows"][0]["fit_why"] == "p1 yes"
-    assert m["fits"] == 3 and m["nos"] == 1 and m["graded"] == 8 and m["weak"] is False and m["union"] == 8
+    assert out["rows"][0]["found_by"] == {"strict": 1, "default": 1, "relaxed:skill": 1} and out["rows"][0]["fit_why"] == "p1 yes"
+    assert m["fits"] == 3 and m["nos"] == 1 and m["graded"] == 9 and m["weak"] is False and m["union"] == 9
     assert out["counts"] == {"field": {"software": 5}} and out["contract"]["must"] == {"field": ["software"], "skill": ["kafka"]}   # the rail keeps the ratified contract
     assert calls["log"] and calls["log"][0]["tallies"]["yes"] == 3 and calls["log"][0]["recipes"][0]["name"] == "strict"
 
@@ -147,5 +150,5 @@ def test_switched_off_recipes_and_empty_pools_are_left_out_and_a_failed_judge_le
     def broken(system, user): raise RuntimeError("provider down")
     out = _run(merged_search(c, kind="person", user_keys=set(), notes=[], evaluate_fn=evaluate_fn, slice_fn=slice_fn, llm_json=broken, lines_fn=lines_fn, off=["relaxed:skill"]))
     m = out["merge"]
-    assert [r["name"] for r in m["recipes"]] == ["strict"] and m["off"] == ["relaxed:skill"] and m["ladder"] == ["strict", "relaxed:skill"]
-    assert m["graded"] == 0 and m["judge_error"] and [r["id"] for r in out["rows"]] == ["p1", "p2"] and out["rows"][0]["fit"] is None
+    assert [r["name"] for r in m["recipes"]] == ["strict", "default"] and m["off"] == ["relaxed:skill"] and m["ladder"] == ["strict", "default", "relaxed:skill"]
+    assert m["graded"] == 0 and m["judge_error"] and [r["id"] for r in out["rows"]] == ["p1", "p2", "p8"] and out["rows"][0]["fit"] is None

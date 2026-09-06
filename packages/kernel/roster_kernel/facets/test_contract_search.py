@@ -92,3 +92,13 @@ def test_a_judges_id_is_resolved_however_it_writes_it():
     _, mapping = blind([{"id": "e0"}, {"id": "e1"}, {"id": "e2"}], seed=1)
     assert resolve_blind_id(mapping, "r2") == mapping["r2"] and resolve_blind_id(mapping, 2) == mapping["r2"]
     assert resolve_blind_id(mapping, "[R3]") == mapping["r3"] and resolve_blind_id(mapping, "x9") is None and resolve_blind_id(mapping, "") is None
+
+
+def test_the_default_recipe_lets_compiled_musts_on_named_keys_rank_but_never_the_users():
+    from roster_kernel.facets.contract_search import recipes
+    c = _c(must={"k1": ["a"], "k2": ["b"], "k3": ["c"]})
+    rs = recipes(c, user_keys={"k3"}, relaxable_keys=set(), default_keys={"k1", "k3"})
+    assert [r.name for r in rs] == ["strict", "default"]
+    d = rs[1].contract
+    assert d.must == {"k2": ["b"], "k3": ["c"]} and d.prefer["k1"] == ["a"]
+    assert [r.name for r in recipes(c, user_keys={"k1", "k3"}, relaxable_keys=set(), default_keys={"k1", "k3"})] == ["strict"]

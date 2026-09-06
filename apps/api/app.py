@@ -2869,7 +2869,9 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             except Exception:  # noqa: BLE001
                 _saved, _parsed = {}, {}
             _prof = {**_parsed, **_saved}
-            if len(str(_prof.get("_resume_text") or "")) >= 200:
+            # a READY Guided contract is the ask; the résumé-on-file match must not pre-empt it (it did: the intake's
+            # ratified contract was ignored for every signed-in seeker with a résumé)
+            if len(str(_prof.get("_resume_text") or "")) >= 200 and not body.contract:
                 from api.people_population import (apply_job_must, apply_level_pref, job_brief_contract, match_resume_jobs,
                                                    parse_job_query, profile_search_prefs)
                 try:
@@ -6123,6 +6125,14 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         cache[kind] = (_time.monotonic(), cov); app.state._facet_cov = cache
         return cov
 
+    def _judge_provider() -> str:
+        """The in-product judge runs on the FAST provider (latency budget §12.9); the eval's judge takes the other one."""
+        return os.environ.get("ROSTER_JUDGE_PROVIDER", "openai").strip().lower()
+
+    def _judge_llm(system: str, user: str) -> dict:
+        from api.model_json import llm_json
+        return llm_json(system, user, timeout=60, prefer=_judge_provider())
+
     async def _people_lines(ids: list[str]) -> dict:
         """ONE batched profile fetch for the judge's role lines (people rows carry only facets otherwise)."""
         cs = _claim_store_cached()
@@ -6161,7 +6171,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         cs = _claim_store_cached()
         log_fn = choice_logger(cs._get_pool) if cs is not None else None
         out = await merged_search(con, kind=kind, user_keys=user_keys, notes=notes, evaluate_fn=_evaluate_contract, slice_fn=slice_fn,
-                                  llm_json=getattr(app.state, "intake_llm", None) or _llm_json, lines_fn=_people_lines, off=opts["off"], log_fn=log_fn)
+                                  llm_json=getattr(app.state, "intake_llm", None) or _judge_llm, lines_fn=_people_lines, off=opts["off"], log_fn=log_fn)
         # the options ride back on the contract so a rail edit re-runs the SAME kind of search
         out["contract"] = {**(out.get("contract") or {}), "user_keys": sorted(user_keys), "notes": notes, "place_or_mode": bool(c.get("place_or_mode")),
                            "merge": {"mode": "merged", "off": list(opts["off"])}}
@@ -6458,12 +6468,12 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         import hashlib as _h
         items, mapping = blind(rows, seed=int(_h.sha1(body.brief.encode("utf-8")).hexdigest()[:8], 16))
         user = "BRIEF\n" + judge_brief(kind, body.brief, body.contract) + "\n\nROWS:\n" + "\n".join(judge_row(kind, bid, r, r.get("blurb") or "") for bid, r in items)
-        fn = getattr(app.state, "intake_llm", None) or _llm_json
+        fn = getattr(app.state, "intake_llm", None) or _judge_llm
         if body.provider == "alt" and getattr(app.state, "intake_llm", None) is None:
             from api.model_json import llm_json as _lj, providers as _prov
-            names = [p[0] for p in _prov()]
-            alt = names[1] if len(names) > 1 else (names[0] if names else None)
-            fn = (lambda sy, us: _lj(sy, us, timeout=60, prefer=alt))
+            names = [p[0] for p in _prov() if p[0] != _judge_provider()]
+            alt = names[0] if names else _judge_provider()
+            fn = (lambda sy, us: _lj(sy, us, timeout=90, prefer=alt))
         d = await asyncio.to_thread(fn, judge_prompt(kind), user)
         verdicts = {}
         for v in (d.get("verdicts") or []):

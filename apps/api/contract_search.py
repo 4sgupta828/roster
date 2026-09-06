@@ -153,11 +153,12 @@ async def merged_search(c: Contract, *, kind: str, user_keys: set, notes: list[d
     """One search over several recipes, merged. Returns the evaluate shape (rows / counts / coverage / contract /
     labels — counts and coverage are the ratified contract's, the rail's shared layer) plus `merge`: the recipes
     with their numbers, the judge's tallies, WEAK. Rows carry `fit`, `fit_why`, `found_by`."""
-    from roster_vertical.intake import JUDGE_HEAD, MERGE_RRF_K, RELAXABLE_KEYS, SELF_STATED_EVIDENCE, WEAK_FITS, judge_brief, judge_prompt, judge_row, reading_alternatives
+    from roster_vertical.intake import (JUDGE_HEAD, LADDER_DEFAULT_KEYS, MERGE_RRF_K, RELAXABLE_KEYS, SELF_STATED_EVIDENCE, WEAK_FITS, judge_brief, judge_prompt,
+                                        judge_row, reading_alternatives)
     import time as _t
     t0 = _t.monotonic(); timings: dict = {}
     off = [str(x) for x in (off or [])]
-    ladder = recipes(c, user_keys=set(user_keys or ()), relaxable_keys=set(RELAXABLE_KEYS), readings=reading_alternatives(notes))
+    ladder = recipes(c, user_keys=set(user_keys or ()), relaxable_keys=set(RELAXABLE_KEYS), readings=reading_alternatives(notes), default_keys=set(LADDER_DEFAULT_KEYS))
     kept = [r for r in ladder if r.name not in off] or ladder[:1]
     sizes = await asyncio.gather(*[_safe_size(slice_fn, kind, r.contract.must) for r in kept])
     surv = survivors(kept, {r.name: n for r, n in zip(kept, sizes)})

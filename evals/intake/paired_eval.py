@@ -99,12 +99,18 @@ def main():
     only = {x.strip() for x in args.only.split(",") if x.strip()}
     results = []
     t_all = time.time()
+    live_url = ""
+    try:   # a live posting URL for the link scenario
+        d = post(args.base, "/search/evaluate", {"contract": {"kind": "job", "text": "backend engineer", "must": {"field": ["software"]}, "limit": 5}})
+        live_url = next((r.get("url") for r in d.get("rows") or [] if str(r.get("url") or "").startswith("http")), "")
+    except Exception:   # noqa: BLE001
+        pass
     for sc in load_scenarios(args.scenarios):
         if only and sc["id"] not in only:
             continue
         if any("improve" in st for st in sc["steps"]) or (sc.get("expect") or {}).get("no_draft"):
             continue
-        run = Run(args.base, sc, "")
+        run = Run(args.base, sc, live_url)
         try:
             run.seed(); run.drive()
         except urllib.error.HTTPError as e:

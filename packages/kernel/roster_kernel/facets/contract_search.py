@@ -112,9 +112,11 @@ class Recipe:
     pool: int | None = None  # filled by the caller's probe
 
 
-def recipes(c, *, user_keys: set, relaxable_keys: set, readings: list[dict] | None = None, max_recipes: int = 6) -> list[Recipe]:
-    """The candidate ladder for one contract: `strict` (as ratified); `relaxed:<key>` per compiled must on a
-    relaxable key (that must ranks instead); `loose` when two or more such keys exist (all of them rank);
+def recipes(c, *, user_keys: set, relaxable_keys: set, readings: list[dict] | None = None, max_recipes: int = 6,
+            default_keys: set | None = None) -> list[Recipe]:
+    """The candidate ladder for one contract: `strict` (as ratified); `default` — every compiled must on a
+    `default_keys` key ranks instead of filtering (the reading of the words stays, as a preference); `relaxed:<key>`
+    per compiled must on a relaxable key; `loose` when two or more such keys exist (all of them rank);
     `reading:<key>=<value>` per alternative reading (a different value for a key the user did not set — the value
     is swapped in whichever section holds the key, or added as a must). The user's own keys are never touched.
     Identical contracts collapse; `strict` is always first."""
@@ -129,6 +131,14 @@ def recipes(c, *, user_keys: set, relaxable_keys: set, readings: list[dict] | No
             return
         seen.add(key); out.append(Recipe(name, contract, why))
 
+    dflt = [k for k in c.must if k not in user_keys and k in set(default_keys or ())]
+    if dflt:
+        r = Contract.from_dict(c.to_dict())
+        for k in dflt:
+            vals = r.must.pop(k)
+            if isinstance(vals, list):
+                r.prefer[k] = sorted(set([str(v) for v in (r.prefer.get(k) or [])] + [str(v) for v in vals]))
+        _add("default", r, "the compiled reading ranks instead of filtering")
     relax = [k for k in c.must if k not in user_keys and k in set(relaxable_keys or ())]
     for k in relax:
         r = Contract.from_dict(c.to_dict())
