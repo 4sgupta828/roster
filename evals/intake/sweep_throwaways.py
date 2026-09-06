@@ -4,7 +4,7 @@ Runs INSIDE the API container (needs ROSTER_CORPUS_DSN):
   railway ssh --service roster-api "sh -c \"echo $b64 | base64 -d > /tmp/sweep.py && python /tmp/sweep.py\""
 Never touches a real account: the match is the throwaway email patterns only."""
 import os, asyncio, asyncpg
-PAT = ("intake-eval-%@roster.test", "briefs-smoke-%@roster.test", "rail-smoke-%@roster.test")
+PAT = ("intake-eval-%@roster.test", "briefs-smoke-%@roster.test", "rail-smoke-%@roster.test", "nudge-smoke-%@roster.test")
 TABLES = ['roster_answer_bank', 'roster_application', 'roster_brief', 'roster_bucket', 'roster_candidate_profile', 'roster_connection',
           'roster_feedback', 'roster_notification', 'roster_outreach', 'roster_saved_search', 'roster_user_pref', 'roster_user_token']
 async def main():
