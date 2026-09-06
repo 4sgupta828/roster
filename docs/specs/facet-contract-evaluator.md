@@ -348,6 +348,11 @@ Nothing is deleted before its replacement runs behind the flag on prod for one d
   CRM search; must field=marketing yields exactly the 9 matching managers. Vocabulary note: "marketing
   engineering" is field=software + specialty / skills (CRM, Salesforce), not field=marketing (that selects
   marketers) — the rail's Skills / Specialty chips are the right lever there.
+- Step 4 CUTOVER (2026-09-05, owner: "still not working" on a brief typed straight into Talent Map): a FRESH brief on
+  the People surface now compiles → evaluate → hydrated cards + rail (`_people_population_route` → `_people_contract_route`)
+  whenever the compile names a role / field / level / skill / place; the old engine keeps person-name lookups
+  (a compile with only a company, or nothing) and follow-up refinement turns (`refine_facets` / `prior_person`).
+  The People tab's evidence chips → `must evidence`; its level selector → `center`; the selector country → `must`.
 - Known gaps: `role_family` pills show the key label only; the pool for a brief with no musts is the semantic
   top-K (cap ≈ limit × 6), so counts are index-wide while rows are the nearest; navigation on a map with no
   contract (saved before this work) says so and asks for a fresh search.

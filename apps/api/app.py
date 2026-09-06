@@ -3984,6 +3984,32 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             must never silently become open-web people enumeration. `route_extra` (router mode)
             rides the persisted session extra for auditability."""
             store = _claim_store_cached()
+            # THE EVALUATOR FOR A PLAIN TALENT MAP SEARCH (spec step 4 cutover, owner 2026-09-05: a brief typed
+            # into Talent Map ran the old engine, so field / level / skills carried no weight and rows had no
+            # facets). A fresh brief compiles to a contract → evaluate → cards + rail. The old engine keeps what
+            # it is better at: a person's NAME (a compile that names only a company, or nothing, is a lookup)
+            # and follow-up refinement turns that carry the running filter.
+            _fresh = not (body.refine_facets or (body.prior_person or "").strip() or (body.prior_context or "").strip())
+            if facet_evaluator_enabled() and _fresh and _facet_store() is not None:
+                try:
+                    from api.facets_engine import compile_contract, downgrade_uncovered_musts
+                    _q = (question_text or body.question or "").strip()
+                    _scope_c = ((body.country or "us").strip().lower() if people_geo_scope_enabled() else "")
+                    _c = await asyncio.to_thread(compile_contract, "person", _q, _facet_schema(), _llm_json, limit=200, scope={"country": _scope_c} if _scope_c else {})
+                    downgrade_uncovered_musts(_c, await _facet_coverage("person"))
+                    _signal = [k for k in list(_c.must) + list(_c.prefer) if k != "company"]
+                    if _signal or _c.center:                       # a role / field / level / skill / place was named → the evaluator
+                        if _scope_c and not _c.must.get("country"):
+                            _c.must["country"] = [_scope_c]
+                        if body.evidence_kinds:
+                            _c.must["evidence"] = [str(x) for x in body.evidence_kinds]
+                        if body.levels and body.levels[0]:
+                            _c.center = {"key": "level", "value": str(body.levels[0]), "span": int(body.level_span)}
+                        return await _people_contract_route(_c.to_dict()), {"kind": "contract"}
+                except HTTPException:
+                    raise
+                except Exception:   # noqa: BLE001 — the engine is the fallback, never a dead end
+                    pass
             if store is None:
                 return ResearchOut(grounded=False, answer="The people index is unavailable right now "
                                    "— please retry.", claims=[], coverage_gaps=[], rejected=0,
@@ -4058,7 +4084,15 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             if on_event is not None:
                 await on_event({"type": "people", "count": len(rows)})
             nav = {"contract": out["contract"], "counts": out["counts"], "coverage": out["coverage"], "labels": out.get("labels")}
-            cov = {"query_facets": {}, "population_statement": f"{len(rows)} people from the index match this contract (evaluator; counts on the rail)."}
+            _cc = out["contract"]; _cv = out.get("coverage") or {}
+            _lab = (out.get("labels") or {}).get("values") or {}
+            _words = lambda vals: [(_lab.get(str(v)) or str(v).replace("_", " ")) for v in (vals if isinstance(vals, list) else [str(vals)])]
+            _stmt = (f"{len(rows)} people ranked from a pool of {_cv.get('pool', len(rows))} that meet the filters"
+                     + (f"; the closest match is {_cv.get('best_match')}% — weak; the rail says which filter keeps closer people out." if _cv.get("weak") else ".")
+                     + " Adjust filters on the rail; the counts are live.")
+            cov = {"query_facets": {}, "population_statement": _stmt,
+                   "brief_contract": {"hard": {k: _words(v) for k, v in (_cc.get("must") or {}).items()}, "soft": {k: _words(v) for k, v in (_cc.get("prefer") or {}).items()},
+                                      "topic": [], "assumptions": (["weak matches — see the rail"] if _cv.get("weak") else [])}}
             sid = None
             sstore = _store()
             if sstore is not None:

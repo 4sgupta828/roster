@@ -395,3 +395,24 @@ def test_a_reply_that_names_no_role_is_asked_again_and_function_never_filters_ca
     out = _run(s2.step(message="Backend Engineer, Payments. " + "own our ledger services. " * 8, state=out["state"]))
     c = out["state"]["kernel"]["contract"]
     assert "function" not in c["must"] and c["prefer"]["function"] == ["engineering"] and c["must"]["field"] == ["software"]
+
+
+def test_a_plain_talent_map_brief_runs_the_evaluator_and_a_name_lookup_does_not(monkeypatch):
+    """Spec step 4 cutover: a fresh brief on the People surface compiles → evaluate (cards with facets + the rail);
+    a query that compiles to nothing but a company / nothing at all stays with the old engine (name lookups)."""
+    from fastapi.testclient import TestClient
+    from api.app import create_app
+    import api.facets_engine as eng
+    monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1"); monkeypatch.setenv("ROSTER_QA_ROUTER", "1"); monkeypatch.setenv("ROSTER_PEOPLE_POPULATION", "1")
+    def fake_compile(kind, text, schema, llm, **kw):
+        if "senior engineers" in text:
+            return Contract(kind=kind, text=text, must={"level": ["senior"]}, limit=kw.get("limit", 60))
+        return Contract(kind=kind, text=text, must={"company": ["cisco"]}, limit=kw.get("limit", 60))     # 'Mukul Gupta at Cisco'
+    monkeypatch.setattr(eng, "compile_contract", fake_compile)
+    app = create_app(); app.state.facet_store = InMemoryFacetStore(JOBS + PEOPLE, FACET_SCHEMA)
+    c = TestClient(app)
+    d = c.post("/research", json={"question": "senior engineers in the bay area", "tenant_id": "demo", "surface": "people"}).json()
+    assert d["people_rows"] and all(p["facets"]["level"] == ["senior"] for p in d["people_rows"]) and d["facet_nav"]["contract"]["must"] == {"level": ["senior"]}
+    assert "pool of" in (d["coverage_basis"] or {}).get("population_statement", "")
+    d2 = c.post("/research", json={"question": "Mukul Gupta at Cisco", "tenant_id": "demo", "surface": "people"}).json()
+    assert not d2.get("facet_nav") and "unavailable" in (d2.get("answer") or "")                     # the engine path (no people store in tests)
