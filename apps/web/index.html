@@ -694,6 +694,9 @@
   .jgroup-name{font-weight:600;}
   .jgroup-n{color:var(--muted);font-size:.78rem;}
   .jgroup-best{margin-left:auto;color:var(--gold);font-size:.74rem;font-weight:600;}
+  .jgroup-why{color:var(--muted);font-size:.74rem;}
+  .jgroup-opt.auto{border-style:dashed;}
+  .jgroup-note{color:var(--muted);font-size:.74rem;}
   .jgroup-body{padding:0 .55rem .6rem;}
   @media (max-width:560px){ .jgroup-best{margin-left:0;} }
   .job-alljobs{font-size:.72rem;color:var(--muted);text-decoration:none;border:1px solid var(--hair);border-radius:999px;padding:.02rem .4rem;white-space:nowrap;}
@@ -2960,19 +2963,26 @@ function hopToQA(){
 // GROUP THE WHOLE RESULT SET (owner, 2026-09-07): many roles share a company, a place, a level or a track, and a flat
 // list of 80 is hard to walk. Grouping runs over EVERY row the search returned (not the page), the groups are ranked by
 // how relevant their best role is, and they arrive collapsed so the page stays short.
-const JOB_GROUPS = [
-  {id: "company",  label: "Company",   of: j => (j.company || "").replace(/_/g, " ").trim()},
-  {id: "location", label: "Location",  of: j => (j.location || "").trim() || facetOne(j, "metro")},
-  {id: "level",    label: "Seniority", of: j => facetOne(j, "level")},
-  {id: "track",    label: "IC / manager", of: j => facetOne(j, "work_type")},
-];
+// how each offered dimension reads a row; WHICH ones are offered comes from the server (`group_options`), because the
+// eligibility rule — enough rows know it, no bucket swallowing the set — lives in the kernel and must not live twice.
+const JOB_GROUP_OF = {
+  company:          j => (j.company || "").replace(/_/g, " ").trim(),
+  metro:            j => (j.location || "").trim() || facetOne(j, "metro"),
+  level:            j => facetOne(j, "level"),
+  work_type:        j => facetOne(j, "work_type"),
+  work_mode:        j => facetOne(j, "work_mode"),
+  company_industry: j => facetOne(j, "company_industry"),
+};
+function jobGroupOptions(d){ return (d.group_options || []).filter(o => o.key === "auto" || JOB_GROUP_OF[o.key]); }
 function facetOne(j, key){
   const v = ((j.facets || {})[key] || [])[0];
   return v ? String(v).replace(/_/g, " ") : "";
 }
-function groupJobs(jobs, mode){
-  const spec = JOB_GROUPS.find(g => g.id === mode);
-  if(!spec) return null;
+function groupJobs(jobs, mode, d){
+  if(mode === "auto") return autoGroups(jobs, d);
+  const of = JOB_GROUP_OF[mode];
+  if(!of) return null;
+  const spec = {of};
   const by = new Map();
   (jobs || []).forEach((j, i) => {
     const raw = (spec.of(j) || "").trim();
@@ -2987,9 +2997,43 @@ function groupJobs(jobs, mode){
   return [...by.values()].sort((a, b) => (b.stated - a.stated) || (b.best - a.best) || (b.rows.length - a.rows.length) || (a.first - b.first));
 }
 function jobGroupBarMarkup(d){
-  const opts = [{id: "", label: "Ungrouped"}, ...JOB_GROUPS].map(o =>
-    `<button type="button" class="jgroup-opt${(d._groupBy || "") === o.id ? " on" : ""}" data-jpid="${esc(d._jpid)}" data-group="${esc(o.id)}">${esc(o.label)}</button>`).join("");
-  return `<div class="jgroup-bar"><span class="jgroup-k">Group by</span>${opts}</div>`;
+  const opts = [{key: "", label: "Ungrouped"}, ...jobGroupOptions(d)].map(o => {
+    const on = (d._groupBy || "") === o.key;
+    const tip = o.key === "auto" ? "Let the model segment these results by the work — one call, only when you ask"
+              : o.groups ? `${o.groups} groups here` : "";
+    return `<button type="button" class="jgroup-opt${on ? " on" : ""}${o.key === "auto" ? " auto" : ""}" data-jpid="${esc(d._jpid)}" data-group="${esc(o.key)}" title="${esc(tip)}">${esc(o.label)}${o.key === "auto" ? " ✨" : ""}</button>`;
+  }).join("");
+  const note = d._autoNote ? `<span class="jgroup-note">${esc(d._autoNote)}</span>` : "";
+  return `<div class="jgroup-bar"><span class="jgroup-k">Group by</span>${opts}${note}</div>`;
+}
+// AUTO: the segmentation the server returned for THIS result set, cached on the render so paging never re-calls it.
+function autoGroups(jobs, d){
+  const a = d._auto;
+  if(!a) return null;
+  const byId = new Map((jobs || []).map(j => [String(j.id), j]));
+  const groups = (a.groups || []).map(g => {
+    const rows = (g.ids || []).map(id => byId.get(String(id))).filter(Boolean);
+    return {key: g.name, label: g.name, why: g.why || "", rows, stated: true,
+            best: rows.reduce((m, r) => Math.max(m, Number(r.match_pct) || 0), 0), first: 0};
+  }).filter(g => g.rows.length);
+  const left = (a.leftovers || []).map(id => byId.get(String(id))).filter(Boolean);
+  if(left.length) groups.push({key: "\u0000none", label: "Everything else", why: "", rows: left, stated: false, best: 0, first: 1e9});
+  return groups.length ? groups : null;
+}
+async function requestAutoGroups(jpid){
+  const d = facetRenderOf(jpid); if(!d || d._autoBusy) return;
+  if(d._auto){ d._groupBy = "auto"; gotoJobsPage(jpid, 0); return; }        // already segmented: never call twice
+  d._autoBusy = true; d._groupBy = "auto"; d._autoNote = "segmenting…"; gotoJobsPage(jpid, 0);
+  try{
+    const rows = (d.jobs || []).map(j => ({id: String(j.id), title: j.title || "",
+      specialty: ((j.facets||{}).specialty)||[], skill: ((j.facets||{}).skill)||[], role_family: ((j.facets||{}).role_family)||[]}));
+    const r = await fetch("/jobs/group", {method: "POST", headers: {"content-type": "application/json"},
+      body: JSON.stringify({rows, question: (d.query && d.query.text) || ""})});
+    const out = await r.json();
+    if(!r.ok || !(out.groups || []).length){ d._auto = null; d._groupBy = ""; d._autoNote = "couldn't segment these — try another grouping"; }
+    else { d._auto = out; d._autoNote = out.source === "fallback" ? "grouped by shared terms (the model was unavailable)" : ""; }
+  }catch(e){ d._auto = null; d._groupBy = ""; d._autoNote = "couldn't reach the grouping service"; }
+  finally{ d._autoBusy = false; gotoJobsPage(jpid, 0); }
 }
 function jobsGroupedMarkup(d, groups, cardOf){
   const open = d._openGroups || {};
@@ -3000,7 +3044,7 @@ function jobsGroupedMarkup(d, groups, cardOf){
       <button type="button" class="jgroup-head" data-jpid="${esc(d._jpid)}" data-key="${esc(g.key)}" aria-expanded="${isOpen}">
         <span class="jgroup-caret">${isOpen ? "▾" : "▸"}</span>
         <span class="jgroup-name">${esc(g.label)}</span>
-        <span class="jgroup-n">${g.rows.length} role${g.rows.length === 1 ? "" : "s"}</span>${best}</button>
+        <span class="jgroup-n">${g.rows.length} role${g.rows.length === 1 ? "" : "s"}</span>${g.why ? `<span class="jgroup-why">${esc(g.why)}</span>` : ""}${best}</button>
       ${isOpen ? `<div class="ppl-grid jgroup-body">${g.rows.map(cardOf).join("")}</div>` : ""}</div>`;
   }).join("");
 }
@@ -3068,9 +3112,14 @@ function jobsMarkup(d){
   const relHtml = rel.length
     ? `<details class="jobs-related"><summary>Related roles at other companies (${rel.length}) — similar titles from the semantic search, not ${esc((q.company||[]).join(", ").replace(/_/g," ")||"this company")}</summary>${jobsMarkup({jobs: rel, query: {}, stats: {}, geo_scope: d.geo_scope, _jpid: d._jpid + "r", _jpage: d._rpage||0, _noMapBar: true})}</details>`
     : "";
-  const groups = groupJobs(jobs, d._groupBy);
+  const groups = groupJobs(jobs, d._groupBy, d);
   const cards = pagedJobs.map(cardOf).join("");
-  const groupBar = jobs.length > 3 ? jobGroupBarMarkup(d) : "";
+  // the remembered choice applies once per result set, and only to a dimension this set actually offers
+  if(d._groupBy === undefined){
+    let want = ""; try{ want = localStorage.getItem("roster_group_by") || ""; }catch(e){}
+    d._groupBy = (want && want !== "auto" && jobGroupOptions(d).some(o => o.key === want)) ? want : "";
+  }
+  const groupBar = jobs.length > 5 && jobGroupOptions(d).length > 1 ? jobGroupBarMarkup(d) : "";
   const body = groups
     ? jobsGroupedMarkup(d, groups, cardOf)
     : `<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">' + esc((d.must && d.must.dropped && !d.must.kept) ? `No role in this search satisfies Must have: ${(d.must.labels||d.must.kinds).join(" · ")} (${d.must.dropped} left out) — drop a toggle above or widen the search.` : (d.note || "No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.")) + '</div>'}</div>`;
@@ -8009,7 +8058,11 @@ async function facetReevaluate(jpid, contract, save){
 }
 document.addEventListener("click", (e)=>{
   const gopt = e.target.closest && e.target.closest(".jgroup-opt");
-  if(gopt){ e.preventDefault(); const d = facetRenderOf(gopt.dataset.jpid); if(d){ d._groupBy = gopt.dataset.group || ""; d._openGroups = {}; d._jpage = 0; gotoJobsPage(gopt.dataset.jpid, 0); } return; }
+  if(gopt){ e.preventDefault(); const d = facetRenderOf(gopt.dataset.jpid);
+    if(d){ const mode = gopt.dataset.group || ""; d._openGroups = {}; d._jpage = 0; d._autoNote = "";
+      try{ localStorage.setItem("roster_group_by", mode); }catch(err){}
+      if(mode === "auto"){ requestAutoGroups(gopt.dataset.jpid); } else { d._groupBy = mode; gotoJobsPage(gopt.dataset.jpid, 0); } }
+    return; }
   const ghead = e.target.closest && e.target.closest(".jgroup-head");
   if(ghead){ e.preventDefault(); const d = facetRenderOf(ghead.dataset.jpid); if(d){ d._openGroups = d._openGroups || {}; const k = ghead.dataset.key;
     d._openGroups[k] = !d._openGroups[k]; gotoJobsPage(ghead.dataset.jpid, d._jpage || 0); } return; }

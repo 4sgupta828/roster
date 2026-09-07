@@ -184,3 +184,52 @@ def test_one_aggregator_cannot_fill_the_page_with_the_same_posting():
     out = thin_repeats(rows)
     assert [r["id"] for r in out] == [0, 1, 100] and thin_repeats(rows, per_title=1)[0]["id"] == 0
     assert thin_repeats([]) == [] and len(thin_repeats([{"company": "", "title": ""}] * 5)) == 5   # unnamed rows are never merged
+
+
+def test_auto_grouping_segments_the_set_enforces_the_shape_and_survives_a_dead_provider():
+    """docs/specs/result-grouping.md §4 — the model segments, code keeps single membership and a bounded shape, and a
+    provider outage falls back to the free token split rather than losing the feature."""
+    from api.app import create_app
+    rows = ([{"id": f"j{i}", "title": "Infrastructure Engineer", "skill": ["kubernetes"], "specialty": ["platform"]} for i in range(4)]
+            + [{"id": f"j{i}", "title": "ML Engineer", "skill": ["pytorch"], "specialty": ["applied ml"]} for i in range(4, 8)])
+    app = create_app()
+    calls = []
+
+    def fake(system, user):
+        calls.append(user)
+        assert "stripe" not in user                                   # the model never sees the employer
+        return {"groups": [{"name": "Infrastructure", "why": "platform work", "ids": [0, 1, 2, 3, 99]},
+                           {"name": "Applied ML", "ids": [3, 4, 5, 6]},        # 3 already taken → single membership
+                           {"name": "Solo", "ids": [7]}]}              # below min size → leftover
+    app.state.intake_llm = fake
+    c = TestClient(app)
+    d = c.post("/jobs/group", json={"rows": rows, "question": "engineer jobs"}).json()
+    assert d["source"] == "model" and [g["name"] for g in d["groups"]] == ["Infrastructure", "Applied ML"]
+    assert d["groups"][0]["ids"] == ["j0", "j1", "j2", "j3"] and d["groups"][1]["ids"] == ["j4", "j5", "j6"]
+    assert d["leftovers"] == ["j7"] and any("out-of-range" in n for n in d["notes"]) and len(calls) == 1
+
+    def dead(system, user):
+        raise RuntimeError("no model answered")
+    app.state.intake_llm = dead
+    d2 = c.post("/jobs/group", json={"rows": rows}).json()
+    assert d2["source"] == "fallback" and d2["groups"] and any("model unavailable" in n for n in d2["notes"])
+    assert sum(len(g["ids"]) for g in d2["groups"]) + len(d2["leftovers"]) == len(rows)
+    # too few rows is not an error, just nothing to group
+    assert c.post("/jobs/group", json={"rows": rows[:3]}).json()["source"] == "none"
+
+
+def test_the_group_menu_only_offers_dimensions_that_organise_these_rows():
+    """A grouping that would produce one giant bucket or a junk drawer is not offered at all."""
+    import os
+    os.environ["ROSTER_FACET_EVALUATOR"] = "1"
+    app = create_app()
+    app.state.facet_store = InMemoryFacetStore(ROWS, FACET_SCHEMA)
+    # reach the closure through a request: three companies, one level everywhere, half the rows without a work mode
+    rows = ([{"company": "acme", "title": "A", "location": "New York", "facets": {"level": ["senior"], "work_mode": ["remote"], "company_industry": ["fintech"]}}] * 7
+            + [{"company": "beta", "title": "B", "location": "Boston", "facets": {"level": ["senior"], "company_industry": ["healthtech"]}}] * 7
+            + [{"company": "gamma", "title": "C", "location": "Austin", "facets": {"level": ["senior"], "company_industry": ["gaming"]}}] * 6)
+    from roster_kernel.facets.grouping import eligible
+    assert eligible([r["company"] for r in rows]).ok                                   # 3 balanced companies → offered
+    assert not eligible([(r["facets"].get("level") or [""])[0] for r in rows]).ok      # one level everywhere → hidden
+    assert not eligible([(r["facets"].get("work_mode") or [""])[0] for r in rows]).ok  # 65 % not stated → hidden
+    assert eligible([(r["facets"].get("company_industry") or [""])[0] for r in rows]).ok

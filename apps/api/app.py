@@ -1332,6 +1332,19 @@ class EvaluateIn(BaseModel):               # contract → rows + counts + covera
     relax: bool = False                   # smart relaxing (first searches / evals); a rail Apply keeps the user's chips as set
 
 
+class GroupRow(BaseModel):                 # one posting, as the browser holds it
+    id: str | int
+    title: str = ""
+    specialty: list[str] = Field(default_factory=list)
+    skill: list[str] = Field(default_factory=list)
+    role_family: list[str] = Field(default_factory=list)
+
+
+class GroupIn(BaseModel):                  # AUTO grouping (docs/specs/result-grouping.md §4) — opt-in, one call
+    rows: list[GroupRow] = Field(default_factory=list, max_length=200)
+    question: str = Field(default="", max_length=500)
+
+
 class JudgeIn(BaseModel):                  # the blind fit judge (evals): brief + up to 60 rows → verdicts
     kind: str = "person"
     brief: str = Field(min_length=1, max_length=4000)
@@ -3017,6 +3030,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             return {"jobs": _rows, "count": len(_rows), "query": {}, "semantic": True, "stats": stats, "geo_scope": None, "session_id": sid,
                     "must": None, "level_pref": None, "brief_contract": bc, "contract": _out["contract"], "counts": _out["counts"], "coverage": _out["coverage"],
                     "labels": _out.get("labels"), "merge": _out.get("merge"), "relaxed": _out.get("relaxed") or [], "timings": _out.get("timings") or {},
+                    "group_options": _group_options(_rows),
                     "note": f"evaluator — {_out['coverage'].get('pool', 0)} candidates" + (" · ranked by filters only (semantic ranking is unavailable right now)" if (_out.get("coverage") or {}).get("degraded") else "")}
         # AGENTIC mode (flag): LLM expands the query into multiple angles → multi-leg retrieval → rerank
         if agentic_jobs_enabled():
@@ -6190,6 +6204,30 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         raw = await cs.people_by_ids(ids)
         return {p["entity_id"]: str(p.get("blurb") or "") for p in rows_to_people(raw)}
 
+    def _group_options(rows: list) -> list:
+        """Which groupings earn a place in the menu FOR THESE ROWS (docs/specs/result-grouping.md §2), ordered by how
+        usefully each splits them. Computed once, server-side, so the rule lives in the kernel and not twice."""
+        from roster_kernel.facets.grouping import eligible
+        from roster_vertical.job_grouping import GROUP_DIMENSIONS
+        rows = rows or []
+        out = []
+        for key, label, source in GROUP_DIMENSIONS:
+            if key == "auto":
+                out.append({"key": "auto", "label": label, "score": 1e9, "why": "let the model segment these results"})
+                continue
+            if source == "company":
+                vals = [str((r or {}).get("company") or "").replace("_", " ").strip() for r in rows]
+            elif source == "location":
+                vals = [str((r or {}).get("location") or "").strip() or ((((r or {}).get("facets") or {}).get("metro") or [""])[0]) for r in rows]
+            else:
+                fkey = source.split(":", 1)[1]
+                vals = [(((r or {}).get("facets") or {}).get(fkey) or [""])[0] for r in rows]
+            e = eligible([str(v or "").replace("_", " ") for v in vals])
+            if e.ok:
+                out.append({"key": key, "label": label, "score": e.score, "groups": e.groups, "known": e.known})
+        out.sort(key=lambda o: -o["score"])
+        return out
+
     async def _company_sites() -> dict:
         """{company slug: the employer's own website} — harvested once per company by scripts/company_sites.py and
         cached here for an hour (a few thousand rows; a company's site does not move)."""
@@ -6633,6 +6671,46 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         if (body.contract or {}).get("kind") == "person":
             out["rows"] = await _hydrate_people(out.get("rows") or [])
         return out
+
+    @app.post("/jobs/group")
+    async def jobs_group(body: GroupIn) -> dict:
+        """AUTO grouping: the model segments THIS result set the way a job seeker would; code enforces the shape and
+        falls back to the free token split when no provider answers. Opt-in — the browser calls it only when the user
+        picks Auto, once per result set (docs/specs/result-grouping.md §4)."""
+        import time as _t
+        from roster_kernel.facets.grouping import enforce, token_groups
+        from roster_vertical.job_grouping import resegment_prompt, row_line, segment_prompt, tokens
+        rows = [r.model_dump() for r in (body.rows or [])]
+        n = len(rows)
+        if n < 6:
+            return {"groups": [], "leftovers": list(range(n)), "notes": ["too few rows to group"], "source": "none"}
+        for r in rows:                                    # the shape `tokens`/`row_line` expect
+            r["facets"] = {"specialty": r.get("specialty") or [], "skill": r.get("skill") or [], "role_family": r.get("role_family") or []}
+        t0 = _t.monotonic()
+        user = "\n".join(row_line(i, r) for i, r in enumerate(rows))[:12000]
+        llm = getattr(app.state, "intake_llm", None) or _llm_json
+        groups, leftovers, notes, source = [], list(range(n)), [], "fallback"
+        try:
+            raw = await asyncio.to_thread(llm, segment_prompt(), user)
+            groups, leftovers, notes = enforce(raw.get("groups") or [], n)
+            source = "model"
+            dominant = next((x for x in notes if x.startswith("dominant")), "")
+            if dominant and groups:
+                # one bucket swallowed the set — ask once more to split THAT group (prod prototype: 49 of 78 in one)
+                raw2 = await asyncio.to_thread(llm, resegment_prompt(groups[0].name, len(groups[0].ids), n), user)
+                g2, l2, n2 = enforce(raw2.get("groups") or [], n)
+                if g2 and not any(x.startswith("dominant") for x in n2):
+                    groups, leftovers, notes = g2, l2, n2 + ["re-asked: the first answer had one dominant group"]
+                else:
+                    notes.append("re-ask did not improve on it")
+        except Exception as e:   # noqa: BLE001 — a dead provider must not take grouping down with it
+            notes.append(f"model unavailable ({str(e)[:60]}) — grouped by shared terms instead")
+        if not groups:
+            groups, leftovers = token_groups([tokens(r) for r in rows])
+            source = "fallback"
+        return {"groups": [{**g.to_dict(), "ids": [str(rows[i]["id"]) for i in g.ids]} for g in groups],
+                "leftovers": [str(rows[i]["id"]) for i in leftovers], "notes": notes[:6], "source": source,
+                "secs": round(_t.monotonic() - t0, 2)}
 
     @app.post("/search/judge")
     async def search_judge(body: JudgeIn) -> dict:
