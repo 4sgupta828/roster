@@ -65,3 +65,17 @@ def test_every_via_key_has_a_real_key_to_read_on_the_entity_it_points_at():
         assert target is not None, f"{k.key} reads {via_target_key(k.key, k.via)!r} on a {k.via}, which the schema does not declare"
         assert k.via in target.kinds, f"{target.key} is not a {k.via} key"
         assert set(target.values) == set(k.values), f"{k.key} and {target.key} must share a vocabulary"
+
+
+def test_the_second_source_maps_employee_labels_and_never_uses_the_sector_key():
+    """The people index's per-person `industry` label describes the EMPLOYER (payments → Nubank, Klarna, Stripe); its
+    sibling `sector` describes the person's work (devtools lists Google, Microsoft, Apple) and must never be used."""
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[3] / "scripts"))
+    from company_industry import load_derived
+    d = json.loads(DATA.read_text())["derived_from_employee_labels"]
+    assert "sector" in d["note"] and "not used" in d["note"].lower()
+    dmap, support = load_derived()
+    assert dmap["payments"] == "fintech" and dmap["healthcare"] == "healthtech" and support >= 2
+    assert "b2b" not in dmap                                        # too vague to be an industry
+    assert all(v in INDUSTRIES for v in dmap.values())
