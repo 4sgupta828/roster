@@ -112,11 +112,12 @@ def _vocab(kind: str) -> str:
 def direction_prompt() -> str:
     """The first read when the words leave the side open: settle it or ask it — nothing else."""
     return ("You are a recruiting consultant meeting someone new. Decide from their words whether they are LOOKING for a role for themselves "
-            "(direction \"job\") or HIRING people (direction \"candidate\"). Signals for looking: I'm looking, my next role, my résumé, roles for me. "
-            "Signals for hiring: hire, hiring, we need, our team, candidates, a JD. A bare list of titles or skills is AMBIGUOUS — ask. Return ONLY JSON: "
-            "{\"move\": \"infer\" | \"fork\", \"say\": ≤ 2 sentences, \"brief_delta\": {\"direction\": {\"value\": \"job\" | \"candidate\", \"source\": \"stated\", \"span\": their words}} "
-            "when clear, or \"question\": {\"field\": \"direction\", \"text\": ..., \"options\": [{\"label\": \"Looking for a role\", \"value\": \"job\"}, "
-            "{\"label\": \"Hiring\", \"value\": \"candidate\"}]} when ambiguous. Never guess.")
+            "(direction \"job\") or HIRING people (direction \"candidate\"). EXPLICIT signals for looking: I'm looking, my next role, my résumé, "
+            "roles/jobs/positions for me, 'jobs for a <profile>' (someone describing themselves in the third person is still looking), 'find me'. "
+            "EXPLICIT signals for hiring: hire, hiring, we need, our team, candidates, a JD, 'find people'. A bare list of titles or skills with "
+            "neither signal is AMBIGUOUS. Return ONLY JSON: {\"direction\": \"job\" | \"candidate\" | null, \"explicit\": true when a signal above "
+            "is literally present, false when you are reading between the lines, \"span\": the words that decided it, \"say\": ≤ 1 sentence}. "
+            "null only when nothing at all points either way.")
 
 
 def consultant_prompt(direction: str) -> str:

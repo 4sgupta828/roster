@@ -38,6 +38,9 @@ PERSONAS = [
                 "brief_known_include": ["mission", "role_family", "level"], "contract_must_keys_exclude": ["metro"], "max_calls": 8}},
     {"id": "v3_ambiguous_titles", "steps": [{"message": "Founder CTO or VP / Director Engineering ML Infra, Distributed Systems"}, {"answer": {"name": "direction", "value": "job"}}, {"auto": 3}],
      "expect": {"first_question_field_in": ["direction"], "direction": "job", "reaches_ready_within": 5, "contract_kind": "job"}},
+    {"id": "v3_owner_jobs_for_profile", "steps": [{"message": "jobs for mid level software engineer skilled in building large scale systems using java ecosystems and has experience in k8 and aws tools."},
+                                                  {"skip_if_question": True}, {"auto": 3}],
+     "expect": {"direction_or_switchable": "job", "reaches_ready_within": 5, "never_repeats_question": True, "contract_kind_if_job": "job"}},
     {"id": "v3_start_over", "steps": [{"message": "I'm hiring"}, {"message": "start over — actually I'm looking for a role myself"}],
      "expect": {"stage_last_in": ["restarted", "question", "statement"], "direction_last_in": ["job", None]}},
 ]
@@ -62,6 +65,10 @@ def run(base: str, pc: dict) -> dict:
             user_turns += 1; d = step(message=st["message"])
         elif "answer" in st:
             user_turns += 1; d = step(answer=st["answer"])
+        elif "skip_if_question" in st:
+            q = (d or {}).get("question") or {}
+            if q:
+                user_turns += 1; d = step(answer={"name": q.get("field") or "", "value": "__decline__"})
         elif "auto" in st:
             for _ in range(int(st["auto"])):
                 if d and d.get("stage") == "ready":
@@ -87,6 +94,15 @@ def run(base: str, pc: dict) -> dict:
                 F.append(f"asked the known field {q['field']!r}")
             known_before |= {b["key"] for b in (t.get("brief") or []) if b.get("source") in ("document", "stored", "stated", "asked")}
     last = turns[-1] if turns else {}
+    if "direction_or_switchable" in e:
+        if last.get("direction") != e["direction_or_switchable"] and last.get("direction_source") != "inferred":
+            F.append(f"direction {last.get('direction')!r} locked in (source {last.get('direction_source')!r}) — expected {e['direction_or_switchable']!r} or an assumption the user can switch")
+        if last.get("direction") == e["direction_or_switchable"] and "contract_kind_if_job" in e and last.get("ready") and ((last.get("ready") or {}).get("contract") or {}).get("kind") != e["contract_kind_if_job"]:
+            F.append("contract kind mismatch")
+    if e.get("never_repeats_question"):
+        texts = [q.get("text") for q in qs]
+        if len(texts) != len(set(texts)):
+            F.append("the same question was asked twice")
     if "direction" in e and last.get("direction") != e["direction"]:
         F.append(f"direction {last.get('direction')!r} != {e['direction']!r}")
     if "direction_last_in" in e and last.get("direction") not in e["direction_last_in"]:

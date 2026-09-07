@@ -65,17 +65,21 @@ class IntakeConsultant:
             pass
 
         if direction_tap in ("job", "candidate"):
+            if brief.value("direction") != direction_tap:
+                st["docs_read"] = False; st["artifact"] = {"kind": None, "status": "none"}; st["artifact_text"] = ""
             brief = brief.with_field("direction", direction_tap, "asked")
         # 1b) the side, settled by a cheap read on the first words (never guessed from a bare title list)
         if self._direction(brief, st) is None and message and not st.get("direction_read"):
             st["direction_read"] = True
             try:
                 r = await self._model(V.direction_prompt(), message[:1500])
-                val = str((((r or {}).get("brief_delta") or {}).get("direction") or {}).get("value") or "").strip().lower()
+                val = str((r or {}).get("direction") or "").strip().lower()
                 if val in ("job", "candidate"):
-                    brief = brief.with_field("direction", val, "stated", span=message[:120])
-                elif isinstance((r or {}).get("question"), dict):
-                    st["direction_question"] = {"say": str((r or {}).get("say") or ""), "text": str(r["question"].get("text") or "Are you looking for a role, or hiring?")}
+                    # a side the user literally said is a fact; a side read between the lines is an ASSUMPTION — shown, one tap to switch
+                    src = "stated" if bool((r or {}).get("explicit")) else "inferred"
+                    brief = brief.with_field("direction", val, src, span=str((r or {}).get("span") or message[:120])[:160])
+                    if src == "inferred":
+                        notes.append("direction inferred, not stated — shown as an assumption with a switch")
             except Exception as e:   # noqa: BLE001
                 notes.append(f"direction read failed: {str(e)[:60]}")
             st["calls"] = int(st.get("calls") or 0) + 1
@@ -226,7 +230,11 @@ class IntakeConsultant:
 
     def _apply_answer(self, brief: Brief, st: dict, pend: dict, answer: dict) -> tuple[Brief, dict]:
         val = answer.get("value")
-        fld = pend.get("field") or ""
+        fld = pend.get("field") or str(answer.get("name") or "") or ""
+        if not fld:
+            direction = self._direction(brief, st)
+            open_req = readiness(brief, self._required(brief, direction), accept_inferred=True) if direction else []
+            fld = open_req[0] if open_req else ""                                  # a field-less question was about the next open thing
         if val in (None, "", "__decline__"):
             if fld:
                 brief = brief.skipped(fld)
@@ -449,7 +457,7 @@ class IntakeConsultant:
             elif fl and fl.source == "skipped":
                 lines.append(f"- {f.key}: skipped by the user")
         req = self._required(brief, direction)
-        open_req = [k for k in req if not brief.settled(k)]
+        open_req = readiness(brief, req, accept_inferred=True)                     # an assumed value is not a gap to ask about
         user = ("DIRECTION: " + (direction or "UNKNOWN — decide it from the words or ask; a bare title list is ambiguous") + "\n"
                 + "BRIEF SO FAR:\n" + ("\n".join(lines) or "(nothing yet)") + "\n"
                 + f"REQUIRED BEFORE SEARCH: {', '.join(req)} — still open: {', '.join(open_req) or 'none'}\n"
@@ -471,6 +479,10 @@ class IntakeConsultant:
         move = parse_move(raw, brief=brief, schema=self.schema, allowed_fields=V.FIELD_KEYS)
         if raw.get("_error"):
             move.notes.append(f"planner failed: {raw['_error']}")
+        if move.question and not move.question.field:
+            cand = must_ask or (open_req[0] if open_req else None)                 # the first open required field is what it must be about
+            if cand:
+                move.question.field = cand; move.notes.append(f"question resolved to the open field {cand!r}")
         # direction as a brief field: only from the planner's stated / inferred reading or the user's tap
         return move
 
@@ -553,7 +565,7 @@ class IntakeConsultant:
 
     def _pack(self, st: dict, brief: Brief, question: dict | None, *, say: str, stage: str, notes: list, direction: str | None = None, ready: dict | None = None, pool=None) -> dict:
         st = dict(st); st["brief"] = brief.to_dict(); st["transcript"] = (st.get("transcript") or [])[-TRANSCRIPT_KEEP:]
-        return {"stage": stage, "say": say, "question": question, "ready": ready, "direction": direction, "pool": pool,
+        return {"stage": stage, "say": say, "question": question, "ready": ready, "direction": direction, "direction_source": brief.source("direction"), "pool": pool,
                 "brief": self._brief_view(brief, direction), "artifact": dict(st.get("artifact") or {}), "jd": st.get("jd"),
                 "notes": [n for n in notes if n][:12], "state": st}
 

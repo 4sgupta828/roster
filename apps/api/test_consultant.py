@@ -31,9 +31,10 @@ class Planner:
         if "meeting someone new" in system:
             self.prompts.append(("direction", user))
             low = user.lower()
-            if "hiring" in low or "hire" in low: return {"move": "infer", "brief_delta": {"direction": {"value": "candidate", "source": "stated"}}}
-            if "looking" in low or "next role" in low or "start over" in low or "more" in low or "anything" in low: return {"move": "infer", "brief_delta": {"direction": {"value": "job", "source": "stated"}}}
-            return {"move": "fork", "say": "Could be either.", "question": {"field": "direction", "text": "Looking, or hiring?", "options": [{"label": "Looking for a role", "value": "job"}, {"label": "Hiring", "value": "candidate"}]}}
+            if "hiring" in low or "hire" in low: return {"direction": "candidate", "explicit": True, "span": "hiring"}
+            if "looking" in low or "next role" in low or "start over" in low or "more" in low or "anything" in low: return {"direction": "job", "explicit": True, "span": "looking"}
+            if "jobs for" in low: return {"direction": "candidate", "explicit": False, "span": "jobs for"}          # the misread the owner hit
+            return {"direction": None}
         self.prompts.append(("plan", user))
         return self.moves.pop(0) if self.moves else {"move": "ready", "say": "Searching with what I have."}
 
@@ -151,3 +152,19 @@ def test_the_evidence_gate_keeps_only_document_fields_whose_span_is_in_the_text(
     b = {x["key"]: x for x in out["brief"]}
     assert b["role_family"]["source"] == "document" and b["career_arc"]["source"] == "inferred"
     assert "comp" not in b and "work_mode" not in b and "posture" not in b and any("without a span" in n and "comp" in n for n in out["notes"]) and any("cannot state" in n for n in out["notes"])
+
+
+def test_a_side_read_between_the_lines_is_an_assumption_with_a_switch_and_a_fieldless_question_can_be_skipped():
+    """Owner (2026-09-06): 'I am looking for jobs, but it inferred hiring … and was stuck re-asking the same question even though I
+    said skip'."""
+    nofield = {"move": "fork", "say": "Before I search, what will this person own?", "question": {"text": "What will this person own in the first six months?", "options": []}}
+    pl = Planner([nofield, {"move": "ready", "say": "ok"}])
+    s = _svc(pl)
+    out = _run(s.step(message="jobs for mid level software engineer skilled in java, k8s and aws"))
+    assert out["direction"] == "candidate" and out["direction_source"] == "inferred" and any("assumption" in n for n in out["notes"])
+    assert out["question"] and out["question"]["field"] == "mission"                     # the field-less question resolved to the open required field
+    out2 = _run(s.step(answer={"name": "", "value": "__decline__"}, state=out["state"]))    # Skip on a field-less question skips THAT field
+    assert {b["key"]: b["source"] for b in out2["brief"]}.get("mission") == "skipped"
+    # one tap switches the side; the documents are re-read for it
+    out3 = _run(s.step(direction_tap="job", state=out2["state"]))
+    assert out3["direction"] == "job" and out3["direction_source"] == "asked" and out3["state"]["docs_read"] in (True, False)

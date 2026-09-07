@@ -916,6 +916,9 @@
   /* Intake v2: persistent "wrap up & search now" affordance (quiet; prominent after an urgent turn) */
   .tgt-wrapline{margin:.5rem 0 0;text-align:right;display:flex;gap:.4rem;justify-content:flex-end;flex-wrap:wrap;}
   .tgt-why{font-size:.78rem;color:var(--muted);margin:.1rem 0 .3rem;}
+  .tgt-dir{font-size:.78rem;color:var(--muted);margin:.2rem 0 .5rem;display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;}
+  .tgt-dir.inferred{color:var(--ink);}
+  .tgt-dirswitch{font:inherit;font-size:.76rem;min-height:34px;padding:.2rem .6rem;border:1px solid var(--hair);border-radius:999px;background:var(--panel);color:var(--ink);cursor:pointer;}
   .tgt-brief{margin:.8rem 0 0;border:1px solid var(--hair);border-radius:10px;padding:.4rem .7rem;font-size:.82rem;}
   .tgt-brief summary{cursor:pointer;font-weight:600;min-height:36px;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;}
   .tgt-brief-row{display:grid;grid-template-columns:minmax(7rem,1fr) 2fr auto;gap:.5rem;align-items:center;padding:.35rem 0;border-top:1px dashed var(--hair);cursor:pointer;min-height:36px;}
@@ -5422,6 +5425,11 @@ function briefPanelHtml(brief){
   const rows = brief.map(f => `<div class="tgt-brief-row" data-key="${esc(f.key)}" data-label="${esc(f.label)}" title="${esc(f.span ? "From: " + f.span : "")}"><span class="tgt-brief-k">${esc(f.label)}</span><span class="tgt-brief-v">${esc(Array.isArray(f.value) ? f.value.join(", ") : (f.value == null ? "—" : String(f.value)))}</span><span class="tgt-brief-s ${esc(f.source)}">${esc(f.source_label || f.source)}</span></div>`).join("");
   return `<details class="tgt-brief"><summary>What I understand so far <span class="tgt-q-hint">(${brief.length} · tap a line to change it)</span></summary>${rows}</details>`;
 }
+function directionLineHtml(d){
+  if(!TRIAGE_V3 || !d || !d.direction) return "";
+  const looking = d.direction === "job", inferred = d.direction_source === "inferred";
+  return `<div class="tgt-dir${inferred ? " inferred" : ""}">${inferred ? "I'm reading this as " : ""}<b>${looking ? "a job search for you" : "a hire for your team"}</b>${inferred ? " (assumed)" : ""} · <button type="button" class="tgt-dirswitch" data-dir="${looking ? "candidate" : "job"}">Switch to ${looking ? "hiring" : "looking for a role"}</button></div>`;
+}
 function intakeQuestionV3Html(d){
   const p = d.question; if(!p) return "";
   const opts = (p.options || []).map(o => `<button type="button" class="tgt-opt" data-name="${esc(p.field||"")}" data-value="${esc(String(o.value))}">${esc(String(o.label))}</button>`).join("")
@@ -5457,7 +5465,9 @@ function renderTriage(fresh){
                                              const norm = x => x.toLowerCase().replace(/[?.!]+$/, "").replace(/\s+/g, " "); return (qt && norm(sy).indexOf(norm(qt)) >= 0) ? sy : (sy + " " + qt).trim(); })() : pending.words) : "";
   const shown = (pending && transcript.length && transcript[transcript.length-1].role === "assistant" && transcript[transcript.length-1].text === pendWords) ? transcript.slice(0, -1) : transcript;
   const briefPanel = TRIAGE_V3 && INTAKE.last ? briefPanelHtml(INTAKE.last.brief) : "";
-  tbody().innerHTML = lead + `<div class="tgt-thread" id="tgt-thread">${shown.map(triageMsgHtml).join("")}</div>` + qcard + wrap + briefPanel;
+  const dirLine = TRIAGE_V3 && INTAKE.last && transcript.length ? directionLineHtml(INTAKE.last) : "";
+  tbody().innerHTML = lead + dirLine + `<div class="tgt-thread" id="tgt-thread">${shown.map(triageMsgHtml).join("")}</div>` + qcard + wrap + briefPanel;
+  tbody().querySelectorAll(".tgt-dirswitch").forEach(b => b.addEventListener("click", () => submitTriage("", {direction: b.dataset.dir})));
   const w = $("#tgt-wrapup"); if(w) w.addEventListener("click", wrapUpTriage);
   const so = $("#tgt-startover"); if(so) so.addEventListener("click", () => submitTriage("", {restart: true}));
   tbody().querySelectorAll(".tgt-brief-row").forEach(r => r.addEventListener("click", () => { q.value = `Change ${r.dataset.label}: `; q.focus(); autoGrow(); }));
@@ -5563,7 +5573,7 @@ async function submitTriage(text, extra){
   }
   if(thread){
     const u = document.createElement("div"); u.className = "tgt-msg user";
-    u.textContent = text || (extra.restart ? "Start over" : extra.search_now ? "Search now with what I have" : extra.direction ? (extra.direction === "job" ? "I'm looking for a role" : "I'm hiring")
+    u.textContent = text || (extra.restart ? "Start over" : extra.search_now ? "Search now with what I have" : extra.direction ? (extra.direction === "job" ? "Switch: I'm looking for a role" : "Switch: I'm hiring")
                     : (extra.answer ? (Array.isArray(extra.answer.value) ? extra.answer.value.join(", ") : String(extra.answer.value === "__decline__" ? "Prefer not to say" : extra.answer.value)).replace(/_/g, " ") : ""));
     if(u.textContent) thread.appendChild(u);
   }
@@ -5631,6 +5641,7 @@ function renderTriageReady(rd){
       ${(rd.assumptions||[]).length ? `<div class="tgt-adjust"><div class="tgt-draft-h">Assumptions I'm making</div>${rd.assumptions.map(a => `<div class="tgt-adjust-row">● ${esc(a)} <span class="tgt-q-hint">say so if that's wrong</span></div>`).join("")}</div>` : ""}
       ${advice ? `<ul class="tgt-advice">${advice}</ul>` : ""}
       <div class="tgt-routes">${dirBtn}</div>
+      ${TRIAGE_V3 ? directionLineHtml({direction: rd.direction, direction_source: (rd.brief||[]).find(b => b.key === "direction") ? (rd.brief||[]).find(b => b.key === "direction").source : "stated"}) : ""}
       ${TRIAGE_V3 ? briefPanelHtml(rd.brief) : ""}
       ${improve}
       <button type="button" class="tgt-restart" id="tgt-restart">↺ Start over</button>
@@ -5638,6 +5649,7 @@ function renderTriageReady(rd){
   q.setAttribute("placeholder", "Add a detail to refine further…");
   tbody().querySelectorAll(".tgt-route").forEach(b => b.addEventListener("click", () => routeTriage(b.dataset.route, (c.text || rd.understood || ""), rd)));
   const rs = $("#tgt-restart"); if(rs) rs.addEventListener("click", () => { if(TRIAGE_V3){ INTAKE.ready = null; submitTriage("", {restart: true}); } else setMode("triage", {fresh:true}); });
+  tbody().querySelectorAll(".tgt-dirswitch").forEach(b => b.addEventListener("click", () => { INTAKE.ready = null; submitTriage("", {direction: b.dataset.dir}); }));
   tbody().querySelectorAll(".tgt-brief-row").forEach(r => r.addEventListener("click", () => { INTAKE.ready = null; q.value = `Change ${r.dataset.label}: `; q.focus(); autoGrow(); }));
   const ib = $("#tgt-improve"); if(ib) ib.addEventListener("click", () => intakeImprove(rd));
   tbody().querySelectorAll(".fdiag-drop").forEach(b => b.addEventListener("click", async () => {
