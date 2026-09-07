@@ -228,3 +228,34 @@ question opens); a stated side is switched only by a tap or a restart (shown as 
 lines). Result: the owner's phrasing ("jobs for mid level software engineer … java … k8 and aws") → ready in ONE turn; personas
 5 / 6 → 6 / 6 after the empty-brief rule. Latency is the open problem: 6–17 s a turn with spikes to 60 s (the reasoning model
 plus a cold preview); the extractor stays on the cheap model.
+
+### 11.3 The 0-result outage (2026-09-07) — root cause and the guarantees added
+
+Owner: "WHY SEARCH is not working? 0 results?" with a session link. The session held a Jobs evaluator run of 0 rows whose
+question was the ready card's own sentence.
+
+ROOT CAUSE, and it was not Guided: the OpenAI account was out of credit (`429 insufficient_quota`), so `embed_query`
+returned None for every query, every semantic leg came back empty, and EVERY text search on the product — Jobs, Talent and
+the Guided hand-off — silently answered zero. Probe: a text search returned 0 rows / `legs.semantic = 0`, while the same
+contract with NO text returned rows through the enumerate leg.
+
+Guarantees added (each with a test):
+1. **A text search never silently returns nothing.** With text and an empty pool the kernel falls back to the must-slice
+   enumeration, and every PREFERRED value gets its own slice so the filters still put the right rows in front; the answer
+   carries `coverage.degraded = "semantic_unavailable"` and both surfaces say "ranked by filters only". A genuinely empty
+   must-slice still returns nothing and is NOT called degraded.
+2. **A provider that says "out of credit" is skipped for a cooldown** (`model_json`, `embed_query`) instead of being
+   called on every request; the planner runs on `ROSTER_PLANNER_PROVIDER` / `ROSTER_PLANNER_MODEL` (default
+   `deepseek-chat`) so one dead account cannot take the intake down with it.
+3. **The user's own ask is never lost**: it is recorded as `opening` BEFORE the direction question can return early, it is
+   READ into the brief through the same evidence gate as a document (`DOCUMENT_FIELDS["ask"]`), and it is the contract's
+   text — the ready card's sentence is never the search text, on either side of the hand-off.
+4. **The open question is asked once**: the empty-brief rule now runs AFTER the planner's understanding is applied (it ran
+   before, so it re-fired every turn — the loop the owner saw) and never on a field already asked.
+5. Reader hygiene: a value that echoes the field's own label is nothing; a comma-joined value on a set key is a list; a
+   place the index cannot confirm ranks instead of filtering.
+
+Owner's own search, before → after: `jobs for mid level software engineer … java … k8 and aws` gave 0 rows, then (degraded)
+delivery-driver postings, and now returns mid-level Java / AWS / Kubernetes engineering roles at Cisco, Amazon and others
+with `must field=software`, `prefer role_family / skills`, `centre level=mid`. Embeddings recovered during the fix, so the
+degraded path is no longer active — but it is what stands between a dead provider and a zero-result product.
