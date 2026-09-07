@@ -8,14 +8,15 @@ from __future__ import annotations
 import re
 
 # the dimensions offered as GROUPINGS, in the order they are considered; each names the row field or facet it reads
-GROUP_DIMENSIONS: tuple[tuple[str, str, str], ...] = (
-    ("auto", "Auto", ""),                       # the model segments this result set (opt-in: it costs one call)
-    ("company", "Company", "company"),
-    ("company_industry", "Industry", "facet:company_industry"),
-    ("level", "Seniority", "facet:level"),
-    ("metro", "Location", "location"),
-    ("work_mode", "Work mode", "facet:work_mode"),
-    ("work_type", "IC / manager", "facet:work_type"),
+# (key, label, where to read it, what kind of dimension it is — see `facets.grouping.eligible`)
+GROUP_DIMENSIONS: tuple[tuple[str, str, str, str], ...] = (
+    ("auto", "Auto", "", "auto"),               # the model segments this result set (opt-in: it costs one call)
+    ("company", "Company", "company", "identity"),
+    ("company_industry", "Industry", "facet:company_industry", "categorical"),
+    ("level", "Seniority", "facet:level", "categorical"),
+    ("metro", "Location", "location", "identity"),
+    ("work_mode", "Work mode", "facet:work_mode", "categorical"),
+    ("work_type", "IC / manager", "facet:work_type", "categorical"),
 )
 
 # words that describe the posting's packaging, not the work; they must never form a group

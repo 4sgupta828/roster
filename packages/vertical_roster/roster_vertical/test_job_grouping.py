@@ -26,3 +26,6 @@ def test_the_guidance_forbids_the_cuts_that_are_not_distinctions():
     r = resegment_prompt("Account Executive", 49, 78)
     assert "49 of 78" in r and "Account Executive" in r and "more than half" in r
     assert [d[0] for d in GROUP_DIMENSIONS][:3] == ["auto", "company", "company_industry"]
+    kinds = {d[0]: d[3] for d in GROUP_DIMENSIONS}
+    assert kinds["company"] == "identity" and kinds["metro"] == "identity"        # many groups is the point
+    assert kinds["level"] == "categorical" and kinds["company_industry"] == "categorical"

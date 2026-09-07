@@ -6211,7 +6211,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         from roster_vertical.job_grouping import GROUP_DIMENSIONS
         rows = rows or []
         out = []
-        for key, label, source in GROUP_DIMENSIONS:
+        for key, label, source, kind in GROUP_DIMENSIONS:
             if key == "auto":
                 out.append({"key": "auto", "label": label, "score": 1e9, "why": "let the model segment these results"})
                 continue
@@ -6222,7 +6222,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             else:
                 fkey = source.split(":", 1)[1]
                 vals = [(((r or {}).get("facets") or {}).get(fkey) or [""])[0] for r in rows]
-            e = eligible([str(v or "").replace("_", " ") for v in vals])
+            e = eligible([str(v or "").replace("_", " ") for v in vals], kind=kind)
             if e.ok:
                 out.append({"key": key, "label": label, "score": e.score, "groups": e.groups, "known": e.known})
         out.sort(key=lambda o: -o["score"])

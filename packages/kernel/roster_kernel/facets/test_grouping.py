@@ -51,3 +51,18 @@ def test_the_fallback_ignores_the_query_and_finds_the_distinctions():
     assert token_groups([]) == ([], [])
     # deterministic
     assert [g.ids for g in token_groups(sets)[0]] == [g.ids for g in groups]
+
+
+def test_an_identity_dimension_is_useful_with_many_groups_and_a_categorical_one_is_not():
+    """43 backend roles across 30 companies is exactly when grouping by company helps — spotting that one employer holds
+    five of them. The same shape for a categorical dimension is thirty lines of noise."""
+    many = [f"co{i // 2}" for i in range(30)] + [f"solo{i}" for i in range(6)]     # 15 pairs + 6 singletons
+    assert eligible(many, kind="identity").ok and eligible(many, kind="identity").groups == 21
+    assert not eligible(many).ok and "too many" in eligible(many).reason
+    # an identity dimension where every row stands alone is just the flat list again
+    assert not eligible([f"u{i}" for i in range(20)], kind="identity").ok
+    assert "stands alone" in eligible([f"u{i}" for i in range(20)], kind="identity").reason
+    # concentration scores higher than dust
+    tight = eligible(["a"] * 5 + ["b"] * 5 + ["c"] * 5 + ["d"] * 5, kind="identity").score
+    loose = eligible(["a"] * 2 + ["b"] * 2 + ["c"] * 2 + [f"u{i}" for i in range(14)], kind="identity").score
+    assert tight > loose

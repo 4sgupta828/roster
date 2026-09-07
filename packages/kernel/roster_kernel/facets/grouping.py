@@ -39,11 +39,15 @@ class Eligibility:
     counts: dict = field(default_factory=dict)
 
 
-def eligible(values: list, *, min_groups: int = 2, max_groups: int = 8,
-             max_largest: float = 0.60, max_unstated: float = 0.25) -> Eligibility:
+def eligible(values: list, *, kind: str = "categorical", min_groups: int = 2, max_groups: int = 8,
+             max_largest: float = 0.60, max_unstated: float = 0.25, min_repeats: int = 3) -> Eligibility:
     """`values[i]` is the row's value for one dimension ("" / None when it has none). A dimension earns a place in the
-    menu only if it actually organises THESE rows. `score` ranks the eligible ones: a spread of a few healthy groups
-    beats one big group plus dust."""
+    menu only if it actually organises THESE rows.
+
+    Two kinds of dimension, because they fail in opposite ways. A CATEGORICAL one (level, industry, work mode) is useful
+    with a handful of balanced groups and useless as thirty; an IDENTITY one (company, place) is useful precisely when
+    it has many groups — the value is spotting that one employer holds five of these — and useless only when every row
+    stands alone. `score` ranks the survivors."""
     n = len(values or [])
     if not n:
         return Eligibility(False, "no rows")
@@ -63,10 +67,18 @@ def eligible(values: list, *, min_groups: int = 2, max_groups: int = 8,
         return Eligibility(False, f"{unstated / n:.0%} not stated", e.known, g, e.largest, 0.0, counts)
     if g < min_groups:
         return Eligibility(False, "one group only", e.known, g, e.largest, 0.0, counts)
-    if g > max_groups:
-        return Eligibility(False, f"{g} groups — too many to scan", e.known, g, e.largest, 0.0, counts)
     if largest > max_largest:
         return Eligibility(False, f"one group holds {largest:.0%}", e.known, g, e.largest, 0.0, counts)
+    if kind == "identity":
+        repeats = sum(1 for v in counts.values() if v > 1)
+        if repeats < min_repeats:
+            return Eligibility(False, "every row stands alone", e.known, g, e.largest, 0.0, counts)
+        # the value is concentration: how much of the set sits in groups that actually repeat
+        share = sum(v for v in counts.values() if v > 1) / max(n - unstated, 1)
+        e.score = round(share * known, 4)
+        return e
+    if g > max_groups:
+        return Eligibility(False, f"{g} groups — too many to scan", e.known, g, e.largest, 0.0, counts)
     # a useful split: several groups, none dominant, little unstated
     balance = 1.0 - abs(largest - 0.35) / 0.65
     e.score = round(max(0.0, balance) * known * min(g, 6) / 6, 4)
