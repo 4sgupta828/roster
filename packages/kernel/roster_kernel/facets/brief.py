@@ -258,9 +258,14 @@ def gate_fork(options: list[dict], pools: dict) -> tuple[list[dict], bool, str]:
     return kept, True, ""
 
 
-def readiness(brief: Brief, required: tuple) -> list[str]:
-    """The required fields still open (neither known nor skipped)."""
-    return [k for k in required if not brief.settled(k)]
+def readiness(brief: Brief, required: tuple, *, accept_inferred: bool = False) -> list[str]:
+    """The required fields still open: neither known nor skipped — nor, when `accept_inferred`, inferred with a value (an
+    inference is surfaced as an assumption and never filters; it does not have to be asked)."""
+    def _open(k):
+        if brief.settled(k):
+            return False
+        return not (accept_inferred and brief.source(k) in SOFT_SOURCES and brief.value(k) not in (None, "", []))
+    return [k for k in required if _open(k)]
 
 
 def leverage(counts: dict | None, schema, *, exclude: set = frozenset(), top: int = 3, min_spread: float = 0.3) -> list[dict]:

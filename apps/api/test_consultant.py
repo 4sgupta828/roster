@@ -143,10 +143,11 @@ def test_the_evidence_gate_keeps_only_document_fields_whose_span_is_in_the_text(
     read = {"fields": {"role_family": {"value": "head of ml infrastructure", "span": "Head of ML Infrastructure at Fintech Co"},
                        "comp": {"value": "$200k-300k", "span": "competitive compensation $200k–300k"},           # invented
                        "work_mode": {"value": "hybrid", "span": ""},                                              # no span
+                       "posture": {"value": "step up", "span": "Head of ML Infrastructure at Fintech Co"},         # a real span, but a résumé cannot state a posture
                        "career_arc": {"value": "six years leading ML infra", "span": ""}}}
     pl = Planner([{"move": "ready", "say": "ok"}], read=read)
     s = _svc(pl, profile={"_resume_text": RESUME})
     out = _run(s.step(message="I'm looking for my next role", user={"id": "u1"}))
     b = {x["key"]: x for x in out["brief"]}
     assert b["role_family"]["source"] == "document" and b["career_arc"]["source"] == "inferred"
-    assert "comp" not in b and "work_mode" not in b and any("without a span" in n and "comp" in n for n in out["notes"])
+    assert "comp" not in b and "work_mode" not in b and "posture" not in b and any("without a span" in n and "comp" in n for n in out["notes"]) and any("cannot state" in n for n in out["notes"])

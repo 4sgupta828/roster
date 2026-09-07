@@ -114,13 +114,13 @@ class IntakeConsultant:
                 notes.append("restart on the first turn ignored"); move.move = "infer"
             # REQUIRED FIRST (code-owned): a statement, or a question on a non-required field, while required fields stay open →
             # one bounded re-plan that must ask the most impactful open one
-            open_req = readiness(brief, self._required(brief, direction)) if direction else []
+            open_req = readiness(brief, self._required(brief, direction), accept_inferred=True) if direction else []
             asks_optional = bool(move.question and move.question.field and move.question.field not in open_req and move.move != "confirm")
             if (not move.ready) and open_req and ((move.move in ("infer", "confirm") and not move.question) or asks_optional) \
                     and int(st.get("calls") or 0) < V.MAX_PLANNER_CALLS and not st.get("replanned"):
                 st["replanned"] = True
                 b2, _ = apply_brief_delta(brief, move.brief_delta, allowed_fields=V.FIELD_KEYS)
-                open2 = readiness(b2, self._required(b2, direction))
+                open2 = readiness(b2, self._required(b2, direction), accept_inferred=True)
                 if open2:
                     move2 = await self._plan(b2, st, direction, "", None, lev, pool, market, must_ask=open2[0])
                     st["calls"] = int(st.get("calls") or 0) + 1
@@ -182,7 +182,7 @@ class IntakeConsultant:
         st["brief"] = brief.to_dict()
 
         # 7) ready?
-        missing = readiness(brief, self._required(brief, direction)) if direction else ["direction"]
+        missing = readiness(brief, self._required(brief, direction), accept_inferred=True) if direction else ["direction"]
         wants_ready = forced_ready or (move is not None and move.ready and direction) or (direction and not missing and not (move and move.question))
         if wants_ready and direction:
             ready = await self._ready(brief, st, direction, say=(move.say if move else "I have enough to search; here is what I'm assuming."))
@@ -373,20 +373,38 @@ class IntakeConsultant:
         # produced 26 "document" facts (comp, work mode, risk appetite …) from a five-line résumé that stated none of them
         hay = self._squash(text)
         dropped = []
+        allowed_doc = set(V.DOCUMENT_FIELDS.get(kind, ())) | {"career_arc"}
         for fld, raw in ((read or {}).get("fields") or {}).items():
             if fld not in V.FIELD_KEYS or not isinstance(raw, dict) or raw.get("value") in (None, "", []):
                 continue
+            if fld not in allowed_doc:
+                dropped.append(f"{fld} (a {kind} cannot state it)"); continue
             if brief.known(fld):
                 continue
             span = str(raw.get("span") or "")[:240]
             if fld == "career_arc":
                 brief = brief.with_field(fld, raw.get("value"), "inferred", span=span); continue
-            if not span or self._squash(span) not in hay:
+            if not span or not self._span_in(span, hay):
                 dropped.append(fld); continue
             brief = brief.with_field(fld, raw.get("value"), "document", span=span)
         if dropped:
             notes.append("reader claims without a span in the text dropped: " + ", ".join(dropped[:8]))
         return brief, st, notes
+
+    @classmethod
+    def _span_in(cls, span: str, hay: str) -> bool:
+        """The span is in the text: verbatim, or (a reader re-punctuates) at least 70 % of its words in order-free presence when it
+        has three words or more."""
+        sp = cls._squash(span)
+        if not sp:
+            return False
+        if sp in hay:
+            return True
+        words = [w for w in sp.replace("(", " ").replace(")", " ").replace(",", " ").replace(".", " ").split() if len(w) > 2]
+        if len(words) < 3:
+            return False
+        hit = sum(1 for w in words if w in hay)
+        return hit / len(words) >= 0.7
 
     @staticmethod
     def _squash(t: str) -> str:

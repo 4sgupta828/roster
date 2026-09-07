@@ -48,8 +48,8 @@ def test_a_fork_is_asked_only_when_two_options_survive_the_index_and_differ():
 
 
 def test_readiness_and_leverage():
-    b = Brief().with_field("f1", "a", "asked").skipped("f2")
-    assert readiness(b, ("f1", "f2", "f3")) == ["f3"]
+    b = Brief().with_field("f1", "a", "asked").skipped("f2").with_field("f3", "z", "inferred")
+    assert readiness(b, ("f1", "f2", "f3")) == ["f3"] and readiness(b, ("f1", "f2", "f3"), accept_inferred=True) == []
     lv = leverage({"k1": {"a": 50, "b": 45, "c": 5}, "k2": {"lo": 95, "hi": 5}, "k3": {"x": 10}}, SCH, exclude={"k3"})
     assert [x["key"] for x in lv] == ["k1"] and lv[0]["values"][0] == ("a", 50)                           # k2 is not spread
 

@@ -87,6 +87,13 @@ REQUIRED = {"job": ("direction", "posture", "role_family", "level", "metro"),
 REMOTE_SETTLES = ("metro",)          # a remote role / a remote-only seeker has no metro to ask for
 CONTRACT_KEYS_FOR_EFFECTS = ("field", "function", "specialty", "skill", "role_family", "level", "work_type", "metro", "state", "country", "work_mode",
                              "employment_type", "comp", "company_type", "evidence")
+# what a document CAN state: a résumé states career facts, never a posture or a risk appetite; a JD states the role
+DOCUMENT_FIELDS = {
+    "resume": ("role_family", "field", "function", "specialties", "skills", "level", "work_type", "metro", "authorization", "positioning", "career_arc"),
+    "profile": ("metro", "authorization", "timing", "role_family", "level", "field"),
+    "jd": ("mission", "success", "must_have_done", "trainable", "team", "evidence", "disqualifiers", "role_family", "field", "function", "specialties",
+           "skills", "level", "work_type", "metro", "work_mode", "comp", "company_type", "employment_type", "timing"),
+}
 MAX_FORKS = 4                  # forks per intake before `ready` is offered anyway
 MAX_PLANNER_CALLS = 8
 NEVER_ASK = ("current salary", "age", "gender", "race", "religion", "nationality", "family plans", "health", "years of experience as a number",
@@ -138,8 +145,9 @@ def consultant_prompt(direction: str) -> str:
             "token from METRO TOKENS given below, never free text. A REMOTE role has no metro: record work_mode = remote and never ask which city. "
             "If any REQUIRED field is still open, your move is a question on the most "
             "impactful open one (or `ready` when the user asks to search). "
-            "Every turn, RECORD every fact the user states into brief_delta (comp, skills, must_have_done, work_mode, timing, deal_breakers, team …) — "
-            "nothing the user said may be lost. A free-text question has \"options\": [] (never a placeholder option). "
+            "Every turn, RECORD every fact the user states into brief_delta (role_family, level, comp, skills, must_have_done, work_mode, timing, "
+            "deal_breakers, team …) — nothing the user said may be lost; a paraphrase of THEIR words is `stated` ('senior backend engineer at Acme' → "
+            "role_family backend engineer, level senior, both stated). A free-text question has \"options\": [] (never a placeholder option). "
             "`stated` only for what the user actually wrote; `inferred` for your reading (it ranks, never filters, until confirmed). "
             "`ready` when the required fields are settled or the user asks to search: `say` STATES the search in one line and the assumptions "
             "you are making (never 'I will now summarize'). "
@@ -155,7 +163,9 @@ def document_reader_prompt(kind: str, direction: str) -> str:
            "head of a 12-person team; fintech throughout') — this is the one field you may compose; mark it source inferred. "
            if kind == "resume" else "Also write `mission` from the responsibilities if the text states what the person owns. ")
     return (f"You read {what} into a recruiting brief. Return ONLY JSON: {{\"fields\": {{field: {{\"value\": short, \"span\": the exact sentence or "
-            f"phrase it comes from}}}}}}. Only fields the text STATES; never invent; keep values under 12 words; for level use the title's own words. "
+            f"phrase it comes from}}}}}}. Only fields the text STATES; never invent; keep values under 12 words; copy each span VERBATIM from the text. For level and role_family use the CURRENT (most recent) "
+            "position — 'Head of' / VP / CTO / director = leadership, principal / staff = staff_plus, senior / lead = senior. A résumé never states a "
+            "posture, a risk appetite or a compensation target — leave those out. "
             f"{arc}Fields:\n{fields}\nVocabulary hints — {_vocab(SEARCH_KIND.get(direction, 'job'))}; for metro write the index token "
             "(new_york, bay_area, seattle, los_angeles, boston, chicago, austin, london, bangalore, remote) when the place is one of them.")
 
