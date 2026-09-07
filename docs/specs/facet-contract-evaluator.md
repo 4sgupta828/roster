@@ -434,3 +434,27 @@ mentions them.
 
 Next for coverage: the curated map covers the large employers; the long tail is best filled by reading the industry
 from the posting body (5,217 open postings say "fintech" outright), which needs model credit and is not done.
+
+### Industry coverage, employer links and grouping (2026-09-07, later)
+
+- **A second, free industry source.** The curated map covers the big employers; healthtech is mostly small companies, so
+  the owner saw no healthtech chip. The people index already carries a per-person `industry` label that describes the
+  EMPLOYER (payments → Nubank, Klarna, Razorpay, Block, Stripe; healthcare → Endpoint Health, Brave Care), so a company
+  whose employees carry one label, and that the curated map does not name, takes it (majority label, support ≥ 2,
+  provenance `derived:employee_industry_labels`). Coverage 1,342 → **3,422 companies / 143k postings**, healthtech 493.
+  The sibling `sector` key is deliberately unused: it describes the person's work, so its devtools bucket is Google,
+  Microsoft and Apple.
+- **A named industry FILTERS.** "backend at healthtech companies" was landing in `prefer`, so the search ranked healthtech
+  faintly and returned everything else. The compile now puts an asked-for employer industry in `must`; `company_industry`
+  is absent from `RELAX_ORDER`, so smart relaxing never quietly drops it.
+- **One aggregator cannot fill a page.** jobgether reposts other companies' roles (4.5k open postings, the largest single
+  "employer") and returned one title ten times. `thin_repeats` keeps at most two rows per (company, title).
+- **Employer links** (`roster_vertical/employer_link.py`, `employer_site.py`, `scripts/company_sites.py`): the card links
+  the company name to their OWN site and offers a terse "All jobs ↗" to their board. The site is harvested once per
+  company from the board page (Ashby embeds `organization.publicWebsite`; Lever and Greenhouse put it behind the header
+  logo — read at least 1.8 MB, Lever inlines ~400 KB of CSS first). An ATS VENDOR's own site is never taken for the
+  employer's: Greenhouse's footer link had made `greenhouse.com` the site for 420 employers before that guard existed.
+- **Grouping** (web): the whole result set groups by company, location, seniority or IC/manager — ranked by the best role
+  in each group, then size; collapsed by default; "Not stated" last. Ungrouped remains the default.
+
+Open: the site harvest is a script, not a worker loop, so new employers stay unlinked until it is re-run.
