@@ -27,6 +27,77 @@ Talent search filters and ranks them less accurately, and some schema keys are s
 **67.9 % complete.** Started 2026-09-05 (owner-approved, projected at the time as ≈ $12); it has run continuously since,
 apart from the two provider outages below.
 
+## 2b. What it changes, in one person's facets
+
+The same shape of person — a GitHub-sourced engineer — before and after. Names and links are omitted here; only the
+facets matter. **Left: still bridged.** The people index's old vocabulary is translated by one table
+(`roster_vertical/facet_legacy.py`) into four schema keys. **Right: re-extracted.** The model reads the profile and
+writes the schema's own keys, each with its provenance.
+
+| | bridged (legacy) | re-extracted (`provenance='profile'`) |
+|---|---|---|
+| field | `software` | `data_ml` |
+| function | `engineering` | `research` |
+| level | `mid` | (stated when the title states one) |
+| work_type | `ic` | `academic` |
+| **role_family** | — | `graduate student` |
+| **specialty** | — | `machine learning`, `big data` |
+| **skill** | — | `machine learning`, `big data` |
+| **metro / state** | — | `atlanta` / the state |
+| **evidence** | — | `repos` (from linked artifacts) |
+| company | — | the current employer, normalized |
+
+The bridge can only carry what the old vocabulary already knew. Everything in bold is a key the search operates on that
+simply **does not exist** for a person until they are re-extracted.
+
+### How complete each key is, per group (measured 2026-09-07)
+
+| facet key | people still bridged | people re-extracted |
+|---|---|---|
+| role_family | **0.0 %** | 83.1 % |
+| work_type | 13.8 % | 64.5 % |
+| metro | 12.2 % | 45.9 % |
+| specialty | **0.0 %** | 30.1 % |
+| state | **0.0 %** | 18.8 % |
+| skill | 1.9 % | 17.6 % |
+| level | 2.1 % | 13.4 % |
+| evidence | 0.2 % | 11.9 % |
+| field | 80.5 % | 68.1 % |
+| function | 100 % | 77.6 % |
+
+## 2c. Why it matters — what the search can and cannot do
+
+The contract is the only search operation: `must` filters, `prefer` ranks, `center` centres, and all three read facets
+(`docs/specs/facet-contract-evaluator.md`). A person who lacks a key is not "ranked lower" on it — they are **outside the
+question**:
+
+1. **A filter on a missing key can never match them.** `matches_must` requires the value. Today the whole index reaches
+   only 432 people by `role_family = backend engineer`, 56 by `specialty = payments`, 687 by `skill = kubernetes` and
+   15,986 by `evidence = repos` — and essentially every one of those is a re-extracted person. The 126,321 bridged
+   people cannot appear in such a search however well they actually fit.
+2. **They cannot earn preference points either.** Ranking adds points per matched preferred value, so a bridged person
+   can only ever score on `field` and `function`. Two equally relevant people rank differently purely by whether the
+   extraction has reached them — a systematic bias against a third of the index, invisible in the results.
+3. **The rail's chip counts describe the extracted two-thirds.** Bridged people fall into the `unknown` bucket for
+   level, metro, specialty and evidence, so those numbers understate the real pool and the navigation misleads.
+4. **Smart relaxing and the empty-pool diagnosis reason about the wrong pool.** When a search comes back thin, the
+   diagnosis blames the filter that "emptied" it, when the real cause can be that the matching people have no facets yet.
+
+### The search, before and after — a hiring manager's ask
+
+> "Backend engineers who have built payments systems, staff level, in Seattle."
+
+| | bridged person | re-extracted person |
+|---|---|---|
+| `prefer role_family: backend engineer` | no value → no points, cannot be a must | matches |
+| `prefer specialty: payments` | no value → invisible to the decisive filter | matches |
+| `center level: staff_plus` | usually `unknown` → no centring | centred |
+| `must metro: seattle` | 88 % have no metro → excluded by a geo must | matches |
+| `prefer evidence: repos` | no value | matches, and the card shows the proof |
+
+The bridged person is reachable only by free-text similarity and the two coarse keys. That is precisely the "55 % match
+for a pharma role" failure the facet spec was written to end.
+
 ## 3. Why it was paused
 
 The job is the dominant consumer of model credit in the whole product — roughly 281 thousand model calls so far, which is
@@ -80,10 +151,11 @@ The public endpoint `GET /admin/people-coverage` shows index counts by source (n
 
 ## 6. What is degraded while it stays paused
 
-- The 126 thousand people still on legacy rows rank and filter less precisely in Talent searches; some schema keys
-  (specialty, evidence kinds, work type) are missing or coarse for them.
-- Facet COUNTS on the rail mix precise and bridged rows for those people, so chip numbers for them are approximate.
-- Nothing is broken and no search fails; the corpus is simply less sharp for a third of the people.
+- **126,321 people (30 % of the index) are unreachable by role, specialty, skill, state and evidence filters** — see
+  §2b / §2c. They are not ranked low; they are absent from those questions.
+- Their ranking can only score on `field` and `function`, so they sit below equally relevant re-extracted people.
+- Facet COUNTS on the rail put them in `unknown` for level / metro / specialty / evidence, so chip numbers understate.
+- Nothing is broken and no search fails: free-text similarity still reaches them, and every plain search still answers.
 
 ## 7. The decision to revisit
 
