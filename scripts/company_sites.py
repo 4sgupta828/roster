@@ -25,7 +25,8 @@ UA = "Mozilla/5.0 (compatible; roster-jobs/1.0; +https://roster-api-production-3
 def fetch(url: str, timeout: float = 20.0) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "text/html"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read(400_000).decode("utf-8", "replace")
+        # Lever inlines ~400 KB of CSS before the header link; a smaller cap silently loses the company's site
+        return r.read(1_800_000).decode("utf-8", "replace")
 
 
 async def main() -> None:
