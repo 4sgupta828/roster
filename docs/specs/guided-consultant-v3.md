@@ -1,6 +1,8 @@
 # Guided v3 — a recruiting consultant, not a form
 
-Status: DESIGN (2026-09-06), panel-reviewed (Codex; Gemini; code-grounded audit — verdicts in §9). Awaiting the owner's go.
+Status: BUILT and LIVE in prod behind `ROSTER_GUIDED_V3=1` (2026-09-06 evening; owner: "Do #1 now"), panel-reviewed (Codex; Gemini;
+code-grounded audit — verdicts in §9). v2 (`/intake/step`, `apps/api/intake.py`) stays in the tree; the flag switches the Guided tab.
+Delivery status at the end of §11.
 Supersedes the intake mechanics of `docs/specs/guided-intake.md` §0–§8; keeps its hand-off, JD-centre, briefs, index-aware
 compile, smart relaxing and merged-search sections (§12) unchanged — those are the SEARCH side and stay the one operation.
 
@@ -178,3 +180,28 @@ never a dependency of a turn. Two roles = an array of briefs on the client, one 
 4. Web: brief panel (labels, edit), Start over, session history, move-shaped turns; mobile pass.
 5. Evals: rubric judge + goldens + budgets; the 19 scenarios re-pointed. Flag `ROSTER_GUIDED_V3`; v2 stays until the
    rubric beats it on the goldens.
+
+### 11.1 Status (2026-09-06, end of day)
+
+LIVE: kernel `facets/brief.py` (Brief + sources + spans; `parse_move`; `gate_fork`; `readiness` — accepts an inferred value as an
+ASSUMPTION, never as a filter; `leverage`; `contract_from_brief` with the hardness rule), vertical `consultant.py` (fields, mapping,
+REQUIRED per direction — posture for seekers, mission for hiring; `DOCUMENT_FIELDS` per document kind; the consultant, direction,
+reader and JD-assemble prompts), app `consultant.py` (`IntakeConsultant`: single-pass turn; documents read ONCE with the EVIDENCE
+GATE — a document field lives only if its span is in the text, verbatim or ≥ 70 % of its words, and only if that kind of document
+can state it; leverage + market + metro tokens computed before the planner call; required-first re-plan, bounded; forks probed
+against the index, dead options dropped, a fork whose options die stays as free text; remote never a metro; `search_now`
+deterministic; restart ignored on turn one; write-behind `roster_intake_record`), `POST /intake/v3/step`, `/config.triage_v3`, web
+(say + question + why + options + Skip; the brief panel with sources, tap to change; Start over; ready-card assumptions; JD
+accept / save). Verified at 390 px. Eval `evals/intake/run_v3_eval.py` (5 personas, deterministic checks): 5 / 5 on prod, 2–8 s per
+turn, ≤ 6 planner calls per intake.
+
+Lessons from the live planner (gpt-4o-mini, DeepSeek out): it hallucinated 26 "document" facts from a five-line résumé (→ the evidence
+gate); it wrote brief-field names as contract keys (→ the effect-key list in the prompt + the kernel drop); it read "I'm hiring" as a
+restart (→ restart only after turn one); it asked a city for a remote role (→ remote settles the metro); it marked the user's own
+words as inferred (→ the paraphrase rule + readiness accepting assumptions); it invented `san_francisco` (→ metro tokens from the
+index, enforced in code).
+
+NOT DONE: the rubric judge on another model family (§10) and frozen golden transcripts; the History list of records in the UI;
+`split` (two roles) end to end; the JD interview's `jd_assemble_prompt` (the draft still uses the v1.1 centre builder with the brief
+as context); resume by record id. The question WORDING still reads form-like at times ("What is your desired posture…") — the
+observation → decision → consequence shape is in the prompt but not yet enforced by an eval; that is the rubric's job.
