@@ -5453,7 +5453,8 @@ function renderTriage(fresh){
   const wrap = transcript.length && !INTAKE.ready && (artPresent || (TRIAGE_V3 && intakeDirection())) ?
     `<div class="tgt-wrapline"><button type="button" class="tgt-wrapup" id="tgt-wrapup">✓ Search now with what I have</button>${TRIAGE_V3 ? ` <button type="button" class="tgt-wrapup" id="tgt-startover">↺ Start over</button>` : ""}</div>` : "";
   // the pending question's words render on the card, not again as the last bubble
-  const pendWords = pending ? (TRIAGE_V3 ? ((INTAKE.last.say || "") + " " + (pending.text || "")).trim() : pending.words) : "";
+  const pendWords = pending ? (TRIAGE_V3 ? (() => { const sy = (INTAKE.last.say || "").trim(), qt = (pending.text || "").trim();
+                                             const norm = x => x.toLowerCase().replace(/[?.!]+$/, "").replace(/\s+/g, " "); return (qt && norm(sy).indexOf(norm(qt)) >= 0) ? sy : (sy + " " + qt).trim(); })() : pending.words) : "";
   const shown = (pending && transcript.length && transcript[transcript.length-1].role === "assistant" && transcript[transcript.length-1].text === pendWords) ? transcript.slice(0, -1) : transcript;
   const briefPanel = TRIAGE_V3 && INTAKE.last ? briefPanelHtml(INTAKE.last.brief) : "";
   tbody().innerHTML = lead + `<div class="tgt-thread" id="tgt-thread">${shown.map(triageMsgHtml).join("")}</div>` + qcard + wrap + briefPanel;
@@ -5555,7 +5556,8 @@ async function submitTriage(text, extra){
   const pendingQ = INTAKE.last && INTAKE.last.question;
   const card = tbody().querySelector(".tgt-q"); if(card) card.remove();
   const wrapLine = tbody().querySelector(".tgt-wrapline"); if(wrapLine) wrapLine.remove();
-  const pendWords = pendingQ ? (TRIAGE_V3 ? (((INTAKE.last && INTAKE.last.say) || "") + " " + (pendingQ.text || "")).trim() : pendingQ.words) : "";
+  const pendWords = pendingQ ? (TRIAGE_V3 ? (() => { const sy = ((INTAKE.last && INTAKE.last.say) || "").trim(), qt = (pendingQ.text || "").trim();
+                                             const norm = x => x.toLowerCase().replace(/[?.!]+$/, "").replace(/\s+/g, " "); return (qt && norm(sy).indexOf(norm(qt)) >= 0) ? sy : (sy + " " + qt).trim(); })() : pendingQ.words) : "";
   if(thread && pendingQ && pendWords && !(thread.lastElementChild && thread.lastElementChild.classList.contains("bot") && thread.lastElementChild.textContent === pendWords)){
     const qb = document.createElement("div"); qb.className = "tgt-msg bot"; qb.textContent = pendWords; thread.appendChild(qb);
   }

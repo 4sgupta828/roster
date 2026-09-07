@@ -198,7 +198,11 @@ class IntakeConsultant:
                  "multi": move.question.multi, "free_text": move.question.free_text, "move": move.move}
             st["pending"] = q
         say = move.say if move else "Let me search with what I have."
-        st["transcript"].append({"role": "assistant", "text": (say + (" " + q["text"] if q else ""))[:TURN_CAP]})
+        if q and self._squash(q["text"]).rstrip("?") and self._squash(q["text"]).rstrip("?") in self._squash(say):
+            q_words = ""                                                             # the reply already asks it — never twice in the bubble
+        else:
+            q_words = (" " + q["text"]) if q else ""
+        st["transcript"].append({"role": "assistant", "text": (say + q_words)[:TURN_CAP]})
         st["transcript"] = st["transcript"][-TRANSCRIPT_KEEP:]
         await self._record(st, brief, direction, stage="question" if q else "statement")
         return self._pack(st, brief, q, say=say, stage="question" if q else "statement", notes=notes, direction=direction, pool=pool)
