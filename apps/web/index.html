@@ -7837,8 +7837,13 @@ function facetPendingAll(d){
   if(d.merge && d._recipeOff){ const was = new Set((d.merge.off||[])); const now = d._recipeOff; was.forEach(x => { if(!now.has(x)) n++; }); now.forEach(x => { if(!was.has(x)) n++; }); }
   return n;
 }
+function countsEmpty(counts){ return !counts || !Object.values(counts).some(v => v && Object.keys(v).length); }
 function facetRailMarkup(d){
-  const c = facetDraft(d), counts = d.counts || {}, L = d.labels || {};
+  const c = facetDraft(d), L = d.labels || {};
+  // AN EMPTY POOL (owner, 2026-09-06): the chips must not vanish with the counts — the user needs them to change the
+  // filters that emptied it. The last non-empty counts stay on the rail, labelled, beside the diagnosis.
+  const stale = countsEmpty(d.counts) && d._lastCounts && !countsEmpty(d._lastCounts);
+  const counts = stale ? d._lastCounts : (d.counts || {});
   const order = (L.order || Object.keys(counts)).filter(k => counts[k] && Object.keys(counts[k]).length);
   const rows = order.map(key => {
     const entries = Object.entries(counts[key]).sort((a, b) => (a[0] === "unknown") - (b[0] === "unknown") || b[1] - a[1]).slice(0, 14);
@@ -7862,7 +7867,7 @@ function facetRailMarkup(d){
       <button type="button" class="idgo frail-go" data-jpid="${esc(d._jpid)}">Apply</button><button type="button" class="histbtn frail-reset" data-jpid="${esc(d._jpid)}">Reset</button></div>`
     : `<div class="frail-apply">${d._applied && d._delta ? `<span class="frail-done">Applied ✓ — ${d._delta.after} shown${d._delta.added ? ` · <b>${d._delta.added} new</b>` : ""}${d._delta.removed ? ` · ${d._delta.removed} dropped` : ""}${!d._delta.added && !d._delta.removed ? " · same rows, order may differ" : ""}${(d._delta.prevPool != null && d._delta.pool != null && d._delta.prevPool !== d._delta.pool) ? ` · pool ${d._delta.prevPool} → ${d._delta.pool}` : ""}</span> ${d._delta.added && !d._newFirst ? (() => { const rowsNow = Array.isArray(d.people_rows) ? d.people_rows : (d.jobs||[]); const per = 20, pg = Array.isArray(d.people_rows) ? (d._page||0) : (d._jpage||0); const onPage = rowsNow.slice(pg*per, pg*per+per).filter(r => r._new).length; return `${onPage ? ` <span class="frail-note">${onPage} of them on this page (corner flag)</span>` : ` <span class="frail-note">none of them on this page</span>`} <button type="button" class="histbtn frail-shownew" data-jpid="${esc(d._jpid)}">Show the ${d._delta.added} new first</button>`; })() : ""}` : "Tap chips to stage changes, then apply once. "}${saveBtn}</div>`;
   const empty = (cov.diagnosis && !facetPending(d)) ? diagnosisMarkup({...cov.diagnosis, best_match: cov.best_match}, d._jpid, L) : "";
-  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}">${relaxedMarkup(d)}${mergeMarkup(d)}<div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
+  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}">${relaxedMarkup(d)}${mergeMarkup(d)}<div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""}${stale ? ` <span class="frail-note" title="The pool is empty, so these counts are from the last result that had rows — change a filter and apply">· chips from the last result</span>` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
 }
 // EMPTY RESULT → which must is doing it (leave-one-out from the evaluator), with one-tap Drop (staged)
 function diagnosisMarkup(diag, jpid, L){
@@ -7902,6 +7907,7 @@ async function facetReevaluate(jpid, contract, save){
       : await fetch("/search/evaluate", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({contract})});
     const out = await r.json();
     if(!r.ok){ d._busy = false; rerenderRail(jpid); alert(out.detail || "Couldn't apply those changes."); return; }
+    if(!countsEmpty(d.counts)) d._lastCounts = d.counts;                       // remembered for an empty pool
     d.contract = out.contract; d._draft = null; d.counts = out.counts; d.coverage = out.coverage; d.labels = out.labels || d.labels;
     if(out.merge !== undefined){ d.merge = out.merge || null; } d._recipeOff = null;
     d.relaxed = [];   // an Apply runs the chips exactly as set — no auto-relaxing on the rail
