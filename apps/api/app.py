@@ -377,6 +377,11 @@ def discovery_enabled() -> bool:
     return os.environ.get("ROSTER_DISCOVERY", "").lower() in ("1", "true", "yes")
 
 
+def guided_v3_enabled() -> bool:
+    """Guided v3 — the recruiting consultant (docs/specs/guided-consultant-v3.md); v2 stays until the goldens say otherwise."""
+    return os.environ.get("ROSTER_GUIDED_V3", "").lower() in ("1", "true", "yes")
+
+
 def guided_intake_enabled() -> bool:
     """Flag (default OFF, Rule 20): the Guided intake mode (docs/specs/guided-intake.md) — POST /intake/step and
     the ◍ Guided tab. Needs the facet evaluator (counts) and a model key."""
@@ -1298,6 +1303,7 @@ class IntakeIn(BaseModel):                 # one Guided-intake turn (docs/specs/
     direction: str | None = None           # "job" | "candidate" when tapped
     answer: dict | None = None             # {name, value} when a chip answered the pending question
     search_now: bool = False
+    restart: bool = False                  # v3: start over (the client drops its state; a new record begins)
     attachments: list[Attachment] | None = None   # a résumé / JD file this turn (parsed once)
     tenant_id: str = "demo"
     country: str = "us"
@@ -2185,6 +2191,7 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             "panel_examples": (list(getattr(svc, "panel_examples", ())) if live_panel else []),
             "refine_enabled": refine_enabled() and bool(getattr(svc, "refine_prompt", None)),
             "triage_enabled": guided_intake_enabled() and facet_evaluator_enabled(),
+            "triage_v3": guided_v3_enabled() and facet_evaluator_enabled(),
             "pulse_enabled": pulse_enabled() and bool(os.environ.get("ROSTER_CORPUS_DSN")),
             "graph_enabled": graph_enabled() and bool(os.environ.get("ROSTER_CORPUS_DSN")),
             "graph_expand": graph_expand_mode(),
@@ -6401,6 +6408,59 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 att_texts = []
         return await svc.step(state=body.state, message=body.message, direction=body.direction, answer=body.answer,
                               search_now=body.search_now, attachments_text=att_texts, user=user)
+
+    @app.post("/intake/v3/step")
+    async def intake_v3_step(body: IntakeIn, x_roster_token: str = Header(default="")) -> dict:
+        """One turn of the recruiting consultant (docs/specs/guided-consultant-v3.md): documents read once, leverage
+        measured before the single planner call, the move parsed and gated in the kernel, the hand-off = the one contract."""
+        if not guided_v3_enabled():
+            raise HTTPException(status_code=404, detail="guided v3 is not enabled")
+        from api.consultant import IntakeConsultant, record_writer
+        from api.facets_engine import compile_contract
+        from api.media import attachment_texts_async
+        store = _facet_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="the index is unavailable right now")
+        user = await _optional_user(x_roster_token)
+        acc = _accounts()
+
+        async def counts_fn(kind: str, must: dict) -> dict:
+            nav = await _facet_nav(kind, text="", must=must, scope={"country": (body.country or "us").lower()})
+            return (nav or {}).get("counts") or {}
+
+        async def slice_fn(kind: str, must: dict):
+            fn = getattr(store, "slice_size", None)
+            return (await fn(kind, must)) if fn is not None else None
+
+        def compile_fn(kind: str, text: str, *, limit: int = 60, scope: dict | None = None, extras: dict | None = None):
+            return compile_contract(kind, text, _facet_schema(), _llm_json, limit=limit, scope=scope or {"country": (body.country or "us").lower()}, extras=extras)
+
+        async def profile_fn(u: dict | None) -> dict | None:
+            if acc is None or not u:
+                return None
+            return ((await acc.get_parse(u["id"])).get("profile") or {}) or None
+
+        async def stored_fn(u: dict | None) -> dict | None:
+            if acc is None or not u:
+                return None
+            return await acc.get_profile(u["id"])
+        cs = _claim_store_cached()
+        svc = getattr(app.state, "consultant_service", None) or IntakeConsultant(
+            schema=_facet_schema(), llm_json=getattr(app.state, "intake_llm", None) or _llm_json, counts_fn=counts_fn, slice_fn=slice_fn,
+            profile_fn=profile_fn, stored_fn=stored_fn, briefs_fn=_briefs_fn_for(acc), draft_fn=_draft_fn(compile_fn), index_aware_fn=_index_aware,
+            record_fn=(record_writer(cs._get_pool, (user or {}).get("id")) if cs is not None else None), jd_fetch_fn=_fetch_jd_text)
+        att_texts = []
+        if body.attachments:
+            try:
+                att_texts = [t for _n, t in await attachment_texts_async([a.model_dump() for a in body.attachments]) if t]
+            except Exception:   # noqa: BLE001
+                att_texts = []
+        message = body.message or ""
+        if body.direction in ("job", "candidate") and not message:
+            message = "I'm looking for a role" if body.direction == "job" else "I'm hiring"
+        if body.search_now and not message:
+            message = "Search now with what you have."
+        return await svc.step(state=body.state, message=message, answer=body.answer, attachments_text=att_texts, user=user, restart=bool(body.restart))
 
     @app.post("/search/compile")
     async def search_compile(body: CompileIn) -> dict:

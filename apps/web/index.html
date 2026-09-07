@@ -914,7 +914,16 @@
     border:1px solid var(--hair);border-radius:8px;padding:.35rem .7rem;cursor:pointer;}
   .tgt-restart:hover{border-color:var(--gold);color:var(--gold);}
   /* Intake v2: persistent "wrap up & search now" affordance (quiet; prominent after an urgent turn) */
-  .tgt-wrapline{margin:.5rem 0 0;text-align:right;}
+  .tgt-wrapline{margin:.5rem 0 0;text-align:right;display:flex;gap:.4rem;justify-content:flex-end;flex-wrap:wrap;}
+  .tgt-why{font-size:.78rem;color:var(--muted);margin:.1rem 0 .3rem;}
+  .tgt-brief{margin:.8rem 0 0;border:1px solid var(--hair);border-radius:10px;padding:.4rem .7rem;font-size:.82rem;}
+  .tgt-brief summary{cursor:pointer;font-weight:600;min-height:36px;display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;}
+  .tgt-brief-row{display:grid;grid-template-columns:minmax(7rem,1fr) 2fr auto;gap:.5rem;align-items:center;padding:.35rem 0;border-top:1px dashed var(--hair);cursor:pointer;min-height:36px;}
+  .tgt-brief-k{color:var(--muted);}
+  .tgt-brief-s{font-size:.7rem;border:1px solid var(--hair);border-radius:999px;padding:.05rem .45rem;color:var(--muted);white-space:nowrap;}
+  .tgt-brief-s.inferred{border-style:dashed;color:var(--gold);}
+  .tgt-brief-s.stated,.tgt-brief-s.asked{border-color:rgba(var(--gold-rgb),.5);}
+  @media (max-width:560px){ .tgt-brief-row{grid-template-columns:1fr;gap:.1rem;} }
   .tgt-wrapup{font-family:var(--mono);font-size:.72rem;color:var(--muted);background:transparent;
     border:1px solid var(--hair);border-radius:999px;padding:.35rem .85rem;cursor:pointer;}
   .tgt-wrapup:hover{border-color:var(--gold);color:var(--gold);}
@@ -2426,6 +2435,7 @@ let GUIDED_REFINED = false;     // one-shot: the Q&A box was filled from Guided 
 let REASONING_ENABLED = false;  // reasoning-read interpretation + confidence layer (server-validated)
 let ASK_PANEL_ENABLED = false;  // AI expert panel (Alpha)
 let TRIAGE_ENABLED = false;     // guided-intake / triage mode (clarify → route)
+let TRIAGE_V3 = false;          // Guided v3 — the recruiting consultant (docs/specs/guided-consultant-v3.md)
 let ACCOUNTS_ENABLED = false;   // accounts + per-answer feedback (W-taxonomy)
 let SEARCH_MODE = "people";     // People/Jobs toggle — explicit routing, no keyword guessing
 const PJ_COPY = {
@@ -2587,6 +2597,7 @@ async function loadConfig(){
     REASONING_ENABLED = !!c.reasoning_read_enabled;
     ASK_PANEL_ENABLED = !!c.ask_panel_enabled;
     TRIAGE_ENABLED = !!c.triage_enabled;
+    TRIAGE_V3 = !!c.triage_v3;                 // Guided v3 — the recruiting consultant (docs/specs/guided-consultant-v3.md)
     ACCOUNTS_ENABLED = !!c.accounts_enabled;
     DUEL_ENABLED = !!c.duel_enabled;
     PULSE_ENABLED = !!c.pulse_enabled;
@@ -5401,30 +5412,66 @@ function triageMsgHtml(m){ return `<div class="tgt-msg ${m.role==='user'?'user':
 // and the READY card ratifies the contract (what I understood · chips · pool · advice) before anything runs.
 // The old medical-lineage logic (safety / register / retrieval terms / Q&A-panel routes) is gone.
 let INTAKE = {state: null, busy: false, last: null, ready: null};
+function intakeDirection(){ return TRIAGE_V3 ? ((INTAKE.last && INTAKE.last.direction) || (INTAKE.ready && INTAKE.ready.direction) || null)
+                                             : ((INTAKE.state && INTAKE.state.kernel && INTAKE.state.kernel.direction) || null); }
+// GUIDED v3 (docs/specs/guided-consultant-v3.md): the consultant's move = what it says + ONE question with options that
+// carry their search effect; the BRIEF ("what I understand") is visible with sources and editable; Start over any time.
+function intakePending(last){ return TRIAGE_V3 ? (last.question || null) : last.question; }
+function briefPanelHtml(brief){
+  if(!brief || !brief.length) return "";
+  const rows = brief.map(f => `<div class="tgt-brief-row" data-key="${esc(f.key)}" data-label="${esc(f.label)}" title="${esc(f.span ? "From: " + f.span : "")}"><span class="tgt-brief-k">${esc(f.label)}</span><span class="tgt-brief-v">${esc(Array.isArray(f.value) ? f.value.join(", ") : (f.value == null ? "—" : String(f.value)))}</span><span class="tgt-brief-s ${esc(f.source)}">${esc(f.source_label || f.source)}</span></div>`).join("");
+  return `<details class="tgt-brief"><summary>What I understand so far <span class="tgt-q-hint">(${brief.length} · tap a line to change it)</span></summary>${rows}</details>`;
+}
+function intakeQuestionV3Html(d){
+  const p = d.question; if(!p) return "";
+  const opts = (p.options || []).map(o => `<button type="button" class="tgt-opt" data-name="${esc(p.field||"")}" data-value="${esc(String(o.value))}">${esc(String(o.label))}</button>`).join("")
+    + `<button type="button" class="tgt-opt quiet" data-name="${esc(p.field||"")}" data-value="__decline__">Skip</button>`;
+  const answer = p.multi && (p.options||[]).length ? `<button type="button" class="idgo tgt-answer" hidden>Answer ✓</button>` : "";
+  const hint = (p.options||[]).length ? (p.multi ? "tap one or more, then Answer — or type" : "tap one — or type your own answer") : "type your answer";
+  return `<div class="tgt-q v3"><div class="tgt-q-words">${esc(p.text||"")}</div>${p.why ? `<div class="tgt-why">Why: ${esc(p.why)}</div>` : ""}<div class="tgt-q-hint">${esc(hint)}</div><div class="tgt-opts">${opts}${answer}</div></div>`;
+}
+function intakeDraftV3Html(d){
+  const jd = d.jd; if(!jd) return "";
+  return `<div class="tgt-q v3">${intakeDraftHtml(jd)}<div class="tgt-opts"><button type="button" class="tgt-opt" data-name="jd" data-value="accept">Use this JD and search</button>${loggedIn() ? `<button type="button" class="tgt-opt" data-name="jd" data-value="save">Save to my account &amp; use</button>` : ""}</div><div class="tgt-q-hint">or ask for changes in words</div></div>`;
+}
 function renderTriage(fresh){
   if(fresh){ INTAKE = {state: null, busy: false, last: null, ready: null}; TRIAGE = {transcript: [], busy: false, refined: "", register: "", urgent: false}; q.value = ""; autoGrow(); }
   if(!fresh && INTAKE.ready){ renderTriageReady(INTAKE.ready); return; }   // coming back to the tab after a hand-off: the ready card, not a dead transcript
   const transcript = (INTAKE.state && INTAKE.state.transcript) || [];
   document.body.classList.toggle("triage-live", transcript.length > 0);
-  const pending = INTAKE.last && INTAKE.last.question;
-  q.setAttribute("placeholder", pending ? (pending.kind === "artifact" ? "Paste or describe here…" : pending.kind === "draft" ? "Ask for changes in words — e.g. “make it staff level, add Kafka”…"
+  const pending = INTAKE.last && intakePending(INTAKE.last);
+  q.setAttribute("placeholder", TRIAGE_V3 ? (INTAKE.last && INTAKE.last.stage === "draft" ? "Ask for changes in words — e.g. “make it staff level, add Kafka”…" : pending ? "Type your answer, or tap an option…" : "Tell me what you're after — a role for you, or a hire for your team…")
+                              : pending ? (pending.kind === "artifact" ? "Paste or describe here…" : pending.kind === "draft" ? "Ask for changes in words — e.g. “make it staff level, add Kafka”…"
                                         : pending.kind === "draft_context" ? "Describe the role — title & level, where, your must-haves…" : "Type your answer, or tap chips…")
                                         : "Tell me what you're after — a role for you, or a hire for your team…");
   const lead = transcript.length ? "" :
-    `<div class="tgt-lead">Guided search. I'll ask only what changes the results — then hand you a search you can adjust.
+    `<div class="tgt-lead">${TRIAGE_V3 ? "Tell me what you're after. I'll read what's on file, ask only what changes the search, and hand you a search you can adjust."
+                                       : "Guided search. I'll ask only what changes the results — then hand you a search you can adjust."}
      Attach a résumé or paste a job description any time with 📎.</div>`;
-  const qcard = pending ? intakeQuestionHtml(pending) : "";
-  const wrap = transcript.length && !INTAKE.ready && (INTAKE.state && INTAKE.state.kernel && INTAKE.state.kernel.artifact && INTAKE.state.kernel.artifact.status === "present") ?
-    `<div class="tgt-wrapline"><button type="button" class="tgt-wrapup" id="tgt-wrapup">✓ Search now with what I have</button></div>` : "";
+  const qcard = TRIAGE_V3 ? (INTAKE.last && INTAKE.last.stage === "draft" ? intakeDraftV3Html(INTAKE.last) : (pending ? intakeQuestionV3Html(INTAKE.last) : "")) : (pending ? intakeQuestionHtml(pending) : "");
+  const artPresent = TRIAGE_V3 ? !!(INTAKE.last && INTAKE.last.artifact && INTAKE.last.artifact.status === "present") : !!(INTAKE.state && INTAKE.state.kernel && INTAKE.state.kernel.artifact && INTAKE.state.kernel.artifact.status === "present");
+  const wrap = transcript.length && !INTAKE.ready && (artPresent || (TRIAGE_V3 && intakeDirection())) ?
+    `<div class="tgt-wrapline"><button type="button" class="tgt-wrapup" id="tgt-wrapup">✓ Search now with what I have</button>${TRIAGE_V3 ? ` <button type="button" class="tgt-wrapup" id="tgt-startover">↺ Start over</button>` : ""}</div>` : "";
   // the pending question's words render on the card, not again as the last bubble
-  const shown = (pending && transcript.length && transcript[transcript.length-1].role === "assistant" && transcript[transcript.length-1].text === pending.words) ? transcript.slice(0, -1) : transcript;
-  tbody().innerHTML = lead + `<div class="tgt-thread" id="tgt-thread">${shown.map(triageMsgHtml).join("")}</div>` + qcard + wrap;
+  const pendWords = pending ? (TRIAGE_V3 ? ((INTAKE.last.say || "") + " " + (pending.text || "")).trim() : pending.words) : "";
+  const shown = (pending && transcript.length && transcript[transcript.length-1].role === "assistant" && transcript[transcript.length-1].text === pendWords) ? transcript.slice(0, -1) : transcript;
+  const briefPanel = TRIAGE_V3 && INTAKE.last ? briefPanelHtml(INTAKE.last.brief) : "";
+  tbody().innerHTML = lead + `<div class="tgt-thread" id="tgt-thread">${shown.map(triageMsgHtml).join("")}</div>` + qcard + wrap + briefPanel;
   const w = $("#tgt-wrapup"); if(w) w.addEventListener("click", wrapUpTriage);
+  const so = $("#tgt-startover"); if(so) so.addEventListener("click", () => submitTriage("", {restart: true}));
+  tbody().querySelectorAll(".tgt-brief-row").forEach(r => r.addEventListener("click", () => { q.value = `Change ${r.dataset.label}: `; q.focus(); autoGrow(); }));
   const SEL = new Set();
   const answerBtn = tbody().querySelector(".tgt-answer");
   const syncAnswer = () => { if(answerBtn){ answerBtn.hidden = !SEL.size; answerBtn.textContent = SEL.size > 1 ? `Answer with ${SEL.size} ✓` : "Answer ✓"; } };
   tbody().querySelectorAll(".tgt-opt").forEach(b => b.addEventListener("click", async () => {
     const name = b.dataset.name, val = b.dataset.value;
+    if(TRIAGE_V3){
+      if(name === "jd" && val === "accept"){ submitTriage("Use this JD and search."); return; }
+      if(name === "jd" && val === "save"){ await intakeSaveDraft(INTAKE.last && INTAKE.last.jd); submitTriage("Use this JD and search."); return; }
+      if(val === "__decline__"){ submitTriage("", {answer: {name, value: "__decline__"}}); return; }
+      if(pending && pending.multi){ if(SEL.has(val)) SEL.delete(val); else SEL.add(val); b.classList.toggle("sel", SEL.has(val)); syncAnswer(); return; }
+      submitTriage("", {answer: {name, value: val}}); return;
+    }
     if(pending && pending.kind === "direction"){ submitTriage("", {direction: val}); return; }
     if(pending && pending.kind === "artifact"){
       if(val === "attach"){ const a = $("#attach"); if(a && !a.hidden) a.click(); else q.focus(); return; }
@@ -5441,7 +5488,7 @@ function renderTriage(fresh){
     if(SEL.has(val)) SEL.delete(val); else SEL.add(val);
     b.classList.toggle("sel", SEL.has(val)); syncAnswer();
   }));
-  if(answerBtn) answerBtn.addEventListener("click", () => { const vals = [...SEL]; if(!vals.length) return; submitTriage("", {answer: {name: pending.name, value: vals.length > 1 ? vals : vals[0]}}); });
+  if(answerBtn) answerBtn.addEventListener("click", () => { const vals = [...SEL]; if(!vals.length) return; submitTriage("", {answer: {name: TRIAGE_V3 ? (pending.field || "") : pending.name, value: vals.length > 1 ? vals : vals[0]}}); });
   triageScroll();
 }
 function intakeSupportHtml(sup){
@@ -5488,17 +5535,18 @@ function triageScroll(){
 function triageFetch(extra){
   const body = {state: INTAKE.state, tenant_id: "demo", ...geoPayload(), ...(extra || {})};
   if(ATTACHMENTS.length){ body.attachments = ATTACHMENTS.map(a => ({data: a.data, media_type: a.media_type, name: a.name})); }
-  return fetch("/intake/step", {method: "POST", headers: {"content-type": "application/json", ...authHeaders()}, body: JSON.stringify(body)});
+  return fetch(TRIAGE_V3 ? "/intake/v3/step" : "/intake/step", {method: "POST", headers: {"content-type": "application/json", ...authHeaders()}, body: JSON.stringify(body)});
 }
 function handleTriageTurn(d){
   INTAKE.last = d; INTAKE.state = d.state || INTAKE.state;
+  if(d.stage === "restarted"){ INTAKE = {state: d.state, busy: false, last: d, ready: null}; PENDING_INTAKE_TRANSCRIPT = null; renderTriage(false); return; }
   if(d.stage === "ready" && d.ready){ INTAKE.ready = d.ready; renderTriageReady(d.ready); return; }
   INTAKE.ready = null; renderTriage(false);
 }
 async function submitTriage(text, extra){
   if(INTAKE.busy) return;
   extra = extra || {};
-  if(!text && !extra.direction && !extra.answer && !extra.search_now){ q.focus(); return; }
+  if(!text && !extra.direction && !extra.answer && !extra.search_now && !extra.restart){ q.focus(); return; }
   if(typeof voiceHush === "function") voiceHush();
   q.value = ""; autoGrow();
   const thread = $("#tgt-thread");
@@ -5507,12 +5555,13 @@ async function submitTriage(text, extra){
   const pendingQ = INTAKE.last && INTAKE.last.question;
   const card = tbody().querySelector(".tgt-q"); if(card) card.remove();
   const wrapLine = tbody().querySelector(".tgt-wrapline"); if(wrapLine) wrapLine.remove();
-  if(thread && pendingQ && pendingQ.words && !(thread.lastElementChild && thread.lastElementChild.classList.contains("bot") && thread.lastElementChild.textContent === pendingQ.words)){
-    const qb = document.createElement("div"); qb.className = "tgt-msg bot"; qb.textContent = pendingQ.words; thread.appendChild(qb);
+  const pendWords = pendingQ ? (TRIAGE_V3 ? (((INTAKE.last && INTAKE.last.say) || "") + " " + (pendingQ.text || "")).trim() : pendingQ.words) : "";
+  if(thread && pendingQ && pendWords && !(thread.lastElementChild && thread.lastElementChild.classList.contains("bot") && thread.lastElementChild.textContent === pendWords)){
+    const qb = document.createElement("div"); qb.className = "tgt-msg bot"; qb.textContent = pendWords; thread.appendChild(qb);
   }
   if(thread){
     const u = document.createElement("div"); u.className = "tgt-msg user";
-    u.textContent = text || (extra.search_now ? "Search now with what I have" : extra.direction ? (extra.direction === "job" ? "I'm looking for a role" : "I'm hiring")
+    u.textContent = text || (extra.restart ? "Start over" : extra.search_now ? "Search now with what I have" : extra.direction ? (extra.direction === "job" ? "I'm looking for a role" : "I'm hiring")
                     : (extra.answer ? (Array.isArray(extra.answer.value) ? extra.answer.value.join(", ") : String(extra.answer.value === "__decline__" ? "Prefer not to say" : extra.answer.value)).replace(/_/g, " ") : ""));
     if(u.textContent) thread.appendChild(u);
   }
@@ -5546,7 +5595,7 @@ function triageError(msg){
       <div class="tgt-route-t">Search with what you typed</div>
       <div class="tgt-route-why">Run it as a plain search in the Talent Map or Jobs tab.</div></button></div>`;
   const btn = tbody().querySelector(".tgt-route");
-  if(btn) btn.addEventListener("click", () => routeTriage((INTAKE.state && INTAKE.state.kernel && INTAKE.state.kernel.direction) === "candidate" ? "people" : "jobs", (last && last.text) || ""));
+  if(btn) btn.addEventListener("click", () => routeTriage(intakeDirection() === "candidate" ? "people" : "jobs", (last && last.text) || ""));
   triageScroll();
 }
 function renderTriageReady(rd){
@@ -5559,8 +5608,9 @@ function renderTriageReady(rd){
     chips.push(`<span class="fpill">${g} ${esc(k.replace(/_/g, " "))}: ${esc(lab(v))}</span>`);
   if(c.center && c.center.key) chips.push(`<span class="fpill">◎ centre ${esc(c.center.key)}: ${esc(lab(c.center.value))}</span>`);
   const art = rd.artifact || {};
-  const artLine = art.kind === "profile" ? `Résumé: ${art.source === "on_file" ? "on file" : art.source === "attachment" ? "attached this session" : "from your description"}`
-                : `Job description: ${art.source === "pasted" ? "pasted" : art.source === "link" ? "from the link" : art.source === "attachment" ? "attached" : "from your description"}`;
+  const artLine = (art.kind === "profile" || art.kind === "resume") ? `Résumé: ${art.source === "on_file" ? "on file" : art.source === "attachment" ? "attached this session" : art.source === "stored" ? "from your profile" : "from your description"}`
+                : art.status === "missing" ? "No job description on file — the search runs on what you told me" 
+                : `Job description: ${art.source === "pasted" ? "pasted" : art.source === "link" ? "from the link" : art.source === "attachment" ? "attached" : art.source === "drafted" ? "drafted with you" : art.source === "saved" ? "from your saved briefs" : "from your description"}`;
   const dirBtn = rd.direction === "job"
     ? `<button type="button" class="tgt-route rec" data-route="jobs"><div class="tgt-route-t">💼 Find roles <span class="rec-badge">${rd.pool || 0} in the pool</span></div><div class="tgt-route-why">Runs this contract in Jobs — the rail lets you adjust it.</div></button>`
     : `<button type="button" class="tgt-route rec" data-route="people"><div class="tgt-route-t">🗺 Find candidates <span class="rec-badge">${rd.pool || 0} in the pool</span></div><div class="tgt-route-why">Runs this contract in the Talent Map — the rail lets you adjust it.</div></button>`;
@@ -5576,14 +5626,17 @@ function renderTriageReady(rd){
       ${(rd.notes||[]).filter(n => n.action).length ? `<div class="tgt-adjust"><div class="tgt-draft-h">Adjusted against the index</div>${rd.notes.filter(n => n.action).map(n => `<div class="tgt-adjust-row">● <b>${esc(String(n.key||"").replace(/_/g," "))}</b> ${esc(String((n.values||[]).join(" / ")))} — ${esc(n.action)} <span class="tgt-q-hint">${esc(n.why||"")}</span></div>`).join("")}</div>` : ""}
       ${(rd.u_diagnostics||[]).length && (rd.pool||0) < 50 ? `<div class="tgt-adjust"><div class="tgt-draft-h">Your own filters</div>${rd.u_diagnostics.map(k => `<div class="tgt-adjust-row">● <b>${esc(String(k.label||k.key))}</b>: ${esc(Array.isArray(k.values) ? k.values.join(" / ") : "")} — with it ${rd.pool||0}, without it <b>${(k.without||0).toLocaleString()}</b>${k.best_without != null ? ` (best match ${k.best_without}%)` : ""} <span class="tgt-q-hint">kept as you set it — drop it on the rail if you want</span></div>`).join("")}</div>` : ""}
       ${rd.diagnosis && (rd.pool||0) < 5 ? diagnosisMarkup(rd.diagnosis, "__ready__", null) : ""}
+      ${(rd.assumptions||[]).length ? `<div class="tgt-adjust"><div class="tgt-draft-h">Assumptions I'm making</div>${rd.assumptions.map(a => `<div class="tgt-adjust-row">● ${esc(a)} <span class="tgt-q-hint">say so if that's wrong</span></div>`).join("")}</div>` : ""}
       ${advice ? `<ul class="tgt-advice">${advice}</ul>` : ""}
       <div class="tgt-routes">${dirBtn}</div>
+      ${TRIAGE_V3 ? briefPanelHtml(rd.brief) : ""}
       ${improve}
       <button type="button" class="tgt-restart" id="tgt-restart">↺ Start over</button>
     </div>`;
   q.setAttribute("placeholder", "Add a detail to refine further…");
   tbody().querySelectorAll(".tgt-route").forEach(b => b.addEventListener("click", () => routeTriage(b.dataset.route, (c.text || rd.understood || ""), rd)));
-  const rs = $("#tgt-restart"); if(rs) rs.addEventListener("click", () => setMode("triage", {fresh:true}));
+  const rs = $("#tgt-restart"); if(rs) rs.addEventListener("click", () => { if(TRIAGE_V3){ INTAKE.ready = null; submitTriage("", {restart: true}); } else setMode("triage", {fresh:true}); });
+  tbody().querySelectorAll(".tgt-brief-row").forEach(r => r.addEventListener("click", () => { INTAKE.ready = null; q.value = `Change ${r.dataset.label}: `; q.focus(); autoGrow(); }));
   const ib = $("#tgt-improve"); if(ib) ib.addEventListener("click", () => intakeImprove(rd));
   tbody().querySelectorAll(".fdiag-drop").forEach(b => b.addEventListener("click", async () => {
     // drop the must from the ratified contract, re-count, re-render the card
