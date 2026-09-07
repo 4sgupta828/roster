@@ -169,3 +169,11 @@ def test_a_side_read_between_the_lines_is_an_assumption_with_a_switch_and_a_fiel
     # one tap switches the side; the documents are re-read for it
     out3 = _run(s.step(direction_tap="job", state=out2["state"]))
     assert out3["direction"] == "job" and out3["direction_source"] == "asked" and out3["state"]["docs_read"] in (True, False)
+
+
+def test_the_side_alone_is_not_an_ask_the_consultant_opens_with_the_open_question():
+    pl = Planner([{"move": "ready", "say": "Searching 240k roles."}, {"move": "ready", "say": "ok"}])
+    s = _svc(pl)
+    out = _run(s.step(message="I'm looking for my next role"))
+    assert out["stage"] == "question" and out["question"]["field"] == "role_family" and out["question"]["options"] == [] and "what you do today" in out["question"]["text"]
+    assert any("empty brief" in n for n in out["notes"])

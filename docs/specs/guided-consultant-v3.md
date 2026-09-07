@@ -205,3 +205,26 @@ NOT DONE: the rubric judge on another model family (§10) and frozen golden tran
 `split` (two roles) end to end; the JD interview's `jd_assemble_prompt` (the draft still uses the v1.1 centre builder with the brief
 as context); resume by record id. The question WORDING still reads form-like at times ("What is your desired posture…") — the
 observation → decision → consequence shape is in the prompt but not yet enforced by an eval; that is the rubric's job.
+
+### 11.2 Where the reasoning was lacking — and the rebuild (2026-09-06, late)
+
+Owner: "We should not patch. Guided intake is the most important part of the product. Find out where we are lacking intelligent
+reasoning to discover user intent and map it to the right search with the right parameters, seeking clarification only where
+needed" / "use the best model for the planner".
+
+Diagnosis (from the live transcripts): the planner never SAW the search it would run, so it reasoned about fields — a checklist
+wearing a persona (posture asked twice, then company type, comp, work mode as "confirms"); REQUIRED fields recreated the form
+(posture forced even on a fully specified ask); confirms were free; the extractor-class model (deepseek-chat / gpt-4o-mini) could
+not weigh impact. The decisive experiment: the same SEARCH-FIRST scaffold on the owner's own phrasing — every model but the mini
+one asked exactly one high-impact question (place or mode) and none re-asked posture. The scaffold was the missing intelligence;
+the model is the second lever.
+
+Rebuilt turn: code builds the search from the brief, runs a PREVIEW (pool + top results; rows only, ≤ 12 s) and measures the
+leverage BEFORE the one strategic call; the planner (gpt-5.4 via `ROSTER_PLANNER_MODEL`, `ROSTER_PLANNER_EFFORT`=low — medium
+was 30–50 s a turn) reasons in order: understanding (sources) → the search it would run → a verdict on the preview → gaps ranked
+by how much an answer would CHANGE the results → ready or ONE question. REQUIRED = the side (+ the mission for a JD from nothing);
+one budget of 3 questions; a field never asked twice; a question is always about a field; the side alone is not an ask (the open
+question opens); a stated side is switched only by a tap or a restart (shown as an assumption with a switch when read between the
+lines). Result: the owner's phrasing ("jobs for mid level software engineer … java … k8 and aws") → ready in ONE turn; personas
+5 / 6 → 6 / 6 after the empty-brief rule. Latency is the open problem: 6–17 s a turn with spikes to 60 s (the reasoning model
+plus a cold preview); the extractor stays on the cheap model.

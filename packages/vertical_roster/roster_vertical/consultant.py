@@ -87,6 +87,10 @@ def contract_mapping(direction: str) -> dict:
 # would change the results — the planner judges that against the preview and the leverage
 REQUIRED = {"job": ("direction",), "candidate": ("direction", "mission")}
 MAX_QUESTIONS = 3               # any question counts; "search now" ends it from any turn
+# the consultant's opener when NOTHING but the side is known — the one question that is never a checklist item
+OPEN_QUESTION = {"job": "Tell me what you do today and what you're after — role, level, where — and I'll take it from there.",
+                 "candidate": "What will this hire own, and what fails in the next six months if you don't make it?"}
+INTENT_FIELDS = ("role_family", "field", "specialties", "skills", "mission", "must_have_done", "level", "career_arc")   # any of these = an ask exists
 REMOTE_SETTLES = ("metro",)          # a remote role / a remote-only seeker has no metro to ask for
 CONTRACT_KEYS_FOR_EFFECTS = ("field", "function", "specialty", "skill", "role_family", "level", "work_type", "metro", "state", "country", "work_mode",
                              "employment_type", "comp", "company_type", "evidence")

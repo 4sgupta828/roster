@@ -105,10 +105,10 @@ class IntakeConsultant:
         direction = self._direction(brief, st)
         kind = V.SEARCH_KIND.get(direction or "job", "job")
         contract, cnotes = self._contract(brief, st, direction or "job")
-        lev, pool, market = await self._leverage(contract, kind, brief, direction)
+        (lev, pool, market), preview = await asyncio.gather(self._leverage(contract, kind, brief, direction),
+                                                            (self._preview(contract, kind) if direction else asyncio.sleep(0, result={})))
         if getattr(self, "_last_metro_tokens", None):
             st["metro_tokens"] = list(self._last_metro_tokens)
-        preview = await self._preview(contract, kind) if direction else {}
 
         # 5) the planner (ONE call on the best reasoning model), unless the budget is spent or the user asked to search now
         forced_ready = search_now or int(st.get("calls") or 0) >= V.MAX_PLANNER_CALLS
@@ -127,6 +127,13 @@ class IntakeConsultant:
                 notes.append(f"{move.question.field!r} was already asked → not again"); move.question = None; move.ready = True
             if move.move == "fork" and not move.question:
                 move.ready = True                                                    # the model wanted to ask but nothing askable remains
+            # NOTHING TO SEARCH YET: the side alone is not an ask — the consultant opens with the one open question
+            if move.ready and direction and not any(brief.value(k) not in (None, "", []) for k in V.INTENT_FIELDS) and not search_now:
+                from roster_kernel.facets.brief import Question
+                move.ready = False; move.move = "fork"
+                move.question = Question(field=("mission" if direction == "candidate" else "role_family"), text=V.OPEN_QUESTION[direction], options=[], free_text=True)
+                move.say = move.say if move.say and "search" not in move.say.lower() else ""
+                notes.append("empty brief → the open question, not a search")
         st["pending"] = None
 
         # 6) apply the move
