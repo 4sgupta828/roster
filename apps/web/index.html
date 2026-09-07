@@ -1932,8 +1932,9 @@
   <div class="tplist" id="tplist"><div class="suggest-loading">Loading…</div></div>
 </section>
 
-<section class="panelbody" id="panelbody" hidden aria-label="Expert panel"></section>
-  <section class="triagebody" id="triagebody" hidden aria-label="Guided intake"></section>
+<!-- shown by body[data-mode] CSS, not by the hidden attribute (the global [hidden] rule would win) -->
+<section class="panelbody" id="panelbody" aria-label="Expert panel"></section>
+  <section class="triagebody" id="triagebody" aria-label="Guided intake"></section>
   <footer class="pagefoot" id="pagefoot" hidden></footer>
   <footer class="missionfoot" id="missionfoot">
     <svg class="spiritanim" viewBox="0 0 340 96" role="img" aria-label="A search beam sweeps a field of profiles; each one it passes lights up as found">
