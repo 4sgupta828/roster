@@ -86,6 +86,9 @@ FACET_SCHEMA = FacetSchema(keys=(
              guidance="from curated, dated sets (Fortune 500, public, big tech) and accelerator / stage records; else other"),
     FacetKey(key="stage", type=FacetType.ordinal, kinds=("company",), label="Stage", values=COMPANY_STAGES,
              guidance="the funding stage a registry, accelerator record or filing states"),
+    FacetKey(key="industry", type=FacetType.categorical, kinds=("company",), label="Industry", values=INDUSTRIES,
+             guidance="what the employer does, from curated lookup data (roster_vertical/data/company_industry.json); "
+                      "never inferred from a posting or a profile — this is the key `company_industry` reads"),
 ))
 
 # EXTRACTION COMPATIBILITY (2026-09-07). `FacetSchema.version()` hashes every key, so adding a VIA key — one that is read
@@ -94,7 +97,8 @@ FACET_SCHEMA = FacetSchema(keys=(
 # ADD a stamp here only when the change genuinely leaves extracted values valid; a vocabulary or guidance change to an
 # EXTRACTED key must NOT be listed — those rows have to be read again.
 #   77c3be380247 — the schema before `company_industry` (a via key) was added.
-COMPATIBLE_EXTRACTION_VERSIONS = ("77c3be380247",)
+#   7566973b714a — `company_industry` present, the company's own `industry` key not yet declared.
+COMPATIBLE_EXTRACTION_VERSIONS = ("77c3be380247", "7566973b714a")
 
 
 def extraction_is_current(stamp: str | None) -> bool:

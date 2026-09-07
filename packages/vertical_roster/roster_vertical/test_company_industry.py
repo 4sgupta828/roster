@@ -52,3 +52,16 @@ def test_adding_a_via_key_does_not_invalidate_a_single_extracted_row():
     assert "77c3be380247" in COMPATIBLE_EXTRACTION_VERSIONS                  # the stamp on every row extracted so far
     assert extraction_is_current("77c3be380247") and extraction_is_current(FACET_SCHEMA.version())
     assert not extraction_is_current("deadbeef1234") and not extraction_is_current(None)
+
+
+def test_every_via_key_has_a_real_key_to_read_on_the_entity_it_points_at():
+    """`FacetSQLStore.project` silently drops a key the schema does not declare: `company_industry` existed while the
+    company's own `industry` did not, so a lookup pass reported 1,342 matches and wrote 0 rows (prod, 2026-09-07)."""
+    from api.facet_store import via_target_key
+    for k in FACET_SCHEMA.keys:
+        if not k.via:
+            continue
+        target = FACET_SCHEMA.key(via_target_key(k.key, k.via))
+        assert target is not None, f"{k.key} reads {via_target_key(k.key, k.via)!r} on a {k.via}, which the schema does not declare"
+        assert k.via in target.kinds, f"{target.key} is not a {k.via} key"
+        assert set(target.values) == set(k.values), f"{k.key} and {target.key} must share a vocabulary"

@@ -78,7 +78,7 @@ async def main() -> None:
         postings = {r["c"]: r["n"] for r in await conn.fetch("SELECT lower(replace(company, ' ', '_')) AS c, count(*) n FROM rs_job WHERE closed_at IS NULL AND company <> '' GROUP BY 1")}
     slugs = sorted(job_cos | ppl_cos)
     ver = FACET_SCHEMA.version()
-    hit, covered_postings, by_industry = 0, 0, {}
+    hit, written, covered_postings, by_industry = 0, 0, 0, {}
     for slug in slugs:
         ind = industry_of(slug, table)
         if not ind:
@@ -87,12 +87,15 @@ async def main() -> None:
         covered_postings += int(postings.get(slug) or 0)
         by_industry[ind] = by_industry.get(ind, 0) + 1
         if args.live:
-            await store.project("company", company_entity_id(slug), {"schema_version": ver, "facets": {
+            written += await store.project("company", company_entity_id(slug), {"schema_version": ver, "facets": {
                 "industry": [{"value": ind, "confidence": 1.0, "provenance": f"lookup:curated {as_of}".strip()}]}})
     await pool.close()
     top = ", ".join(f"{k} {v}" for k, v in sorted(by_industry.items(), key=lambda kv: -kv[1])[:12])
-    print(f"companies seen {len(slugs)} · matched {hit} · open postings covered {covered_postings}"
+    print(f"companies seen {len(slugs)} · matched {hit} · rows written {written} · open postings covered {covered_postings}"
           f"{'' if args.live else ' (dry — nothing written)'}\n  {top}")
+    if args.live and hit and not written:
+        # `project` drops a key the schema does not declare: this pass once reported 1,342 matches and wrote 0 rows
+        raise SystemExit("matched companies but wrote NO rows — is `industry` declared as a company key in the schema?")
 
 
 if __name__ == "__main__":
