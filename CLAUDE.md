@@ -64,6 +64,8 @@ the connection-graph mission; do not assume the current tech framing is intended
   to GitHub auto-deploy, so a `git push` does not redeploy); poll `railway service status` until
   `SUCCESS`. `railway run` from a laptop injects the INTERNAL Postgres hostname (unreachable locally);
   for DB work use `railway ssh --service roster-api`.
+- **PAUSED background job (must be resumed): the people facet re-extraction — 67.9 % done, `ROSTER_BULK_PEOPLE_FACETS=0`
+  on roster-worker. Read `docs/ops/people-reextraction-PAUSED.md` before touching worker spend or model credit.**
 - Ingest (prod-direct): `POST /admin/corpus/ingest` with `{"jobs":[{"connector","query","limit"}]}`
   and header `X-Admin-Token: $ROSTER_ADMIN_TOKEN`; watch `GET /corpus/queue`. People/jobs index
   progress: public `GET /admin/people-coverage` + `rs_ingest_checkpoint` (people windows / job boards).
