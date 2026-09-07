@@ -6181,7 +6181,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         from roster_vertical.employer_link import employer_page
         for r in rows or []:
             if isinstance(r, dict) and not r.get("employer_url"):
-                u = employer_page(str(r.get("url") or ""), str(r.get("source") or ""))
+                u = employer_page(str(r.get("url") or ""), str(r.get("source") or ""), str(r.get("company") or ""))
                 if u:
                     r["employer_url"] = u
         return rows or []

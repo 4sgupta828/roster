@@ -16,6 +16,33 @@ def test_every_ats_in_the_corpus_yields_the_employers_own_board():
         assert employer_page(url) == want, url
 
 
+OWN_SITE = [  # postings ingested from the employer's own site (shapes taken from prod)
+    ("https://stripe.com/jobs/search?gh_jid=8014859", "stripe", "https://stripe.com/jobs"),
+    ("https://www.janestreet.com/join-jane-street/apply/7449190002", "Jane Street", "https://www.janestreet.com/join-jane-street"),
+    ("https://careers.airbnb.com/positions/7716341", "airbnb", "https://careers.airbnb.com/positions"),
+    ("https://www.brex.com/careers/8438581002", "brex", "https://www.brex.com/careers"),
+    ("https://abnormal.ai/careers/jobs/7981482003", "abnormal-security", "https://abnormal.ai/careers"),
+    ("https://explore.jobs.netflix.net/careers/job/790316013491", "Netflix", "https://explore.jobs.netflix.net/careers"),
+    ("https://www.amazon.jobs/en/jobs/10522805/ml-engineer", "amazon", "https://www.amazon.jobs"),
+]
+
+
+def test_the_employers_own_site_is_linked_only_when_the_host_names_the_company():
+    for url, company, want in OWN_SITE:
+        assert employer_page(url, company=company) == want, url
+    # the same URLs without the company, or with a different company, claim nothing
+    assert employer_page("https://stripe.com/jobs/search?gh_jid=1") is None
+    assert employer_page("https://stripe.com/jobs/search?gh_jid=1", company="chariot") is None
+
+
+def test_an_aggregator_is_never_passed_off_as_the_hiring_company():
+    for url, company in (("https://www.adzuna.com/details/5851008429", "chariot"),
+                         ("https://www.arbeitnow.com/jobs/companies/smartly/senior-ml", "smartly"),
+                         ("https://www.linkedin.com/jobs/view/123", "linkedin"),
+                         ("https://www.indeed.com/viewjob?jk=abc", "acme")):
+        assert employer_page(url, company=company) is None, url
+
+
 def test_a_url_that_names_no_employer_yields_nothing_rather_than_a_guess():
     for url in ("https://apply.workable.com/j/6EDFC2AB01",          # the employer is not in the path
                 "https://www.linkedin.com/jobs/view/123",            # not an employer board
