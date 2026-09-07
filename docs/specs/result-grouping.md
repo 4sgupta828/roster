@@ -1,7 +1,8 @@
 # Grouping search results — what we offer, and what we refuse
 
-Status: DESIGN (2026-09-07), panel-reviewed (Codex, Gemini, code-grounded audit). Phase 1 ready to build; the DISCIPLINE
-dimension needs the owner's go because it is the one the panel split on.
+Status: BUILT and LIVE (2026-09-07), panel-reviewed (Codex, Gemini, code-grounded audit). Owner approved Auto as opt-in
+("only pay when grouping is invoked") with the free fallback. Delivered: §2's eligibility, §4's Auto, Industry and Work
+mode in the menu. Shelved: the curated per-function taxonomy (§4b).
 
 Owner: "identify what more relevant groups we can add — pertinent to how job seekers would benefit … industry type …
 maybe go deep into job function itself — Building Infra, Applications, Research, Model training, Model inferencing,
@@ -179,3 +180,22 @@ non-engineering corpus); elevate `function` and `field`; kill auto-grouping; sti
 sticky choice and no-auto-switching are right and are in §2; the corpus-coverage rule is rejected in favour of per-result
 eligibility, which subsumes it; Discipline is kept but gated, because `function` demonstrably cannot answer the owner's
 question.
+
+## 8. As built (2026-09-07)
+
+`packages/kernel/roster_kernel/facets/grouping.py` — `eligible` (two kinds: CATEGORICAL wants a handful of balanced
+groups, IDENTITY wants concentration, because 43 backend roles across 30 employers is exactly when grouping by company
+helps), `enforce` (single membership, ≤ 7 groups, unknown ids dropped, leftovers returned, dominant-group flag),
+`token_groups` (the free fallback). `packages/vertical_roster/roster_vertical/job_grouping.py` — the dimensions, the
+seeker's segmentation guidance, the row line the model sees (title + specialty + skill; never employer, place or pay),
+the re-ask. `POST /jobs/group` — opt-in, one call, one retry when a bucket swallows the set, token fallback when no
+provider answers. `group_options` rides the jobs response so eligibility lives in the kernel and not twice.
+
+Measured on prod: "backend engineer jobs" → Backend Engineers 22 · Infrastructure Engineers 6 · Specialized 6 · AI 3 ·
+Full Stack 2 · .NET 2 · Automation 2, in ~4 s including one re-ask. "machine learning engineer jobs" → Applied ML
+Engineering 46 · ML Infrastructure and Platform 14 · Autonomous Driving ML 7 · Deep Learning 6 · Senior ML Leadership.
+Verified at 390 px.
+
+Known gaps: a broad set can still leave one large group after the single re-ask (Applied ML holds 46); grouping is
+Jobs-only (Talent has the same need); and the jobs response's field list in the browser has now silently dropped three
+new fields in a row (relaxed, merge, group_options) — it should be a pass-through, not an allow-list.
