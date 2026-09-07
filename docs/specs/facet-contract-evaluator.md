@@ -403,3 +403,34 @@ until the old path is deleted.
 No cross-tenant facets; no learned weights (the weight table is hand-set and small); no client-side
 filtering of snapshots (navigation always re-evaluates); no model call inside `evaluate`; no compensation
 inference from titles or companies; no company size until a source exists.
+
+## Industry — what the employer does (2026-09-07)
+
+Owner: "why fintech jobs are not captured in this?" — nothing was broken; the schema had no way to say what an employer
+DOES, so a brief's "fintech" survived only as free text while every other part of it became a facet.
+
+`company_industry` is a VIA key on jobs and people (kinds P + J), reading the COMPANY entity's own `industry` — the same
+mechanism as `company_type` / `company_stage`. 41 values (fintech, financial_services, insurance, crypto, healthtech,
+biotech_pharma, medical_devices, developer_tools, data_infrastructure, ai, security, gaming, aerospace_defense,
+semiconductors …). Weights: prefer 0.22, avoid 0.25 — an industry says more about fit than a size class does.
+
+Source is LOOKUP DATA, never a model guess: `roster_vertical/data/company_industry.json` (curated, dated, grouped by
+industry so it is auditable; a company the map does not name gets no facet). `scripts/company_industry.py --live`
+writes the company rows; it matches a slug through its legal suffix (`coupang_inc` → `coupang`), is idempotent and
+costs nothing. First run 2026-09-07: **1,342 companies, covering 136,762 of 247k open postings.**
+
+Two traps this uncovered, both now guarded by tests:
+- **A via key needs a real key to read.** `project` silently drops a key the schema does not declare, so the first live
+  run reported 1,342 matches and wrote 0 rows. `test_company_industry` asserts every via key has a target key on the
+  target kind, sharing its vocabulary; the pass counts rows written and fails loudly if a match writes none.
+- **Adding a via key must not re-extract the corpus.** `FacetSchema.version()` hashes every key, so the stamp changed
+  although nothing about extraction did. `COMPATIBLE_EXTRACTION_VERSIONS` lists stamps whose extractions stay valid and
+  both corpus passes accept them — without it this change alone would have re-read 281k people and every job at full
+  model cost.
+
+Also: the compile is told that a named industry is a filter (it is looked up per employer, not read from a posting),
+and `to_prompt_block(include_via=True)` lets a SEARCH compile set via keys while the EXTRACTION prompt still never
+mentions them.
+
+Next for coverage: the curated map covers the large employers; the long tail is best filled by reading the industry
+from the posting body (5,217 open postings say "fintech" outright), which needs model credit and is not done.
