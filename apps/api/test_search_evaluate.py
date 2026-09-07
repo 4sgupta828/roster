@@ -233,3 +233,15 @@ def test_the_group_menu_only_offers_dimensions_that_organise_these_rows():
     assert not eligible([(r["facets"].get("level") or [""])[0] for r in rows]).ok      # one level everywhere → hidden
     assert not eligible([(r["facets"].get("work_mode") or [""])[0] for r in rows]).ok  # 65 % not stated → hidden
     assert eligible([(r["facets"].get("company_industry") or [""])[0] for r in rows]).ok
+
+
+def test_every_jobs_path_carries_its_grouping_menu():
+    """Regression (2026-09-07): the menu was attached at ONE return site, so the résumé path — the one a signed-in
+    seeker takes — lost grouping entirely, including the four dimensions that had always worked."""
+    import inspect
+
+    from api import app as appmod
+    src = inspect.getsource(appmod.create_app)
+    # the route wraps the implementation and fills the menu in for whatever path produced the answer
+    assert 'out["group_options"] = _group_options(out.get("jobs") or [])' in src
+    assert src.index("async def _jobs_impl") > src.index('@app.post("/jobs")')

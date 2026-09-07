@@ -2735,6 +2735,14 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
 
     @app.post("/jobs")
     async def jobs(body: ResearchIn, x_roster_token: str = Header(default="")) -> dict:
+        """Every jobs answer carries its grouping menu, whatever path produced it. The menu was attached at a single
+        return site once, and the résumé path — the one a signed-in seeker takes — silently lost grouping entirely."""
+        out = await _jobs_impl(body, x_roster_token)
+        if isinstance(out, dict) and out.get("jobs") and not out.get("group_options"):
+            out["group_options"] = _group_options(out.get("jobs") or [])
+        return out
+
+    async def _jobs_impl(body: ResearchIn, x_roster_token: str = Header(default="")) -> dict:
         """JOBS MODE (flag ROSTER_JOBS): search open roles aggregated from public ATS boards
         (Greenhouse/Ashby/Lever) — LLM parses the query into company/title-keywords/location, code
         filters `rs_job`, each result carries an apply link. 404 when off."""

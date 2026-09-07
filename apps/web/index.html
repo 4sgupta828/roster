@@ -2974,7 +2974,15 @@ const JOB_GROUP_OF = {
   work_mode:        j => facetOne(j, "work_mode"),
   company_industry: j => facetOne(j, "company_industry"),
 };
-function jobGroupOptions(d){ return (d.group_options || []).filter(o => o.key === "auto" || JOB_GROUP_OF[o.key]); }
+// The server says which dimensions organise THESE rows. If a response predates that (or a path forgets it), fall back to
+// the four that always worked — a missing field must never take the feature away, which is exactly what it once did.
+const JOB_GROUPS_FALLBACK = [{key: "auto", label: "Auto"}, {key: "company", label: "Company"},
+                             {key: "metro", label: "Location"}, {key: "level", label: "Seniority"},
+                             {key: "work_type", label: "IC / manager"}];
+function jobGroupOptions(d){
+  const from = ((d.group_options || []).length ? d.group_options : JOB_GROUPS_FALLBACK);
+  return from.filter(o => o.key === "auto" || JOB_GROUP_OF[o.key]);
+}
 function facetOne(j, key){
   const v = ((j.facets || {})[key] || [])[0];
   return v ? String(v).replace(/_/g, " ") : "";
@@ -3120,7 +3128,7 @@ function jobsMarkup(d){
     let want = ""; try{ want = localStorage.getItem("roster_group_by") || ""; }catch(e){}
     d._groupBy = (want && want !== "auto" && jobGroupOptions(d).some(o => o.key === want)) ? want : "";
   }
-  const groupBar = jobs.length > 5 && jobGroupOptions(d).length > 1 ? jobGroupBarMarkup(d) : "";
+  const groupBar = jobs.length > 5 ? jobGroupBarMarkup(d) : "";
   const body = groups
     ? jobsGroupedMarkup(d, groups, cardOf)
     : `<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">' + esc((d.must && d.must.dropped && !d.must.kept) ? `No role in this search satisfies Must have: ${(d.must.labels||d.must.kinds).join(" · ")} (${d.must.dropped} left out) — drop a toggle above or widen the search.` : (d.note || "No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.")) + '</div>'}</div>`;
