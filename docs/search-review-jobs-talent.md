@@ -44,7 +44,8 @@ This review examined:
 - Eigen's startup search store, router, compiler, and merged search implementation.
 
 The review used source inspection, a code-grounded verification subagent, and local tests. No
-production API or embedding calls were made.
+production data, production API, or production embedding calls were made; external review calls
+were limited to critique of the local document.
 
 ## Severity Model
 
@@ -53,6 +54,9 @@ production API or embedding calls were made.
 - P2: Degrades relevance, consistency, explainability, or maintainability; may become P1 for
   specific users or feature combinations.
 - P3: Local correctness, test, or cleanup issue with limited search impact.
+
+Findings marked P1/P2 are boundary cases: they are P1 when the affected route or flag is active
+for a user, but P2 as a platform-wide issue because another route may still behave correctly.
 
 ## Findings
 
@@ -333,6 +337,12 @@ The compiler should produce a versioned contract with:
 
 The contract is a plan input, not an SQL fragment and not a model-generated final result.
 
+The compiler must be treated as an untrusted parser. A deterministic schema-validation middleware
+must reject or map out-of-vocabulary facets, normalize aliases, enforce allowed scope keys, and
+preserve the original text when a structured interpretation is uncertain. A malformed or
+overconfident contract must degrade to semantic or lexical retrieval with an explicit diagnostic,
+not silently become an empty must-slice.
+
 ### 2. Search context and store protocol
 
 Every store call should receive a context equivalent to:
@@ -386,7 +396,21 @@ The ranking stack should be:
 An LLM judge can remain a bounded head-quality check, but it should not be the only reranker and
 must never override hard constraints or typed evidence.
 
-### 5. Evidence and coverage
+### 5. Execution budgets and failure containment
+
+The five retrieval legs are a recall design, not a requirement that every query fan out without
+limits. The planner should select legs by query class and enforce budgets for:
+
+- Maximum candidates per leg and maximum union size.
+- Per-leg and total latency deadlines.
+- Maximum cross-encoder batch size.
+- Maximum judge rows and model/API spend.
+- Cancellation of slow optional legs after the primary result is viable.
+
+The response should expose which legs completed, timed out, or degraded. This prevents a principled
+multi-leg design from becoming a tail-latency and memory problem at production scale.
+
+### 6. Evidence and coverage
 
 Every result should distinguish:
 
@@ -505,8 +529,9 @@ file/line locations. The external CLI panel was partially unavailable in this en
 
 - Codex CLI could not use the installed gpt-5.5; its fallback gpt-5.6-sol required a newer CLI.
 - Gemini launched but could not read /Users/sgupta/eigen because that path was outside its trusted
-  workspace. It was stopped rather than treated as evidence.
-- Claude was not available as a callable local review path in this environment.
+  workspace during the first repository-wide attempt. A second document-only Gemini pass completed
+  and identified the need for explicit P1/P2 labeling, retrieval budgets, and compiler validation.
+- Claude was installed but not authenticated; its non-interactive review returned `Not logged in`.
 
 The Eigen comparison in this document is therefore based on direct source inspection, not a claimed
 Gemini or Claude endorsement. A future review pass should run Gemini and Claude with both repositories
@@ -525,4 +550,3 @@ query variants, or judges will increase surface area faster than quality.
 The platform becomes SOTA when AI expands and interprets intent while a typed, observable,
 vertical-neutral search core guarantees what may enter the candidate set, how it is ranked, what the
 system knows, and what it is uncertain about.
-
