@@ -63,9 +63,9 @@ READ = {"fields": {"role_family": {"value": "head of ml infrastructure", "span":
 
 
 def test_a_seeker_with_a_resume_gets_a_posture_fork_first_and_the_answer_becomes_the_contract():
-    fork = {"move": "fork", "say": "You've led ML infra for six years, so the real fork is a step up or a lateral move. That changes the level I search at.",
-            "brief_delta": {"direction": {"value": "job", "source": "stated", "span": "my next role"}},
-            "question": {"field": "posture", "text": "Step up, lateral, or a switch?", "why": "it sets the level centre",
+    fork = {"move": "ask", "say": "You've led ML infra for six years, so the real fork is a step up or a lateral move. That changes the level I search at.",
+            "understanding": {"direction": {"value": "job", "source": "stated", "span": "my next role"}}, "preview_verdict": "good", "gaps": [{"field": "posture", "impact": "high"}],
+            "question": {"field": "posture", "text": "Step up, lateral, or a switch?",
                          "options": [{"label": "Step up", "value": "step_up", "effect": {"center": {"key": "level", "value": "leadership"}}},
                                      {"label": "Lateral", "value": "lateral", "effect": {"center": {"key": "level", "value": "staff_plus"}}}]}}
     ready = {"move": "ready", "say": "I'll search leadership ML infra roles in the Bay Area; assuming you're open to remote."}
@@ -78,7 +78,7 @@ def test_a_seeker_with_a_resume_gets_a_posture_fork_first_and_the_answer_becomes
     assert b["role_family"]["source"] == "document" and b["level"]["value"] == "leadership" and b["career_arc"]["source"] == "inferred" and b["authorization"]["source"] == "stored"
     # the planner saw the arc, the leverage and the market; and asked the posture fork with two surviving options
     plan = [u for k, u in pl.prompts if k == "plan"][0]
-    assert "career_arc" in plan and "LEVERAGE" in plan and "REQUIRED BEFORE SEARCH" in plan
+    assert "career_arc" in plan and "LEVERAGE" in plan and "PREVIEW" in plan
     assert out["stage"] == "question" and out["question"]["field"] == "posture" and [o["label"] for o in out["question"]["options"]] == ["Step up", "Lateral"]
     # tap "Step up" → asked; the planner says ready → the contract: document fields filter, the tap's centre applies, user_keys carry the tap
     out2 = _run(s.step(answer={"name": "posture", "value": "step_up"}, state=out["state"], user={"id": "u1"}))
@@ -91,25 +91,26 @@ def test_a_seeker_with_a_resume_gets_a_posture_fork_first_and_the_answer_becomes
 
 
 def test_a_question_on_a_known_field_is_dropped_and_the_fork_gate_drops_dead_options():
-    asks_known = {"move": "fork", "say": "Which domain?", "brief_delta": {"direction": {"value": "job", "source": "stated"}},
+    asks_known = {"move": "ask", "say": "Which domain?", "understanding": {"direction": {"value": "job", "source": "stated"}},
                   "question": {"field": "field", "text": "Which field is your work in?", "options": [{"label": "Software", "effect": {"must": {"field": ["software"]}}}, {"label": "Data", "effect": {"must": {"field": ["data_ml"]}}}]}}
-    dead = {"move": "fork", "say": "Remote or the Bay Area?", "question": {"field": "work_mode", "text": "Remote or the Bay Area?",
+    dead = {"move": "ask", "say": "Remote or the Bay Area?", "question": {"field": "work_mode", "text": "Remote or the Bay Area?",
             "options": [{"label": "Remote", "effect": {"must": {"work_mode": ["remote"]}}}, {"label": "Onsite Bay Area", "effect": {"must": {"metro": ["bay_area"]}}}]}}
     pl = Planner([asks_known, dead, {"move": "ready", "say": "ok"}], read=READ)
     s = _svc(pl, profile={"_resume_text": RESUME}, slice_sizes=lambda kind, must: 0 if "work_mode" in must else 25)
     out = _run(s.step(message="I'm looking for my next role", user={"id": "u1"}))
-    # the question on the résumé's own field is dropped; posture stays open, so the turn re-plans once and asks — the Remote
-    # option has an empty pool and one survivor is no fork, but work_mode is still open, so the question stays, in words
-    assert any("known field 'field'" in n for n in out["notes"]) and any("re-planned" in n for n in out["notes"])
-    assert out["question"] and out["question"]["field"] == "work_mode" and out["question"]["options"] == [] and any("kept as free text" in n for n in out["notes"])
+    # a question on the résumé's own field is dropped — and with nothing askable the search runs with its assumptions
+    assert any("known field 'field'" in n for n in out["notes"]) and out["stage"] == "ready"
+    out2 = _run(s.step(message="hmm, one more thing", state=out["state"], user={"id": "u1"}))
+    # the Remote option has an empty pool and one survivor is no fork, but work_mode is still open, so the question stays, in words
+    assert out2["question"] and out2["question"]["field"] == "work_mode" and out2["question"]["options"] == [] and any("kept as free text" in n for n in out2["notes"])
 
 
 def test_a_hiring_manager_without_a_jd_is_asked_the_mission_first_then_the_draft_builds_from_the_brief():
-    mission = {"move": "fork", "say": "Before a title, what will this person own?", "brief_delta": {"direction": {"value": "candidate", "source": "stated", "span": "I'm hiring"}},
+    mission = {"move": "ask", "say": "Before a title, what will this person own?", "understanding": {"direction": {"value": "candidate", "source": "stated", "span": "I'm hiring"}},
                "question": {"field": "mission", "text": "What will they own, and what fails if you don't hire them?", "options": []}}
-    record = {"move": "confirm", "say": "So: own the ML platform end to end, reporting to you. I'll read that as a leadership hire.",
-              "brief_delta": {"mission": {"value": "own the ML platform end to end", "source": "stated", "span": "own our ML platform end to end"},
-                              "level": {"value": "leadership", "source": "inferred"}, "role_family": {"value": "head of ml platform", "source": "inferred"}, "field": {"value": "data_ml", "source": "inferred"}},
+    record = {"move": "ask", "say": "So: own the ML platform end to end, reporting to you. I'll read that as a leadership hire.",
+              "understanding": {"mission": {"value": "own the ML platform end to end", "source": "stated", "span": "own our ML platform end to end"},
+                                "level": {"value": "leadership", "source": "inferred"}, "role_family": {"value": "head of ml platform", "source": "inferred"}, "field": {"value": "data_ml", "source": "inferred"}},
               "question": {"field": "level", "text": "Leadership hire — right?", "options": [{"label": "Yes", "effect": {"center": {"key": "level", "value": "leadership"}}}, {"label": "No, staff IC", "effect": {"center": {"key": "level", "value": "staff_plus"}}}]}}
     draft = {"move": "draft", "say": "Let me write the JD from that and the market."}
     calls = {"calls": []}
@@ -119,7 +120,7 @@ def test_a_hiring_manager_without_a_jd_is_asked_the_mission_first_then_the_draft
     assert out["stage"] == "question" and out["question"]["field"] == "mission" and out["question"]["options"] == [] and out["artifact"]["status"] == "missing"
     out2 = _run(s.step(message="They'd own our ML platform end to end, reporting to me. If we don't hire, the platform stalls.", state=out["state"], user={"id": "u2"}))
     b = {x["key"]: x for x in out2["brief"]}
-    assert b["mission"]["source"] == "stated" and b["level"]["source"] == "inferred" and out2["question"]["move"] == "confirm"
+    assert b["mission"]["source"] == "stated" and b["level"]["source"] == "inferred" and out2["question"]["field"] == "level"
     out3 = _run(s.step(answer={"name": "level", "value": "Yes"}, state=out2["state"], user={"id": "u2"}))
     assert out3["stage"] == "draft" and out3["jd"]["title"] == "Head of ML Infrastructure" and out3["artifact"]["source"] == "drafted"
     role_text, ctx = calls["calls"][0]
@@ -135,7 +136,7 @@ def test_start_over_and_the_call_budget():
     assert out["stage"] == "restarted" and out["state"]["brief"] == {} and out["state"]["overlay"] == {} and out["state"]["calls"] == 0 and out["brief"] == []
     from roster_vertical.consultant import MAX_PLANNER_CALLS
     spent = dict(st); spent["calls"] = MAX_PLANNER_CALLS
-    pl2 = Planner([{"move": "fork", "say": "one more?", "question": {"field": "comp", "text": "Comp?", "options": [{"label": "a"}, {"label": "b"}]}}])
+    pl2 = Planner([{"move": "ask", "say": "one more?", "question": {"field": "comp", "text": "Comp?", "options": [{"label": "a"}, {"label": "b"}]}}])
     out2 = _run(_svc(pl2).step(message="more", state=spent, user={"id": "u1"}))
     assert out2["stage"] == "ready" and pl2.moves                                                     # no planner call was made; the budget forced the hand-off
 
@@ -157,7 +158,7 @@ def test_the_evidence_gate_keeps_only_document_fields_whose_span_is_in_the_text(
 def test_a_side_read_between_the_lines_is_an_assumption_with_a_switch_and_a_fieldless_question_can_be_skipped():
     """Owner (2026-09-06): 'I am looking for jobs, but it inferred hiring … and was stuck re-asking the same question even though I
     said skip'."""
-    nofield = {"move": "fork", "say": "Before I search, what will this person own?", "question": {"text": "What will this person own in the first six months?", "options": []}}
+    nofield = {"move": "ask", "say": "Before I search, what will this person own?", "gaps": [{"field": "mission", "impact": "high"}], "question": {"text": "What will this person own in the first six months?", "options": []}}
     pl = Planner([nofield, {"move": "ready", "say": "ok"}])
     s = _svc(pl)
     out = _run(s.step(message="jobs for mid level software engineer skilled in java, k8s and aws"))

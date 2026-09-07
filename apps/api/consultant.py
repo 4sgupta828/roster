@@ -18,9 +18,12 @@ TRANSCRIPT_KEEP, TURN_CAP, DOC_CAP = 16, 300, 6000
 class IntakeConsultant:
     def __init__(self, *, schema, llm_json: Callable[[str, str], dict], counts_fn: Callable[[str, dict], Awaitable[dict]],
                  slice_fn: Callable[[str, dict], Awaitable[int | None]] | None = None, profile_fn=None, stored_fn=None, briefs_fn=None,
-                 draft_fn=None, index_aware_fn=None, record_fn=None, jd_fetch_fn=None):
+                 draft_fn=None, index_aware_fn=None, record_fn=None, jd_fetch_fn=None, planner_llm=None, evaluate_fn=None, lines_fn=None):
         self.schema = schema
-        self.llm = llm_json
+        self.llm = llm_json                   # the fast extractor: direction read, document reader
+        self.planner = planner_llm or llm_json   # the BEST reasoning model: the one strategic call per turn
+        self.evaluate_fn = evaluate_fn        # async (contract dict, depth=) → rows (the PREVIEW the planner judges)
+        self.lines_fn = lines_fn              # async (ids) → {id: role line} for people previews
         self.counts_fn = counts_fn
         self.slice_fn = slice_fn
         self.profile_fn = profile_fn          # async (user) → parsed résumé profile ({_resume_text, …}) or None
@@ -98,40 +101,33 @@ class IntakeConsultant:
 
         # 3) steering words the planner must see: nothing special — restart/split are moves; but a bare title list stays ambiguous
 
-        # 4) leverage + market, computed before the planner call
+        # 4) the search as it stands, its preview, the leverage and the market — computed BEFORE the planner call
         direction = self._direction(brief, st)
         kind = V.SEARCH_KIND.get(direction or "job", "job")
         contract, cnotes = self._contract(brief, st, direction or "job")
         lev, pool, market = await self._leverage(contract, kind, brief, direction)
         if getattr(self, "_last_metro_tokens", None):
             st["metro_tokens"] = list(self._last_metro_tokens)
+        preview = await self._preview(contract, kind) if direction else {}
 
-        # 5) the planner (one call), unless the budget is spent or the user asked to search now
+        # 5) the planner (ONE call on the best reasoning model), unless the budget is spent or the user asked to search now
         forced_ready = search_now or int(st.get("calls") or 0) >= V.MAX_PLANNER_CALLS
         if forced_ready:
             move = None
         else:
-            move = await self._plan(brief, st, direction, message, pend, lev, pool, market)
+            move = await self._plan(brief, st, direction, message, pend, lev, pool, market, preview=preview)
             st["calls"] = int(st.get("calls") or 0) + 1
             notes += move.notes
             if move.move == "restart" and not restart and len([t for t in st.get("transcript") or [] if t.get("role") == "user"]) < 2:
                 notes.append("restart on the first turn ignored"); move.move = "infer"
-            # REQUIRED FIRST (code-owned): a statement, or a question on a non-required field, while required fields stay open →
-            # one bounded re-plan that must ask the most impactful open one
-            open_req = readiness(brief, self._required(brief, direction), accept_inferred=True) if direction else []
-            asks_optional = bool(move.question and move.question.field and move.question.field not in open_req and move.move != "confirm")
-            if (not move.ready) and open_req and ((move.move in ("infer", "confirm") and not move.question) or asks_optional) \
-                    and int(st.get("calls") or 0) < V.MAX_PLANNER_CALLS and not st.get("replanned"):
-                st["replanned"] = True
-                b2, _ = apply_brief_delta(brief, move.brief_delta, allowed_fields=V.FIELD_KEYS)
-                open2 = readiness(b2, self._required(b2, direction), accept_inferred=True)
-                if open2:
-                    move2 = await self._plan(b2, st, direction, "", None, lev, pool, market, must_ask=open2[0])
-                    st["calls"] = int(st.get("calls") or 0) + 1
-                    if move2.question:
-                        move2.brief_delta = {**move.brief_delta, **move2.brief_delta}; move = move2; notes.append(f"re-planned to ask {open2[0]!r}")
+            # the question budget: any question counts; past it, the search runs with the assumptions shown
+            if move.question and len(st.get("asked_fields") or []) >= V.MAX_QUESTIONS:
+                notes.append("question budget spent → ready"); move.question = None; move.ready = True
+            if move.question and move.question.field and move.question.field in (st.get("asked_fields") or []):
+                notes.append(f"{move.question.field!r} was already asked → not again"); move.question = None; move.ready = True
+            if move.move == "fork" and not move.question:
+                move.ready = True                                                    # the model wanted to ask but nothing askable remains
         st["pending"] = None
-        st["replanned"] = False
 
         # 6) apply the move
         if move is not None:
@@ -172,12 +168,8 @@ class IntakeConsultant:
                         notes.append(f"fork on {move.question.field!r} kept as free text: {why}"); move.question.options = []
                 else:
                     move.question.options = kept
-            if move.question and move.move in ("fork", "trade_off", "challenge", "confirm"):
-                if int(st.get("forks") or 0) >= V.MAX_FORKS and move.move != "confirm":
-                    notes.append("fork budget spent → ready offered")
-                    move.question = None; move.ready = True
-                else:
-                    st["forks"] = int(st.get("forks") or 0) + (1 if move.move != "confirm" else 0)
+            if move.question:
+                st["asked_fields"] = list(st.get("asked_fields") or []) + ([move.question.field] if move.question.field else [])
             if move.move == "draft" and direction == "candidate" and self.draft_fn is not None:
                 brief, st, say = await self._draft(brief, st, move.say)
                 st["brief"] = brief.to_dict()
@@ -185,9 +177,8 @@ class IntakeConsultant:
                 return self._pack(st, brief, None, say=say, stage="draft", notes=notes, direction=direction)
         st["brief"] = brief.to_dict()
 
-        # 7) ready?
-        missing = readiness(brief, self._required(brief, direction), accept_inferred=True) if direction else ["direction"]
-        wants_ready = forced_ready or (move is not None and move.ready and direction) or (direction and not missing and not (move and move.question))
+        # 7) ready? — the planner judged the preview; code adds the budget and the user's "search now"
+        wants_ready = bool(direction) and (forced_ready or (move is not None and move.ready) or (move is not None and not move.question and move.move in ("infer", "fork")))
         if wants_ready and direction:
             ready = await self._ready(brief, st, direction, say=(move.say if move else "I have enough to search; here is what I'm assuming."))
             st["transcript"].append({"role": "assistant", "text": ready["understood"][:TURN_CAP]})
@@ -214,7 +205,7 @@ class IntakeConsultant:
     # ------------------------------------------------------------------ pieces
     def _fresh(self) -> dict:
         return {"v": 3, "brief": {}, "transcript": [], "pending": None, "artifact": {"kind": None, "status": "none"}, "artifact_text": "",
-                "overlay": {}, "forks": 0, "calls": 0, "docs_read": False, "record_id": hashlib.sha1(f"{time.time()}".encode()).hexdigest()[:12], "opening": ""}
+                "overlay": {}, "forks": 0, "asked_fields": [], "calls": 0, "docs_read": False, "record_id": hashlib.sha1(f"{time.time()}".encode()).hexdigest()[:12], "opening": ""}
 
     def _required(self, brief: Brief, direction: str | None) -> tuple:
         """The required fields for this brief: a remote role / seeker settles the metro."""
@@ -446,7 +437,35 @@ class IntakeConsultant:
             market = {}
         return lev, pool, market
 
-    async def _plan(self, brief: Brief, st: dict, direction: str | None, message: str, pend: dict | None, lev: list, pool, market: dict, must_ask: str | None = None):
+    async def _preview(self, contract: Contract, kind: str) -> dict:
+        """The search as it stands: pool + the top results' role lines — what a consultant looks at before asking anything."""
+        if self.evaluate_fn is None:
+            return {}
+        try:
+            cd = contract.to_dict(); cd["limit"] = 10
+            out = await asyncio.wait_for(self.evaluate_fn(cd, depth={"counts": False}), timeout=12.0)
+        except Exception:   # noqa: BLE001
+            return {}
+        rows = list(out.get("rows") or [])[:8]
+        top = []
+        if kind == "person" and self.lines_fn is not None and rows:
+            try:
+                lines = await asyncio.wait_for(self.lines_fn([str(r.get("id") or r.get("entity_id") or "") for r in rows]), timeout=5.0)
+            except Exception:   # noqa: BLE001
+                lines = {}
+            for r in rows:
+                ln = str(lines.get(str(r.get("id") or r.get("entity_id") or "")) or "").split(" — ")[0].strip()
+                f = r.get("facets") or {}
+                top.append(ln or " / ".join(str((f.get(k) or ["?"])[0]) for k in ("role_family", "level", "field")))
+        else:
+            for r in rows:
+                f = r.get("facets") or {}
+                top.append(f"{r.get('title') or (f.get('role_family') or ['?'])[0]} ({(f.get('level') or ['level ?'])[0]}, {(f.get('metro') or ['place ?'])[0]})")
+        cov = out.get("coverage") or {}
+        return {"pool": cov.get("pool"), "best_match": cov.get("best_match"), "weak": cov.get("weak"), "top": top}
+
+    async def _plan(self, brief: Brief, st: dict, direction: str | None, message: str, pend: dict | None, lev: list, pool, market: dict,
+                    preview: dict | None = None):
         V = self._v()
         d = direction or "job"
         lines = []
@@ -455,36 +474,52 @@ class IntakeConsultant:
             if fl and fl.value not in (None, "", []):
                 lines.append(f"- {f.key} = {fl.value!r} [{fl.source}]" + (f" (from: “{fl.span[:80]}”)" if fl.span else ""))
             elif fl and fl.source == "skipped":
-                lines.append(f"- {f.key}: skipped by the user")
-        req = self._required(brief, direction)
-        open_req = readiness(brief, req, accept_inferred=True)                     # an assumed value is not a gap to ask about
-        user = ("DIRECTION: " + (direction or "UNKNOWN — decide it from the words or ask; a bare title list is ambiguous") + "\n"
+                lines.append(f"- {f.key}: skipped by the user — never ask again")
+        asked = [q for q in (st.get("asked_fields") or [])]
+        pv = preview or {}
+        user = ("DIRECTION: " + d + "\n"
+                + "USER'S WORDS (opening): " + str(st.get("opening") or "")[:400] + "\n"
                 + "BRIEF SO FAR:\n" + ("\n".join(lines) or "(nothing yet)") + "\n"
-                + f"REQUIRED BEFORE SEARCH: {', '.join(req)} — still open: {', '.join(open_req) or 'none'}\n"
-                + f"POOL for the current filters: {pool if pool is not None else 'unknown'}\n"
-                + "LEVERAGE (keys that split the pool; counts): " + ("; ".join(f"{x['key']} → " + ", ".join(f"{v} {n}" for v, n in x["values"]) for x in lev) or "none measured") + "\n"
+                + f"ARTIFACT: {st.get('artifact')}\n" + (f"SAVED JDS: {st.get('saved_jds')}\n" if st.get("saved_jds") else "")
+                + "PREVIEW of the current search: " + (f"pool {pv.get('pool')}" + (f", best match {pv.get('best_match')} %" if pv.get("best_match") is not None else "")
+                                                       + ("; top: " + " · ".join(pv.get("top") or []) if pv.get("top") else "; no rows") if pv else f"pool {pool if pool is not None else 'unknown'}") + "\n"
+                + "LEVERAGE (what splits the pool; counts): " + ("; ".join(f"{x['key']} → " + ", ".join(f"{v} {n}" for v, n in x["values"]) for x in lev) or "none measured") + "\n"
                 + "MARKET (open postings in this domain): " + ("; ".join(f"{k}: " + ", ".join(f"{V.option_label(k, v)} {n}" for v, n in d2.items()) for k, d2 in market.items()) or "n/a") + "\n"
-                + f"ARTIFACT: {st.get('artifact')}\n"
-                + (f"SAVED JDS: {st.get('saved_jds')}\n" if st.get("saved_jds") else "")
-                + f"FORKS ASKED: {st.get('forks', 0)} of {V.MAX_FORKS}\n"
                 + "METRO TOKENS: " + ", ".join(st.get("metro_tokens") or ["new_york", "bay_area", "seattle", "los_angeles", "boston", "chicago", "austin", "london", "bangalore"]) + "\n"
-                + (f"YOU MUST ASK about the open required field {must_ask!r} this turn (a question with 2–3 concrete options or free text).\n" if must_ask else "")
+                + f"QUESTIONS ASKED SO FAR: {len(asked)} of {V.MAX_QUESTIONS} (fields: {', '.join(asked) or 'none'})\n"
                 + "TRANSCRIPT (latest last):\n" + "\n".join(f"{t['role']}: {t['text']}" for t in (st.get("transcript") or [])[-TRANSCRIPT_KEEP:])
                 + (f"\nPENDING QUESTION the user typed an answer to: {pend.get('text')} (field {pend.get('field')})" if (pend and message) else "")
-                + (f"\nLATEST USER MESSAGE: {message}" if message else "\n(no new message — continue)"))
+                + (f"\nLATEST USER MESSAGE: {message}" if message else "\n(no new message — decide from the brief and the preview)"))
         try:
-            raw = await self._model(V.consultant_prompt(d), user[:9000])
+            raw = await asyncio.to_thread(self.planner, V.planner_prompt(d), user[:12000])
         except Exception as e:   # noqa: BLE001
-            raw = {"move": "infer", "say": "Tell me a little more about what you're after.", "_error": str(e)[:80]}
-        move = parse_move(raw, brief=brief, schema=self.schema, allowed_fields=V.FIELD_KEYS)
-        if raw.get("_error"):
-            move.notes.append(f"planner failed: {raw['_error']}")
+            raw = {"move": "ready", "say": "I'll search with what I have.", "_error": str(e)[:80]}
+        move = parse_move(self._adapt(raw), brief=brief, schema=self.schema, allowed_fields=V.FIELD_KEYS)
+        move.notes = [n for n in move.notes] + ([f"planner failed: {raw['_error']}"] if raw.get("_error") else [])
         if move.question and not move.question.field:
-            cand = must_ask or (open_req[0] if open_req else None)                 # the first open required field is what it must be about
+            # a question is always ABOUT a field: the planner's top high-impact gap, else the first open required one
+            gaps = [g.get("field") for g in (raw.get("gaps") or []) if isinstance(g, dict) and g.get("impact") == "high" and g.get("field") in V.FIELD_KEYS]
+            open_req = readiness(brief, self._required(brief, direction), accept_inferred=True) if direction else []
+            cand = (gaps[0] if gaps else None) or (open_req[0] if open_req else None)
             if cand:
-                move.question.field = cand; move.notes.append(f"question resolved to the open field {cand!r}")
-        # direction as a brief field: only from the planner's stated / inferred reading or the user's tap
+                move.question.field = cand; move.notes.append(f"question resolved to the field {cand!r}")
+        if isinstance(raw.get("preview_verdict"), str):
+            move.notes.append("preview: " + raw["preview_verdict"][:100])
+        if isinstance(raw.get("gaps"), list):
+            move.notes.append("gaps: " + ", ".join(f"{g.get('field')}={g.get('impact')}" for g in raw["gaps"] if isinstance(g, dict))[:160])
         return move
+
+    @staticmethod
+    def _adapt(raw: dict) -> dict:
+        """The search-first output → the kernel's move shape: understanding → brief_delta; search → contract_delta; ask → fork."""
+        raw = raw if isinstance(raw, dict) else {}
+        mv = str(raw.get("move") or "").lower()
+        move = {"ask": "fork", "ready": "ready", "draft": "draft", "restart": "restart", "split": "split"}.get(mv, "infer")
+        q = raw.get("question") if move == "fork" else None
+        search = raw.get("search") if isinstance(raw.get("search"), dict) else {}
+        cd = {k: v for k, v in search.items() if k in ("must", "prefer", "avoid", "center")}
+        return {"move": move, "say": raw.get("say") or "", "brief_delta": raw.get("understanding") if isinstance(raw.get("understanding"), dict) else {},
+                "question": q, "contract_delta": cd, "ready": move == "ready", "search_text": search.get("text")}
 
     async def _probe_options(self, kind: str, brief: Brief, st: dict, direction: str, options: list[dict]) -> dict:
         if self.slice_fn is None:

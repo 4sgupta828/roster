@@ -82,8 +82,11 @@ def contract_mapping(direction: str) -> dict:
 
 
 # readiness (spec §4.4): known or explicitly skipped before the search is proposed
-REQUIRED = {"job": ("direction", "posture", "role_family", "level", "metro"),
-            "candidate": ("direction", "mission", "role_family", "level", "metro")}
+# readiness is the PREVIEW, not a checklist (owner, 2026-09-06: "seek clarification only where needed"): the side must be
+# known; a hiring manager building a JD from nothing needs the mission; everything else is asked only when the answer
+# would change the results — the planner judges that against the preview and the leverage
+REQUIRED = {"job": ("direction",), "candidate": ("direction", "mission")}
+MAX_QUESTIONS = 3               # any question counts; "search now" ends it from any turn
 REMOTE_SETTLES = ("metro",)          # a remote role / a remote-only seeker has no metro to ask for
 CONTRACT_KEYS_FOR_EFFECTS = ("field", "function", "specialty", "skill", "role_family", "level", "work_type", "metro", "state", "country", "work_mode",
                              "employment_type", "comp", "company_type", "evidence")
@@ -118,6 +121,40 @@ def direction_prompt() -> str:
             "neither signal is AMBIGUOUS. Return ONLY JSON: {\"direction\": \"job\" | \"candidate\" | null, \"explicit\": true when a signal above "
             "is literally present, false when you are reading between the lines, \"span\": the words that decided it, \"say\": ≤ 1 sentence}. "
             "null only when nothing at all points either way.")
+
+
+def planner_prompt(direction: str) -> str:
+    """SEARCH-FIRST reasoning (the fix for 'a checklist wearing a persona'): the planner maps the words onto the ONE search it
+    would run now, judges the PREVIEW of that search, ranks the open facts by how much an answer would change the results,
+    and asks ONE question only when a high-impact gap remains."""
+    kind = SEARCH_KIND.get(direction, "job")
+    who = "a job seeker" if direction == "job" else "a hiring manager"
+    fields = "\n".join(f"- {f.key}: {f.label} — {f.ask}" for f in fields_for(direction) if f.key != "direction")
+    first = ("a seeker's résumé is read for the career arc; the posture (step up / lateral / switch) is worth ONE question only when the "
+             "words leave it open AND it would change the level you search at" if direction == "job" else
+             "with no JD on file, the mission (what this person owns; what fails unhired) comes before any title or skills list")
+    return (f"You are a senior recruiting consultant working with {who}. Each turn you MAP what they want onto ONE search and ask a question "
+            "ONLY if its answer would change the results materially. Reason in this order and return ONLY JSON with exactly these keys:\n"
+            "1. \"understanding\": {field: {\"value\", \"source\": \"stated\" | \"inferred\", \"span\": their words}} — what the words already fix "
+            "(role, level, domain, skills, specialties, place, mode, posture, mission, comp …). A paraphrase of THEIR words is stated; your reading is inferred. "
+            "Record every fact they state; never lose one.\n"
+            "2. \"search\": the contract you would run NOW: {\"must\": {key: [values]}, \"prefer\": {key: [values]}, \"center\": {\"key\": \"level\", \"value\"}, "
+            "\"text\": the search words}. Musts only for what they stated as a bar; preferences rank.\n"
+            "3. \"preview_verdict\": given the PREVIEW (pool and top results of the current search), \"good\" or \"off: <one line>\".\n"
+            "4. \"gaps\": open facts ranked by how much the answer would CHANGE the results: [{\"field\", \"impact\": \"high\" | \"low\", \"why\": what changes}]. "
+            "A fact the words already fix is not a gap. Company type, comp, timing, deal-breakers are low impact unless the pool is huge or the preview is off.\n"
+            "5. \"move\": \"ready\" when the preview is good and no high-impact gap remains (or they asked to search); \"ask\" for ONE high-impact gap; "
+            "\"draft\" to build the JD (hiring, no JD, mission known); \"restart\" only when they literally ask to start over or switch side; \"split\" for two roles.\n"
+            "6. \"say\": ≤ 2 sentences in a consultant's voice — for ask: the OBSERVATION from the evidence, then why this fork matters; for ready: the search in one "
+            "line and the assumptions you are making (never 'I will now summarize').\n"
+            "7. \"question\": null, or {\"field\": the brief field, \"text\": the fork in one sentence, \"options\": [{\"label\", \"value\", \"effect\": {\"must\" | \"prefer\": "
+            "{key: [values]}, \"center\": {\"key\", \"value\"}}}] (2–3 concrete options, same shape each; [] for free text), \"multi\": bool}. Hypothesis-led: "
+            "propose the default with the market number and ask for variance.\n"
+            f"Rules: {first}. Never ask what the brief already knows; never ask twice; never ask: {', '.join(NEVER_ASK)}. A fully specified ask (role + "
+            "level + skills + place or mode) is searched, not interrogated. Contract keys and vocabularies — "
+            f"{', '.join(CONTRACT_KEYS_FOR_EFFECTS)}; {_vocab(kind)}; open keys (skill, specialty, role_family) take lowercase tokens; metro takes a token from "
+            "METRO TOKENS, never free text; a REMOTE role has no metro (work_mode = remote).\n"
+            f"BRIEF FIELDS for {who}:\n{fields}")
 
 
 def consultant_prompt(direction: str) -> str:

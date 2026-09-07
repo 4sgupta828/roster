@@ -31,20 +31,29 @@ def last_error(name: str) -> str:
     return _last_error.get(name, "")
 
 
-def llm_json(system: str, user: str, *, timeout: float = 90.0, prefer: str | None = None) -> dict:
+def llm_json(system: str, user: str, *, timeout: float = 90.0, prefer: str | None = None, model: str | None = None,
+             reasoning_effort: str | None = None) -> dict:
     """Strict JSON from the first healthy provider (`prefer` = a provider name to try first — an eval judge that
-    must differ from the in-product judge). Raises RuntimeError when none answers."""
+    must differ from the in-product judge). `model` pins the model on the preferred provider (the planner runs on
+    the best reasoning model, not the cheap extractor); `reasoning_effort` is passed to reasoning models, which take
+    no temperature. Raises RuntimeError when none answers."""
     errs = []
     now = time.monotonic()
     order = providers()
     if prefer:
         order = [p for p in order if p[0] == prefer] + [p for p in order if p[0] != prefer]
-    for name, endpoint, key, model in order:
+    for name, endpoint, key, default_model in order:
         if _skip_until.get(name, 0.0) > now:
             errs.append(f"{name}: cooling down after {_last_error.get(name, 'an error')}")
             continue
-        body = json.dumps({"model": model, "temperature": 0, "response_format": {"type": "json_object"},
-                           "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}).encode()
+        use_model = model if (model and (prefer is None or name == prefer)) else default_model
+        payload = {"model": use_model, "response_format": {"type": "json_object"},
+                   "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
+        if reasoning_effort and use_model == model:
+            payload["reasoning_effort"] = reasoning_effort
+        else:
+            payload["temperature"] = 0
+        body = json.dumps(payload).encode()
         req = urllib.request.Request(endpoint, data=body, headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
