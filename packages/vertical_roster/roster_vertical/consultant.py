@@ -136,8 +136,11 @@ def consultant_prompt(direction: str) -> str:
             f"`value` only and NO effect. Vocabularies — {_vocab(kind)}; open keys (skill, specialty, role_family) take lowercase tokens; metro takes a "
             "token from METRO TOKENS given below, never free text. If any REQUIRED field is still open, your move is a question on the most "
             "impactful open one (or `ready` when the user asks to search). "
+            "Every turn, RECORD every fact the user states into brief_delta (comp, skills, must_have_done, work_mode, timing, deal_breakers, team …) — "
+            "nothing the user said may be lost. A free-text question has \"options\": [] (never a placeholder option). "
             "`stated` only for what the user actually wrote; `inferred` for your reading (it ranks, never filters, until confirmed). "
-            "`ready` when the required fields are settled or the user asks to search: summarize the assumptions and trade-offs in `say`. "
+            "`ready` when the required fields are settled or the user asks to search: `say` STATES the search in one line and the assumptions "
+            "you are making (never 'I will now summarize'). "
             "`restart` ONLY when the user literally asks to start over or says they are on the other side after all; `split` when there are two roles. `draft` to build or revise the "
             f"document.\nBRIEF FIELDS for {who}:\n{fields}")
 

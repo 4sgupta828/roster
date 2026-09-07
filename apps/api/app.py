@@ -6455,7 +6455,9 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 att_texts = [t for _n, t in await attachment_texts_async([a.model_dump() for a in body.attachments]) if t]
             except Exception:   # noqa: BLE001
                 att_texts = []
-        return await svc.step(state=body.state, message=body.message or "", answer=body.answer, attachments_text=att_texts, user=user, restart=bool(body.restart),
+        st_in = dict(body.state or {})
+        st_in["scope"] = {"country": (body.country or "us").lower()}
+        return await svc.step(state=(st_in if body.state else None), message=body.message or "", answer=body.answer, attachments_text=att_texts, user=user, restart=bool(body.restart),
                               search_now=bool(body.search_now), direction_tap=(body.direction if body.direction in ("job", "candidate") else None))
 
     @app.post("/search/compile")

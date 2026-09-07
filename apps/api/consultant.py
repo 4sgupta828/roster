@@ -45,6 +45,8 @@ class IntakeConsultant:
                    attachments_text: list[str] | None = None, restart: bool = False, search_now: bool = False, direction_tap: str | None = None) -> dict:
         V = self._v()
         st = self._fresh() if (restart or not state or int((state or {}).get("v") or 0) != 3) else dict(state)
+        if state and state.get("scope"):
+            st["scope"] = dict(state["scope"])
         if restart:
             st["restarted"] = True
         message = (message or "").strip()[:4000]
@@ -140,13 +142,26 @@ class IntakeConsultant:
                 brief, st, dn = await self._read_documents(brief, st, user, attachments_text or [], "")
                 notes += dn
             # a fork must survive the index
+            if move.question and move.question.options:
+                known_metros = set(st.get("metro_tokens") or [])
+                for o in move.question.options:                                     # a metro the index does not know is no option
+                    for mode in ("must", "prefer", "avoid"):
+                        m = (o.get("effect") or {}).get(mode) or {}
+                        if known_metros and isinstance(m.get("metro"), list):
+                            bad = [v for v in m["metro"] if v not in known_metros and v != "remote"]
+                            if bad:
+                                notes.append(f"dropped metro {bad} — not index tokens"); m["metro"] = [v for v in m["metro"] if v not in bad]
+                                if not m["metro"]:
+                                    del m["metro"]
             if move.question and move.question.options and move.move in ("fork", "trade_off", "challenge") and any(o.get("effect") for o in move.question.options):
                 # only a fork whose options reach the CONTRACT is measured; a brief-only fork (direction, posture, mission) is asked as is
                 pools = await self._probe_options(kind, brief, st, direction or "job", move.question.options)
                 kept, worth, why = gate_fork(move.question.options, pools)
                 if not worth and move.question.field:
-                    notes.append(f"fork on {move.question.field!r} not asked: {why}")
-                    move.question = None
+                    if brief.settled(move.question.field):
+                        notes.append(f"fork on {move.question.field!r} not asked: {why}"); move.question = None
+                    else:                                                            # still open: ask it in words, without the dead options
+                        notes.append(f"fork on {move.question.field!r} kept as free text: {why}"); move.question.options = []
                 else:
                     move.question.options = kept
             if move.question and move.move in ("fork", "trade_off", "challenge", "confirm"):
@@ -223,11 +238,34 @@ class IntakeConsultant:
             out["center"] = dict(effect["center"])
         return out
 
+    @staticmethod
+    def _metro_token(value, tokens: list[str] | None):
+        """A place as the index writes it: 'New York' → new_york when that token exists; a token already known stays; else None
+        (the words still ride the search text). Deterministic spelling only — never a meaning guess."""
+        if value in (None, "", []):
+            return None
+        vals = value if isinstance(value, list) else [value]
+        out = []
+        for v in vals:
+            t = str(v).strip().lower().replace("-", " ").replace(",", " ")
+            t = "_".join(t.split())
+            if not tokens or t in tokens or t == "remote":
+                out.append(t)
+        return out or None
+
     def _contract(self, brief: Brief, st: dict, direction: str) -> tuple[Contract, list[str]]:
         V = self._v()
         kind = V.SEARCH_KIND.get(direction, "job")
         text = self._intent_text(brief, st, direction)
-        c, notes = contract_from_brief(brief, V.contract_mapping(direction), self.schema, kind=kind, text=text, scope=dict(st.get("scope") or {}))
+        mapping = dict(V.contract_mapping(direction))
+        m = brief.get("metro")
+        if m is not None and m.value not in (None, "", []) and m.source not in GAP_SOURCES:
+            tok = self._metro_token(m.value, st.get("metro_tokens"))
+            if tok is None:
+                mapping.pop("metro", None)                                          # not a place the index knows: the words carry it
+            else:
+                brief = brief.with_field("metro", tok if len(tok) > 1 else tok[0], m.source, span=m.span, note=m.note)
+        c, notes = contract_from_brief(brief, mapping, self.schema, kind=kind, text=text, scope=dict(st.get("scope") or {}))
         ov = st.get("overlay") or {}
         for mode in ("must", "prefer", "avoid"):
             for key, vals in (ov.get(mode) or {}).items():
@@ -239,6 +277,17 @@ class IntakeConsultant:
             c.center = {"key": str(ov["center"]["key"]), "value": str(ov["center"].get("value")), "span": int(ov["center"].get("span") or 1)}
         for section in (c.must, c.prefer, c.avoid):
             section.pop("company", None)                                            # never the user's own employer / the JD's company
+            vals = section.get("metro")
+            if isinstance(vals, list) and any(str(v).lower() in ("remote", "anywhere", "wfh") for v in vals):
+                section["metro"] = [v for v in vals if str(v).lower() not in ("remote", "anywhere", "wfh")]
+                if not section["metro"]:
+                    del section["metro"]
+                if kind == "job":
+                    c.must.setdefault("work_mode", [])
+                    if "remote" not in c.must["work_mode"]:
+                        c.must["work_mode"].append("remote")
+                elif (st.get("scope") or {}).get("country") and "country" not in c.must:
+                    c.must["country"] = [str(st["scope"]["country"])]              # "remote US" = the country, for people
         return c, notes
 
     def _intent_text(self, brief: Brief, st: dict, direction: str) -> str:

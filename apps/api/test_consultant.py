@@ -92,14 +92,15 @@ def test_a_seeker_with_a_resume_gets_a_posture_fork_first_and_the_answer_becomes
 def test_a_question_on_a_known_field_is_dropped_and_the_fork_gate_drops_dead_options():
     asks_known = {"move": "fork", "say": "Which domain?", "brief_delta": {"direction": {"value": "job", "source": "stated"}},
                   "question": {"field": "field", "text": "Which field is your work in?", "options": [{"label": "Software", "effect": {"must": {"field": ["software"]}}}, {"label": "Data", "effect": {"must": {"field": ["data_ml"]}}}]}}
-    dead = {"move": "fork", "say": "Remote or Bay Area?", "question": {"field": "work_mode", "text": "Remote or the Bay Area?",
-            "options": [{"label": "Remote", "effect": {"must": {"work_mode": ["remote"]}}}, {"label": "Onsite Boise", "effect": {"must": {"metro": ["boise"]}}}]}}
+    dead = {"move": "fork", "say": "Remote or the Bay Area?", "question": {"field": "work_mode", "text": "Remote or the Bay Area?",
+            "options": [{"label": "Remote", "effect": {"must": {"work_mode": ["remote"]}}}, {"label": "Onsite Bay Area", "effect": {"must": {"metro": ["bay_area"]}}}]}}
     pl = Planner([asks_known, dead, {"move": "ready", "say": "ok"}], read=READ)
-    s = _svc(pl, profile={"_resume_text": RESUME}, slice_sizes=lambda kind, must: 0 if "boise" in (must.get("metro") or []) else 25)
+    s = _svc(pl, profile={"_resume_text": RESUME}, slice_sizes=lambda kind, must: 0 if "work_mode" in must else 25)
     out = _run(s.step(message="I'm looking for my next role", user={"id": "u1"}))
     assert out["question"] is None and any("known field 'field'" in n for n in out["notes"])          # never asks what the résumé states
     out2 = _run(s.step(message="anything else?", state=out["state"], user={"id": "u1"}))
-    assert out2["question"] is None and any("not asked" in n and "fewer than two" in n for n in out2["notes"])   # one option had an empty pool
+    # the Remote option has an empty pool; one survivor is no fork — but work_mode is still open, so the question stays, in words
+    assert out2["question"] and out2["question"]["options"] == [] and any("kept as free text" in n for n in out2["notes"])
 
 
 def test_a_hiring_manager_without_a_jd_is_asked_the_mission_first_then_the_draft_builds_from_the_brief():
