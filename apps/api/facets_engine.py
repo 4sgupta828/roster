@@ -135,7 +135,9 @@ _COMPILE_SYS = ("You compile a search brief into a facet CONTRACT. Return STRICT
                 "strong matches), intent (one sentence), place_or_mode (true when the brief names a place as an ALTERNATIVE to remote / hybrid — "
                 "'remote or Seattle', 'hybrid in NYC or fully remote' — the place then goes under prefer, it ranks and never filters), work_mode ('remote' | 'hybrid' | "
                 "'onsite' | null — the mode the brief states, whichever kind is being searched). Use ONLY the keys and vocabularies "
-                "listed; omit what the brief does not say; never invent constraints.")
+                "listed; omit what the brief does not say; never invent constraints. When the brief names the KIND OF EMPLOYER — "
+                "fintech, healthtech, gaming, defense, biotech, developer tools, a bank, an insurer — set `company_industry` to that "
+                "value: it is looked up per company, so it is a real filter, not a word to leave in the text.")
 
 # A must is a promise the index must be able to keep: open-vocabulary keys (free phrases) cannot be promised
 # exactly, so a compiled must on them becomes a prefer — except the employer and named skills, which ARE exact.
