@@ -28,6 +28,12 @@ class Planner:
     def __call__(self, system, user):
         if "You read" in system:
             self.prompts.append(("read", user)); return self.read
+        if "meeting someone new" in system:
+            self.prompts.append(("direction", user))
+            low = user.lower()
+            if "hiring" in low or "hire" in low: return {"move": "infer", "brief_delta": {"direction": {"value": "candidate", "source": "stated"}}}
+            if "looking" in low or "next role" in low or "start over" in low or "more" in low or "anything" in low: return {"move": "infer", "brief_delta": {"direction": {"value": "job", "source": "stated"}}}
+            return {"move": "fork", "say": "Could be either.", "question": {"field": "direction", "text": "Looking, or hiring?", "options": [{"label": "Looking for a role", "value": "job"}, {"label": "Hiring", "value": "candidate"}]}}
         self.prompts.append(("plan", user))
         return self.moves.pop(0) if self.moves else {"move": "ready", "say": "Searching with what I have."}
 

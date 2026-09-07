@@ -42,7 +42,7 @@ class IntakeConsultant:
 
     # ------------------------------------------------------------------ the turn
     async def step(self, *, message: str = "", answer: dict | None = None, state: dict | None = None, user: dict | None = None,
-                   attachments_text: list[str] | None = None, restart: bool = False) -> dict:
+                   attachments_text: list[str] | None = None, restart: bool = False, search_now: bool = False, direction_tap: str | None = None) -> dict:
         V = self._v()
         st = self._fresh() if (restart or not state or int((state or {}).get("v") or 0) != 3) else dict(state)
         if restart:
@@ -62,6 +62,29 @@ class IntakeConsultant:
             # typed instead of tapping: the planner reads it against the pending question (below)
             pass
 
+        if direction_tap in ("job", "candidate"):
+            brief = brief.with_field("direction", direction_tap, "asked")
+        # 1b) the side, settled by a cheap read on the first words (never guessed from a bare title list)
+        if self._direction(brief, st) is None and message and not st.get("direction_read"):
+            st["direction_read"] = True
+            try:
+                r = await self._model(V.direction_prompt(), message[:1500])
+                val = str((((r or {}).get("brief_delta") or {}).get("direction") or {}).get("value") or "").strip().lower()
+                if val in ("job", "candidate"):
+                    brief = brief.with_field("direction", val, "stated", span=message[:120])
+                elif isinstance((r or {}).get("question"), dict):
+                    st["direction_question"] = {"say": str((r or {}).get("say") or ""), "text": str(r["question"].get("text") or "Are you looking for a role, or hiring?")}
+            except Exception as e:   # noqa: BLE001
+                notes.append(f"direction read failed: {str(e)[:60]}")
+            st["calls"] = int(st.get("calls") or 0) + 1
+        if self._direction(brief, st) is None and not answer:
+            # ambiguous words: the only question is the side (a bare title list is either)
+            dq = st.get("direction_question") or {"say": "", "text": "Are you looking for a role for yourself, or hiring for your team?"}
+            q = {"field": "direction", "text": dq["text"], "why": "everything else depends on it", "move": "fork", "multi": False, "free_text": True,
+                 "options": [{"label": "Looking for a role", "value": "job", "effect": {}}, {"label": "Hiring", "value": "candidate", "effect": {}}]}
+            st["pending"] = q; st["brief"] = brief.to_dict()
+            st["transcript"].append({"role": "assistant", "text": (dq["say"] + " " + q["text"]).strip()[:TURN_CAP]})
+            return self._pack(st, brief, q, say=dq["say"] or "Before anything else:", stage="question", notes=notes)
         # 2) documents: read once, before anything is asked
         if not st.get("docs_read"):
             brief, st, dn = await self._read_documents(brief, st, user, attachments_text or [], message)
@@ -74,15 +97,30 @@ class IntakeConsultant:
         kind = V.SEARCH_KIND.get(direction or "job", "job")
         contract, cnotes = self._contract(brief, st, direction or "job")
         lev, pool, market = await self._leverage(contract, kind, brief, direction)
+        if getattr(self, "_last_metro_tokens", None):
+            st["metro_tokens"] = list(self._last_metro_tokens)
 
-        # 5) the planner (one call), unless the budget is spent
-        forced_ready = int(st.get("calls") or 0) >= V.MAX_PLANNER_CALLS
+        # 5) the planner (one call), unless the budget is spent or the user asked to search now
+        forced_ready = search_now or int(st.get("calls") or 0) >= V.MAX_PLANNER_CALLS
         if forced_ready:
             move = None
         else:
             move = await self._plan(brief, st, direction, message, pend, lev, pool, market)
             st["calls"] = int(st.get("calls") or 0) + 1
             notes += move.notes
+            if move.move == "restart" and not restart and len([t for t in st.get("transcript") or [] if t.get("role") == "user"]) < 2:
+                notes.append("restart on the first turn ignored"); move.move = "infer"
+            # a statement while required fields stay open → one bounded re-plan that must ask
+            open_req = readiness(brief, V.REQUIRED.get(direction or "job", ())) if direction else []
+            if move.move in ("infer", "confirm") and not move.question and not move.ready and open_req and int(st.get("calls") or 0) < V.MAX_PLANNER_CALLS and not st.get("replanned"):
+                st["replanned"] = True
+                b2, _ = apply_brief_delta(brief, move.brief_delta, allowed_fields=V.FIELD_KEYS)
+                open2 = readiness(b2, V.REQUIRED.get(direction or "job", ()))
+                if open2:
+                    move2 = await self._plan(b2, st, direction, "", None, lev, pool, market, must_ask=open2[0])
+                    st["calls"] = int(st.get("calls") or 0) + 1
+                    if move2.question:
+                        move2.brief_delta = {**move.brief_delta, **move2.brief_delta}; move = move2; notes.append(f"re-planned to ask {open2[0]!r}")
         st["pending"] = None
 
         # 6) apply the move
@@ -285,6 +323,10 @@ class IntakeConsultant:
         try:
             counts = await self.counts_fn(kind, dict(contract.must))
             pool = pool_from_counts(counts, self.schema, kind)
+            if isinstance(counts.get("metro"), dict):
+                st_tokens = [v for v, _ in sorted(((v, int(n)) for v, n in counts["metro"].items() if v != "unknown"), key=lambda kv: -kv[1])[:16]]
+                if st_tokens:
+                    self._last_metro_tokens = st_tokens
             constrained = set(contract.must) | set(contract.prefer) | ({contract.center["key"]} if contract.center else set())
             lev = leverage(counts, self.schema, exclude=constrained | {"company", "country", "state", "posted"})
         except Exception:   # noqa: BLE001
@@ -298,7 +340,7 @@ class IntakeConsultant:
             market = {}
         return lev, pool, market
 
-    async def _plan(self, brief: Brief, st: dict, direction: str | None, message: str, pend: dict | None, lev: list, pool, market: dict):
+    async def _plan(self, brief: Brief, st: dict, direction: str | None, message: str, pend: dict | None, lev: list, pool, market: dict, must_ask: str | None = None):
         V = self._v()
         d = direction or "job"
         lines = []
@@ -319,6 +361,8 @@ class IntakeConsultant:
                 + f"ARTIFACT: {st.get('artifact')}\n"
                 + (f"SAVED JDS: {st.get('saved_jds')}\n" if st.get("saved_jds") else "")
                 + f"FORKS ASKED: {st.get('forks', 0)} of {V.MAX_FORKS}\n"
+                + "METRO TOKENS: " + ", ".join(st.get("metro_tokens") or ["new_york", "bay_area", "seattle", "los_angeles", "boston", "chicago", "austin", "london", "bangalore"]) + "\n"
+                + (f"YOU MUST ASK about the open required field {must_ask!r} this turn (a question with 2–3 concrete options or free text).\n" if must_ask else "")
                 + "TRANSCRIPT (latest last):\n" + "\n".join(f"{t['role']}: {t['text']}" for t in (st.get("transcript") or [])[-TRANSCRIPT_KEEP:])
                 + (f"\nPENDING QUESTION the user typed an answer to: {pend.get('text')} (field {pend.get('field')})" if (pend and message) else "")
                 + (f"\nLATEST USER MESSAGE: {message}" if message else "\n(no new message — continue)"))

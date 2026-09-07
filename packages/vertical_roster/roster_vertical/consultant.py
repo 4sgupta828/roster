@@ -82,8 +82,10 @@ def contract_mapping(direction: str) -> dict:
 
 
 # readiness (spec §4.4): known or explicitly skipped before the search is proposed
-REQUIRED = {"job": ("direction", "role_family", "level", "metro", "deal_breakers"),
-            "candidate": ("direction", "mission", "role_family", "level", "metro", "deal_breakers")}
+REQUIRED = {"job": ("direction", "role_family", "level", "metro"),
+            "candidate": ("direction", "mission", "role_family", "level", "metro")}
+CONTRACT_KEYS_FOR_EFFECTS = ("field", "function", "specialty", "skill", "role_family", "level", "work_type", "metro", "state", "country", "work_mode",
+                             "employment_type", "comp", "company_type", "evidence")
 MAX_FORKS = 4                  # forks per intake before `ready` is offered anyway
 MAX_PLANNER_CALLS = 8
 NEVER_ASK = ("current salary", "age", "gender", "race", "religion", "nationality", "family plans", "health", "years of experience as a number",
@@ -97,6 +99,16 @@ def option_label(key: str, value: str) -> str:
 
 def _vocab(kind: str) -> str:
     return "; ".join(f"{k.key}: {', '.join(k.values)}" for k in FACET_SCHEMA.for_kind(kind) if k.values)
+
+
+def direction_prompt() -> str:
+    """The first read when the words leave the side open: settle it or ask it — nothing else."""
+    return ("You are a recruiting consultant meeting someone new. Decide from their words whether they are LOOKING for a role for themselves "
+            "(direction \"job\") or HIRING people (direction \"candidate\"). Signals for looking: I'm looking, my next role, my résumé, roles for me. "
+            "Signals for hiring: hire, hiring, we need, our team, candidates, a JD. A bare list of titles or skills is AMBIGUOUS — ask. Return ONLY JSON: "
+            "{\"move\": \"infer\" | \"fork\", \"say\": ≤ 2 sentences, \"brief_delta\": {\"direction\": {\"value\": \"job\" | \"candidate\", \"source\": \"stated\", \"span\": their words}} "
+            "when clear, or \"question\": {\"field\": \"direction\", \"text\": ..., \"options\": [{\"label\": \"Looking for a role\", \"value\": \"job\"}, "
+            "{\"label\": \"Hiring\", \"value\": \"candidate\"}]} when ambiguous. Never guess.")
 
 
 def consultant_prompt(direction: str) -> str:
@@ -118,11 +130,15 @@ def consultant_prompt(direction: str) -> str:
             "\"question\": null | {\"field\": the brief field it resolves, \"text\", \"why\": why it matters for the search, "
             "\"options\": [{\"label\", \"value\", \"effect\": {\"must\" | \"prefer\" | \"avoid\": {key: [values]}, \"center\": {\"key\", \"value\"}}}], \"multi\": bool}, "
             "\"contract_delta\": same effect shape, \"ready\": bool}. ONE question at most; its options MUST come from the LEVERAGE given "
-            "(measured splits of the current pool) or be a confirm / posture / mission question; an option's effect uses ONLY these keys and "
-            f"vocabularies — {_vocab(kind)}; open keys (skill, specialty, role_family, metro) take lowercase tokens. "
+            "(measured splits of the current pool) or be a confirm / posture / mission question. An option's `effect` is a SEARCH effect and uses ONLY "
+            f"these contract keys: {', '.join(CONTRACT_KEYS_FOR_EFFECTS)} — never a brief field name; every option of one question uses the SAME shape "
+            "(all `center` on level, or all `must` on one key). A brief-only question (direction, posture, mission, deal_breakers, timing …) carries "
+            f"`value` only and NO effect. Vocabularies — {_vocab(kind)}; open keys (skill, specialty, role_family) take lowercase tokens; metro takes a "
+            "token from METRO TOKENS given below, never free text. If any REQUIRED field is still open, your move is a question on the most "
+            "impactful open one (or `ready` when the user asks to search). "
             "`stated` only for what the user actually wrote; `inferred` for your reading (it ranks, never filters, until confirmed). "
             "`ready` when the required fields are settled or the user asks to search: summarize the assumptions and trade-offs in `say`. "
-            "`restart` when the user wants to start over or changes side; `split` when there are two roles. `draft` to build or revise the "
+            "`restart` ONLY when the user literally asks to start over or says they are on the other side after all; `split` when there are two roles. `draft` to build or revise the "
             f"document.\nBRIEF FIELDS for {who}:\n{fields}")
 
 
@@ -135,7 +151,8 @@ def document_reader_prompt(kind: str, direction: str) -> str:
            if kind == "resume" else "Also write `mission` from the responsibilities if the text states what the person owns. ")
     return (f"You read {what} into a recruiting brief. Return ONLY JSON: {{\"fields\": {{field: {{\"value\": short, \"span\": the exact sentence or "
             f"phrase it comes from}}}}}}. Only fields the text STATES; never invent; keep values under 12 words; for level use the title's own words. "
-            f"{arc}Fields:\n{fields}\nVocabulary hints — {_vocab(SEARCH_KIND.get(direction, 'job'))}.")
+            f"{arc}Fields:\n{fields}\nVocabulary hints — {_vocab(SEARCH_KIND.get(direction, 'job'))}; for metro write the index token "
+            "(new_york, bay_area, seattle, los_angeles, boston, chicago, austin, london, bangalore, remote) when the place is one of them.")
 
 
 def jd_assemble_prompt() -> str:

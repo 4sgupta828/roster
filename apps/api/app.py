@@ -6455,12 +6455,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 att_texts = [t for _n, t in await attachment_texts_async([a.model_dump() for a in body.attachments]) if t]
             except Exception:   # noqa: BLE001
                 att_texts = []
-        message = body.message or ""
-        if body.direction in ("job", "candidate") and not message:
-            message = "I'm looking for a role" if body.direction == "job" else "I'm hiring"
-        if body.search_now and not message:
-            message = "Search now with what you have."
-        return await svc.step(state=body.state, message=message, answer=body.answer, attachments_text=att_texts, user=user, restart=bool(body.restart))
+        return await svc.step(state=body.state, message=body.message or "", answer=body.answer, attachments_text=att_texts, user=user, restart=bool(body.restart),
+                              search_now=bool(body.search_now), direction_tap=(body.direction if body.direction in ("job", "candidate") else None))
 
     @app.post("/search/compile")
     async def search_compile(body: CompileIn) -> dict:
