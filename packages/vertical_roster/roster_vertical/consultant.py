@@ -211,7 +211,9 @@ def document_reader_prompt(kind: str, direction: str) -> str:
         return (f"You read {what} into a recruiting brief. Return ONLY JSON: {{\"fields\": {{field: {{\"value\": short, \"span\": the exact words "
                 "it comes from, copied verbatim}}}}}}. Read what they ASK FOR, not what they are: 'jobs for a mid level software engineer "
                 "skilled in java and k8s' states role_family software engineer, level mid, skills java / kubernetes, field software. Only what "
-                "the words state; never invent; values under 12 words; use the vocabulary tokens where one fits.\n"
+                "the words state; never invent; values under 12 words; use the vocabulary tokens where one fits. NEVER echo a field's own name "
+                "or label as its value, and never emit a field the words do not mention — omit it. Set fields (skills, specialties) are JSON "
+                "LISTS of single tokens, never one comma-joined string.\n"
                 f"Fields:\n{fields}\nVocabulary — {_vocab(SEARCH_KIND.get(direction, 'job'))}; metro tokens: new_york, bay_area, seattle, "
                 "los_angeles, boston, chicago, austin, london, bangalore; skills / specialties / role_family are lowercase free tokens.")
     arc = ("Also write `career_arc`: two sentences on tenure, trajectory and domain (e.g. 'six years in ML infrastructure, from senior engineer to "

@@ -218,13 +218,17 @@ def test_the_users_own_ask_is_read_into_the_brief_so_the_search_has_facets_witho
                            "level": {"value": "mid", "span": "mid level"},
                            "skills": {"value": ["java", "kubernetes"], "span": "java ecosystems and k8s"},
                            "field": {"value": "software", "span": "software engineer"},
-                           "comp": {"value": "300k_plus", "span": "not in these words"}}}      # no span → dropped
+                           "comp": {"value": "300k_plus", "span": "not in these words"},        # no span → dropped
+                           "metro": {"value": "Place", "span": "jobs for mid level"},           # the field's own label → dropped
+                           "specialties": {"value": "large scale systems, distributed", "span": "building large scale systems"}}}
     pl = Planner([{"move": "ready", "say": "Searching."}], ask_read=ask_read)
     s = _svc(pl)
     out = _run(s.step(message=ASK))                                   # the side is ambiguous → asked; the words are kept
     out = _run(s.step(direction_tap="job", state=out["state"]))       # …and read as soon as the side is known
     b = {x["key"]: x for x in out["brief"]}
-    assert b["role_family"]["source"] == "stated" and b["level"]["value"] == "mid" and "comp" not in b
+    assert b["role_family"]["source"] == "stated" and b["level"]["value"] == "mid" and "comp" not in b and "metro" not in b
+    assert b["specialties"]["value"] == ["large scale systems", "distributed"]          # one comma-joined string is a list
     c = (out.get("ready") or {}).get("contract") or {}
     assert c["center"] == {"key": "level", "value": "mid", "span": 1} and c["prefer"]["skill"] == ["java", "kubernetes"] and c["must"]["field"] == ["software"]
+    assert c["prefer"]["specialty"] == ["distributed", "large scale systems"] and "metro" not in c["must"]
     assert c["text"].startswith("jobs for mid")

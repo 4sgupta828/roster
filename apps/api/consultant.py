@@ -296,6 +296,9 @@ class IntakeConsultant:
             tok = self._metro_token(m.value, st.get("metro_tokens"))
             if tok is None:
                 mapping.pop("metro", None)                                          # not a place the index knows: the words carry it
+            elif not st.get("metro_tokens") and mapping.get("metro", ("", ""))[1] == "must":
+                mapping["metro"] = ("metro", "prefer")                              # unverified against the index: it ranks, never filters
+                brief = brief.with_field("metro", tok if len(tok) > 1 else tok[0], m.source, span=m.span, note=m.note)
             else:
                 brief = brief.with_field("metro", tok if len(tok) > 1 else tok[0], m.source, span=m.span, note=m.note)
         c, notes = contract_from_brief(brief, mapping, self.schema, kind=kind, text=text, scope=dict(st.get("scope") or {}))
@@ -417,6 +420,17 @@ class IntakeConsultant:
                 dropped.append(f"{fld} (a {kind} cannot state it)"); continue
             if brief.known(fld):
                 continue
+            val = raw.get("value")
+            # a reader that echoes the FIELD'S OWN NAME is stating nothing ("metro": "Place", "career_arc": "Career arc")
+            f_def = V.FIELDS_BY_KEY.get(fld)
+            if isinstance(val, str) and f_def and self._squash(val) in (self._squash(f_def.label), self._squash(fld.replace("_", " "))):
+                dropped.append(f"{fld} (echoed the field name)"); continue
+            # a set-typed key given as one comma-joined string is a list ("java, k8, aws" is three skills, not one)
+            if f_def and f_def.contract and isinstance(val, str) and "," in val:
+                k = self.schema.key(f_def.contract[0])
+                if k is not None and k.type.value == "set":
+                    val = [t.strip() for t in val.split(",") if t.strip()]
+            raw = {**raw, "value": val}
             span = str(raw.get("span") or "")[:240]
             if fld == "career_arc":
                 brief = brief.with_field(fld, raw.get("value"), "inferred", span=span); continue
