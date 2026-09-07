@@ -1921,6 +1921,21 @@ async def _gap_processor_loop(dsn: str, vertical: str) -> None:
             await q.fail(job["id"], str(e))
 
 
+def thin_repeats(rows: list, *, per_title: int = 2) -> list:
+    """At most `per_title` rows with the same company AND title. A staffing aggregator (jobgether reposts other
+    companies' roles: 4.5k open postings, the largest single "employer" in the corpus) otherwise fills a whole page with
+    one title; the rest of the page is what the user came for. Order is untouched."""
+    seen: dict = {}
+    out = []
+    for r in rows or []:
+        k = (str((r or {}).get("company") or "").strip().lower(), str((r or {}).get("title") or "").strip().lower())
+        if k != ("", "") and seen.get(k, 0) >= per_title:
+            continue
+        seen[k] = seen.get(k, 0) + 1
+        out.append(r)
+    return out
+
+
 def create_app(service: ResearchService | None = None) -> FastAPI:
     app = FastAPI(title="Roster Research", version="0")
     app.state.service = service   # lazily built on first request if None
@@ -2931,7 +2946,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         _out = await _run_contract({**_c.to_dict(), "user_keys": [k for k in ("work_mode", "company_type", "level") if body.job_must]}, "job", relax=True)
                         _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display")},
                                   "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in _out["rows"]]
-                        _rows = _with_employer(_rows)
+                        _rows = _with_employer(thin_repeats(_rows))
                         stats = await store.jobs_stats()
                         sid = await _save_job_session(_rows, {"title_keywords": _pq.get("title_keywords") or [], "company": [], "location": _pq.get("location") or ""})
                         bc = job_brief_contract(question=body.question or "", plan={"variants": _c.angles, "intent": ""}, job_must=body.job_must, scope=None,
@@ -2993,7 +3008,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             _out["timings"] = {**(_out.get("timings") or {}), **(_plain_t if not body.contract else {})}
             _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display", "fit", "fit_why", "found_by")},
                       "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in _out["rows"]]
-            _rows = _with_employer(_rows)
+            _rows = _with_employer(thin_repeats(_rows))
             stats = await store.jobs_stats()
             sid = await _save_job_session(_rows, {"title_keywords": [], "company": [], "location": ""})
             bc = job_brief_contract(question=body.question or "", plan={"variants": _c.angles, "intent": ""}, job_must=body.job_must, scope=None,

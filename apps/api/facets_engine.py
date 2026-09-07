@@ -137,7 +137,8 @@ _COMPILE_SYS = ("You compile a search brief into a facet CONTRACT. Return STRICT
                 "'onsite' | null — the mode the brief states, whichever kind is being searched). Use ONLY the keys and vocabularies "
                 "listed; omit what the brief does not say; never invent constraints. When the brief names the KIND OF EMPLOYER — "
                 "fintech, healthtech, gaming, defense, biotech, developer tools, a bank, an insurer — set `company_industry` to that "
-                "value: it is looked up per company, so it is a real filter, not a word to leave in the text.")
+                "value, and put it in MUST when the brief asks for that kind of company ('at healthtech companies', 'fintech "
+                "roles', 'in gaming'): it is looked up per employer, so it is a real filter, not a word to leave in the text.")
 
 # A must is a promise the index must be able to keep: open-vocabulary keys (free phrases) cannot be promised
 # exactly, so a compiled must on them becomes a prefer — except the employer and named skills, which ARE exact.

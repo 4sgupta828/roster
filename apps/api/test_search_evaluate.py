@@ -172,3 +172,15 @@ def test_ensure_schema_takes_no_lock_when_the_database_is_already_migrated():
     store = FacetSQLStore(getter, FACET_SCHEMA)
     asyncio.new_event_loop().run_until_complete(store.ensure_schema())
     assert ran == [] and store._ready                       # nothing missing → no DDL, no lock
+
+
+def test_one_aggregator_cannot_fill_the_page_with_the_same_posting():
+    """jobgether reposts other companies' roles — 4.5k open postings, the largest single 'employer' in the corpus — and
+    returned the same title ten times in a row (prod, 2026-09-07)."""
+    from api.app import thin_repeats
+    rows = ([{"company": "jobgether", "title": "Backend Engineer, Core APIs", "id": i} for i in range(9)]
+            + [{"company": "acme", "title": "Backend Engineer", "id": 100}]
+            + [{"company": "Jobgether", "title": "backend engineer, core apis", "id": 200}])      # same, differently cased
+    out = thin_repeats(rows)
+    assert [r["id"] for r in out] == [0, 1, 100] and thin_repeats(rows, per_title=1)[0]["id"] == 0
+    assert thin_repeats([]) == [] and len(thin_repeats([{"company": "", "title": ""}] * 5)) == 5   # unnamed rows are never merged
