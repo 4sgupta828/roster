@@ -20,6 +20,15 @@ WORK_TYPES = ("ic", "manager", "executive", "founder", "academic")
 WORK_MODES = ("remote", "hybrid", "onsite")
 EMPLOYMENT_TYPES = ("full_time", "part_time", "contract", "internship")
 COMPANY_TYPES = ("fortune500", "public", "big_tech", "startup", "other")
+# WHAT THE EMPLOYER DOES (owner, 2026-09-07: "why are fintech jobs not captured?"). Read off the COMPANY entity, never
+# extracted from a posting or a profile — the same via-key mechanism as company_type / company_stage.
+INDUSTRIES = ("fintech", "financial_services", "insurance", "crypto", "healthtech", "biotech_pharma", "healthcare_services", "medical_devices",
+              "ecommerce", "marketplace", "retail_consumer", "food_beverage", "travel_hospitality", "enterprise_software",
+              "developer_tools", "data_infrastructure", "ai", "security", "social_media", "gaming", "media_entertainment",
+              "edtech", "hr_recruiting", "legal_tech", "real_estate_proptech", "logistics_supply_chain", "transportation",
+              "automotive", "aerospace_defense", "semiconductors", "hardware_devices", "telecom", "energy_climate",
+              "industrial_manufacturing", "construction", "agriculture", "government_public", "education", "nonprofit",
+              "professional_services", "staffing", "other")
 COMPANY_STAGES = ("pre_seed", "seed", "series_a", "series_b", "series_c_plus", "public")
 EVIDENCE_KINDS = ("repos", "papers", "blog_posts", "talks", "patents")
 
@@ -69,6 +78,9 @@ FACET_SCHEMA = FacetSchema(keys=(
              guidance="(lookup data on the company — never inferred from a posting or profile)"),
     FacetKey(key="company_stage", type=FacetType.ordinal, kinds=PJ, label="Company stage", values=COMPANY_STAGES, via="company",
              guidance="(from the company's own stage facet)"),
+    FacetKey(key="company_industry", type=FacetType.categorical, kinds=PJ, label="Industry", values=INDUSTRIES, via="company",
+             guidance="what the EMPLOYER does — fintech, healthtech, developer tools … (lookup data on the company, never "
+                      "inferred from a posting or a profile; a payments engineer at a bank is financial_services, not fintech)"),
     # ---- the company entity's own keys ----
     FacetKey(key="type", type=FacetType.categorical, kinds=("company",), label="Type", values=COMPANY_TYPES,
              guidance="from curated, dated sets (Fortune 500, public, big tech) and accelerator / stage records; else other"),
@@ -76,12 +88,26 @@ FACET_SCHEMA = FacetSchema(keys=(
              guidance="the funding stage a registry, accelerator record or filing states"),
 ))
 
+# EXTRACTION COMPATIBILITY (2026-09-07). `FacetSchema.version()` hashes every key, so adding a VIA key — one that is read
+# off a related entity and never extracted from a text — changes the stamp even though nothing about extraction changed.
+# The corpus passes re-read a row only when its stamp is not in this set, so a stamp listed here is still trusted.
+# ADD a stamp here only when the change genuinely leaves extracted values valid; a vocabulary or guidance change to an
+# EXTRACTED key must NOT be listed — those rows have to be read again.
+#   77c3be380247 — the schema before `company_industry` (a via key) was added.
+COMPATIBLE_EXTRACTION_VERSIONS = ("77c3be380247",)
+
+
+def extraction_is_current(stamp: str | None) -> bool:
+    """True when a stored `schema_version` stamp still describes a valid extraction."""
+    return bool(stamp) and (stamp == FACET_SCHEMA.version() or stamp in COMPATIBLE_EXTRACTION_VERSIONS)
+
+
 # Ranking weights (the small table of judgment the evaluator applies). Prefer / avoid per hit; the centre
 # penalty per ordinal step beyond the span. Values mirror the bonuses the surfaces used before unification.
 FACET_WEIGHTS = FacetWeights(
-    prefer={"field": 0.25, "work_type": 0.20, "function": 0.15, "metro": 0.15, "state": 0.15, "country": 0.10, "work_mode": 0.15, "company_type": 0.12, "company": 0.15,
+    prefer={"field": 0.25, "work_type": 0.20, "function": 0.15, "metro": 0.15, "state": 0.15, "country": 0.10, "work_mode": 0.15, "company_type": 0.12, "company": 0.15, "company_industry": 0.22,
             "skill": 0.06, "role_family": 0.10, "specialty": 0.08, "evidence": 0.10, "level": 0.12},
-    avoid={"field": 0.30, "function": 0.15, "level": 0.10, "metro": 0.10, "work_mode": 0.10, "company": 0.15, "company_type": 0.10},
+    avoid={"field": 0.30, "function": 0.15, "level": 0.10, "metro": 0.10, "work_mode": 0.10, "company": 0.15, "company_type": 0.10, "company_industry": 0.25},
     default_prefer=0.10, default_avoid=0.10, center_per_step=0.06, max_hits_per_key=3)
 
 SCHEMA_VERSION = FACET_SCHEMA.version()

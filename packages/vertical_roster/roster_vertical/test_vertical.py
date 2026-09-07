@@ -26,8 +26,10 @@ def test_manifest_conforms_through_p4():
     assert report.ok, report.summary()
 
 
-def test_manifest_name_is_tech():
-    assert build_manifest().name == "tech"
+def test_manifest_name_is_roster():
+    """Inherited from the eigen fork as `tech`; the vertical is `roster` (CLAUDE.md: no inherited naming, the entry
+    point and ROSTER_ACTIVE_VERTICAL are both `roster`). The assertion was stale, not the manifest."""
+    assert build_manifest().name == "roster"
 
 
 def _search(src, emb, q, k=8):

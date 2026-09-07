@@ -337,6 +337,14 @@ def embed_batch(texts: list[str]) -> list[str | None]:
         return [None] * len(texts)
 
 
+def _accepted_versions() -> list[str]:
+    """Stamps whose extractions are still valid: the current schema plus the compatible predecessors
+    (`roster_vertical.facet_schema`). Adding a VIA key changes the hash without invalidating a single
+    extracted row — without this, one such change would re-read the whole corpus."""
+    from roster_vertical.facet_schema import COMPATIBLE_EXTRACTION_VERSIONS, FACET_SCHEMA
+    return [FACET_SCHEMA.version(), *COMPATIBLE_EXTRACTION_VERSIONS]
+
+
 async def ensure_checkpoint(conn) -> None:
     await conn.execute(
         """CREATE TABLE IF NOT EXISTS rs_ingest_checkpoint (
@@ -574,8 +582,8 @@ async def backfill_facets(conn, limit: int, *, live: bool, batch_size: int = 20)
     ver = FACET_SCHEMA.version()
     rows = await conn.fetch("""SELECT id, title, company, department, location, skills, updated_at,
                                       left(body, 400) AS head, right(body, 600) AS tail, length(body) AS blen
-                               FROM rs_job WHERE closed_at IS NULL AND (facets IS NULL OR facets->>'schema_version' IS DISTINCT FROM $2)
-                               ORDER BY updated_at DESC LIMIT $1""", int(limit), ver)
+                               FROM rs_job WHERE closed_at IS NULL AND (facets IS NULL OR NOT (facets->>'schema_version' = ANY($2::text[])))
+                               ORDER BY updated_at DESC LIMIT $1""", int(limit), _accepted_versions())
     st = {"rows": len(rows), "written": 0, "calls": 0, "failed_batches": 0, "schema_version": ver}
     if not live:
         return st

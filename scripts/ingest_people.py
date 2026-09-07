@@ -219,6 +219,14 @@ def _facet_rows(fac: dict, profile: dict) -> list[tuple[str, str, str]]:
     return rows
 
 
+def _accepted_versions() -> list[str]:
+    """Stamps whose extractions are still valid: the current schema plus the compatible predecessors
+    (`roster_vertical.facet_schema`). Adding a VIA key changes the hash without invalidating a single
+    extracted row — without this, one such change would re-read the whole corpus."""
+    from roster_vertical.facet_schema import COMPATIBLE_EXTRACTION_VERSIONS, FACET_SCHEMA
+    return [FACET_SCHEMA.version(), *COMPATIBLE_EXTRACTION_VERSIONS]
+
+
 async def ensure_checkpoint(conn) -> None:
     await conn.execute(
         """CREATE TABLE IF NOT EXISTS rs_ingest_checkpoint (
@@ -283,8 +291,8 @@ async def backfill_person_facets(conn, limit: int, *, live: bool, batch_size: in
                                         WHERE f.entity_id = e.entity_id AND f.facet_key IN ('title','company','metro','country','role','function','skill')) AS legacy,   -- never the old extractor's 'seniority' (its 'mid' was a default, and the model echoed it)
                                       EXISTS (SELECT 1 FROM rs_map m, jsonb_array_elements(m.rows) r WHERE r->>'entity_id' = e.entity_id) AS on_map
                                FROM rs_entity e WHERE e.kind = 'person' AND e.status = 'active'
-                                 AND (e.facet_env IS NULL OR e.facet_env->>'schema_version' IS DISTINCT FROM $2)
-                               ORDER BY on_map DESC, e.retrieved_at DESC NULLS LAST LIMIT $1""", int(limit), ver)
+                                 AND (e.facet_env IS NULL OR NOT (e.facet_env->>'schema_version' = ANY($2::text[])))
+                               ORDER BY on_map DESC, e.retrieved_at DESC NULLS LAST LIMIT $1""", int(limit), _accepted_versions())
     st = {"rows": len(rows), "written": 0, "calls": 0, "failed_batches": 0, "schema_version": ver}
     if not live:
         return st

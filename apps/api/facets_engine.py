@@ -148,7 +148,9 @@ def compile_contract(kind: str, text: str, schema: FacetSchema, llm_json, *, lim
     the model's side readings (`place_or_mode`, `intent`) for the index-aware step."""
     c = Contract(kind=kind, text=(text or "").strip(), limit=limit, scope=dict(scope or {}))
     try:
-        out = llm_json(_COMPILE_SYS + "\n\nKEYS:\n" + schema.to_prompt_block(kind), json.dumps({"brief": text}))
+        # the compile may set VIA keys (company_type, company_industry): they are searchable dimensions read off the
+        # employer, even though nothing extracts them from a posting or a profile
+        out = llm_json(_COMPILE_SYS + "\n\nKEYS:\n" + schema.to_prompt_block(kind, include_via=True), json.dumps({"brief": text}))
     except Exception:   # noqa: BLE001
         return c
     if isinstance(extras, dict):

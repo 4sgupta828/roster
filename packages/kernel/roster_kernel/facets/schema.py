@@ -160,10 +160,12 @@ class FacetSchema:
         return hashlib.sha1(json.dumps(canon, sort_keys=True).encode()).hexdigest()[:12]
 
     # ---- prompt rendering (structure only; the words are the vertical's) ----
-    def to_prompt_block(self, kind: str) -> str:
+    def to_prompt_block(self, kind: str, *, include_via: bool = False) -> str:
+        """The keys a model is told about. VIA keys are read off a related entity and are never extracted from this
+        text, so an EXTRACTION prompt omits them — but a SEARCH compile may set them, so it asks for them."""
         lines = []
         for k in self.for_kind(kind):
-            if k.via:
+            if k.via and not include_via:
                 continue                         # read off the related entity, never extracted from this text
             if k.type is FacetType.ordinal:
                 vocab = " < ".join(k.values)
