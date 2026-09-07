@@ -124,7 +124,7 @@ def run(base: str, pc: dict) -> dict:
             pass
     return {"id": pc["id"], "ok": not F, "failures": F, "user_turns": user_turns, "calls": calls, "secs": secs, "total_secs": round(time.time() - t0, 1),
             "questions": [(q.get("move"), q.get("field"), q.get("text"), [o["label"] for o in q.get("options") or []]) for q in qs],
-            "says": [t.get("say") for t in turns], "brief": last.get("brief"), "contract": c, "throwaway": email}
+            "says": [t.get("say") for t in turns], "notes": [t.get("notes") for t in turns], "brief": last.get("brief"), "contract": c, "throwaway": email}
 
 
 def main():

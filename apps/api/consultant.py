@@ -112,9 +112,12 @@ class IntakeConsultant:
             notes += move.notes
             if move.move == "restart" and not restart and len([t for t in st.get("transcript") or [] if t.get("role") == "user"]) < 2:
                 notes.append("restart on the first turn ignored"); move.move = "infer"
-            # a statement while required fields stay open → one bounded re-plan that must ask
+            # REQUIRED FIRST (code-owned): a statement, or a question on a non-required field, while required fields stay open →
+            # one bounded re-plan that must ask the most impactful open one
             open_req = readiness(brief, self._required(brief, direction)) if direction else []
-            if move.move in ("infer", "confirm") and not move.question and not move.ready and open_req and int(st.get("calls") or 0) < V.MAX_PLANNER_CALLS and not st.get("replanned"):
+            asks_optional = bool(move.question and move.question.field and move.question.field not in open_req and move.move != "confirm")
+            if (not move.ready) and open_req and ((move.move in ("infer", "confirm") and not move.question) or asks_optional) \
+                    and int(st.get("calls") or 0) < V.MAX_PLANNER_CALLS and not st.get("replanned"):
                 st["replanned"] = True
                 b2, _ = apply_brief_delta(brief, move.brief_delta, allowed_fields=V.FIELD_KEYS)
                 open2 = readiness(b2, self._required(b2, direction))
@@ -124,6 +127,7 @@ class IntakeConsultant:
                     if move2.question:
                         move2.brief_delta = {**move.brief_delta, **move2.brief_delta}; move = move2; notes.append(f"re-planned to ask {open2[0]!r}")
         st["pending"] = None
+        st["replanned"] = False
 
         # 6) apply the move
         if move is not None:
