@@ -382,18 +382,34 @@ class IntakeConsultant:
         st["docs_read"] = True
         if not text:
             st["artifact"] = {"kind": ("jd" if direction == "candidate" else "resume"), "status": "missing"}
+            # NO DOCUMENT, BUT THEY TOLD US WHAT THEY WANT: their own words are read into the brief the same way, so the
+            # facets that make a search work do not depend on the planner noticing them
+            ask = str(st.get("opening") or "").strip()
+            if len(ask) >= 25 and not st.get("ask_read"):
+                st["ask_read"] = True
+                brief, an = await self._read_text_into_brief(brief, ask, kind="ask", direction=direction, source="stated")
+                notes += an
             return brief, st, notes
         st["artifact"] = {"kind": kind, "status": "present", "source": source, "chars": len(text)}
         st["artifact_text"] = text[:DOC_CAP]
+        brief, an = await self._read_text_into_brief(brief, text[:DOC_CAP], kind=kind, direction=(direction or ("candidate" if kind == "jd" else "job")), source="document")
+        return brief, st, notes + an
+
+    async def _read_text_into_brief(self, brief: Brief, text: str, *, kind: str, direction: str, source: str) -> tuple[Brief, list[str]]:
+        """Text → brief fields, with the EVIDENCE GATE: a field lives only if its span is really in the text and only if
+        that kind of text can state it. Used for a résumé / JD / profile (source `document`) and for the user's own ask."""
+        V = self._v()
+        notes: list[str] = []
         try:
-            read = await self._model(V.document_reader_prompt(kind, direction or ("candidate" if kind == "jd" else "job")), text[:DOC_CAP])
+            read = await self._model(V.document_reader_prompt(kind, direction), text[:DOC_CAP])
         except Exception as e:   # noqa: BLE001
-            notes.append(f"document read failed: {str(e)[:80]}"); return brief, st, notes
+            return brief, [f"{kind} read failed: {str(e)[:80]}"]
         # EVIDENCE GATE (spec §4; Codex): a document field lives only if its span is really in the text — the reader once
         # produced 26 "document" facts (comp, work mode, risk appetite …) from a five-line résumé that stated none of them
         hay = self._squash(text)
         dropped = []
         allowed_doc = set(V.DOCUMENT_FIELDS.get(kind, ())) | {"career_arc"}
+        st = {}
         for fld, raw in ((read or {}).get("fields") or {}).items():
             if fld not in V.FIELD_KEYS or not isinstance(raw, dict) or raw.get("value") in (None, "", []):
                 continue
@@ -406,10 +422,10 @@ class IntakeConsultant:
                 brief = brief.with_field(fld, raw.get("value"), "inferred", span=span); continue
             if not span or not self._span_in(span, hay):
                 dropped.append(fld); continue
-            brief = brief.with_field(fld, raw.get("value"), "document", span=span)
+            brief = brief.with_field(fld, raw.get("value"), source, span=span)
         if dropped:
-            notes.append("reader claims without a span in the text dropped: " + ", ".join(dropped[:8]))
-        return brief, st, notes
+            notes.append(f"{kind}: claims without a span in the text dropped: " + ", ".join(dropped[:8]))
+        return brief, notes
 
     @classmethod
     def _span_in(cls, span: str, hay: str) -> bool:

@@ -303,6 +303,13 @@ def test_a_text_search_whose_semantic_leg_is_unavailable_falls_back_to_the_filte
     run = lambda c: asyncio.new_event_loop().run_until_complete(c)
     out = run(evaluate(Contract(kind="e", text="anything", must={"k1": ["a"]}), NoEmbed(rows, sch), sch))
     assert len(out["rows"]) == 10 and out["coverage"]["degraded"] == "semantic_unavailable" and out["coverage"]["legs"]["enumerate"] == 10
+    # the preferences still shape the degraded pool: their own slices join it, so the right rows can rank first
+    seen = []
+    class Spy(NoEmbed):
+        async def enumerate(self, kind, must, *, cap=400):
+            seen.append(dict(must)); return await super().enumerate(kind, must, cap=cap)
+    out_p = run(evaluate(Contract(kind="e", text="anything", prefer={"k1": ["b"]}), Spy(rows, sch), sch))
+    assert seen == [{}, {"k1": ["b"]}] and out_p["coverage"]["legs"]["prefer"] == 10 and out_p["rows"][0]["facets"]["k1"] == ["b"]
     # a must that genuinely matches nothing still returns nothing — and is not called degraded
     only_b = [r for r in rows if r["facets"]["k1"] == ["b"]]
     out2 = run(evaluate(Contract(kind="e", text="anything", must={"k1": ["a"]}), NoEmbed(only_b, sch), sch))

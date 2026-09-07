@@ -41,6 +41,7 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
     if errs:
         raise ValueError("; ".join(errs))
     must = contract.must or {}
+    import asyncio as _aio
     import time as _time
     _t = {"start": _time.monotonic()}
     # 1) POOL — every leg is asked with the musts; the union keeps the best similarity per id
@@ -61,7 +62,6 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
                 pool[rid] = dict(r)
 
     if contract.text:
-        import asyncio as _aio
         jobs = [("semantic", store.semantic(contract.kind, contract.text, must, cap=cap))]
         for a in (contract.angles or [])[:3]:
             jobs.append(("angles", store.semantic(contract.kind, str(a), must, cap=cap // 2)))
@@ -91,7 +91,15 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
         # A SEARCH NEVER RETURNS NOTHING WHILE THE INDEX HOLDS MATCHING ROWS (prod 2026-09-07: the embedding provider
         # ran out of credit, every semantic leg came back empty and every text search silently answered zero). The
         # filters still answer; the caller is told the ranking is degraded so the surface can say so.
-        _take(await store.enumerate(contract.kind, must, cap=cap), "enumerate")
+        # every PREFERRED value gets its own slice too, so the filters can still put the right rows in front (without
+        # this the pool is an arbitrary page of the index and a Java/Kubernetes ask returns delivery drivers)
+        legs_to_run = [store.enumerate(contract.kind, must, cap=cap)]
+        pref_keys = [(k, v) for k, v in (contract.prefer or {}).items() if isinstance(v, list) and v and k not in must and schema.key(k) is not None]
+        for key, vals in pref_keys[:4]:
+            legs_to_run.append(store.enumerate(contract.kind, {**must, key: list(vals)}, cap=max(cap // 3, 60)))
+        for i, res in enumerate(await _aio.gather(*legs_to_run, return_exceptions=True)):
+            if not isinstance(res, Exception):
+                _take(res, "enumerate" if i == 0 else "prefer")
         if pool:
             degraded = "semantic_unavailable"
     _t["legs"] = round(_time.monotonic() - _t["start"], 2)

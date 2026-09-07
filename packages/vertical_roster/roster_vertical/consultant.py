@@ -98,6 +98,9 @@ CONTRACT_KEYS_FOR_EFFECTS = ("field", "function", "specialty", "skill", "role_fa
 DOCUMENT_FIELDS = {
     "resume": ("role_family", "field", "function", "specialties", "skills", "level", "work_type", "metro", "authorization", "positioning", "career_arc"),
     "profile": ("metro", "authorization", "timing", "role_family", "level", "field"),
+    # the user's OWN WORDS about what they want: everything they can state in a sentence (never a posture they did not name)
+    "ask": ("role_family", "field", "function", "specialties", "skills", "level", "work_type", "metro", "work_mode", "employment_type",
+            "comp", "company_type", "mission", "must_have_done", "timing", "deal_breakers", "evidence", "team", "hiring_reason"),
     "jd": ("mission", "success", "must_have_done", "trainable", "team", "evidence", "disqualifiers", "role_family", "field", "function", "specialties",
            "skills", "level", "work_type", "metro", "work_mode", "comp", "company_type", "employment_type", "timing"),
 }
@@ -201,8 +204,16 @@ def consultant_prompt(direction: str) -> str:
 
 def document_reader_prompt(kind: str, direction: str) -> str:
     """Reads a résumé / JD / profile INTO the brief: value + the exact span it came from; nothing inferred beyond the words."""
-    what = {"resume": "a résumé or self-description", "jd": "a job description or a hiring manager's role notes", "profile": "a stored profile record"}.get(kind, "a document")
+    what = {"resume": "a résumé or self-description", "jd": "a job description or a hiring manager's role notes", "profile": "a stored profile record",
+            "ask": "the person's OWN WORDS about the search they want"}.get(kind, "a document")
     fields = "\n".join(f"- {f.key}: {f.label}" for f in fields_for(direction) if f.key != "direction")
+    if kind == "ask":
+        return (f"You read {what} into a recruiting brief. Return ONLY JSON: {{\"fields\": {{field: {{\"value\": short, \"span\": the exact words "
+                "it comes from, copied verbatim}}}}}}. Read what they ASK FOR, not what they are: 'jobs for a mid level software engineer "
+                "skilled in java and k8s' states role_family software engineer, level mid, skills java / kubernetes, field software. Only what "
+                "the words state; never invent; values under 12 words; use the vocabulary tokens where one fits.\n"
+                f"Fields:\n{fields}\nVocabulary — {_vocab(SEARCH_KIND.get(direction, 'job'))}; metro tokens: new_york, bay_area, seattle, "
+                "los_angeles, boston, chicago, austin, london, bangalore; skills / specialties / role_family are lowercase free tokens.")
     arc = ("Also write `career_arc`: two sentences on tenure, trajectory and domain (e.g. 'six years in ML infrastructure, from senior engineer to "
            "head of a 12-person team; fintech throughout') — this is the one field you may compose; mark it source inferred. "
            if kind == "resume" else "Also write `mission` from the responsibilities if the text states what the person owns. ")

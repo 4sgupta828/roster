@@ -23,11 +23,14 @@ def _run(c):
 
 class Planner:
     """Scripted planner: `moves` are consumed in order for consultant calls; the reader prompt gets `read`."""
-    def __init__(self, moves, read=None):
-        self.moves = list(moves); self.read = read or {"fields": {}}; self.prompts = []
+    def __init__(self, moves, read=None, ask_read=None):
+        self.moves = list(moves); self.read = read or {"fields": {}}; self.ask_read = ask_read or {"fields": {}}; self.prompts = []
     def __call__(self, system, user):
         if "You read" in system:
-            self.prompts.append(("read", user)); return self.read
+            self.prompts.append(("read", user))
+            if "OWN WORDS about the search" in system:
+                return self.ask_read
+            return self.read
         if "meeting someone new" in system:
             self.prompts.append(("direction", user))
             low = user.lower()
@@ -205,3 +208,23 @@ def test_the_open_question_is_asked_once_never_in_a_loop():
     assert out["stage"] == "question" and out["question"]["field"] == "role_family"
     out2 = _run(s.step(message="not sure yet", state=out["state"]))
     assert out2["stage"] == "ready" and not out2.get("question")                        # asked once; then it searches with the words
+
+
+def test_the_users_own_ask_is_read_into_the_brief_so_the_search_has_facets_without_the_planner():
+    """The owner's search returned delivery drivers for a Java / Kubernetes ask: the facts were in his sentence, but nothing
+    read them, so the contract was empty."""
+    ASK = "jobs for mid level software engineer skilled in building large scale systems using java ecosystems and k8s"
+    ask_read = {"fields": {"role_family": {"value": "software engineer", "span": "software engineer"},
+                           "level": {"value": "mid", "span": "mid level"},
+                           "skills": {"value": ["java", "kubernetes"], "span": "java ecosystems and k8s"},
+                           "field": {"value": "software", "span": "software engineer"},
+                           "comp": {"value": "300k_plus", "span": "not in these words"}}}      # no span → dropped
+    pl = Planner([{"move": "ready", "say": "Searching."}], ask_read=ask_read)
+    s = _svc(pl)
+    out = _run(s.step(message=ASK))                                   # the side is ambiguous → asked; the words are kept
+    out = _run(s.step(direction_tap="job", state=out["state"]))       # …and read as soon as the side is known
+    b = {x["key"]: x for x in out["brief"]}
+    assert b["role_family"]["source"] == "stated" and b["level"]["value"] == "mid" and "comp" not in b
+    c = (out.get("ready") or {}).get("contract") or {}
+    assert c["center"] == {"key": "level", "value": "mid", "span": 1} and c["prefer"]["skill"] == ["java", "kubernetes"] and c["must"]["field"] == ["software"]
+    assert c["text"].startswith("jobs for mid")
