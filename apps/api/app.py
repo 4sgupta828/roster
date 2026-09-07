@@ -6451,7 +6451,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             the cheap extractor keeps the direction read and the document reader."""
             from api.model_json import llm_json
             return llm_json(system, user_msg, timeout=90, prefer="openai", model=os.environ.get("ROSTER_PLANNER_MODEL", "gpt-5.4"),
-                            reasoning_effort=os.environ.get("ROSTER_PLANNER_EFFORT", "medium"))
+                            reasoning_effort=os.environ.get("ROSTER_PLANNER_EFFORT", "low"))     # low: ~10 s a turn; medium was 30–50 s
         svc = getattr(app.state, "consultant_service", None) or IntakeConsultant(
             schema=_facet_schema(), llm_json=getattr(app.state, "intake_llm", None) or _llm_json, counts_fn=counts_fn, slice_fn=slice_fn,
             profile_fn=profile_fn, stored_fn=stored_fn, briefs_fn=_briefs_fn_for(acc), draft_fn=_draft_fn(compile_fn), index_aware_fn=_index_aware,

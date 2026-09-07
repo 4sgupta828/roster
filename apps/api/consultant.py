@@ -131,6 +131,12 @@ class IntakeConsultant:
 
         # 6) apply the move
         if move is not None:
+            # the SIDE is structural: only job | candidate, and once stated / tapped only a tap or a restart changes it
+            dd = move.brief_delta.get("direction")
+            if isinstance(dd, dict):
+                if str(dd.get("value") or "").lower() not in ("job", "candidate") or brief.source("direction") in ("stated", "asked"):
+                    move.brief_delta = {k: v for k, v in move.brief_delta.items() if k != "direction"}
+                    notes.append("planner's direction change ignored (only a tap or a restart switches the side)")
             brief, an = apply_brief_delta(brief, move.brief_delta, allowed_fields=V.FIELD_KEYS)
             notes += an
             if move.contract_delta:
