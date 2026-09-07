@@ -9426,7 +9426,7 @@ function jobMapBarMarkup(d){
     const nAct = (m.feedback||[]).filter(f => ((f.tags||[]).length || f.state === "shortlist" || f.state === "not relevant") && (!since || String(f.updated_at||"") > since)).length;
     const revise = (m.is_owner && nAct) ? `<button type="button" class="mb-btn" id="reviseBtn" onclick="reviseMapPreview()">↻ Revise from feedback (${nAct} new)</button>`
       : (m.is_owner && revN ? `<span class="mb-meta" style="flex-basis:auto;">no new feedback since revision ${revN}</span>` : "");
-    return `<div class="mapbar">${title}${share}<a class="mb-btn" href="${csvHref}" target="_blank" rel="noopener">⬇ Export CSV</a>${revise}${cadenceMarkup(m)}
+    return `<div class="mapbar">${title}${share}<a class="mb-btn" href="${csvHref}" target="_blank" rel="noopener">⬇ Export CSV</a>${fork}${revise}${cadenceMarkup(m)}
       <span class="mb-meta">Saved Job Map${revN?` · revision ${revN}`:""} · ${m.n_rows||0} roles · ${m.is_owner?"you own this map — 👍 / 👎 roles, then revise; notes persist here":"shared read-only view"}${m.created_at?` · saved ${esc(String(m.created_at).slice(0,10))}`:""}</span>
       ${revisionsMarkup(m)}
       <div id="reviseBox" hidden></div>
