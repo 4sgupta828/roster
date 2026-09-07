@@ -71,7 +71,7 @@ usefully each splits this result set — guidance without the UI changing under 
 |---|---|---|
 | **Company** *(shipped)* | row | compare employers; spot one company hiring ten of these |
 | **Industry** | `company_industry` | "healthcare vs fintech vs defence" — the owner's first example |
-| **Discipline** *(new, §4)* | derived | "infra vs applications vs ML vs integrations" — the owner's second |
+| **Auto** *(new, §4)* | the model, per result set | "what kinds of role are in here?" — infra vs applied ML vs integrations, discovered rather than declared |
 | **Seniority** *(shipped)* | `level` | is this market senior-heavy or junior-heavy |
 | **Location** *(shipped)* | `metro` → `state` | where these roles actually are |
 | **Work mode** | `work_mode` | remote / hybrid / onsite, when the set knows it |
@@ -80,7 +80,44 @@ usefully each splits this result set — guidance without the UI changing under 
 Refused outright: raw skill, raw specialty, raw role_family (thousands of groups), comp (3.7 % coverage), posted (one
 value), and employment_type as a standing option.
 
-## 4. DISCIPLINE — the dimension the panel split on
+## 4. AUTO — let the result set segment itself (owner, 2026-09-07: "what if we simply clustered the results into most
+meaningful groups with some guidance for those groups to be aligned to how job seekers want to segment the space")
+
+This replaces the curated per-function taxonomy of §4b. It was prototyped on real prod result sets before being chosen,
+and the prototypes settled the argument:
+
+**Attempt 1 — group by the most common shared token.** Collapsed: 78 of 79 rows for "machine learning engineer jobs"
+share the token *learning*. The most common token IS the query; it explains nothing.
+
+**Attempt 2 — score tokens by how well they SPLIT the set** (drop anything above 60 % of rows, prefer a healthy minority
+and the more specific phrase). Good on sales — Sales Development · Account Management · Enterprise · Commercial ·
+Business Development, which is how a seeker actually cuts that market. Poor on engineering: "backend engineer jobs" came
+back as five synonyms of itself (Backend Software Engineering, Backend Systems Engineering, Backend API Engineering,
+Senior Backend Engineering, Backend Development), because tokens cannot see that those are one thing.
+
+**Attempt 3 — the model segments the set, code enforces the shape.** One call over the returned rows' titles and their
+specialty / skill tokens, with the guidance that a seeker segments by the WORK they would own, never by employer,
+seniority, location or a word nearly every row shares. On the same query: Backend Engineering · Infrastructure &
+Platforms · AI and Data · Full Stack and Web · Automation and CI. On sales: Account Executive · Sales Development ·
+Sales Representative · Account Management · Sales Management · Business Development. **2.2–2.6 s, ≈ $0.001 per grouped
+search.** This is the design.
+
+Code owns the shape, the model owns the meaning:
+- single membership (the first group claiming a row keeps it), 3–7 groups, unknown ids dropped,
+- a row in no group falls into "Everything else", shown last,
+- the largest group may not exceed 60 % of rows — the prototype hit 49 of 78 on a broad sales search, so a dominant
+  bucket is re-asked once ("split the biggest group by what they sell / what they build"), then accepted or shown as is,
+- the segmentation is cached per result set, so paging and expanding never re-call the model,
+- **free fallback**: when the model is unavailable (a dead provider took search down once already this week), attempt 2's
+  token split runs instead — deterministic, zero cost, and honest about being coarser.
+
+Why this beats the curated taxonomy: nothing to maintain, no "Other" swamp, and it adapts to a corpus whose largest
+specialty is truck driving. It also adapts to the QUERY — a narrow ML search gets ML-shaped groups, a broad one gets
+market-shaped groups — which no fixed vocabulary can do.
+
+Cost discipline: the call happens only when the user groups by Auto, once per result set. Facet groupings stay free.
+
+## 4b. DISCIPLINE — the curated taxonomy the panel split on (NOT the plan; kept for the record)
 
 The owner's ask is precisely the split that `function` cannot give: 69,376 postings are `function = engineering`, and a
 seeker choosing between platform work and applied ML learns nothing from that. Gemini's objection is empirical and
@@ -124,11 +161,12 @@ it is measurable — the assignment rate on real result sets is the number that 
 
 ## 6. Delivery
 
-1. **Phase 1 (no new taxonomy):** per-result eligibility + usefulness ordering, Industry and Work mode added to the menu,
-   remembered choice, "Not stated" last. Small, and it improves the three dimensions already shipped.
-2. **Phase 2 (Discipline):** the curated map for engineering and sales first, measured on real result sets, shipped only
-   where it clears the gate; then clinical and transport, which the corpus demands.
-3. **Phase 3:** per-group actions (save the group, "more like this group") — only once grouping is proven.
+1. **Phase 1 (free, no model):** per-result eligibility + usefulness ordering, Industry and Work mode added to the menu
+   (Industry is already in the payload), remembered choice, "Not stated" last.
+2. **Phase 2 (Auto, §4):** the model-led segmentation with the code gates and the token fallback. One endpoint, one menu
+   entry, cached per result set.
+3. **Phase 3:** per-group actions (save the group, "more like this") — only once grouping is proven.
+The curated per-function taxonomy (§4b) is shelved: Auto delivers the same thing without a vocabulary to maintain.
 
 ## 7. Panel verdicts
 
