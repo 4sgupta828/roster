@@ -14,9 +14,13 @@ import json
 import re
 from urllib.parse import urlsplit
 
-_ATS_HOSTS = ("ashbyhq.com", "lever.co", "greenhouse.io", "careerpuck.com", "smartrecruiters.com", "myworkdayjobs.com",
-              "workable.com", "recruitee.com", "jobvite.com", "bamboohr.com", "teamtailor.com", "pinpointhq.com",
-              "rippling.com", "eightfold.ai", "icims.com", "ashbyprd.com", "greenhouse-cdn.com")
+# the ATS VENDORS themselves — their product sites as well as their board hosts. Greenhouse's board pages link to
+# greenhouse.com in the footer, and without it every Greenhouse employer was given the vendor's site as its own.
+_ATS_HOSTS = ("ashbyhq.com", "ashby.hq", "ashbyprd.com", "lever.co", "greenhouse.io", "greenhouse.com", "greenhouse-cdn.com",
+              "careerpuck.com", "smartrecruiters.com", "myworkdayjobs.com", "workday.com", "workable.com", "recruitee.com",
+              "jobvite.com", "bamboohr.com", "teamtailor.com", "pinpointhq.com", "rippling.com", "eightfold.ai", "icims.com",
+              "jazzhr.com", "breezy.hr", "polymer.co", "gem.com", "paylocity.com", "adp.com", "ukg.com", "successfactors.com",
+              "taleo.net", "oraclecloud.com", "brassring.com", "avature.net", "phenompeople.com", "jobs.net")
 _JUNK_HOSTS = ("linkedin.com", "twitter.com", "x.com", "facebook.com", "instagram.com", "youtube.com", "github.com",
                "glassdoor.com", "medium.com", "w3.org", "schema.org", "google.com", "apple.com", "gstatic.com",
                "cloudflare.com", "googleapis.com", "cookiebot.com", "onetrust.com", "indeed.com", "crunchbase.com")

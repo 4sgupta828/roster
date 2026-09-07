@@ -683,6 +683,19 @@
   .frail-recipe{font:inherit;font-size:.72rem;min-height:34px;padding:.2rem .55rem;border:1px solid var(--hair);border-radius:999px;background:var(--panel);color:var(--ink);cursor:pointer;}
   .frail-recipe.off{opacity:.55;text-decoration:line-through;}
   .frail-recipe .frail-note{color:var(--muted);}
+  .jgroup-bar{display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;margin:.5rem 0 .6rem;font-size:.76rem;}
+  .jgroup-k{color:var(--muted);font-family:var(--mono);font-size:.68rem;letter-spacing:.05em;text-transform:uppercase;margin-right:.15rem;}
+  .jgroup-opt{font:inherit;font-size:.76rem;min-height:34px;padding:.2rem .7rem;border:1px solid var(--hair);border-radius:999px;background:var(--panel);color:var(--ink);cursor:pointer;}
+  .jgroup-opt.on{border-color:var(--gold);color:var(--gold);font-weight:600;}
+  .jgroup{border:1px solid var(--hair);border-radius:10px;margin-bottom:.45rem;background:var(--card,rgba(127,127,127,.02));}
+  .jgroup.open{border-color:rgba(var(--gold-rgb),.5);}
+  .jgroup-head{width:100%;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;text-align:left;font:inherit;min-height:44px;padding:.5rem .75rem;background:none;border:0;color:inherit;cursor:pointer;}
+  .jgroup-caret{color:var(--muted);width:1rem;}
+  .jgroup-name{font-weight:600;}
+  .jgroup-n{color:var(--muted);font-size:.78rem;}
+  .jgroup-best{margin-left:auto;color:var(--gold);font-size:.74rem;font-weight:600;}
+  .jgroup-body{padding:0 .55rem .6rem;}
+  @media (max-width:560px){ .jgroup-best{margin-left:0;} }
   .job-alljobs{font-size:.72rem;color:var(--muted);text-decoration:none;border:1px solid var(--hair);border-radius:999px;padding:.02rem .4rem;white-space:nowrap;}
   .job-alljobs:hover{border-color:var(--gold);color:var(--gold);}
   .job-co{color:inherit;text-decoration:none;border-bottom:1px solid var(--hair);}
@@ -2944,6 +2957,53 @@ function hopToQA(){
   setSearchMode("qa");
   if(question) askQuestion(question, {skipRefine:true});
 }
+// GROUP THE WHOLE RESULT SET (owner, 2026-09-07): many roles share a company, a place, a level or a track, and a flat
+// list of 80 is hard to walk. Grouping runs over EVERY row the search returned (not the page), the groups are ranked by
+// how relevant their best role is, and they arrive collapsed so the page stays short.
+const JOB_GROUPS = [
+  {id: "company",  label: "Company",   of: j => (j.company || "").replace(/_/g, " ").trim()},
+  {id: "location", label: "Location",  of: j => (j.location || "").trim() || facetOne(j, "metro")},
+  {id: "level",    label: "Seniority", of: j => facetOne(j, "level")},
+  {id: "track",    label: "IC / manager", of: j => facetOne(j, "work_type")},
+];
+function facetOne(j, key){
+  const v = ((j.facets || {})[key] || [])[0];
+  return v ? String(v).replace(/_/g, " ") : "";
+}
+function groupJobs(jobs, mode){
+  const spec = JOB_GROUPS.find(g => g.id === mode);
+  if(!spec) return null;
+  const by = new Map();
+  (jobs || []).forEach((j, i) => {
+    const raw = (spec.of(j) || "").trim();
+    const key = raw ? raw.toLowerCase() : "\u0000none";
+    let g = by.get(key);
+    if(!g){ g = {key, label: raw || "Not stated", rows: [], best: 0, first: i, stated: !!raw}; by.set(key, g); }
+    g.rows.push(j);
+    g.best = Math.max(g.best, Number(j.match_pct) || 0);
+    g.first = Math.min(g.first, i);
+  });
+  // ranked by the best role in the group, then by how many, then by where the best one sat in the flat list
+  return [...by.values()].sort((a, b) => (b.stated - a.stated) || (b.best - a.best) || (b.rows.length - a.rows.length) || (a.first - b.first));
+}
+function jobGroupBarMarkup(d){
+  const opts = [{id: "", label: "Ungrouped"}, ...JOB_GROUPS].map(o =>
+    `<button type="button" class="jgroup-opt${(d._groupBy || "") === o.id ? " on" : ""}" data-jpid="${esc(d._jpid)}" data-group="${esc(o.id)}">${esc(o.label)}</button>`).join("");
+  return `<div class="jgroup-bar"><span class="jgroup-k">Group by</span>${opts}</div>`;
+}
+function jobsGroupedMarkup(d, groups, cardOf){
+  const open = d._openGroups || {};
+  return groups.map(g => {
+    const isOpen = !!open[g.key];
+    const best = g.best ? `<span class="jgroup-best">best ${g.best}%</span>` : "";
+    return `<div class="jgroup${isOpen ? " open" : ""}">
+      <button type="button" class="jgroup-head" data-jpid="${esc(d._jpid)}" data-key="${esc(g.key)}" aria-expanded="${isOpen}">
+        <span class="jgroup-caret">${isOpen ? "▾" : "▸"}</span>
+        <span class="jgroup-name">${esc(g.label)}</span>
+        <span class="jgroup-n">${g.rows.length} role${g.rows.length === 1 ? "" : "s"}</span>${best}</button>
+      ${isOpen ? `<div class="ppl-grid jgroup-body">${g.rows.map(cardOf).join("")}</div>` : ""}</div>`;
+  }).join("");
+}
 function jobsMarkup(d){
   if(d.redirect_to_qa){
     return `<div class="ppl-wrap"><div class="ppl-cov">${esc(d.note||"That reads like a question — ask it in Q&A.")}</div>
@@ -2960,7 +3020,7 @@ function jobsMarkup(d){
   const jfrom = jpage * JPAGE + 1, jto = jpage * JPAGE + pagedJobs.length;
   const jpager = jpagesN > 1
     ? `<div class="ppl-pager"><button type="button" class="jobs-page" data-jpid="${esc(d._jpid)}" data-page="${jpage-1}" ${jpage===0?"disabled":""}>‹ Previous 20</button><span class="ppl-pageinfo">Page <b>${jpage+1}</b> of ${jpagesN} · roles ${jfrom}–${jto} of ${jobs.length}</span><button type="button" class="jobs-page" data-jpid="${esc(d._jpid)}" data-page="${jpage+1}" ${jpage>=jpagesN-1?"disabled":""}>Next 20 ›</button></div>` : "";
-  const cards = pagedJobs.map(j=>{
+  const cardOf = j=>{
     const co = esc((j.company||"").replace(/_/g," "));
     const loc = j.location?`<span class="ppl-tag">${esc(j.location)}</span>`:"";
     const dept = j.department?`<span class="ppl-tag">${esc(j.department)}</span>`:"";
@@ -2985,7 +3045,7 @@ function jobsMarkup(d){
       ${facetLine}
       ${fitChip?`<span class="ppl-tags">${fitChip}</span>`:""}
       ${apply||intro?`<span class="ppl-links">${apply}${intro}${prep}</span>`:""}<span class="js-prepbox" data-ref="${esc(String(jref))}"></span><span class="js-introbox" data-ref="${esc(String(jref))}"></span>${typeof jobFeedbackMarkup==="function" ? jobFeedbackMarkup(String(jref), j) : ""}<span class="js-sumbox" data-ref="${esc(String(jref))}">${typeof openSummaryMarkup==="function"?openSummaryMarkup(jref, j):""}</span></span></div>`;
-  }).join("");
+  };
   const at = (q.company&&q.company.length)?` at ${esc(q.company.join(", ").replace(/_/g," "))}`:"";
   const bcJ = d.brief_contract || null;
   const railHtml = (d.counts && d.contract && typeof facetRailMarkup === "function") ? facetRailMarkup(d) : "";
@@ -3008,7 +3068,13 @@ function jobsMarkup(d){
   const relHtml = rel.length
     ? `<details class="jobs-related"><summary>Related roles at other companies (${rel.length}) — similar titles from the semantic search, not ${esc((q.company||[]).join(", ").replace(/_/g," ")||"this company")}</summary>${jobsMarkup({jobs: rel, query: {}, stats: {}, geo_scope: d.geo_scope, _jpid: d._jpid + "r", _jpage: d._rpage||0, _noMapBar: true})}</details>`
     : "";
-  return `<div class="ppl-wrap" data-jpid="${esc(d._jpid)}">${head}${jpage>0?jpager:""}<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">' + esc((d.must && d.must.dropped && !d.must.kept) ? `No role in this search satisfies Must have: ${(d.must.labels||d.must.kinds).join(" · ")} (${d.must.dropped} left out) — drop a toggle above or widen the search.` : (d.note || "No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.")) + '</div>'}</div>${jpager}${relHtml}</div>`;
+  const groups = groupJobs(jobs, d._groupBy);
+  const cards = pagedJobs.map(cardOf).join("");
+  const groupBar = jobs.length > 3 ? jobGroupBarMarkup(d) : "";
+  const body = groups
+    ? jobsGroupedMarkup(d, groups, cardOf)
+    : `<div class="ppl-grid">${jobs.length?cards:'<div class="pitem-empty">' + esc((d.must && d.must.dropped && !d.must.kept) ? `No role in this search satisfies Must have: ${(d.must.labels||d.must.kinds).join(" · ")} (${d.must.dropped} left out) — drop a toggle above or widen the search.` : (d.note || "No matching open roles yet — try a company or role, e.g. “engineering jobs at Stripe”.")) + '</div>'}</div>`;
+  return `<div class="ppl-wrap" data-jpid="${esc(d._jpid)}">${head}${groupBar}${groups ? "" : (jpage>0?jpager:"")}${body}${groups ? "" : jpager}${relHtml}</div>`;
 }
 // INTERPRETED BRIEF strip — ONE component for Talent Map and Jobs (consistency): Must (what filtered)
 // · Prefer (what only ranks) · Subject / Angles · Scope · assumptions · one clarifying question.
@@ -7942,6 +8008,11 @@ async function facetReevaluate(jpid, contract, save){
   }catch(e){ d._busy = false; rerenderRail(jpid); alert("Couldn't apply those changes — try again."); }
 }
 document.addEventListener("click", (e)=>{
+  const gopt = e.target.closest && e.target.closest(".jgroup-opt");
+  if(gopt){ e.preventDefault(); const d = facetRenderOf(gopt.dataset.jpid); if(d){ d._groupBy = gopt.dataset.group || ""; d._openGroups = {}; d._jpage = 0; gotoJobsPage(gopt.dataset.jpid, 0); } return; }
+  const ghead = e.target.closest && e.target.closest(".jgroup-head");
+  if(ghead){ e.preventDefault(); const d = facetRenderOf(ghead.dataset.jpid); if(d){ d._openGroups = d._openGroups || {}; const k = ghead.dataset.key;
+    d._openGroups[k] = !d._openGroups[k]; gotoJobsPage(ghead.dataset.jpid, d._jpage || 0); } return; }
   const go = e.target.closest && e.target.closest(".frail-go");
   if(go){ e.preventDefault(); const d = facetRenderOf(go.dataset.jpid); if(d && (d._draft || d._recipeOff)) facetReevaluate(go.dataset.jpid, mergeContract(d, d._draft || d.contract)); return; }
   const rc = e.target.closest && e.target.closest(".frail-recipe");

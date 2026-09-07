@@ -26,3 +26,14 @@ def test_a_header_link_gives_the_site_and_the_ats_or_a_social_link_never_does():
 def test_an_unknown_board_yields_nothing():
     assert company_site("https://apply.workable.com/j/ABC", "<a href='https://acme.com'>x</a>") is None
     assert company_site("", ASHBY) is None
+
+
+def test_the_ats_vendors_own_site_is_never_taken_for_the_employers():
+    """Greenhouse board pages link to greenhouse.com in the footer: without this, Zocdoc and CLEAR were both given
+    'https://www.greenhouse.com' as their company site (prod, 2026-09-07)."""
+    page = ('<a href="https://www.greenhouse.com">Powered by Greenhouse</a>'
+            '<a href="https://www.zocdoc.com">Zocdoc</a>')
+    assert from_header_link(page) == "https://www.zocdoc.com"
+    for vendor in ("https://www.greenhouse.com", "https://www.ashbyhq.com", "https://www.lever.co",
+                   "https://www.workday.com", "https://www.smartrecruiters.com", "https://www.bamboohr.com"):
+        assert from_header_link(f'<a href="{vendor}">vendor</a>') is None, vendor

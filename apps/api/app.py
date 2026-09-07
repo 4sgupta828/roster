@@ -6226,6 +6226,16 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             if not r.get("company_site"):
                 slug = str(r.get("company") or "").strip().lower().replace(" ", "_")
                 site = sites.get(slug)
+                if not site:
+                    # the posting itself may sit on the employer's own domain (stripe.com/jobs) — then we already know it
+                    board = str(r.get("employer_url") or "")
+                    if board and not any(h in board for h in ("ashbyhq.com", "lever.co", "greenhouse", "careerpuck", "smartrecruiters",
+                                                              "myworkdayjobs", "workable", "recruitee", "jobvite", "bamboohr",
+                                                              "teamtailor", "pinpointhq", "rippling.com", "eightfold", "icims")):
+                        from urllib.parse import urlsplit as _us
+                        p2 = _us(board)
+                        if p2.hostname:
+                            site = f"{p2.scheme}://{p2.hostname}"
                 if site:
                     r["company_site"] = site
         return rows or []
