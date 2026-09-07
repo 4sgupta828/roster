@@ -2809,7 +2809,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             if body.job_must:
                 from api.people_population import apply_job_must
                 jobs, res["must"] = await apply_job_must(store, jobs, body.job_must)
-            jobs = _with_employer(jobs)
+            jobs = await _with_employer(jobs)
             res.update({"jobs": jobs, "count": len(jobs), "query": {"company": [], "title_keywords": [], "location": ""},
                         "linkedin_profile": {"name": prof.get("name"), "headline": prof.get("headline"), "url": prof.get("url")},
                         "note": ({"headline": f"Matched to {prof.get('name')}'s LinkedIn headline — “{prof.get('headline') or 'no headline shown'}” "
@@ -2819,7 +2819,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         "stats": await store.jobs_stats()})
             from api.people_population import apply_level_pref, job_brief_contract
             jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job", span=int(body.level_span))
-            res.update({"jobs": _with_employer(jobs), "count": len(jobs)})
+            res.update({"jobs": await _with_employer(jobs), "count": len(jobs)})
             res["brief_contract"] = job_brief_contract(question=body.question or "", job_must=body.job_must, scope=res.get("geo_scope"),
                                                        profile_text=text, matched_on=matched_on, levels=body.levels, level_span=int(body.level_span))
             res["session_id"] = await _save_job_session(jobs, res["query"])
@@ -2866,7 +2866,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             if body.job_must:
                 jobs, res["must"] = await apply_job_must(store, jobs, body.job_must)
             _names = ", ".join(n for n, _ in _att_texts)
-            jobs = _with_employer(jobs)
+            jobs = await _with_employer(jobs)
             res.update({"jobs": jobs, "count": len(jobs), "query": {"company": [], "title_keywords": [], "location": ""},
                         "matched_on": matched_on,
                         "note": {"attachment": f"Matched to your attached résumé ({_names}) — title, skills and level first, wording second.",
@@ -2876,7 +2876,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         "stats": await store.jobs_stats()})
             from api.people_population import apply_level_pref, job_brief_contract
             jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job", span=int(body.level_span))
-            res.update({"jobs": _with_employer(jobs), "count": len(jobs)})
+            res.update({"jobs": await _with_employer(jobs), "count": len(jobs)})
             res["brief_contract"] = job_brief_contract(question=body.question or "", job_must=body.job_must, scope=res.get("geo_scope"),
                                                        profile_text=cv_text, matched_on=matched_on, levels=body.levels, level_span=int(body.level_span))
             res["session_id"] = await _save_job_session(jobs, res["query"])
@@ -2946,7 +2946,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         _out = await _run_contract({**_c.to_dict(), "user_keys": [k for k in ("work_mode", "company_type", "level") if body.job_must]}, "job", relax=True)
                         _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display")},
                                   "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in _out["rows"]]
-                        _rows = _with_employer(thin_repeats(_rows))
+                        _rows = await _with_employer(thin_repeats(_rows))
                         stats = await store.jobs_stats()
                         sid = await _save_job_session(_rows, {"title_keywords": _pq.get("title_keywords") or [], "company": [], "location": _pq.get("location") or ""})
                         bc = job_brief_contract(question=body.question or "", plan={"variants": _c.angles, "intent": ""}, job_must=body.job_must, scope=None,
@@ -3008,7 +3008,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             _out["timings"] = {**(_out.get("timings") or {}), **(_plain_t if not body.contract else {})}
             _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display", "fit", "fit_why", "found_by")},
                       "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in _out["rows"]]
-            _rows = _with_employer(thin_repeats(_rows))
+            _rows = await _with_employer(thin_repeats(_rows))
             stats = await store.jobs_stats()
             sid = await _save_job_session(_rows, {"title_keywords": [], "company": [], "location": ""})
             bc = job_brief_contract(question=body.question or "", plan={"variants": _c.angles, "intent": ""}, job_must=body.job_must, scope=None,
@@ -6190,15 +6190,44 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         raw = await cs.people_by_ids(ids)
         return {p["entity_id"]: str(p.get("blurb") or "") for p in rows_to_people(raw)}
 
-    def _with_employer(rows: list) -> list:
-        """Every job row carries the hiring company's OWN board, derived from the posting URL it already holds
-        (`roster_vertical.employer_link`) — no new source, no guess; a URL that names no employer carries nothing."""
+    async def _company_sites() -> dict:
+        """{company slug: the employer's own website} — harvested once per company by scripts/company_sites.py and
+        cached here for an hour (a few thousand rows; a company's site does not move)."""
+        import time as _t
+        hit = getattr(app.state, "_co_sites", None)
+        if hit and _t.monotonic() - hit[0] < 3600:
+            return hit[1]
+        cs = _claim_store_cached()
+        out: dict = {}
+        if cs is not None:
+            try:
+                pool = await cs._get_pool()
+                async with pool.acquire() as conn:
+                    out = {r["entity_id"].split(":", 1)[1]: r["display_value"] for r in await conn.fetch(
+                        "SELECT entity_id, display_value FROM roster_entity_facet WHERE entity_kind='company' AND facet_key='link_website'")}
+            except Exception:   # noqa: BLE001
+                out = {}
+        app.state._co_sites = (_t.monotonic(), out)
+        return out
+
+    async def _with_employer(rows: list) -> list:
+        """Every job row carries where to read more about the hiring company: their OWN SITE when we have harvested it
+        from their board page (`company_site`), and their board — all their open roles — derived from the posting URL
+        (`employer_url`). No guessed domains: a URL that names no employer carries nothing."""
         from roster_vertical.employer_link import employer_page
+        sites = await _company_sites()
         for r in rows or []:
-            if isinstance(r, dict) and not r.get("employer_url"):
+            if not isinstance(r, dict):
+                continue
+            if not r.get("employer_url"):
                 u = employer_page(str(r.get("url") or ""), str(r.get("source") or ""), str(r.get("company") or ""))
                 if u:
                     r["employer_url"] = u
+            if not r.get("company_site"):
+                slug = str(r.get("company") or "").strip().lower().replace(" ", "_")
+                site = sites.get(slug)
+                if site:
+                    r["company_site"] = site
         return rows or []
 
     async def _run_contract(cdict: dict, kind: str, *, depth: dict | None = None, relax: bool = False) -> dict:
