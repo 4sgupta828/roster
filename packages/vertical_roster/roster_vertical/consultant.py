@@ -82,8 +82,9 @@ def contract_mapping(direction: str) -> dict:
 
 
 # readiness (spec §4.4): known or explicitly skipped before the search is proposed
-REQUIRED = {"job": ("direction", "role_family", "level", "metro"),
+REQUIRED = {"job": ("direction", "posture", "role_family", "level", "metro"),
             "candidate": ("direction", "mission", "role_family", "level", "metro")}
+REMOTE_SETTLES = ("metro",)          # a remote role / a remote-only seeker has no metro to ask for
 CONTRACT_KEYS_FOR_EFFECTS = ("field", "function", "specialty", "skill", "role_family", "level", "work_type", "metro", "state", "country", "work_mode",
                              "employment_type", "comp", "company_type", "evidence")
 MAX_FORKS = 4                  # forks per intake before `ready` is offered anyway
@@ -134,7 +135,8 @@ def consultant_prompt(direction: str) -> str:
             f"these contract keys: {', '.join(CONTRACT_KEYS_FOR_EFFECTS)} — never a brief field name; every option of one question uses the SAME shape "
             "(all `center` on level, or all `must` on one key). A brief-only question (direction, posture, mission, deal_breakers, timing …) carries "
             f"`value` only and NO effect. Vocabularies — {_vocab(kind)}; open keys (skill, specialty, role_family) take lowercase tokens; metro takes a "
-            "token from METRO TOKENS given below, never free text. If any REQUIRED field is still open, your move is a question on the most "
+            "token from METRO TOKENS given below, never free text. A REMOTE role has no metro: record work_mode = remote and never ask which city. "
+            "If any REQUIRED field is still open, your move is a question on the most "
             "impactful open one (or `ready` when the user asks to search). "
             "Every turn, RECORD every fact the user states into brief_delta (comp, skills, must_have_done, work_mode, timing, deal_breakers, team …) — "
             "nothing the user said may be lost. A free-text question has \"options\": [] (never a placeholder option). "

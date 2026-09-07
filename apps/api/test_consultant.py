@@ -97,10 +97,10 @@ def test_a_question_on_a_known_field_is_dropped_and_the_fork_gate_drops_dead_opt
     pl = Planner([asks_known, dead, {"move": "ready", "say": "ok"}], read=READ)
     s = _svc(pl, profile={"_resume_text": RESUME}, slice_sizes=lambda kind, must: 0 if "work_mode" in must else 25)
     out = _run(s.step(message="I'm looking for my next role", user={"id": "u1"}))
-    assert out["question"] is None and any("known field 'field'" in n for n in out["notes"])          # never asks what the résumé states
-    out2 = _run(s.step(message="anything else?", state=out["state"], user={"id": "u1"}))
-    # the Remote option has an empty pool; one survivor is no fork — but work_mode is still open, so the question stays, in words
-    assert out2["question"] and out2["question"]["options"] == [] and any("kept as free text" in n for n in out2["notes"])
+    # the question on the résumé's own field is dropped; posture stays open, so the turn re-plans once and asks — the Remote
+    # option has an empty pool and one survivor is no fork, but work_mode is still open, so the question stays, in words
+    assert any("known field 'field'" in n for n in out["notes"]) and any("re-planned" in n for n in out["notes"])
+    assert out["question"] and out["question"]["field"] == "work_mode" and out["question"]["options"] == [] and any("kept as free text" in n for n in out["notes"])
 
 
 def test_a_hiring_manager_without_a_jd_is_asked_the_mission_first_then_the_draft_builds_from_the_brief():
@@ -137,3 +137,16 @@ def test_start_over_and_the_call_budget():
     pl2 = Planner([{"move": "fork", "say": "one more?", "question": {"field": "comp", "text": "Comp?", "options": [{"label": "a"}, {"label": "b"}]}}])
     out2 = _run(_svc(pl2).step(message="more", state=spent, user={"id": "u1"}))
     assert out2["stage"] == "ready" and pl2.moves                                                     # no planner call was made; the budget forced the hand-off
+
+
+def test_the_evidence_gate_keeps_only_document_fields_whose_span_is_in_the_text():
+    read = {"fields": {"role_family": {"value": "head of ml infrastructure", "span": "Head of ML Infrastructure at Fintech Co"},
+                       "comp": {"value": "$200k-300k", "span": "competitive compensation $200k–300k"},           # invented
+                       "work_mode": {"value": "hybrid", "span": ""},                                              # no span
+                       "career_arc": {"value": "six years leading ML infra", "span": ""}}}
+    pl = Planner([{"move": "ready", "say": "ok"}], read=read)
+    s = _svc(pl, profile={"_resume_text": RESUME})
+    out = _run(s.step(message="I'm looking for my next role", user={"id": "u1"}))
+    b = {x["key"]: x for x in out["brief"]}
+    assert b["role_family"]["source"] == "document" and b["career_arc"]["source"] == "inferred"
+    assert "comp" not in b and "work_mode" not in b and any("without a span" in n and "comp" in n for n in out["notes"])

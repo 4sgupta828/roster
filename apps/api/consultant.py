@@ -113,11 +113,11 @@ class IntakeConsultant:
             if move.move == "restart" and not restart and len([t for t in st.get("transcript") or [] if t.get("role") == "user"]) < 2:
                 notes.append("restart on the first turn ignored"); move.move = "infer"
             # a statement while required fields stay open → one bounded re-plan that must ask
-            open_req = readiness(brief, V.REQUIRED.get(direction or "job", ())) if direction else []
+            open_req = readiness(brief, self._required(brief, direction)) if direction else []
             if move.move in ("infer", "confirm") and not move.question and not move.ready and open_req and int(st.get("calls") or 0) < V.MAX_PLANNER_CALLS and not st.get("replanned"):
                 st["replanned"] = True
                 b2, _ = apply_brief_delta(brief, move.brief_delta, allowed_fields=V.FIELD_KEYS)
-                open2 = readiness(b2, V.REQUIRED.get(direction or "job", ()))
+                open2 = readiness(b2, self._required(b2, direction))
                 if open2:
                     move2 = await self._plan(b2, st, direction, "", None, lev, pool, market, must_ask=open2[0])
                     st["calls"] = int(st.get("calls") or 0) + 1
@@ -178,7 +178,7 @@ class IntakeConsultant:
         st["brief"] = brief.to_dict()
 
         # 7) ready?
-        missing = readiness(brief, V.REQUIRED.get(direction or "job", ())) if direction else ["direction"]
+        missing = readiness(brief, self._required(brief, direction)) if direction else ["direction"]
         wants_ready = forced_ready or (move is not None and move.ready and direction) or (direction and not missing and not (move and move.question))
         if wants_ready and direction:
             ready = await self._ready(brief, st, direction, say=(move.say if move else "I have enough to search; here is what I'm assuming."))
@@ -203,6 +203,14 @@ class IntakeConsultant:
     def _fresh(self) -> dict:
         return {"v": 3, "brief": {}, "transcript": [], "pending": None, "artifact": {"kind": None, "status": "none"}, "artifact_text": "",
                 "overlay": {}, "forks": 0, "calls": 0, "docs_read": False, "record_id": hashlib.sha1(f"{time.time()}".encode()).hexdigest()[:12], "opening": ""}
+
+    def _required(self, brief: Brief, direction: str | None) -> tuple:
+        """The required fields for this brief: a remote role / seeker settles the metro."""
+        V = self._v()
+        req = V.REQUIRED.get(direction or "job", ())
+        wm = brief.value("work_mode")
+        remote = (isinstance(wm, list) and "remote" in [str(x).lower() for x in wm]) or str(wm or "").lower() == "remote"
+        return tuple(k for k in req if not (remote and k in V.REMOTE_SETTLES))
 
     def _direction(self, brief: Brief, st: dict) -> str | None:
         d = brief.value("direction")
@@ -357,20 +365,35 @@ class IntakeConsultant:
             read = await self._model(V.document_reader_prompt(kind, direction or ("candidate" if kind == "jd" else "job")), text[:DOC_CAP])
         except Exception as e:   # noqa: BLE001
             notes.append(f"document read failed: {str(e)[:80]}"); return brief, st, notes
+        # EVIDENCE GATE (spec §4; Codex): a document field lives only if its span is really in the text — the reader once
+        # produced 26 "document" facts (comp, work mode, risk appetite …) from a five-line résumé that stated none of them
+        hay = self._squash(text)
+        dropped = []
         for fld, raw in ((read or {}).get("fields") or {}).items():
             if fld not in V.FIELD_KEYS or not isinstance(raw, dict) or raw.get("value") in (None, "", []):
                 continue
-            src = "inferred" if fld == "career_arc" else "document"
-            if not brief.known(fld):
-                brief = brief.with_field(fld, raw.get("value"), src, span=str(raw.get("span") or "")[:240])
+            if brief.known(fld):
+                continue
+            span = str(raw.get("span") or "")[:240]
+            if fld == "career_arc":
+                brief = brief.with_field(fld, raw.get("value"), "inferred", span=span); continue
+            if not span or self._squash(span) not in hay:
+                dropped.append(fld); continue
+            brief = brief.with_field(fld, raw.get("value"), "document", span=span)
+        if dropped:
+            notes.append("reader claims without a span in the text dropped: " + ", ".join(dropped[:8]))
         return brief, st, notes
+
+    @staticmethod
+    def _squash(t: str) -> str:
+        return " ".join(str(t or "").lower().replace("’", "'").replace("–", "-").replace("—", "-").split())
 
     async def _leverage(self, contract: Contract, kind: str, brief: Brief, direction: str | None) -> tuple[list[dict], int | None, dict]:
         lev, pool, market = [], None, {}
         if direction is None:
             return lev, pool, market
         try:
-            counts = await self.counts_fn(kind, dict(contract.must))
+            counts = await asyncio.wait_for(self.counts_fn(kind, dict(contract.must)), timeout=8.0)
             pool = pool_from_counts(counts, self.schema, kind)
             if isinstance(counts.get("metro"), dict):
                 st_tokens = [v for v, _ in sorted(((v, int(n)) for v, n in counts["metro"].items() if v != "unknown"), key=lambda kv: -kv[1])[:16]]
@@ -383,7 +406,7 @@ class IntakeConsultant:
         try:
             fld = brief.value("field") if brief.known("field") or brief.source("field") == "inferred" else None
             if fld:
-                jc = await self.counts_fn("job", {"field": [str(fld)]})
+                jc = await asyncio.wait_for(self.counts_fn("job", {"field": [str(fld)]}), timeout=6.0)
                 market = {k: dict(sorted(((v, n) for v, n in (jc.get(k) or {}).items() if v != "unknown"), key=lambda kv: -kv[1])[:4]) for k in ("comp", "work_mode", "level", "work_type") if jc.get(k)}
         except Exception:   # noqa: BLE001
             market = {}
@@ -399,7 +422,7 @@ class IntakeConsultant:
                 lines.append(f"- {f.key} = {fl.value!r} [{fl.source}]" + (f" (from: “{fl.span[:80]}”)" if fl.span else ""))
             elif fl and fl.source == "skipped":
                 lines.append(f"- {f.key}: skipped by the user")
-        req = V.REQUIRED.get(d, ())
+        req = self._required(brief, direction)
         open_req = [k for k in req if not brief.settled(k)]
         user = ("DIRECTION: " + (direction or "UNKNOWN — decide it from the words or ask; a bare title list is ambiguous") + "\n"
                 + "BRIEF SO FAR:\n" + ("\n".join(lines) or "(nothing yet)") + "\n"
