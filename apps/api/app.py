@@ -2794,6 +2794,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             if body.job_must:
                 from api.people_population import apply_job_must
                 jobs, res["must"] = await apply_job_must(store, jobs, body.job_must)
+            jobs = _with_employer(jobs)
             res.update({"jobs": jobs, "count": len(jobs), "query": {"company": [], "title_keywords": [], "location": ""},
                         "linkedin_profile": {"name": prof.get("name"), "headline": prof.get("headline"), "url": prof.get("url")},
                         "note": ({"headline": f"Matched to {prof.get('name')}'s LinkedIn headline — “{prof.get('headline') or 'no headline shown'}” "
@@ -2803,7 +2804,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         "stats": await store.jobs_stats()})
             from api.people_population import apply_level_pref, job_brief_contract
             jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job", span=int(body.level_span))
-            res.update({"jobs": jobs, "count": len(jobs)})
+            res.update({"jobs": _with_employer(jobs), "count": len(jobs)})
             res["brief_contract"] = job_brief_contract(question=body.question or "", job_must=body.job_must, scope=res.get("geo_scope"),
                                                        profile_text=text, matched_on=matched_on, levels=body.levels, level_span=int(body.level_span))
             res["session_id"] = await _save_job_session(jobs, res["query"])
@@ -2850,6 +2851,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             if body.job_must:
                 jobs, res["must"] = await apply_job_must(store, jobs, body.job_must)
             _names = ", ".join(n for n, _ in _att_texts)
+            jobs = _with_employer(jobs)
             res.update({"jobs": jobs, "count": len(jobs), "query": {"company": [], "title_keywords": [], "location": ""},
                         "matched_on": matched_on,
                         "note": {"attachment": f"Matched to your attached résumé ({_names}) — title, skills and level first, wording second.",
@@ -2859,7 +2861,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         "stats": await store.jobs_stats()})
             from api.people_population import apply_level_pref, job_brief_contract
             jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job", span=int(body.level_span))
-            res.update({"jobs": jobs, "count": len(jobs)})
+            res.update({"jobs": _with_employer(jobs), "count": len(jobs)})
             res["brief_contract"] = job_brief_contract(question=body.question or "", job_must=body.job_must, scope=res.get("geo_scope"),
                                                        profile_text=cv_text, matched_on=matched_on, levels=body.levels, level_span=int(body.level_span))
             res["session_id"] = await _save_job_session(jobs, res["query"])
@@ -2929,6 +2931,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         _out = await _run_contract({**_c.to_dict(), "user_keys": [k for k in ("work_mode", "company_type", "level") if body.job_must]}, "job", relax=True)
                         _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display")},
                                   "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in _out["rows"]]
+                        _rows = _with_employer(_rows)
                         stats = await store.jobs_stats()
                         sid = await _save_job_session(_rows, {"title_keywords": _pq.get("title_keywords") or [], "company": [], "location": _pq.get("location") or ""})
                         bc = job_brief_contract(question=body.question or "", plan={"variants": _c.angles, "intent": ""}, job_must=body.job_must, scope=None,
@@ -2990,6 +2993,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             _out["timings"] = {**(_out.get("timings") or {}), **(_plain_t if not body.contract else {})}
             _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display", "fit", "fit_why", "found_by")},
                       "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in _out["rows"]]
+            _rows = _with_employer(_rows)
             stats = await store.jobs_stats()
             sid = await _save_job_session(_rows, {"title_keywords": [], "company": [], "location": ""})
             bc = job_brief_contract(question=body.question or "", plan={"variants": _c.angles, "intent": ""}, job_must=body.job_must, scope=None,
@@ -6170,6 +6174,17 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         from api.people_population import rows_to_people
         raw = await cs.people_by_ids(ids)
         return {p["entity_id"]: str(p.get("blurb") or "") for p in rows_to_people(raw)}
+
+    def _with_employer(rows: list) -> list:
+        """Every job row carries the hiring company's OWN board, derived from the posting URL it already holds
+        (`roster_vertical.employer_link`) — no new source, no guess; a URL that names no employer carries nothing."""
+        from roster_vertical.employer_link import employer_page
+        for r in rows or []:
+            if isinstance(r, dict) and not r.get("employer_url"):
+                u = employer_page(str(r.get("url") or ""), str(r.get("source") or ""))
+                if u:
+                    r["employer_url"] = u
+        return rows or []
 
     async def _run_contract(cdict: dict, kind: str, *, depth: dict | None = None, relax: bool = False) -> dict:
         """A ratified contract → rows. Single evaluate by default; MERGED (spec §12 step 2: recipes fused + one

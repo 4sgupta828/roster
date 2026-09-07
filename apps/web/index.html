@@ -683,6 +683,8 @@
   .frail-recipe{font:inherit;font-size:.72rem;min-height:34px;padding:.2rem .55rem;border:1px solid var(--hair);border-radius:999px;background:var(--panel);color:var(--ink);cursor:pointer;}
   .frail-recipe.off{opacity:.55;text-decoration:line-through;}
   .frail-recipe .frail-note{color:var(--muted);}
+  .job-co{color:inherit;text-decoration:none;border-bottom:1px solid var(--hair);}
+  .job-co:hover{color:var(--gold);border-bottom-color:var(--gold);}
   .ppl-fit{font-size:.7rem;border-radius:999px;padding:.05rem .5rem;border:1px solid var(--hair);color:var(--muted);white-space:nowrap;}
   .ppl-fit.fit-yes{border-color:rgba(var(--gold-rgb),.6);color:var(--gold);font-weight:600;}
   .ppl-fit.fit-no{opacity:.75;}
@@ -2976,7 +2978,7 @@ function jobsMarkup(d){
     const fitChip = fitChipHtml(j);
     return `<div class="ppl-card job-card${j._new ? " is-new" : ""}" data-jref="${esc(String(jref))}" title="Click for a summary of this posting">${j._new ? `<span class="newflag" title="Not in the previous result">new</span>` : ""}${jsave}<span class="ppl-body">
       <span class="ppl-name">${esc(j.title)}${pct}</span>
-      <span class="ppl-blurb">${co}${j.source?` · via ${esc(j.source)}`:""}${jr}</span>
+      <span class="ppl-blurb">${j.employer_url ? `<a class="job-co" href="${esc(j.employer_url)}" target="_blank" rel="noopener noreferrer" title="All open roles at this company, on their own careers page">${co} ↗</a>` : co}${j.source?` · via ${esc(j.source)}`:""}${jr}</span>
       ${loc||dept?`<span class="ppl-tags">${loc}${dept}</span>`:""}
       ${facetLine}
       ${fitChip?`<span class="ppl-tags">${fitChip}</span>`:""}

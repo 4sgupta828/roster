@@ -142,3 +142,33 @@ def test_the_judge_endpoint_grades_normalized_rows_blind():
     d = r.json()
     assert d["graded"] == 2 and set(d["verdicts"]) == {"p1", "p2"} and d["verdicts"]["p1"]["fit"] == "yes"
     assert "Someone" not in seen["user"] and "level leadership" in seen["user"]                      # names never reach the judge
+
+
+def test_ensure_schema_takes_no_lock_when_the_database_is_already_migrated():
+    """2026-09-07: a long analytical SELECT plus these no-op `ALTER TABLE … ADD COLUMN IF NOT EXISTS` statements stalled
+    the whole product — a queued ACCESS EXCLUSIVE lock blocks every later reader. A catalog check comes first."""
+    import asyncio
+
+    from api.facet_store import FacetSQLStore
+    from roster_vertical.facet_schema import FACET_SCHEMA
+    ran: list[str] = []
+
+    class Conn:
+        async def fetch(self, sql, *a):
+            if "information_schema.columns" in sql:
+                return [{"table_name": t, "column_name": c} for t, c in FacetSQLStore._DDL_COLUMNS]
+            return [{"indexname": i} for i in FacetSQLStore._DDL_INDEXES]
+        async def execute(self, sql, *a):
+            ran.append(sql)
+
+    class Pool:
+        def acquire(self):
+            class _Cm:
+                async def __aenter__(_s): return Conn()
+                async def __aexit__(_s, *a): return False
+            return _Cm()
+
+    async def getter(): return Pool()
+    store = FacetSQLStore(getter, FACET_SCHEMA)
+    asyncio.new_event_loop().run_until_complete(store.ensure_schema())
+    assert ran == [] and store._ready                       # nothing missing → no DDL, no lock

@@ -76,11 +76,29 @@ class FacetSQLStore:
     async def _conn(self):
         return await self._pool_getter()
 
+    # every column / index the DDL creates, so a started-up database is recognised without touching a lock
+    _DDL_COLUMNS = (("roster_entity_facet", "entity_kind"), ("roster_entity_facet", "provenance"),
+                    ("roster_entity_facet", "schema_version"), ("roster_entity_facet", "numeric_value"),
+                    ("rs_job", "facets_projected"))
+    _DDL_INDEXES = ("ix_roster_facet_kind_kv", "ix_roster_facet_entity", "ix_rs_job_facet_eid")
+
     async def ensure_schema(self) -> None:
+        """Idempotent DDL — but only when something is actually missing. `ALTER TABLE … ADD COLUMN IF NOT EXISTS` still
+        takes an ACCESS EXCLUSIVE lock, and a queued exclusive lock blocks every later reader of that table: on
+        2026-09-07 one long analytical SELECT plus these no-op ALTERs stalled the whole product. A catalog check first
+        costs one cheap query and takes no lock at all."""
         if self._ready:
             return
         pool = await self._conn()
         async with pool.acquire() as conn:
+            have_cols = {(r["table_name"], r["column_name"]) for r in await conn.fetch(
+                "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ANY($1::text[])",
+                sorted({t for t, _ in self._DDL_COLUMNS}))}
+            have_idx = {r["indexname"] for r in await conn.fetch(
+                "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1::text[])", list(self._DDL_INDEXES))}
+            if all(c in have_cols for c in self._DDL_COLUMNS) and all(i in have_idx for i in self._DDL_INDEXES):
+                self._ready = True
+                return
             for ddl in _DDL:
                 await conn.execute(ddl)
         self._ready = True
