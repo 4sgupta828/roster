@@ -2997,7 +2997,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             bc["contract"] = _out["contract"]; bc["counts"] = _out["counts"]; bc["coverage"] = _out["coverage"]
             return {"jobs": _rows, "count": len(_rows), "query": {}, "semantic": True, "stats": stats, "geo_scope": None, "session_id": sid,
                     "must": None, "level_pref": None, "brief_contract": bc, "contract": _out["contract"], "counts": _out["counts"], "coverage": _out["coverage"],
-                    "labels": _out.get("labels"), "merge": _out.get("merge"), "relaxed": _out.get("relaxed") or [], "timings": _out.get("timings") or {}, "note": f"evaluator — {_out['coverage'].get('pool', 0)} candidates"}
+                    "labels": _out.get("labels"), "merge": _out.get("merge"), "relaxed": _out.get("relaxed") or [], "timings": _out.get("timings") or {},
+                    "note": f"evaluator — {_out['coverage'].get('pool', 0)} candidates" + (" · ranked by filters only (semantic ranking is unavailable right now)" if (_out.get("coverage") or {}).get("degraded") else "")}
         # AGENTIC mode (flag): LLM expands the query into multiple angles → multi-leg retrieval → rerank
         if agentic_jobs_enabled():
             from api.people_population import agentic_job_search, parse_job_query
@@ -4151,7 +4152,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             _cc = out["contract"]; _cv = out.get("coverage") or {}
             _lab = (out.get("labels") or {}).get("values") or {}
             _words = lambda vals: [(_lab.get(str(v)) or str(v).replace("_", " ")) for v in (vals if isinstance(vals, list) else [str(vals)])]
-            _stmt = (f"{len(rows)} people ranked from a pool of {_cv.get('pool', len(rows))} that meet the filters"
+            _stmt = (("Semantic ranking is unavailable right now, so these are the people who meet the filters, unranked. " if _cv.get("degraded") else "")
+                     + f"{len(rows)} people ranked from a pool of {_cv.get('pool', len(rows))} that meet the filters"
                      + (f"; the closest match is {_cv.get('best_match')}% — weak; the rail says which filter keeps closer people out." if _cv.get("weak") else ".")
                      + " Adjust filters on the rail; the counts are live.")
             cov = {"query_facets": {}, "population_statement": _stmt,
@@ -6447,11 +6449,14 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         cs = _claim_store_cached()
 
         def _planner_llm(system: str, user_msg: str) -> dict:
-            """The ONE strategic call per turn runs on the best reasoning model available (owner: 'best model for planner');
-            the cheap extractor keeps the direction read and the document reader."""
+            """The ONE strategic call per turn runs on the best reasoning model the account can actually reach (owner:
+            'best model for planner'); the cheap extractor keeps the direction read and the document reader. A provider
+            that is out of credit is skipped by `llm_json` itself, so this degrades instead of failing."""
             from api.model_json import llm_json
-            return llm_json(system, user_msg, timeout=90, prefer="openai", model=os.environ.get("ROSTER_PLANNER_MODEL", "gpt-5.4"),
-                            reasoning_effort=os.environ.get("ROSTER_PLANNER_EFFORT", "low"))     # low: ~10 s a turn; medium was 30–50 s
+            provider = os.environ.get("ROSTER_PLANNER_PROVIDER", "deepseek").strip().lower() or None
+            model = os.environ.get("ROSTER_PLANNER_MODEL", "deepseek-chat")
+            effort = os.environ.get("ROSTER_PLANNER_EFFORT", "low") if model.startswith(("gpt-5", "o3", "o4")) else None
+            return llm_json(system, user_msg, timeout=90, prefer=provider, model=model, reasoning_effort=effort)
         svc = getattr(app.state, "consultant_service", None) or IntakeConsultant(
             schema=_facet_schema(), llm_json=getattr(app.state, "intake_llm", None) or _llm_json, counts_fn=counts_fn, slice_fn=slice_fn,
             profile_fn=profile_fn, stored_fn=stored_fn, briefs_fn=_briefs_fn_for(acc), draft_fn=_draft_fn(compile_fn), index_aware_fn=_index_aware,

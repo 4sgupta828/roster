@@ -55,6 +55,8 @@ class IntakeConsultant:
         message = (message or "").strip()[:4000]
         if message:
             st["transcript"].append({"role": "user", "text": message[:TURN_CAP]})
+            if not st.get("opening"):
+                st["opening"] = message[:400]        # THE ASK: the user's own words, kept before anything can return early
         notes: list[str] = []
         brief = Brief.from_dict(st.get("brief"))
 
@@ -127,13 +129,6 @@ class IntakeConsultant:
                 notes.append(f"{move.question.field!r} was already asked → not again"); move.question = None; move.ready = True
             if move.move == "fork" and not move.question:
                 move.ready = True                                                    # the model wanted to ask but nothing askable remains
-            # NOTHING TO SEARCH YET: the side alone is not an ask — the consultant opens with the one open question
-            if move.ready and direction and not any(brief.value(k) not in (None, "", []) for k in V.INTENT_FIELDS) and not search_now:
-                from roster_kernel.facets.brief import Question
-                move.ready = False; move.move = "fork"
-                move.question = Question(field=("mission" if direction == "candidate" else "role_family"), text=V.OPEN_QUESTION[direction], options=[], free_text=True)
-                move.say = move.say if move.say and "search" not in move.say.lower() else ""
-                notes.append("empty brief → the open question, not a search")
         st["pending"] = None
 
         # 6) apply the move
@@ -158,6 +153,16 @@ class IntakeConsultant:
                 # the side just became known: read what is on file for it before anything is asked
                 brief, st, dn = await self._read_documents(brief, st, user, attachments_text or [], "")
                 notes += dn
+            # NOTHING TO SEARCH YET: the side alone is not an ask — the consultant opens with the one open question, ONCE
+            # (this rule ran BEFORE the planner's understanding was applied, which is what looped the owner's session)
+            open_field = "mission" if direction == "candidate" else "role_family"
+            if move.ready and direction and not search_now and not move.question \
+                    and not any(brief.value(k) not in (None, "", []) for k in V.INTENT_FIELDS) and open_field not in (st.get("asked_fields") or []):
+                from roster_kernel.facets.brief import Question
+                move.ready = False; move.move = "fork"
+                move.question = Question(field=open_field, text=V.OPEN_QUESTION[direction], options=[], free_text=True)
+                move.say = move.say if move.say and "search" not in move.say.lower() else ""
+                notes.append("empty brief → the open question, not a search")
             # a fork must survive the index
             if move.question and move.question.options:
                 known_metros = set(st.get("metro_tokens") or [])
@@ -320,7 +325,8 @@ class IntakeConsultant:
 
     def _intent_text(self, brief: Brief, st: dict, direction: str) -> str:
         """The search text = the user's opening words + what the brief settled (role, specialties, place) — never the document body."""
-        parts = [str(st.get("opening") or "").strip()[:200]]
+        last_user = next((t["text"] for t in reversed(st.get("transcript") or []) if t.get("role") == "user"), "")
+        parts = [(str(st.get("opening") or "").strip() or str(last_user or "").strip())[:200]]
         for k in ("role_family", "specialties", "skills", "mission", "must_have_done", "metro"):
             v = brief.value(k)
             if v in (None, "", []) or brief.source(k) in GAP_SOURCES:
@@ -334,8 +340,6 @@ class IntakeConsultant:
         """Read everything on file ONCE: an attachment, the résumé on file (seeker), the apply profile, saved JDs (hiring)."""
         V = self._v()
         notes: list[str] = []
-        if not st.get("opening") and message:
-            st["opening"] = message[:400]
         direction = self._direction(brief, st)
         text, kind, source = "", "", ""
         att = [a for a in attachments_text if str(a or "").strip()]

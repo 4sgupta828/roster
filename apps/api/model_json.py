@@ -59,9 +59,15 @@ def llm_json(system: str, user: str, *, timeout: float = 90.0, prefer: str | Non
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 return json.loads(json.load(r)["choices"][0]["message"]["content"])
         except urllib.error.HTTPError as e:
-            msg = f"HTTP {e.code}"
+            detail = ""
+            try:
+                detail = e.read()[:200].decode("utf-8", "replace")
+            except Exception:   # noqa: BLE001
+                pass
+            msg = f"HTTP {e.code}" + (": out of credit" if "insufficient_quota" in detail or "credit_balance" in detail else "")
             _last_error[name] = msg
-            if e.code in (401, 402):                      # dead key / no balance: stop trying it for a while
+            # dead key / no balance / exhausted quota: stop trying it for a while (a plain rate-limit 429 is retried)
+            if e.code in (401, 402) or ("insufficient_quota" in detail or "credit_balance" in detail):
                 _skip_until[name] = time.monotonic() + COOLDOWN
             errs.append(f"{name}: {msg}")
             continue

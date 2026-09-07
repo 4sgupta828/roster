@@ -286,3 +286,27 @@ def test_weak_diagnosis_reports_the_best_match_without_each_must():
     d = asyncio.new_event_loop().run_until_complete(diagnose_musts(Contract(kind="e", text="q", must={"ct": ["x"], "m": ["a"]}), lambda k, m: st.counts(k, m, sch), sch,
                                                                     semantic_fn=lambda k, t, m: st.semantic(k, t, m)))
     assert d["keys"][0]["key"] == "ct" and d["keys"][0]["best_without"] == 80 and d["keys"][1]["best_without"] == 8
+
+
+def test_a_text_search_whose_semantic_leg_is_unavailable_falls_back_to_the_filters_and_says_so():
+    """Prod 2026-09-07: the embedding provider ran out of credit; every semantic leg returned [] and every text search
+    silently answered zero. The filters must still answer, labelled degraded."""
+    import asyncio
+    from roster_kernel.facets import Contract, InMemoryFacetStore, evaluate
+    from roster_kernel.facets.schema import FacetKey, FacetSchema, FacetType
+    sch = FacetSchema(keys=(FacetKey(key="k1", type=FacetType.categorical, kinds=("e",), label="K1", values=("a", "b")),))
+    rows = [{"id": f"r{i}", "kind": "e", "sim": 0.5, "facets": {"k1": ["a" if i % 2 else "b"]}} for i in range(20)]
+
+    class NoEmbed(InMemoryFacetStore):
+        async def semantic(self, kind, text, must, *, cap=400):
+            return []                                                     # the provider is down
+    run = lambda c: asyncio.new_event_loop().run_until_complete(c)
+    out = run(evaluate(Contract(kind="e", text="anything", must={"k1": ["a"]}), NoEmbed(rows, sch), sch))
+    assert len(out["rows"]) == 10 and out["coverage"]["degraded"] == "semantic_unavailable" and out["coverage"]["legs"]["enumerate"] == 10
+    # a must that genuinely matches nothing still returns nothing — and is not called degraded
+    only_b = [r for r in rows if r["facets"]["k1"] == ["b"]]
+    out2 = run(evaluate(Contract(kind="e", text="anything", must={"k1": ["a"]}), NoEmbed(only_b, sch), sch))
+    assert out2["rows"] == [] and "degraded" not in out2["coverage"]
+    # a healthy semantic leg is untouched (no enumerate)
+    out3 = run(evaluate(Contract(kind="e", text="anything", must={"k1": ["a"]}), InMemoryFacetStore(rows, sch), sch))
+    assert out3["coverage"]["legs"]["enumerate"] == 0 and "degraded" not in out3["coverage"]

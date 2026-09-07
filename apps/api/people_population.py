@@ -77,11 +77,24 @@ def people_semantic_first_enabled() -> bool:
     return os.environ.get("ROSTER_PEOPLE_SEMANTIC_FIRST", "").lower() in ("1", "true", "yes")
 
 
+_EMBED_DOWN_UNTIL = [0.0]        # an out-of-credit / dead-key embedding provider: remembered, so a search degrades instantly
+EMBED_COOLDOWN = 120.0
+
+
+def embed_unavailable_for() -> float:
+    """Seconds the embedding provider is still considered down (0 = healthy). The routes report it."""
+    import time as _t
+    return max(0.0, _EMBED_DOWN_UNTIL[0] - _t.monotonic())
+
+
 def embed_query(text: str) -> str | None:
     """Embed the query with text-embedding-3-small → a pgvector literal '[...]'. None on any failure
     (the caller falls back to the exact facet path). Never raises to the route."""
+    import time as _t
     key = os.environ.get("OPENAI_API_KEY")
     if not key or not (text or "").strip():
+        return None
+    if _EMBED_DOWN_UNTIL[0] > _t.monotonic():
         return None
     try:
         body = json.dumps({"model": "text-embedding-3-small", "input": [text[:2000]]}).encode()
@@ -90,6 +103,16 @@ def embed_query(text: str) -> str | None:
         with urllib.request.urlopen(req, timeout=15) as r:
             v = json.load(r)["data"][0]["embedding"]
         return "[" + ",".join(f"{x:.6f}" for x in v) + "]"
+    except urllib.error.HTTPError as e:  # noqa: BLE001
+        detail = ""
+        try:
+            detail = e.read()[:200].decode("utf-8", "replace")
+        except Exception:   # noqa: BLE001
+            pass
+        if e.code in (401, 402, 429):
+            _EMBED_DOWN_UNTIL[0] = _t.monotonic() + EMBED_COOLDOWN
+        _log.warning("embed_query failed: HTTP %s %s", e.code, detail[:120])
+        return None
     except Exception as e:  # noqa: BLE001
         _log.warning("embed_query failed: %s", e)
         return None

@@ -33,7 +33,7 @@ class Planner:
             low = user.lower()
             if "hiring" in low or "hire" in low: return {"direction": "candidate", "explicit": True, "span": "hiring"}
             if "looking" in low or "next role" in low or "start over" in low or "more" in low or "anything" in low: return {"direction": "job", "explicit": True, "span": "looking"}
-            if "jobs for" in low: return {"direction": "candidate", "explicit": False, "span": "jobs for"}          # the misread the owner hit
+            if "ledger" in low: return {"direction": "candidate", "explicit": False, "span": "ledger"}     # read between the lines
             return {"direction": None}
         self.prompts.append(("plan", user))
         return self.moves.pop(0) if self.moves else {"move": "ready", "say": "Searching with what I have."}
@@ -161,7 +161,7 @@ def test_a_side_read_between_the_lines_is_an_assumption_with_a_switch_and_a_fiel
     nofield = {"move": "ask", "say": "Before I search, what will this person own?", "gaps": [{"field": "mission", "impact": "high"}], "question": {"text": "What will this person own in the first six months?", "options": []}}
     pl = Planner([nofield, {"move": "ready", "say": "ok"}])
     s = _svc(pl)
-    out = _run(s.step(message="jobs for mid level software engineer skilled in java, k8s and aws"))
+    out = _run(s.step(message="backend engineers who have built a ledger"))
     assert out["direction"] == "candidate" and out["direction_source"] == "inferred" and any("assumption" in n for n in out["notes"])
     assert out["question"] and out["question"]["field"] == "mission"                     # the field-less question resolved to the open required field
     out2 = _run(s.step(answer={"name": "", "value": "__decline__"}, state=out["state"]))    # Skip on a field-less question skips THAT field
@@ -177,3 +177,31 @@ def test_the_side_alone_is_not_an_ask_the_consultant_opens_with_the_open_questio
     out = _run(s.step(message="I'm looking for my next role"))
     assert out["stage"] == "question" and out["question"]["field"] == "role_family" and out["question"]["options"] == [] and "what you do today" in out["question"]["text"]
     assert any("empty brief" in n for n in out["notes"])
+
+
+def test_the_users_own_words_survive_the_direction_question_and_become_the_search_text():
+    """Owner's 0-result session: the opening words were eaten by the direction question, the brief stayed empty, the same
+    question repeated, and the ready card's own sentence became the search text."""
+    reads_ask = {"move": "ready", "say": "I'll search mid-level Java platform roles.",
+                 "understanding": {"role_family": {"value": "software engineer", "source": "stated"}, "level": {"value": "mid", "source": "stated"},
+                                   "skills": {"value": ["java", "kubernetes", "aws"], "source": "stated"}},
+                 "search": {"prefer": {"role_family": ["software engineer"], "skill": ["java", "kubernetes", "aws"]}, "center": {"key": "level", "value": "mid"}}}
+    pl = Planner([reads_ask])
+    s = _svc(pl)
+    ASK = "jobs for mid level software engineer skilled in java, k8s and aws"
+    out = _run(s.step(message=ASK))                                    # ambiguous → the side is asked, the words are kept
+    assert out["question"]["field"] == "direction" and out["state"]["opening"].startswith("jobs for mid")
+    out2 = _run(s.step(direction_tap="job", state=out["state"]))
+    c = (out2.get("ready") or {}).get("contract") or {}
+    assert out2["stage"] == "ready" and c.get("text", "").startswith("jobs for mid")     # the ask is the search text, never the say
+    assert c["prefer"]["skill"] == ["aws", "java", "kubernetes"] and c["center"]["value"] == "mid"
+
+
+def test_the_open_question_is_asked_once_never_in_a_loop():
+    """The owner saw 'Before I search, what will this person own…' three times: the empty-brief rule re-fired every turn."""
+    pl = Planner([{"move": "ready", "say": "Searching."} for _ in range(4)])
+    s = _svc(pl)
+    out = _run(s.step(message="I'm looking for my next role"))
+    assert out["stage"] == "question" and out["question"]["field"] == "role_family"
+    out2 = _run(s.step(message="not sure yet", state=out["state"]))
+    assert out2["stage"] == "ready" and not out2.get("question")                        # asked once; then it searches with the words

@@ -82,10 +82,18 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
                     raise res
                 continue
             _take(res, leg)
+    degraded = ""
     if not contract.text:
         # no text → the must-slice itself is the pool. WITH text the pool is the semantic neighbourhood only: an
         # enumerate leg would pour unrelated rows (sim 0) into it, and rank_by an ordinal then sorts them first
         _take(await store.enumerate(contract.kind, must, cap=cap), "enumerate")
+    elif not pool:
+        # A SEARCH NEVER RETURNS NOTHING WHILE THE INDEX HOLDS MATCHING ROWS (prod 2026-09-07: the embedding provider
+        # ran out of credit, every semantic leg came back empty and every text search silently answered zero). The
+        # filters still answer; the caller is told the ranking is degraded so the surface can say so.
+        _take(await store.enumerate(contract.kind, must, cap=cap), "enumerate")
+        if pool:
+            degraded = "semantic_unavailable"
     _t["legs"] = round(_time.monotonic() - _t["start"], 2)
     # 2) the contract is the law: re-filter (leaky-pool invariant) + explicit exclusions
     excl = {str(x) for x in (contract.exclude_ids or [])}
@@ -165,7 +173,7 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
     _t["c0"] = _time.monotonic()
     counts = {} if (depth or {}).get("counts") is False else await store.counts(contract.kind, must, schema, depth=depth)
     _t["counts"] = round(_time.monotonic() - _t["c0"], 2)
-    coverage = {"pool": len(rows), "legs": legs, "excluded": len(excl), "unknown": {k.key: unknown_by_key.get(k.key, 0) for k in schema.for_kind(contract.kind) if k.navigable and k.type is not FacetType.set},
+    coverage = {"pool": len(rows), "legs": legs, **({"degraded": degraded} if degraded else {}), "excluded": len(excl), "unknown": {k.key: unknown_by_key.get(k.key, 0) for k in schema.for_kind(contract.kind) if k.navigable and k.type is not FacetType.set},
                 "noise_floor": floor}
     # an EMPTY (or near-empty) slice with musts → say which must is doing it (leave-one-out; a few counts calls)
     slice_total = pool_from_counts(counts, schema, contract.kind)

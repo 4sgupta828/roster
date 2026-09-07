@@ -674,6 +674,7 @@
   .frail-pills{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.3rem;}
   .frail-apply{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.45rem;padding-top:.4rem;border-top:1px dashed var(--hair);font-size:.76rem;color:var(--muted);}
   .frail-merge,.frail-relaxed{margin-bottom:.4rem;padding-bottom:.4rem;border-bottom:1px dashed var(--hair);font-size:.74rem;color:var(--muted);}
+  .frail-degraded{margin-bottom:.45rem;padding:.4rem .6rem;border:1px solid var(--gold);border-left-width:4px;border-radius:8px;background:rgba(var(--gold-rgb),.08);font-size:.76rem;line-height:1.45;}
   .frail-relaxed-item{display:inline-flex;align-items:center;gap:.25rem;min-height:30px;padding:.15rem .55rem;border:1px solid rgba(var(--gold-rgb),.5);border-radius:999px;color:var(--ink);}
   .frail-relaxed-item.yours{border-style:dashed;}
   .frail-merge-h{display:flex;flex-wrap:wrap;gap:.35rem;align-items:baseline;margin-bottom:.3rem;}
@@ -5647,7 +5648,9 @@ function renderTriageReady(rd){
       <button type="button" class="tgt-restart" id="tgt-restart">↺ Start over</button>
     </div>`;
   q.setAttribute("placeholder", "Add a detail to refine further…");
-  tbody().querySelectorAll(".tgt-route").forEach(b => b.addEventListener("click", () => routeTriage(b.dataset.route, (c.text || rd.understood || ""), rd)));
+  // the search text is the ASK (the contract's own text, else the user's last words) — never the ready card's sentence
+  const lastUser = [...((INTAKE.state && INTAKE.state.transcript) || [])].reverse().find(m => m.role === "user");
+  tbody().querySelectorAll(".tgt-route").forEach(b => b.addEventListener("click", () => routeTriage(b.dataset.route, (c.text || (lastUser && lastUser.text) || ""), rd)));
   const rs = $("#tgt-restart"); if(rs) rs.addEventListener("click", () => { if(TRIAGE_V3){ INTAKE.ready = null; submitTriage("", {restart: true}); } else setMode("triage", {fresh:true}); });
   tbody().querySelectorAll(".tgt-dirswitch").forEach(b => b.addEventListener("click", () => { INTAKE.ready = null; submitTriage("", {direction: b.dataset.dir}); }));
   tbody().querySelectorAll(".tgt-brief-row").forEach(r => r.addEventListener("click", () => { INTAKE.ready = null; q.value = `Change ${r.dataset.label}: `; q.focus(); autoGrow(); }));
@@ -7838,6 +7841,11 @@ function facetPendingAll(d){
   return n;
 }
 function countsEmpty(counts){ return !counts || !Object.values(counts).some(v => v && Object.keys(v).length); }
+function degradedMarkup(d){
+  const cov = d.coverage || {};
+  if(cov.degraded !== "semantic_unavailable") return "";
+  return `<div class="frail-degraded">⚠ <b>Ranked by filters only</b> — the semantic ranking is unavailable right now, so these are the rows that meet the filters, in index order. Chips still work.</div>`;
+}
 function facetRailMarkup(d){
   const c = facetDraft(d), L = d.labels || {};
   // AN EMPTY POOL (owner, 2026-09-06): the chips must not vanish with the counts — the user needs them to change the
@@ -7867,7 +7875,7 @@ function facetRailMarkup(d){
       <button type="button" class="idgo frail-go" data-jpid="${esc(d._jpid)}">Apply</button><button type="button" class="histbtn frail-reset" data-jpid="${esc(d._jpid)}">Reset</button></div>`
     : `<div class="frail-apply">${d._applied && d._delta ? `<span class="frail-done">Applied ✓ — ${d._delta.after} shown${d._delta.added ? ` · <b>${d._delta.added} new</b>` : ""}${d._delta.removed ? ` · ${d._delta.removed} dropped` : ""}${!d._delta.added && !d._delta.removed ? " · same rows, order may differ" : ""}${(d._delta.prevPool != null && d._delta.pool != null && d._delta.prevPool !== d._delta.pool) ? ` · pool ${d._delta.prevPool} → ${d._delta.pool}` : ""}</span> ${d._delta.added && !d._newFirst ? (() => { const rowsNow = Array.isArray(d.people_rows) ? d.people_rows : (d.jobs||[]); const per = 20, pg = Array.isArray(d.people_rows) ? (d._page||0) : (d._jpage||0); const onPage = rowsNow.slice(pg*per, pg*per+per).filter(r => r._new).length; return `${onPage ? ` <span class="frail-note">${onPage} of them on this page (corner flag)</span>` : ` <span class="frail-note">none of them on this page</span>`} <button type="button" class="histbtn frail-shownew" data-jpid="${esc(d._jpid)}">Show the ${d._delta.added} new first</button>`; })() : ""}` : "Tap chips to stage changes, then apply once. "}${saveBtn}</div>`;
   const empty = (cov.diagnosis && !facetPending(d)) ? diagnosisMarkup({...cov.diagnosis, best_match: cov.best_match}, d._jpid, L) : "";
-  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}">${relaxedMarkup(d)}${mergeMarkup(d)}<div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""}${stale ? ` <span class="frail-note" title="The pool is empty, so these counts are from the last result that had rows — change a filter and apply">· chips from the last result</span>` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
+  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}">${degradedMarkup(d)}${relaxedMarkup(d)}${mergeMarkup(d)}<div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""}${stale ? ` <span class="frail-note" title="The pool is empty, so these counts are from the last result that had rows — change a filter and apply">· chips from the last result</span>` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
 }
 // EMPTY RESULT → which must is doing it (leave-one-out from the evaluator), with one-tap Drop (staged)
 function diagnosisMarkup(diag, jpid, L){
