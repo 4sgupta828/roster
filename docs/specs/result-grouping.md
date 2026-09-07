@@ -199,3 +199,25 @@ Verified at 390 px.
 Known gaps: a broad set can still leave one large group after the single re-ask (Applied ML holds 46); grouping is
 Jobs-only (Talent has the same need); and the jobs response's field list in the browser has now silently dropped three
 new fields in a row (relaxed, merge, group_options) — it should be a pass-through, not an allow-list.
+
+## 9. Saved maps and Talent (2026-09-07, owner follow-ups)
+
+"Why am I not seeing all the filtering controls, and grouping controls in saved job maps? Basically I can create new maps
+from a given map … and navigate those easily" — then "do the same for talent maps".
+
+- **A saved map navigates like a live search.** `/maps/{id}/navigate` returns the measured group menu alongside rows,
+  counts, labels and contract, so a map's menu is the one its rows earn rather than the static fallback. Applying
+  filters on a map refreshes the menu and drops any stale Auto segmentation.
+- **Grouping is no longer Jobs-only.** Per-surface accessors give Talent the same machinery (a person's company, place,
+  level, track, industry, evidence), each surface re-renders itself, and Auto sends people AS people — the guidance then
+  segments a shortlist by what each person does rather than a posting by what you would own.
+- **A map can be forked.** "＋ Save as a new map" on both map bars turns the contract you navigated to and the rows in
+  front of you into a new map you own — including from a map someone shared with you, so a map is a starting point
+  rather than a dead end.
+
+Verified on prod with a throwaway account: a jobs map shows rail + menu (Auto · Company · Location) and forks to a new
+owned map with its own link; a talent map shows rail + menu (Auto · Location) and groups 100 people into 13.
+
+Two bugs found while doing it, both from editing by pattern rather than by scope: the fork button was declared in one
+map bar and rendered in the other, and an earlier edit hit the first of two identical markup lines. The lesson is in the
+commits — anchor an edit inside the function it belongs to.
