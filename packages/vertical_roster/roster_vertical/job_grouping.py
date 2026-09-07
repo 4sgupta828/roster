@@ -53,8 +53,10 @@ def row_line(i: int, row: dict, *, cap: int = 70) -> str:
     return f"{i}| " + " · ".join(b for b in bits if b)
 
 
-def segment_prompt(max_groups: int = 7) -> str:
-    return ("You segment a list of job postings the way a JOB SEEKER decides where to apply: by the WORK they would own. "
+def segment_prompt(max_groups: int = 7, kind: str = "job") -> str:
+    who = ("a list of CANDIDATES the way a HIRING MANAGER reads a shortlist: by the WORK each person does"
+           if kind == "person" else "a list of job postings the way a JOB SEEKER decides where to apply: by the WORK they would own")
+    return (f"You segment {who}. "
             "Good cuts name the craft or the domain — building infrastructure · applied ML · model training · inference "
             "and serving · integrations and solutions · data platform · frontend · security · new business sales · "
             "account management · sales engineering · long-haul driving · bedside care. NEVER segment by employer, by "
@@ -65,8 +67,8 @@ def segment_prompt(max_groups: int = 7) -> str:
             "(the leftovers are shown as 'Everything else'). Order groups by how many rows they hold.")
 
 
-def resegment_prompt(name: str, n: int, total: int) -> str:
+def resegment_prompt(name: str, n: int, total: int, kind: str = "job") -> str:
     """One retry when a single group swallowed the set: split THAT group, keep the rest."""
-    return (segment_prompt() + f"\n\nYour previous answer put {n} of {total} rows in \"{name}\", which is not a "
+    return (segment_prompt(kind=kind) + f"\n\nYour previous answer put {n} of {total} rows in \"{name}\", which is not a "
             "segmentation. Split that group by what those people actually build or sell, and keep the smaller groups as "
             "they were. No group may hold more than half the rows.")

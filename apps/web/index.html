@@ -2979,9 +2979,25 @@ const JOB_GROUP_OF = {
 const JOB_GROUPS_FALLBACK = [{key: "auto", label: "Auto"}, {key: "company", label: "Company"},
                              {key: "metro", label: "Location"}, {key: "level", label: "Seniority"},
                              {key: "work_type", label: "IC / manager"}];
+const PERSON_GROUP_OF = {
+  company:          p => (facetOne(p, "company") || "").trim(),
+  metro:            p => facetOne(p, "metro"),
+  level:            p => facetOne(p, "level"),
+  work_type:        p => facetOne(p, "work_type"),
+  company_industry: p => facetOne(p, "company_industry"),
+  evidence:         p => facetOne(p, "evidence"),
+};
+function isPeopleRender(d){ return Array.isArray(d && d.people_rows); }
+function groupAccessors(d){ return isPeopleRender(d) ? PERSON_GROUP_OF : JOB_GROUP_OF; }
+function regroupRender(d){
+  if(!d) return;
+  if(isPeopleRender(d) && typeof gotoPeoplePage === "function") gotoPeoplePage(d._pid, 0);
+  else gotoJobsPage(d._jpid, d._jpage || 0);
+}
 function jobGroupOptions(d){
+  const of = groupAccessors(d);
   const from = ((d.group_options || []).length ? d.group_options : JOB_GROUPS_FALLBACK);
-  return from.filter(o => o.key === "auto" || JOB_GROUP_OF[o.key]);
+  return from.filter(o => o.key === "auto" || of[o.key]);
 }
 function facetOne(j, key){
   const v = ((j.facets || {})[key] || [])[0];
@@ -2989,7 +3005,7 @@ function facetOne(j, key){
 }
 function groupJobs(jobs, mode, d){
   if(mode === "auto") return autoGroups(jobs, d);
-  const of = JOB_GROUP_OF[mode];
+  const of = groupAccessors(d)[mode];
   if(!of) return null;
   const spec = {of};
   const by = new Map();
@@ -3019,7 +3035,7 @@ function jobGroupBarMarkup(d){
 function autoGroups(jobs, d){
   const a = d._auto;
   if(!a) return null;
-  const byId = new Map((jobs || []).map(j => [String(j.id), j]));
+  const byId = new Map((jobs || []).map(j => [String(isPeopleRender(d) ? (j.entity_id || j.id) : j.id), j]));
   const groups = (a.groups || []).map(g => {
     const rows = (g.ids || []).map(id => byId.get(String(id))).filter(Boolean);
     return {key: g.name, label: g.name, why: g.why || "", rows, stated: true,
@@ -3031,18 +3047,25 @@ function autoGroups(jobs, d){
 }
 async function requestAutoGroups(jpid){
   const d = facetRenderOf(jpid); if(!d || d._autoBusy) return;
-  if(d._auto){ d._groupBy = "auto"; gotoJobsPage(jpid, 0); return; }        // already segmented: never call twice
-  d._autoBusy = true; d._groupBy = "auto"; d._autoNote = "segmenting…"; gotoJobsPage(jpid, 0);
+  if(d._auto){ d._groupBy = "auto"; regroupRender(d); return; }             // already segmented: never call twice
+  d._autoBusy = true; d._groupBy = "auto"; d._autoNote = "segmenting…"; regroupRender(d);
   try{
-    const rows = (d.jobs || []).map(j => ({id: String(j.id), title: j.title || "",
-      specialty: ((j.facets||{}).specialty)||[], skill: ((j.facets||{}).skill)||[], role_family: ((j.facets||{}).role_family)||[]}));
+    const people = isPeopleRender(d);
+    const src = people ? d.people_rows : d.jobs;
+    const rows = (src || []).map(x => {
+      const f = x.facets || {};
+      const title = people ? ((f.role_family || [])[0] || String(x.blurb || "").split(" at ")[0].split(" — ")[0] || "")
+                           : (x.title || "");
+      return {id: String(people ? (x.entity_id || x.id) : x.id), title: String(title).slice(0, 80),
+              specialty: f.specialty || [], skill: f.skill || [], role_family: f.role_family || []};
+    });
     const r = await fetch("/jobs/group", {method: "POST", headers: {"content-type": "application/json"},
-      body: JSON.stringify({rows, question: (d.query && d.query.text) || ""})});
+      body: JSON.stringify({rows, kind: people ? "person" : "job", question: (d.query && d.query.text) || ""})});
     const out = await r.json();
     if(!r.ok || !(out.groups || []).length){ d._auto = null; d._groupBy = ""; d._autoNote = "couldn't segment these — try another grouping"; }
     else { d._auto = out; d._autoNote = out.source === "fallback" ? "grouped by shared terms (the model was unavailable)" : ""; }
   }catch(e){ d._auto = null; d._groupBy = ""; d._autoNote = "couldn't reach the grouping service"; }
-  finally{ d._autoBusy = false; gotoJobsPage(jpid, 0); }
+  finally{ d._autoBusy = false; regroupRender(d); }
 }
 function jobsGroupedMarkup(d, groups, cardOf){
   const open = d._openGroups || {};
@@ -3344,7 +3367,18 @@ function peopleRowsMarkup(data){
   } else {
     body = `${pagedMode && pagesN>1 && page>0 ? moreBtn : ""}<div class="ppl-grid">${pickCards || cards}</div>${moreBtn}`;
   }
-  return `<div class="ppl-wrap" data-pid="${esc(data._pid)}">${head}${body}</div>`;
+  // GROUPING (docs/specs/result-grouping.md) — the same machinery the Jobs Map uses, over every returned person
+  let groupBar = "";
+  if(isEnum && rows.length > 5 && !(cb.clusters && cb.clusters.length)){
+    if(data._groupBy === undefined){
+      let want = ""; try{ want = localStorage.getItem("roster_group_by") || ""; }catch(e){}
+      data._groupBy = (want && want !== "auto" && jobGroupOptions(data).some(o => o.key === want)) ? want : "";
+    }
+    groupBar = jobGroupBarMarkup(data);
+    const groups = groupJobs(rows, data._groupBy, data);
+    if(groups) body = jobsGroupedMarkup(data, groups, cardHtml);
+  }
+  return `<div class="ppl-wrap" data-pid="${esc(data._pid)}">${head}${groupBar}${body}</div>`;
 }
 
 // [n] AND grouped [n, m, k] citation refs → clickable sups, in ONE pass (a chained second replace
@@ -8046,6 +8080,8 @@ async function facetReevaluate(jpid, contract, save){
     if(!countsEmpty(d.counts)) d._lastCounts = d.counts;                       // remembered for an empty pool
     d.contract = out.contract; d._draft = null; d.counts = out.counts; d.coverage = out.coverage; d.labels = out.labels || d.labels;
     if(out.merge !== undefined){ d.merge = out.merge || null; } d._recipeOff = null;
+    if(out.group_options) { d.group_options = out.group_options; }
+    d._auto = null; d._autoNote = "";                        // the rows changed: any Auto segmentation is stale
     d.relaxed = [];   // an Apply runs the chips exactly as set — no auto-relaxing on the rail
     // WHAT CHANGED (owner, 2026-09-06): the delta against the rows shown before this Apply, and a "new" badge
     const delta = rowsDelta(prevRows, out.rows || []); const beforeKeys = new Set(prevRows.map(rowKey));
@@ -8070,11 +8106,11 @@ document.addEventListener("click", (e)=>{
   if(gopt){ e.preventDefault(); const d = facetRenderOf(gopt.dataset.jpid);
     if(d){ const mode = gopt.dataset.group || ""; d._openGroups = {}; d._jpage = 0; d._autoNote = "";
       try{ localStorage.setItem("roster_group_by", mode); }catch(err){}
-      if(mode === "auto"){ requestAutoGroups(gopt.dataset.jpid); } else { d._groupBy = mode; gotoJobsPage(gopt.dataset.jpid, 0); } }
+      if(mode === "auto"){ requestAutoGroups(gopt.dataset.jpid); } else { d._groupBy = mode; regroupRender(d); } }
     return; }
   const ghead = e.target.closest && e.target.closest(".jgroup-head");
   if(ghead){ e.preventDefault(); const d = facetRenderOf(ghead.dataset.jpid); if(d){ d._openGroups = d._openGroups || {}; const k = ghead.dataset.key;
-    d._openGroups[k] = !d._openGroups[k]; gotoJobsPage(ghead.dataset.jpid, d._jpage || 0); } return; }
+    d._openGroups[k] = !d._openGroups[k]; regroupRender(d); } return; }
   const go = e.target.closest && e.target.closest(".frail-go");
   if(go){ e.preventDefault(); const d = facetRenderOf(go.dataset.jpid); if(d && (d._draft || d._recipeOff)) facetReevaluate(go.dataset.jpid, mergeContract(d, d._draft || d.contract)); return; }
   const rc = e.target.closest && e.target.closest(".frail-recipe");
@@ -9252,6 +9288,7 @@ function talentMapBar(){
     const title = m.is_owner
       ? `<input class="mb-title" id="mapTitle" value="${esc(m.title||"")}" placeholder="Map title" onchange="saveMapMeta()">`
       : `<span class="mb-title">${esc(m.title||"Talent Map")}</span>`;
+    const fork = `<button type="button" class="mb-btn" onclick="forkTalentMap()" title="Save what you are looking at — these filters and these people — as a new map of your own">＋ Save as a new map</button>`;
     const nFb = (m.feedback||[]).filter(f => f.reviewer_key).length;
     // feedback that CAN revise the brief: any tags, or an owner/reviewer shortlist / not-relevant call —
     // counted only when NEWER than the last revision (everything older is already in this list)
@@ -9262,7 +9299,7 @@ function talentMapBar(){
     const reviewAs = m.is_owner ? "" : `<span class="mb-meta" style="flex-basis:auto;">Review as <input class="mb-title" id="reviewerName" style="max-width:180px;" placeholder="your name" value="${esc(reviewerName())}" onchange="setReviewerName(this.value);"> <span class="ppl-fc" style="text-transform:none;">(no account needed — your review states and feedback save to this map under your name)</span></span>`;
     const revise = (m.is_owner && nAct) ? `<button type="button" class="mb-btn" id="reviseBtn" onclick="reviseMapPreview()">↻ Revise from feedback (${nAct} new)</button>`
       : (m.is_owner && revN ? `<span class="mb-meta" style="flex-basis:auto;">no new feedback since revision ${revN}</span>` : "");
-    return `<div class="mapbar">${title}${share}<a class="mb-btn" href="${csvHref}" target="_blank" rel="noopener">⬇ Export CSV</a>${revise}${cadenceMarkup(m)}
+    return `<div class="mapbar">${title}${share}<a class="mb-btn" href="${csvHref}" target="_blank" rel="noopener">⬇ Export CSV</a>${fork}${revise}${cadenceMarkup(m)}
       <span class="mb-meta">Saved Talent Map${revN?` · revision ${revN}`:""} · ${m.n_rows||0} people · ${m.is_owner?"you own this map — review states, feedback and notes persist here":"shared view"}${nFb?` · ${nFb} reviewer feedback item${nFb===1?"":"s"}`:""}${m.created_at?` · saved ${esc(String(m.created_at).slice(0,10))}`:""}</span>
       ${reviewAs}
       ${revisionsMarkup(m)}
@@ -9382,6 +9419,7 @@ function jobMapBarMarkup(d){
     const title = m.is_owner
       ? `<input class="mb-title" id="mapTitle" value="${esc(m.title||"")}" placeholder="Job map title" onchange="saveMapMeta()">`
       : `<span class="mb-title">${esc(m.title||"Job Map")}</span>`;
+    const fork = `<button type="button" class="mb-btn" onclick="forkJobMap()" title="Save what you are looking at — these filters and these roles — as a new map of your own">＋ Save as a new map</button>`;
     const revs = m.revisions || [];
     const revN = revs.length ? revs[revs.length-1].revision_id : 0;
     const since = revN ? String(revs[revs.length-1].created_at||"") : "";
@@ -9398,6 +9436,56 @@ function jobMapBarMarkup(d){
   if(!d || !d._jpid) return "";
   return `<div class="mapbar"><span class="mb-meta" style="flex-basis:auto;flex:1 1 200px;">Keep this job search as a durable, shareable list.</span>
     <button type="button" class="mb-btn" onclick="saveJobMap('${esc(d._jpid)}')">💾 Save as Job Map</button></div>`;
+}
+// FORK a saved TALENT map: the contract you navigated to and the people it shows become a new map you own.
+async function forkTalentMap(){
+  if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
+  const m = window.ACTIVE_MAP; if(!m) return;
+  const t = lastPeopleTurn() || {};
+  const d = (t._pid && facetRenderOf(t._pid)) || t;
+  const rows = (d.people_rows || t.people_rows || []).slice(0, 400);
+  if(!rows.length){ alert("Nothing to save yet — apply your filters first."); return; }
+  const base = (m.title || "Talent Map").replace(/\s*\(copy( \d+)?\)$/, "");
+  const title = (prompt("Name for the new map", base + " (copy)") || "").trim();
+  if(!title) return;
+  const cb = d.coverage_basis || t.coverage_basis || {};
+  const body = {tenant_id:"demo", map_type:"talent", brief:(t.question || base), title: title.slice(0,80),
+    contract:(d.contract || t.contract || null), rows, filters:(cb.query_facets || {}),
+    coverage:{...cb, counts:(d.counts || null), forked_from:m.id}};
+  try{
+    const r = await fetch("/maps", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(body)});
+    const res = await r.json().catch(()=>({}));
+    if(!r.ok){ alert(res.detail || "Couldn't save the new map."); return; }
+    window.ACTIVE_MAP = {id:res.id, map_type:"talent", title:res.title, share_path:res.share_path, token:(res.share_token||""), is_owner:true,
+                         reviews:{}, feedback:[], revisions:[], n_rows:rows.length, notes:"", refresh_every:"off"};
+    try{ history.replaceState(null, "", res.share_path); }catch(e){}
+    renderThread();
+  }catch(e){ alert("Couldn't save the new map — " + (e.message||e)); }
+}
+// FORK a saved map: the contract you have navigated to and the roles it shows become a NEW map you own. Works on a map
+// someone shared with you, which is how a map becomes a starting point rather than a dead end.
+async function forkJobMap(){
+  if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
+  const m = window.ACTIVE_MAP; if(!m) return;
+  const t = (THREAD.turns||[]).find(x => x.kind === "jobs") || {};
+  const d = (t._jpid && facetRenderOf(t._jpid)) || t;
+  const rows = (d.jobs||[]).slice(0,400).map(j => ({...j, summary: (window.JOB_SUMMARIES||{})[j.url||""] || undefined}));
+  if(!rows.length){ alert("Nothing to save yet — apply your filters first."); return; }
+  const base = (m.title || "Job Map").replace(/\s*\(copy( \d+)?\)$/, "");
+  const title = (prompt("Name for the new map", base + " (copy)") || "").trim();
+  if(!title) return;
+  const body = {tenant_id:"demo", map_type:"jobs", brief:(t.question || base), title: title.slice(0,80),
+    contract:(d.contract||null), rows, filters:(d.query||{}),
+    coverage:{must:d.must||null, geo_scope:d.geo_scope||null, note:d.note||"", brief_contract:d.brief_contract||null, counts:(d.counts||null), forked_from:m.id}};
+  try{
+    const r = await fetch("/maps", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(body)});
+    const res = await r.json().catch(()=>({}));
+    if(!r.ok){ alert(res.detail || "Couldn't save the new map."); return; }
+    window.ACTIVE_MAP = {id:res.id, map_type:"jobs", title:res.title, share_path:res.share_path, token:(res.share_token||""), is_owner:true,
+                         reviews:{}, feedback:[], revisions:[], n_rows:rows.length, notes:"", refresh_every:"off"};
+    try{ history.replaceState(null, "", res.share_path); }catch(e){}
+    renderThread();
+  }catch(e){ alert("Couldn't save the new map — " + (e.message||e)); }
 }
 async function saveJobMap(jpid){
   if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
@@ -9457,7 +9545,7 @@ async function loadMapView(id, token){
       if(m.contract){   // the rail's live counts for this map's contract (the snapshot stays until you apply)
         try{
           const nr = await fetch(`/maps/${encodeURIComponent(m.id)}/navigate`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({t: token||""})});
-          if(nr.ok){ const nd = await nr.json(); const t0 = THREAD.turns[0]; t0.counts = nd.counts; t0.labels = nd.labels; t0.coverage = nd.coverage; t0.contract = nd.contract; if(t0._jpid) gotoJobsPage(t0._jpid, t0._jpage||0); else renderThread(); }
+          if(nr.ok){ const nd = await nr.json(); const t0 = THREAD.turns[0]; t0.counts = nd.counts; t0.labels = nd.labels; t0.coverage = nd.coverage; t0.contract = nd.contract; t0.group_options = nd.group_options || t0.group_options || []; if(t0._jpid) gotoJobsPage(t0._jpid, t0._jpage||0); else renderThread(); }
         }catch(e){}
       }
       return;
@@ -9473,7 +9561,7 @@ async function loadMapView(id, token){
     if(m.contract){   // the rail's live counts for this map's contract (the snapshot stays until you apply)
       try{
         const nr = await fetch(`/maps/${encodeURIComponent(m.id)}/navigate`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({t: token||""})});
-        if(nr.ok){ const nd = await nr.json(); const t0 = THREAD.turns[0]; t0.counts = nd.counts; t0.labels = nd.labels; t0.coverage = nd.coverage; t0.contract = nd.contract; if(t0._pid) rerenderPeople(t0._pid); else renderThread(); }
+        if(nr.ok){ const nd = await nr.json(); const t0 = THREAD.turns[0]; t0.counts = nd.counts; t0.labels = nd.labels; t0.coverage = nd.coverage; t0.contract = nd.contract; t0.group_options = nd.group_options || t0.group_options || []; if(t0._pid) rerenderPeople(t0._pid); else renderThread(); }
       }catch(e){}
     }
   }catch(e){ if(out) out.innerHTML = `<div class="pitem-empty">Couldn't load the map — ${esc(e.message||e)}</div>`; }

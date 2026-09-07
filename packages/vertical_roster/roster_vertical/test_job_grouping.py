@@ -29,3 +29,11 @@ def test_the_guidance_forbids_the_cuts_that_are_not_distinctions():
     kinds = {d[0]: d[3] for d in GROUP_DIMENSIONS}
     assert kinds["company"] == "identity" and kinds["metro"] == "identity"        # many groups is the point
     assert kinds["level"] == "categorical" and kinds["company_industry"] == "categorical"
+
+
+def test_a_shortlist_of_people_is_segmented_as_people_not_as_postings():
+    jobs, people = segment_prompt(), segment_prompt(kind="person")
+    assert "JOB SEEKER decides where to apply" in jobs and "CANDIDATES" in people and "HIRING MANAGER" in people
+    for forbidden in ("employer", "seniority", "location"):
+        assert forbidden in people, forbidden
+    assert "CANDIDATES" in resegment_prompt("Backend", 40, 60, kind="person")

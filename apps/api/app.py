@@ -1343,6 +1343,7 @@ class GroupRow(BaseModel):                 # one posting, as the browser holds i
 class GroupIn(BaseModel):                  # AUTO grouping (docs/specs/result-grouping.md §4) — opt-in, one call
     rows: list[GroupRow] = Field(default_factory=list, max_length=200)
     question: str = Field(default="", max_length=500)
+    kind: str = "job"                      # job | person — a shortlist of people segments by what each person DOES
 
 
 class JudgeIn(BaseModel):                  # the blind fit judge (evals): brief + up to 60 rows → verdicts
@@ -4189,6 +4190,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             if on_event is not None:
                 await on_event({"type": "people", "count": len(rows)})
             nav = {"contract": out["contract"], "counts": out["counts"], "coverage": out["coverage"], "labels": out.get("labels"), "merge": out.get("merge"),
+                   "group_options": _group_options(rows),
                    "relaxed": out.get("relaxed") or [], "timings": {"search": round(_t1 - _t0, 2), "hydrate": round(_t2 - _t1, 2), **{f"search.{k}": v for k, v in (out.get("timings") or {}).items()}, **((cdict or {}).get("timings") or {})}}
             _cc = out["contract"]; _cv = out.get("coverage") or {}
             _lab = (out.get("labels") or {}).get("values") or {}
@@ -6224,7 +6226,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 out.append({"key": "auto", "label": label, "score": 1e9, "why": "let the model segment these results"})
                 continue
             if source == "company":
-                vals = [str((r or {}).get("company") or "").replace("_", " ").strip() for r in rows]
+                vals = [str((r or {}).get("company") or (((r or {}).get("facets") or {}).get("company") or [""])[0] or "").replace("_", " ").strip() for r in rows]
             elif source == "location":
                 vals = [str((r or {}).get("location") or "").strip() or ((((r or {}).get("facets") or {}).get("metro") or [""])[0]) for r in rows]
             else:
@@ -6698,14 +6700,15 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         user = "\n".join(row_line(i, r) for i, r in enumerate(rows))[:12000]
         llm = getattr(app.state, "intake_llm", None) or _llm_json
         groups, leftovers, notes, source = [], list(range(n)), [], "fallback"
+        kind = "person" if body.kind == "person" else "job"
         try:
-            raw = await asyncio.to_thread(llm, segment_prompt(), user)
+            raw = await asyncio.to_thread(llm, segment_prompt(kind=kind), user)
             groups, leftovers, notes = enforce(raw.get("groups") or [], n)
             source = "model"
             dominant = next((x for x in notes if x.startswith("dominant")), "")
             if dominant and groups:
                 # one bucket swallowed the set — ask once more to split THAT group (prod prototype: 49 of 78 in one)
-                raw2 = await asyncio.to_thread(llm, resegment_prompt(groups[0].name, len(groups[0].ids), n), user)
+                raw2 = await asyncio.to_thread(llm, resegment_prompt(groups[0].name, len(groups[0].ids), n, kind=kind), user)
                 g2, l2, n2 = enforce(raw2.get("groups") or [], n)
                 if g2 and not any(x.startswith("dominant") for x in n2):
                     groups, leftovers, notes = g2, l2, n2 + ["re-asked: the first answer had one dominant group"]
@@ -6832,6 +6835,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         out = await _evaluate_contract(cdict)
         new_rows = await _rows_from_eval(m.get("map_type") or "jobs", out)
         res = {"rows": new_rows, "counts": out["counts"], "coverage": out["coverage"], "contract": out["contract"], "labels": out.get("labels")}
+        res["group_options"] = _group_options(new_rows)          # a saved map navigates like a live search, menu included
         if body.save:
             if not m.get("is_owner"):
                 raise HTTPException(status_code=403, detail="only the owner can save a navigated view")
