@@ -2785,6 +2785,7 @@ async function runJobs(question, opts){
     THREAD.turns.push({question, kind: "jobs", jobs: d.jobs||[], query: d.query||{},
                        contract: d.contract||null, counts: d.counts||null, coverage: d.coverage||null, labels: d.labels||null,   // the evaluator's rail
                        relaxed: d.relaxed||[], merge: d.merge||null,                                       // smart relaxing notes; merged-search recipes
+                       group_options: d.group_options||[],                                                  // which groupings organise THESE rows (server-computed)
                        stats: d.stats||{}, semantic: d.semantic, geo_scope: d.geo_scope||null,
                        related_jobs: d.related_jobs||[], company_indexed: d.company_indexed,
                        agentic: !!d.agentic, intent: d.intent||"", query_angles: d.query_angles||[],
