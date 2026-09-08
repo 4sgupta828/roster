@@ -2764,7 +2764,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         if store is None:
             return {"jobs": [], "count": 0, "query": {}, "stats": {"jobs": 0, "companies": 0}}
 
-        async def _save_job_session(rows: list, qdesc: dict):
+        async def _save_job_session(rows: list, qdesc: dict, nav: dict | None = None):
             # Store the actual job rows on the session so History can SHOW the stored results
             # on click (never re-run the search). Cap the stored payload so a huge result set
             # doesn't bloat the row. Returns the session id (the shareable link), or None.
@@ -2777,7 +2777,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         question=body.question, answer=f"Found {count} open role{'' if count==1 else 's'}{at}.",
                         grounded=bool(count), claims=[], source_stats={}, coverage_gaps=[], rejected=0,
                         sources=body.sources, user_name=body.user_name, user_email=body.user_email,
-                        kind="jobs", extra={"jobs_count": count, "jobs": list(rows[:60]), "query": qdesc})
+                        kind="jobs", extra={"jobs_count": count, "jobs": list(rows[:60]), "query": qdesc,
+                                            # the rail and the intent strip are part of the answer: a reopened session
+                                            # that cannot show which filters produced it is not the same artifact
+                                            **{k: v for k, v in (nav or {}).items() if v}})
             except Exception:   # noqa: BLE001
                 pass
             return None
