@@ -1181,8 +1181,9 @@ class ApplicationAnswersIn(BaseModel):
 
 
 class ApplicationExecIn(BaseModel):
-    filled: list[str] = []
-    missing: list[str] = []
+    filled: list[str] = []        # verified: something we can read back confirms the form took it
+    unconfirmed: list[str] = []   # entered, but the form never confirmed it — the user must check
+    missing: list[str] = []       # not found on the page at all
     note: str = ""
 
 
@@ -7556,9 +7557,15 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         d = await store.get_application(user["id"], app_id)
         if not d:
             raise HTTPException(status_code=404, detail="not found")
-        rep = {"filled": [str(x)[:200] for x in (body.filled or [])][:200], "missing": [str(x)[:200] for x in (body.missing or [])][:100],
-               "note": str(body.note or "")[:500]}
-        await store.update_application(user["id"], app_id, status="filled", reason=("" if not rep["missing"] else f"{len(rep['missing'])} field(s) not found on the live form — check them before submitting"),
+        cut = lambda xs, n: [str(x)[:200] for x in (xs or [])][:n]     # noqa: E731
+        rep = {"filled": cut(body.filled, 200), "unconfirmed": cut(body.unconfirmed, 100),
+               "missing": cut(body.missing, 100), "note": str(body.note or "")[:500]}
+        # THREE outcomes, not two. "Entered but the form did not confirm it" is the one that costs a
+        # user their application: the field looks right on screen and the site's own validation says
+        # it is empty. It is named separately here so the surface can name it too.
+        from api.apply_plan import execution_reason
+        reason = execution_reason(rep["unconfirmed"], rep["missing"])
+        await store.update_application(user["id"], app_id, status="filled", reason=reason,
                                        drafts={**(d.get("drafts") or {}), "_execution": rep})
         return {"ok": True, **rep}
 

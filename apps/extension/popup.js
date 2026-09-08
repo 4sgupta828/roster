@@ -22,7 +22,12 @@ async function refresh() {
     const rr = await send({ type: "fill_active_tab", id: Number(b.dataset.id) });
     if (!rr || !rr.ok) { $("#note").textContent = (rr && rr.error) || "Fill failed."; return; }
     const res = rr.results || {};
-    $("#note").textContent = res.filled ? `Filled ${res.filled.length}; ${res.missing ? res.missing.length : 0} not found. Attach anything missing, review, then submit on the page.` : (res.error || "The page didn't answer — is the application form open in this tab?");
+    if (!res.filled) { $("#note").textContent = res.error || "The page didn't answer — is the application form open in this tab?"; return; }
+    // NAME what needs the user. A count sends someone hunting a forty-field form.
+    const need = res.needs_you || [];
+    $("#note").textContent = `Filled ${res.filled.length}.`
+      + (need.length ? ` ${need.length} need${need.length === 1 ? "s" : ""} you: ${need.slice(0, 4).join(", ")}${need.length > 4 ? "…" : ""} (outlined on the page).` : "")
+      + " Review, then submit on the page yourself.";
   }));
 }
 function esc(s) { return String(s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }

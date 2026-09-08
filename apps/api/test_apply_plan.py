@@ -125,3 +125,32 @@ def test_policy_and_detection():
     assert policy_for("I certify the above is true", "checkbox") == "legal"
     assert policy_for("Resume", "file") == "file" and policy_for("Why us?", "textarea") == "open"
     assert detect("https://acme.wd5.myworkdayjobs.com/x") == "workday" and detect("https://careers.acme.com/jobs/1") == ""
+
+
+# ── what the card says after a fill ───────────────────────────────────────────────────────────────
+
+def test_a_clean_fill_says_nothing():
+    from api.apply_plan import execution_reason
+    assert execution_reason([], []) == ""
+
+
+def test_a_field_the_form_never_confirmed_is_reported_like_a_missing_one():
+    """The failure that costs an application: the box reads back correctly on screen and the site's
+    own state is still empty. It is not a success, so it is named alongside the fields we never found."""
+    from api.apply_plan import execution_reason
+    r = execution_reason(["Location"], ["Race/Ethnicity"])
+    assert r.startswith("2 fields need you before you submit: ")
+    assert "Location" in r and "Race/Ethnicity" in r
+
+
+def test_one_field_reads_as_one():
+    from api.apply_plan import execution_reason
+    assert execution_reason([], ["Work authorization"]) == \
+        "1 field needs you before you submit: Work authorization"
+
+
+def test_the_fields_are_named_not_counted_and_a_long_list_is_trimmed():
+    from api.apply_plan import execution_reason
+    r = execution_reason([f"Q{i}" for i in range(9)], [])
+    assert "Q0" in r and r.endswith("…") and "Q8" not in r      # named, bounded
+    assert r.count(",") == 5                                     # six named, then the ellipsis

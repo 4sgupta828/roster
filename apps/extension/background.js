@@ -68,7 +68,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true, ...(await getResume()) });
       } else if (msg.type === "executed") {
         await api(`/me/applications/${msg.id}/executed`, { method: "POST", headers: { "content-type": "application/json" },
-                  body: JSON.stringify({ filled: msg.filled || [], missing: msg.missing || [], note: msg.note || "" }) });
+                  body: JSON.stringify({ filled: msg.filled || [], unconfirmed: msg.unconfirmed || [],
+                                         missing: msg.missing || [], note: msg.note || "" }) });
         sendResponse({ ok: true });
       } else if (msg.type === "submitted") {
         await api(`/me/applications/${msg.id}/mark-submitted`, { method: "POST" });
@@ -83,13 +84,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // every frame of the tab gets the plan (a company page embeds the Greenhouse form in a frame);
         // the frame that holds the form is the one that fills something
         const frames = (await chrome.webNavigation.getAllFrames({ tabId: tab.id })) || [];
-        const agg = { filled: [], missing: [], frames: 0 };
+        // MERGE across frames. This used to ASSIGN `missing` and only when that frame had filled
+        // something, so a frame that missed everything reported nothing and a later frame erased an
+        // earlier frame's misses — the fields a user most needed to hear about were the ones dropped.
+        const agg = { filled: [], unconfirmed: [], missing: [], frames: 0 };
+        const add = (into, from) => { for (const x of (from || [])) if (!into.includes(x)) into.push(x); };
         for (const f of frames) {
           try {
             const r = await chrome.tabs.sendMessage(tab.id, { type: "fill", application: plan, resume }, { frameId: f.frameId });
-            if (r && r.filled) { agg.frames++; if (r.filled.length) { agg.filled = agg.filled.concat(r.filled); agg.missing = r.missing || []; } }
+            if (r && r.filled) {
+              agg.frames++;
+              add(agg.filled, r.filled); add(agg.unconfirmed, r.unconfirmed); add(agg.missing, r.missing);
+            }
           } catch (e) { /* frame without our content script (other host) */ }
         }
+        // a field filled in one frame is not missing because another frame lacked it
+        agg.missing = agg.missing.filter(x => !agg.filled.includes(x) && !agg.unconfirmed.includes(x));
+        agg.unconfirmed = agg.unconfirmed.filter(x => !agg.filled.includes(x));
+        agg.needs_you = agg.unconfirmed.concat(agg.missing);
         sendResponse({ ok: true, results: agg });
       } else {
         sendResponse({ ok: false, error: "unknown message" });
