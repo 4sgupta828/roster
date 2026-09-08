@@ -1,6 +1,7 @@
 # Voices — practitioner content about job search and hiring, as a mode
 
-**Status:** designed and measured 2026-09-08; panel-reviewed before any code. Build in progress.
+**Status:** Phase 1 BUILT and LIVE in production behind `ROSTER_VOICES`. Measured and panel-reviewed
+before any code was written.
 **Owner ask (2026-09-08):** "Can we add a voices mode just like Eigen's where the content is relevant for
 Talent and Job search? Centered around how to search for jobs, figure out talent, deal with fake resumes,
 AI based cheating in interviews, doing interviews right, how to prepare for interviews in specific domains
@@ -183,3 +184,52 @@ extraction; the disagreement clustering; the job-card strip.
 
 **Explicitly not built:** machine transcription (cost + ToS), YouTube caption scraping (closed),
 scraping publishers who advertise no feed, and any title-only podcast index.
+
+---
+
+## 5. In production (2026-09-08)
+
+Live at `ROSTER_VOICES=1`. The first ingest took **7.7 seconds and spent nothing** — no embeddings, no
+model calls:
+
+| | blocks |
+|---|---|
+| podcast chapter pointers (`show_notes`) | 819 |
+| YouTube chapter pointers (`youtube_chapters`) | 480 |
+| essay passages (`practitioner_essay`) | 216 |
+| **total** | **1,515** |
+| embeddings written | **0** |
+| boilerplate blocks stamped (newsletter sidebars) | 23 |
+
+**Verified on prod**, phone-width (390 px):
+
+- "AI cheating in interviews" → 6 essay cards, all from Karat / BrightHire / Metaview — the vendors
+  §1.4 predicted would carry this topic. Each is quoted and labelled *"Advice from a hiring-tools
+  vendor — what they argue, not a verified outcome."*
+- "how to prepare for a system design interview" → 25 cards, 8 of them video moments, each opening at
+  its own second (e.g. `watch?v=rrWbgtG5Bes&t=836`). This is the case Gemini predicted would dead-end;
+  the length normalisation is what makes it work.
+- A chapter card is never rendered as a quotation, and says *"Chapter marker written by the publisher —
+  watch from this point."*
+- The audience filter re-runs the question and narrows 25 → 12.
+- No horizontal overflow; tap targets 40 px; no console errors.
+
+**Two bugs the mobile pass caught and fixed**: a fourth tab pushed the mode row past a 390 px viewport
+(the row now scrolls itself), and the filter/link tap targets were 36 px.
+
+### What is honestly weak
+
+1. **Vendor marketing.** Karat, Metaview and BrightHire are the best sources on fake candidates and AI
+   cheating AND they are selling something; some passages are product copy. The register names them as
+   a vendor, which is the mitigation, not a cure.
+2. **Keyword false positives.** "fake candidates" matched a video titled "Being Enthusiastic Is Not
+   Being Fake". Semantic ranking (Phase 2) is the real fix.
+3. **YouTube has no back catalogue** — 15 videos per channel per fetch, so the index grows forward.
+4. **No topic facets yet**, by decision: a six-word chapter title cannot be classified by keyword
+   without lying about the precision.
+
+### Operations
+
+`POST /admin/voices/jobs` with `X-Admin-Token`: `{"kind":"ingest"}` (re-fetch every feed; safe to
+re-run, blocks key on a hash of their text) and `{"kind":"mark_boilerplate"}`. Both are free. Run
+ingest on a cadence to keep the YouTube leg growing.
