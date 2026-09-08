@@ -695,6 +695,23 @@
   .vx-go{display:inline-flex;align-items:center;min-height:40px;gap:.3rem;font-size:.8rem;text-decoration:none;color:var(--gold-strong);}
   .vx-empty{color:var(--muted);font-size:.9rem;padding:.8rem 0;}
   @media (max-width:560px){ .vx-h{font-size:.72rem;} .vx-t{font-size:.9rem;} .vx-f{font-size:.74rem;} }
+  /* 🚀 Apply · step 4 — the operative screen of the whole feature. It was styled in the same faint
+     grey as a footnote (#8a93ad, via a `--faint` variable that is never actually defined), so the
+     three instructions a user must follow read as fine print. They are the content here. */
+  .apsub-h{margin:.1rem 0 .55rem;font-size:1rem;font-weight:700;color:var(--ink);}
+  .apsub-open{display:inline-block;width:auto;padding:.6rem 1.1rem;text-decoration:none;margin-bottom:.7rem;}
+  .apsub-steps{margin:.2rem 0 .8rem;padding-left:1.3rem;color:var(--ink);}
+  .apsub-steps li{margin:.4rem 0;font-size:.9rem;line-height:1.6;}
+  .apsub-sub{font-size:.78rem;color:var(--muted);line-height:1.5;}
+  .apsub-hint{font-size:.86rem;color:var(--muted);}
+  .apsub-done{padding:.6rem .8rem;border:1px solid var(--verified);border-left-width:4px;border-radius:9px;color:var(--ink);}
+  .apsub-report{margin:.2rem 0 .7rem;padding:.6rem .8rem;border:1px solid var(--hair);border-left:4px solid var(--verified);
+    border-radius:9px;background:var(--panel);color:var(--ink);font-size:.88rem;line-height:1.55;}
+  .apsub-report.warn{border-left-color:var(--gold);}
+  .apsub-need{margin:.35rem 0 .3rem;padding-left:1.2rem;}
+  .apsub-need li{margin:.15rem 0;font-size:.85rem;}
+  .apsub-foot{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin-top:.4rem;}
+  @media (max-width:560px){ .apsub-steps li{font-size:.86rem;} .apsub-h{font-size:.95rem;} }
   /* 🎙 Prepare — the voices strip inside a job card. Compact by design: it is an aside on the card,
      not a second card, and it links out rather than trying to be the reading surface. */
   .js-prep{display:block;margin:.45rem 0 .1rem;padding:.5rem .6rem;border:1px solid var(--hair);
@@ -2441,6 +2458,7 @@
       <textarea id="apText" rows="4" style="width:100%;font-size:.88rem;" placeholder="Paste the full job description"></textarea>
       <button type="button" class="idgo" id="apGo" style="width:auto;margin-top:.4rem;">🎯 Analyze & plan</button>
     </div>
+    <div id="apsourcechip" hidden style="margin-top:.45rem;font-size:.8rem;color:var(--muted);"></div>
     <div class="aptabs" id="aptabs" role="tablist">
       <button type="button" class="aptab on" data-pane="fit" role="tab">1 · Your fit<span class="apdot" hidden></span></button>
       <button type="button" class="aptab" data-pane="plan" role="tab">2 · Answers<span class="apdot" hidden></span></button>
@@ -8641,6 +8659,29 @@ function apMark(pane, state){   // tab dot: "busy" while loading, on when ready,
   const d = document.querySelector(`#aptabs .aptab[data-pane="${pane}"] .apdot`); if(!d) return;
   d.hidden = !state; d.classList.toggle("busy", state === "busy");
 }
+function apSourceUI(){
+  // The URL box, the "paste the description" textarea and "Analyze & plan" are the way IN. Once a job
+  // is analysed they are stale UI standing above every step — including step 4, where the user reads
+  // them as the app asking for the job all over again. They collapse into one line with a way back.
+  const box = $("#apsource"); if(!box) return;
+  const known = !!(APPLY.url || (APPLY.text||"").length >= 40);
+  box.hidden = !APPLY.manual || known;
+  const chip = $("#apsourcechip");
+  if(chip){
+    chip.hidden = !(APPLY.manual && known);
+    if(APPLY.manual && known){
+      const what = APPLY.url ? APPLY.url.replace(/^https?:\/\//, "").slice(0, 58) : "pasted job description";
+      chip.innerHTML = `<span class="ppl-fc" style="text-transform:none;">Analyzing</span> <b>${esc(what)}</b>
+        <button type="button" class="histbtn" id="apchange" style="margin-left:.4rem;">Change job</button>`;
+      $("#apchange").addEventListener("click", ()=>{
+        APPLY.url = ""; APPLY.text = ""; APPLY.job = null; APPLY.appId = 0; APPLY.app = null; APPLY.fit = null;
+        ["fit","plan","docs","submit"].forEach(pn => { const el = apPane(pn); if(el) el.innerHTML=""; apMark(pn,false); });
+        apSourceUI(); apHeader(); apShow("fit");
+        $("#apFit").innerHTML = `<div class="sethint">Paste a job link (or its description) above, then press <b>Analyze &amp; plan</b>.</div>`;
+      });
+    }
+  }
+}
 function apHeader(){
   const j = APPLY.job || {}, ap = APPLY.app || {}, url = APPLY.url;
   const title = j.title || ap.title || "", company = ((j.company || ap.company || "")).replace(/_/g," ");
@@ -8657,7 +8698,7 @@ function openApplyFlow(o){
   const j = o.ref ? ((window.JOBS_INDEX||{})[o.ref] || (window.MATCH_JOBS||{})[o.ref] || null) : (o.job || null);
   Object.assign(APPLY, {ref: o.ref||"", url: (j && j.url) || o.url || "", text: "", job: j, appId: o.appId||0, app: null, fit: null, manual: !!o.manual});
   $("#appmodal").hidden = false;
-  $("#apsource").hidden = !APPLY.manual;
+  apSourceUI();
   ["fit","plan","docs","submit"].forEach(p => { apPane(p).innerHTML = ""; apMark(p, false); });
   apHeader(); apShow(o.pane || "fit");
   if(APPLY.manual){ $("#apUrl").value = ""; $("#apText").value = ""; $("#apFit").innerHTML = `<div class="sethint">Paste a job link (or its description) above, then press <b>Analyze &amp; plan</b>.</div>`; return; }
@@ -8703,7 +8744,7 @@ async function apLoadPlan(){
     }
     const r2 = await fetch(`/me/applications/${APPLY.appId}`, {headers: authHeaders()}); if(!r2.ok) throw new Error("load");
     const d2 = await r2.json(); APPLY.app = d2;
-    apHeader(); renderPlanPane(d2); renderSubmitPane(d2); apCardStatus(d2); apMark("plan", true); apMark("submit", d2.status === "submitted");
+    apHeader(); renderPlanPane(d2); apWirePlan(d2.id); renderSubmitPane(d2); apCardStatus(d2); apMark("plan", true); apMark("submit", d2.status === "submitted");
     renderApplications();
   }catch(e){ apMark("plan", false); box.innerHTML = `<div class="sethint">Couldn't plan that application — <button type="button" class="ppl-lnk" onclick="apLoadPlan()">↻ Retry</button></div>`; }
 }
@@ -8760,17 +8801,59 @@ function renderPlanPane(d){
     <div style="margin:.2rem 0;">${main}</div>
     ${vol?`<details style="margin-top:.5rem;"><summary class="ppl-fc" style="text-transform:none;cursor:pointer;">Voluntary self-identification (${plan.filter(p=>p.policy==="identity_sensitive").length}) — from your profile or declined by default; never guessed</summary>${vol}</details>`:""}
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.7rem;align-items:center;">
-      <button type="button" class="idgo" style="width:auto;" onclick="saveApplicationAnswers(${Number(d.id)})">Save my answers</button>
-      <button type="button" class="histbtn" onclick="apShow('submit')">Next: fill &amp; submit →</button>
-      <span class="acctmuted" id="appnote"></span></div>`
+      <button type="button" class="idgo" style="width:auto;" id="apNext">Next: fill &amp; submit →</button>
+      <span class="acctmuted" id="appnote">Saved automatically · the extension fills from these</span></div>`
     : `<div style="margin-top:.6rem;"><a class="histbtn" href="${esc(d.form_url||d.url)}" target="_blank" rel="noopener noreferrer">Open the application form ↗</a></div>`}`;
+}
+// AUTOSAVE. The extension does not read this page — at fill time it fetches the plan from the SERVER.
+// So an edit that is not saved is an edit that is not applied, and a user who follows the obvious
+// path ("Next") used to lose their edits silently. Nothing is asked of them now: edits save
+// themselves, and Next waits for the save rather than racing it.
+let AP_SAVE_T = null, AP_SAVING = null, AP_DIRTY = false;
+function apNote(t){ const n = $("#appnote"); if(n) n.textContent = t; }
+function apCollectAnswers(){
+  const answers = {};
+  document.querySelectorAll("#apPlan .appq").forEach(el => { if(el.value) answers[el.dataset.q] = el.value; });
+  return answers;
+}
+async function apSaveNow(id){
+  if(!id) return true;
+  AP_DIRTY = false; apNote("Saving…");
+  AP_SAVING = (async () => {
+    try{
+      const r = await fetch(`/me/applications/${id}/answers`, {method:"POST",
+        headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({answers: apCollectAnswers()})});
+      const d = await r.json().catch(()=>({}));
+      if(!r.ok){ apNote(d.detail || "Couldn't save — your edits are still on screen."); return false; }
+      const sm = d.summary || {};
+      apNote(`Saved · ${sm.answered||0} of ${sm.total||0} answered`);
+      return true;
+    }catch(e){ apNote("Couldn't save — check your connection."); return false; }
+  })();
+  return AP_SAVING;
+}
+function apWirePlan(id){
+  const pane = $("#apPlan"); if(!pane) return;
+  pane.addEventListener("input", () => { AP_DIRTY = true; apNote("Saving…");
+    clearTimeout(AP_SAVE_T); AP_SAVE_T = setTimeout(()=>apSaveNow(id), 900); });
+  pane.addEventListener("change", () => { AP_DIRTY = true; clearTimeout(AP_SAVE_T); apSaveNow(id); });
+  const nx = $("#apNext");
+  if(nx) nx.addEventListener("click", async () => {
+    nx.disabled = true;
+    clearTimeout(AP_SAVE_T);
+    // save-THEN-navigate: an edit typed a second ago must reach the server before the step that uses it
+    if(AP_DIRTY || AP_SAVING) await apSaveNow(id);
+    nx.disabled = false;
+    apShow("submit");
+  });
 }
 function renderDocsPane(){
   $("#apDocs").innerHTML = `<div class="aa-sec"><h4>Grounded in your résumé — yours to edit</h4>
       <div style="font-size:.84rem;color:var(--muted);margin-bottom:.5rem;">Drafted only when you ask; nothing is fabricated. A drafted cover letter drops straight into the application's cover-letter question.</div>
       <button type="button" class="idgo" id="apResumeBtn" style="width:auto;padding:.5rem 1rem;">📄 Tailor my résumé</button>
       <button type="button" class="idgo" id="apCoverBtn" style="width:auto;padding:.5rem 1rem;margin-left:.4rem;">✍️ Draft cover letter</button>
-      <div id="apResumeBox"></div><div id="apCoverBox"></div></div>`;
+      <div id="apResumeBox"></div><div id="apCoverBox"></div>
+      <div class="apnext"><button type="button" class="idgo" style="width:auto;" onclick="apShow('submit')">Next: fill &amp; submit →</button></div></div>`;
   $("#apResumeBtn").addEventListener("click", ()=>apDoc("tailored-resume"));
   $("#apCoverBtn").addEventListener("click", ()=>apDoc("cover-letter"));
 }
@@ -8788,7 +8871,9 @@ async function apDoc(kind){                 // kind: 'cover-letter' | 'tailored-
       renderEditableDoc(box, "Cover letter", d.cover_letter||"", "cover-letter.pdf", false);
       // the letter goes where the form wants it: an empty cover-letter question in the plan
       const q = [...document.querySelectorAll("#apPlan textarea.appq")].find(t => /cover letter/i.test(t.dataset.q||"") && !t.value.trim());
-      if(q){ q.value = d.cover_letter||""; q.rows = 6; box.insertAdjacentHTML("beforeend", `<div class="sethint" style="margin-top:.3rem;">Added to the application's cover-letter question — <a href="#" onclick="event.preventDefault(); apShow('plan')">review it in Answers</a> and Save my answers.</div>`); }
+      if(q){ q.value = d.cover_letter||""; q.rows = 6;
+        if(APPLY.appId) apSaveNow(APPLY.appId);          // it is an answer now; answers save themselves
+        box.insertAdjacentHTML("beforeend", `<div class="sethint" style="margin-top:.3rem;">Added to the application's cover-letter question and saved — <a href="#" onclick="event.preventDefault(); apShow('plan')">review it in Answers</a>.</div>`); }
     }
     apMark("docs", true);
   }catch(e){ box.innerHTML = `<div class="pitem-empty">Generation failed — try again.</div>`; apMark("docs", false); }
@@ -8796,15 +8881,38 @@ async function apDoc(kind){                 // kind: 'cover-letter' | 'tailored-
 }
 function renderSubmitPane(d){
   const box = $("#apSubmit");
-  if(!d){ box.innerHTML = `<div class="sethint">Once the answers are planned, this step fills the live form in your browser.</div>`; return; }
+  if(!d){ box.innerHTML = `<div class="apsub-hint">Once the answers are planned, this step fills the live form in your browser.</div>`; return; }
   const formUrl = d.form_url || d.url;
-  box.innerHTML = d.status === "submitted"
-    ? `<div class="ppl-cov" style="border-left-color:var(--verified);"><b>Submitted ✓</b> ${esc(String(d.submitted_at||"").slice(0,16))}${d.submitted_by==="user"?" (marked by you)":""}</div>`
-    : `<div class="ppl-cov" style="border-left-color:var(--gold);">
-      <b>Fill it in your browser, then submit</b><br>
-      <span style="font-size:.84rem;line-height:1.6;">1. <a href="${esc(formUrl)}" target="_blank" rel="noopener noreferrer">Open the application form ↗</a><br>2. Click the <b>Roster Apply</b> extension and press <b>Fill this page</b> — it fills every answer from step 2 and attaches your résumé, then highlights what it set.<br>3. Review on the page and click the site's submit. Roster records it when it sees the confirmation, or mark it: <button type="button" class="histbtn" onclick="markSubmitted(${Number(d.id)})">✓ I submitted it</button></span>
-      <div class="ppl-fc" style="text-transform:none;margin-top:.4rem;">No extension yet? <a href="#" onclick="event.preventDefault(); $('#appmodal').hidden=true; openAccount();">Set it up under Account</a> (one minute). Roster never submits an application — you do, on the job site.</div>
-      <div class="acctmuted" id="apsubnote" style="margin-top:.3rem;"></div></div>`;
+  if(d.status === "submitted"){
+    box.innerHTML = `<div class="apsub-done"><b>Submitted ✓</b> ${esc(String(d.submitted_at||"").slice(0,16))}${d.submitted_by==="user"?" (marked by you)":""}</div>`;
+    return;
+  }
+  // WHAT THE LAST FILL ACTUALLY DID. Three outcomes, because "we entered it" and "the form took it"
+  // are different facts: a field can read back correctly on screen while the site's own state is
+  // still empty (a combobox whose committed value lives in a hidden input), and that is exactly the
+  // field whose absence the submit button complains about. Naming those fields is the whole point.
+  const ex = ((d.drafts||{})._execution) || null;
+  const need = ex ? ([].concat(ex.unconfirmed||[], ex.missing||[])) : [];
+  const report = ex ? `<div class="apsub-report${need.length?" warn":""}">
+      <b>${(ex.filled||[]).length} field${(ex.filled||[]).length===1?"":"s"} filled and confirmed</b>${need.length?` · <b>${need.length} need${need.length===1?"s":""} you</b>` : " · nothing left over"}
+      ${need.length?`<ul class="apsub-need">${need.slice(0,12).map(x=>`<li>${esc(x)}</li>`).join("")}</ul>
+      <div class="apsub-sub">These are outlined on the page — amber means Roster typed a value the form never confirmed (type it yourself), red means the field wasn't found.</div>`:""}
+    </div>` : "";
+  box.innerHTML = `
+    <h3 class="apsub-h">Fill it in your browser, then submit</h3>
+    <a class="idgo apsub-open" href="${esc(formUrl)}" target="_blank" rel="noopener noreferrer">Open the application form ↗</a>
+    <ol class="apsub-steps">
+      <li><b>Open the form</b> in a new tab (the button above).</li>
+      <li>Click the <b>Roster Apply</b> extension and press <b>Fill this page</b> — it fills every answer from step 2, attaches your résumé, and outlines what it set.</li>
+      <li><b>Check anything outlined amber or red</b>, then click the site's own submit button.</li>
+    </ol>
+    ${report}
+    <div class="apsub-foot">
+      <button type="button" class="histbtn" onclick="markSubmitted(${Number(d.id)})">✓ I submitted it</button>
+      <span class="apsub-sub">Roster records it automatically when the extension sees the confirmation page.</span>
+    </div>
+    <div class="apsub-sub" style="margin-top:.5rem;">No extension yet? <a href="#" onclick="event.preventDefault(); $('#appmodal').hidden=true; openAccount();">Set it up under Account</a> — one minute. <b>Roster never submits an application; you do, on the job site.</b></div>
+    <div class="apsub-sub" id="apsubnote"></div>`;
 }
 function prepareApplication(ref){ openApplyFlow({ref}); }
 function applyWithAssistant(ref){ openApplyFlow({ref}); }
@@ -8828,13 +8936,7 @@ async function deleteApplication(id){ try{ await fetch(`/me/applications/${id}`,
 async function markSubmitted(id){
   try{ const r = await fetch(`/me/applications/${id}/mark-submitted`, {method:"POST", headers: authHeaders()}); if(r.ok){ const n = $("#apsubnote"); if(n) n.textContent = "Recorded as submitted by you."; renderApplications(); APPLY.appId = id; setTimeout(apLoadPlan, 300); } }catch(e){}
 }
-async function saveApplicationAnswers(id){
-  const answers = {}; document.querySelectorAll("#apPlan .appq").forEach(el => { if(el.value) answers[el.dataset.q] = el.value; });
-  const note = $("#appnote"); if(note) note.textContent = "Saving…";
-  try{ const r = await fetch(`/me/applications/${id}/answers`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({answers})}); const d = await r.json().catch(()=>({}));
-    if(note) note.textContent = r.ok ? `Saved — ${(d.summary||{}).answered||0} of ${(d.summary||{}).total||0} answered.` : (d.detail||"Couldn't save.");
-    if(r.ok){ APPLY.appId = id; setTimeout(apLoadPlan, 400); } }catch(e){ if(note) note.textContent = "Couldn't save."; }
-}
+async function saveApplicationAnswers(id){ return apSaveNow(id); }   // kept: answers now save themselves
 document.addEventListener("click", (e)=>{
   const pb = e.target.closest(".job-prep, .job-apply");
   if(pb){ e.preventDefault(); e.stopPropagation(); openApplyFlow({ref: pb.dataset.ref}); return; }
@@ -8845,7 +8947,7 @@ $("#appclose") && $("#appclose").addEventListener("click", ()=>{ $("#appmodal").
 $("#apGo") && $("#apGo").addEventListener("click", ()=>{
   APPLY.url = ($("#apUrl").value||"").trim(); APPLY.text = ($("#apText").value||"").trim(); APPLY.job = null; APPLY.appId = 0; APPLY.app = null; APPLY.fit = null;
   if(!APPLY.url && APPLY.text.length < 40){ $("#apFit").innerHTML = `<div class="sethint">Paste a job link or its description first.</div>`; return; }
-  apHeader(); apShow("fit"); apStart();
+  apSourceUI(); apHeader(); apShow("fit"); apStart();
 });
 // INTRO PATH on a job card: who you know at the company (your own export) + likely hiring managers
 // from Roster's public index, each with its evidence label. Roster never sends anything.

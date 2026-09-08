@@ -105,3 +105,20 @@ def summary(plan: dict) -> dict:
     return {"total": len(ps), "answered": sum(1 for p in ps if p.get("answer")),
             "blocking": [p["label"] for p in ps if p.get("blocking")],
             "by_source": {s: sum(1 for p in ps if p.get("source") == s) for s in ("profile", "saved answer", "agent draft", "your answer")}}
+
+
+def execution_reason(unconfirmed: list, missing: list) -> str:
+    """What the card says after the extension filled the live form.
+
+    THREE outcomes, not two. A field can read back correctly on screen while the site's own state is
+    still empty — a combobox whose committed value lives in a hidden input is the case that costs a
+    user their application, because the form looks right and the submit button says it is empty. So
+    "entered but unconfirmed" is reported alongside "not found", and both are NAMED: a count sends
+    someone hunting a forty-field form, a name sends them to the field.
+    """
+    need = [str(x) for x in (unconfirmed or [])] + [str(x) for x in (missing or [])]
+    if not need:
+        return ""
+    one = len(need) == 1
+    return (f"{len(need)} field{'' if one else 's'} need{'s' if one else ''} you before you submit: "
+            + ", ".join(need[:6]) + ("…" if len(need) > 6 else ""))
