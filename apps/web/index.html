@@ -12,6 +12,7 @@
     color-scheme:light;
     --bg:#F7F8FB; --panel:#FFFFFF; --panel2:#F1F3F9; --ink:#0E1726; --muted:#5B6675;
     --gold:#4F46E5; --gold-strong:#4338CA; --gold-rgb:79,70,229; --verified:#08744E; --gap:#C2701C;
+    --applied:#B4235A;   /* already applied — its own meaning, so its own colour */
     --person:#0B5CAD; --person-rgb:11,92,173;   /* deep azure blue (distinct from the indigo accent) */ --graph:#2C5490;
     --on-accent:#FFFFFF; --on-accent-rgb:255,255,255;   /* white text on the indigo accent */
     --hair:#E4E7EE; --hair-soft:rgba(14,23,38,.05);
@@ -33,6 +34,7 @@
     color-scheme:dark;
     --bg:#0A0F1E; --panel:#131C30; --panel2:#0F1728; --ink:#EAECF2; --muted:#8B96A9;
     --gold:#818CF8; --gold-strong:#A5B0FF; --gold-rgb:129,140,248; --verified:#4ADE9E; --gap:#E0A55E;
+    --applied:#FF6B9D;   /* lighter on the dark ground, still unmistakably not the accent */
     --person:#8AB8F8; --person-rgb:138,184,248;   /* soft azure on the dark ground */ --graph:#7FA8E0;
     --on-accent:#0B1020; --on-accent-rgb:11,16,32;
     --hair:#26314C; --hair-soft:rgba(255,255,255,.06);
@@ -49,6 +51,7 @@
     color-scheme:light;
     --bg:#F6F3EA; --panel:#FDFBF5; --panel2:#F0ECE0; --ink:#221D12; --muted:#6E6550;
     --gold:#8A6A1F; --gold-strong:#6E5314; --gold-rgb:138,106,31; --verified:#2E6B4F; --gap:#A05C24;
+    --applied:#8E2749;
     --person:#123F73; --person-rgb:18,63,115;   /* darker azure for the paper theme */ --graph:#234B7A;
     --on-accent:#FDF8EA; --on-accent-rgb:253,248,234;
     --hair:#DCD4C0; --hair-soft:rgba(34,29,18,.06);
@@ -1144,12 +1147,11 @@
      SUBMITTED is done; STARTED is a plan waiting to be finished, which is an invitation, not a stop. */
   .appliedflag{position:absolute;top:-1px;left:-1px;z-index:3;font-family:var(--mono);font-size:.6rem;
     font-weight:800;text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;
-    color:#fff;background:var(--verified,#12805c);padding:.2rem .6rem .22rem;border-radius:10px 0 10px 0;
+    color:#fff;background:var(--applied);padding:.2rem .6rem .22rem;border-radius:10px 0 10px 0;
     box-shadow:0 1px 4px rgba(0,0,0,.22);pointer-events:none;}
-  /* dark theme's --verified is a LIGHT green, so white on it is unreadable — the ink flips with it */
-  :root[data-theme="dark"] .appliedflag{color:var(--on-accent);}
-  .appliedflag.started{background:var(--gold);color:var(--on-accent);}
-  .ppl-card.has-applied{border-color:var(--verified,#12805c);}
+  .appliedflag.started{background:var(--applied);}            /* one word, one colour */
+  :root[data-theme="dark"] .appliedflag{color:#2A0714;}       /* the dark theme's rose is light */
+  .ppl-card.has-applied{border-color:var(--applied);}
   .ppl-card.has-applied .ppl-body{padding-top:.5rem;}     /* the title never runs under the badge */
   .ppl-card.has-applied .ppl-name{opacity:.85;}
   @media (max-width:560px){ .appliedflag{font-size:.55rem;padding:.16rem .45rem .18rem;} }
@@ -7684,7 +7686,10 @@ function appliedBadgeHtml(a){
   if(!a) return "";
   const done = a.status === "submitted";
   const when = shortDay(a.at);
-  const label = (done ? "Applied" : "Started") + (when ? " · " + when : "");
+  // ONE WORD for both states (owner, 2026-09-08). From the reader's side the question is only "have
+  // I already gone after this one", and two words asked them to hold a distinction they had not
+  // asked for. The difference survives where it costs nothing: in the tooltip.
+  const label = "Applied" + (when ? " · " + when : "");
   const why = done
     ? `You submitted this application${when ? " on " + when : ""} — no need to apply again.`
     : `You started an application here${when ? " on " + when : ""}. Open 🚀 Apply to finish it.`;
