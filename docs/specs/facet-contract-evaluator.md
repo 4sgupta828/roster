@@ -272,6 +272,35 @@ horizontally; tap targets ≥ 40 px; the rail folds behind one "Filter · N acti
 "must have" chips and "Center around level" disappear as separate controls (they are `must:evidence` and
 `center:level` in the rail). Every facet chip has a tooltip with its provenance.
 
+### 7.1 The rail costs the counts, never a re-search (2026-09-07)
+
+**The chips are a property of the contract's must-slice, not of the ranked page.** Opening a saved map used to
+re-run the whole search (`POST /maps/{id}/navigate`) purely to fill the rail, then throw the rows away — the
+snapshot was already on screen. Measured on the production index:
+
+| | full evaluate (what the open path used to do) | counts only |
+|---|---|---|
+| talent map, `must {country us, field software}` | **29.0 s** (legs 28.4 s) | **3.2 s** cold, **0.1 s** warm |
+| job map, résumé contract | 2.7 s | 0.11 s |
+| chips produced | — | **identical** (asserted in the probe and in the kernel test) |
+
+Three parts, each in the layer that owns it:
+
+1. **Kernel** — `evaluate(..., depth={"rows": False})` returns `{rows: [], counts, coverage, contract}` and never
+   asks the store for a row. Symmetric with the existing `depth={"counts": False}`. Coverage carries
+   `counts_only: true` and `slice` (the must-slice read off the counts); it does **not** carry `pool`, because no
+   page was ranked and a rail must not claim a number it did not compute.
+2. **App** — `POST /maps/{id}/navigate {"rows": false}` takes that path; `group_options` is computed from the
+   map's stored rows (pure Python). `save` is rejected there: a rail-only navigation has no rows to record.
+   `GET /maps/{id}` now returns `labels` alongside the map — the vocabulary is schema-only, so a surface with
+   counts needs no second call to draw.
+3. **Surface** — saving a map stores its `counts` in `coverage` (forking already did), so **reopening a map
+   paints the rail from the snapshot with no network at all** (measured 0.42 s to first paint at 390 px, 152
+   chips, 17 dimensions). The rails-only navigate then refreshes those counts against the live index.
+
+An **Apply** still runs the full evaluate — it genuinely needs new rows. A map saved before this change has no
+stored counts and paints after the counts call instead of instantly.
+
 ---
 
 ## 8. Migration (minimal, in order)
