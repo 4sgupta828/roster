@@ -61,7 +61,7 @@ CREATE INDEX IF NOT EXISTS {table}_created ON {table} (created_at DESC);
 class PostgresRetrievalSource:
     def __init__(self, dsn: str, *, key: str = "postgres", dim: int = 1536,
                  table: str = "rs_block", covers: FacetFilter | None = None,
-                 currency_demote: bool = False):
+                 currency_demote: bool = False, never_return: dict | None = None):
         self.key = key
         self._dsn = dsn
         self._dim = dim
@@ -71,6 +71,10 @@ class PostgresRetrievalSource:
         self._cache: dict[tuple[str, str, str], str] = {}
         # Evidence Pulse C1 (flag-fed by the app): exclude retracted / demote superseded at retrieval
         self._currency_demote = currency_demote
+        # NEVER-RETURN: facet values this source must exclude from EVERY request, whatever the caller
+        # asked for (the vertical's `non_evidence_facets`). A request's own exclusions are merged on
+        # top; neither can switch these off.
+        self._never_return = {k: [v] if isinstance(v, str) else list(v) for k, v in (never_return or {}).items()}
 
     # --- lifecycle ---
     async def _get_pool(self):
@@ -227,8 +231,11 @@ class PostgresRetrievalSource:
             params.append(vals)
             preds.append(f"(facets ->> ${key_idx}) = ANY(${len(params)})")
         # exclusion: drop a block only if it HAS the key with a listed value (untagged passes)
+        merged = {k: list(v) for k, v in self._never_return.items()}
         for key, banned in getattr(req, "exclude_facets", {}).items():
             vals = [banned] if isinstance(banned, str) else list(banned)
+            merged[key] = merged.get(key, []) + [v for v in vals if v not in merged.get(key, [])]
+        for key, vals in merged.items():
             params.append(key)
             key_idx = len(params)
             params.append(vals)

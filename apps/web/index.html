@@ -660,6 +660,33 @@
   .mb-cadence{display:inline-flex;align-items:center;gap:.35rem;font-size:.74rem;color:var(--muted);flex-basis:auto;}
   .mb-cadence select{font:inherit;font-size:.74rem;padding:.2rem .35rem;border:1px solid var(--hair);border-radius:6px;background:var(--panel);color:var(--ink);min-height:30px;}
   /* facet RAIL: one row per dimension; chips carry counts; state glyphs ● must ▲ prefer ▼ avoid */
+  /* ── VOICES: practitioner takes. Two objects, two colours, so a reader sees the difference
+     before reading a word: an ESSAY is someone's own words (gold, set as a quotation); a CHAPTER
+     is a producer's marker (blue, set plainly with its offset) and is never a quotation. ── */
+  .vx-reg{margin:.1rem 0 .8rem;padding:.5rem .7rem;border:1px solid var(--hair);border-left-width:4px;
+    border-radius:8px;background:var(--panel);color:var(--muted);font-size:.8rem;line-height:1.5;}
+  .vx-bar{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin:.1rem 0 .7rem;font-size:.78rem;}
+  .vx-bar b{font-weight:600;color:var(--ink);}
+  .vx-f{font:inherit;min-height:36px;padding:.25rem .7rem;border:1px solid var(--hair);border-radius:999px;
+    background:var(--panel);color:var(--ink);cursor:pointer;}
+  .vx-f.on{border-color:var(--gold);background:rgba(var(--gold-rgb),.10);font-weight:600;}
+  .vx-card{border:1px solid var(--hair);border-left-width:4px;border-radius:10px;padding:.6rem .75rem;
+    margin:0 0 .6rem;background:var(--panel);}
+  .vx-card.essay{border-left-color:var(--gold);}
+  .vx-card.podcast,.vx-card.video{border-left-color:#4f7cff;}
+  .vx-h{display:flex;flex-wrap:wrap;gap:.35rem;align-items:baseline;font-size:.78rem;color:var(--muted);margin-bottom:.3rem;}
+  .vx-kind{flex:none;font-size:.66rem;text-transform:uppercase;letter-spacing:.06em;font-weight:700;}
+  .vx-card.essay .vx-kind{color:var(--gold-strong);}
+  .vx-card.podcast .vx-kind,.vx-card.video .vx-kind{color:#4f7cff;}
+  .vx-who{color:var(--ink);font-weight:600;}
+  .vx-t{display:block;font-size:.95rem;line-height:1.5;color:var(--ink);margin:.1rem 0 .35rem;}
+  .vx-card.essay .vx-t{font-style:italic;}
+  .vx-t mark, .vx-t .vx-hit{background:rgba(var(--gold-rgb),.28);padding:0 .1em;border-radius:3px;}
+  .vx-stamp{display:inline-block;font-variant-numeric:tabular-nums;font-weight:700;color:#4f7cff;margin-right:.4rem;}
+  .vx-reg-line{font-size:.72rem;color:var(--muted);margin-top:.25rem;}
+  .vx-go{display:inline-flex;align-items:center;min-height:36px;gap:.3rem;font-size:.8rem;text-decoration:none;color:var(--gold-strong);}
+  .vx-empty{color:var(--muted);font-size:.9rem;padding:.8rem 0;}
+  @media (max-width:560px){ .vx-h{font-size:.72rem;} .vx-t{font-size:.9rem;} .vx-f{font-size:.74rem;} }
   .frail{margin:.5rem 0 .7rem;border:1px solid var(--hair);border-radius:10px;padding:.45rem .6rem;background:var(--panel);}
   .frail-h{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;font-size:.72rem;color:var(--muted);margin-bottom:.25rem;}
   .frail-h select{font:inherit;font-size:.72rem;padding:.15rem .35rem;border:1px solid var(--hair);border-radius:6px;background:var(--panel);color:var(--ink);min-height:30px;}
@@ -1858,6 +1885,7 @@
     <button type="button" class="pjbtn on" data-pj="people" role="tab" aria-selected="true">🗺 Talent Map</button>
     <button type="button" class="pjbtn" data-pj="jobs" role="tab" aria-selected="false">💼 Jobs Map</button>
     <button type="button" class="pjbtn" data-pj="qa" role="tab" aria-selected="false" id="pjqa" hidden>💬 Q&amp;A</button>
+    <button type="button" class="pjbtn" data-pj="voices" role="tab" aria-selected="false" id="pjvoices" hidden title="What practitioners say about hiring and job search — advice and timestamped moments, never presented as fact">🎙 Voices</button>
   </div>
   <div class="modeswitch" id="modeswitch">
     <div class="modeseg" role="tablist" aria-label="Answer mode">
@@ -2466,6 +2494,7 @@ const PJ_COPY = {
   people: {h:"Describe the search brief",  ph:"Talent Map brief — e.g. senior infra engineers with vector DB evidence"},
   jobs:   {h:"What role are you looking for?", ph:"Search jobs — e.g. remote backend roles at big tech · or describe yourself (“backend engineer, 5 years, Java, Kubernetes”), attach your résumé (📎), or paste your LinkedIn URL to find roles for you"},
   qa:     {h:"Ask about the people & jobs data", ph:"Ask about patterns — e.g. “which companies hire the most ML engineers?”, “where are data scientists concentrated?”, “seniority mix for AI roles?”"},
+  voices: {h:"What do practitioners say about it?", ph:"Ask practitioners — e.g. “fake candidates in remote interviews”, “what a screen should catch”, “preparing for a system design interview”"},
 };
 let PEOPLE_CTX = null;          // People-tab conversation: accumulated facet filter — follow-ups NARROW it
 let JOBS_CTX = null;            // Jobs-tab conversation: accumulated job query — follow-ups NARROW it
@@ -2630,6 +2659,8 @@ async function loadConfig(){
     window.INSIGHTS_QA_ENABLED = !!c.insights_qa_enabled;   // grounded people/jobs Q&A (default when on)
     window.QA_ROUTER_ENABLED = !!c.qa_router_enabled;       // NATIVE Q&A: server-side intent router (no proxy)
     { const qb = document.getElementById("pjqa"); if(qb) qb.hidden = !(window.EIGEN_QA_ENABLED || window.INSIGHTS_QA_ENABLED || window.QA_ROUTER_ENABLED); }
+    window.VOICES_ENABLED = !!c.voices_enabled;      // 🎙 Voices: practitioner advice + moments
+    { const vb = document.getElementById("pjvoices"); if(vb) vb.hidden = !window.VOICES_ENABLED; }
     window.JD_EXCLUDE_ENABLED = !!c.jd_exclude_source_co_enabled;   // Find candidates: source-company exclusion
     { const row = document.getElementById("jdSrcCoRow"); if(row) row.hidden = !window.JD_EXCLUDE_ENABLED; }
     window.RECRUITER_MATCH_ENABLED = !!c.recruiter_match_enabled;   // Find jobs: LLM recruiter brief + fine-tune
@@ -3896,6 +3927,10 @@ function render(data, target, opts){
       + `<button type="button" class="stopbtn" onclick="cancelResearch()">■ Stop</button>`;
     return;
   }
+  // VOICES: practitioner moments, never an answer. There is no synthesis here on purpose — the
+  // corpus is opinion, and composing one answer out of it would be exactly the laundering the
+  // mode is designed not to do. The reader gets the takes, labelled, and decides.
+  if(data.kind === "voices"){ target.innerHTML = voicesMarkup(data); wireVoices(target, data); return; }
   // Ambiguous follow-up → the agent asks a clarifying question instead of answering. Render the
   // prompt (not an answer) and stop; the user's next reply carries this in history so it resolves.
   if(data.clarification){
@@ -6460,6 +6495,7 @@ async function askQuestion(question, opts){
   // EXPLICIT mode: the People/Jobs toggle decides routing — no keyword guessing. Jobs → ATS search;
   // People → the grounded people index (server routes it). (Legacy keyword fallback kept for safety.)
   if(SEARCH_MODE === "jobs"){ await runJobs(question, {contract: opts.contract}); if(opts.contract) PENDING_INTAKE_TRANSCRIPT = null; return; }
+  if(SEARCH_MODE === "voices"){ await runVoices(question); return; }
   // Q&A: with the NATIVE router live, fall THROUGH to the full conversational research flow below
   // (thread, follow-ups, streaming, suggestions — the eigen experience); the server's intent router
   // picks the engine per question. Legacy (router off) keeps the one-shot runQA path.
@@ -7050,6 +7086,7 @@ function turnFoldLabel(t){
     return `▸ ${(t.jobs||[]).length} role${(t.jobs||[]).length===1?"":"s"} — expand`;
   if(Array.isArray(t.people_rows) && t.people_rows.length)
     return `▸ ${t.people_rows.length} ${t.people_rows.length===1?"person":"people"} — expand`;
+  if(t.kind === "voices") return `▸ ${(t.moments||[]).length} take${(t.moments||[]).length===1?"":"s"} — expand`;
   if(t.clarification) return `▸ asked to clarify — expand`;
   const a = (t.answer||"").replace(/\[\[\/?[FRK]\]\]/g,"").replace(/[#*_`]/g,"").replace(/\s+/g," ").trim();
   return a ? `▸ ${a.slice(0,120)}${a.length>120?"…":""}` : "▸ expand";
@@ -7112,6 +7149,78 @@ function renderThread(){
   const last = out.querySelector(".turn:last-child"); if(last) last.scrollIntoView({behavior:"smooth", block:"start"});
   syncComposerPad();
 }
+// ── VOICES ───────────────────────────────────────────────────────────────────────────────────────
+// What practitioners say about hiring and job search. Deliberately NOT an answer: the corpus is
+// opinion, and composing one answer out of it would launder a YouTuber's take into a Roster
+// recommendation. The reader gets the takes, each labelled with what it is and who said it.
+const VX_KIND = {essay:"Essay", podcast:"Podcast", video:"Video"};
+function vxStamp(sec){
+  const s = Math.max(0, parseInt(sec,10)||0), h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
+  return (h ? h + ":" + String(m).padStart(2,"0") : String(m)) + ":" + String(s%60).padStart(2,"0");
+}
+// ts_headline marks the matched passage with « » — turn those into a highlight, never into raw HTML
+function vxText(t){
+  return esc(String(t||"")).replace(/«([^»]*)»/g, '<span class="vx-hit">$1</span>');
+}
+function vxCard(m){
+  const kind = m.kind || "essay";
+  const who = [m.speaker, m.show].filter(Boolean).join(" · ");
+  const when = m.published ? String(m.published).slice(0,10) : "";
+  const stamp = (kind !== "essay" && m.t_start) ? `<span class="vx-stamp">${vxStamp(m.t_start)}</span>` : "";
+  const open = m.url
+    ? `<a class="vx-go" href="${esc(m.url)}" target="_blank" rel="noopener">${kind === "essay" ? "Read it ↗" : (kind === "video" ? "Watch from here ↗" : "Listen from here ↗")}</a>`
+    : "";
+  // An ESSAY is quoted — they are the author's own words. A CHAPTER never is: a producer wrote it.
+  const body = m.quotable ? `<span class="vx-t">“${vxText(m.text)}”</span>` : `<span class="vx-t">${stamp}${vxText(m.text)}</span>`;
+  return `<div class="vx-card ${esc(kind)}">
+    <div class="vx-h"><span class="vx-kind">${esc(VX_KIND[kind]||kind)}</span>
+      ${who ? `<span class="vx-who">${esc(who)}</span>` : ""}${when ? `<span>· ${esc(when)}</span>` : ""}
+      ${m.title && m.title !== m.text ? `<span>· ${esc(String(m.title).slice(0,90))}</span>` : ""}</div>
+    ${body}
+    <div class="vx-reg-line">${esc(m.register||"")}${open ? " · " : ""}</div>${open}</div>`;
+}
+function voicesMarkup(d){
+  const ms = d.moments || [];
+  const A = [["", "Everyone"], ["job_seeker", "For job seekers"], ["hiring_team", "For hiring teams"]];
+  const K = [["", "All"], ["essay", "Essays"], ["podcast", "Podcasts"], ["video", "Videos"]];
+  const f = (list, cur, attr) => list.map(([v, lbl]) =>
+    `<button type="button" class="vx-f${(cur||"")===v?" on":""}" data-${attr}="${esc(v)}">${esc(lbl)}</button>`).join("");
+  const c = d.counts || {};
+  const widened = (d.window && d.window.widened)
+    ? ` <span class="tgt-q-hint">· that window was thin, so this is everything</span>` : "";
+  return `<div class="vx-reg">🎙 ${esc(d.register||"")}</div>
+    <div class="vx-bar">${f(A, d.audience, "aud")}<span style="width:.5rem;"></span>${f(K, (d.kinds||[])[0]||"", "kind")}</div>
+    <div class="vx-bar"><b>${c.total||0}</b> take${(c.total||0)===1?"":"s"}
+      ${c.quotable ? `· ${c.quotable} quotable` : ""}${c.pointers ? ` · ${c.pointers} moment${c.pointers===1?"":"s"} to listen to` : ""}
+      ${d.matched_on ? `· matched on ${esc(d.matched_on)}` : ""}${widened}
+      <span class="tgt-q-hint">· ranked by words (no semantic ranking yet)</span></div>
+    ${ms.length ? ms.map(vxCard).join("") : `<div class="vx-empty">Nothing in the voices corpus matches that yet. Try fewer words, or switch the filters above — this corpus is small and deliberately curated.</div>`}`;
+}
+function wireVoices(target, d){
+  target.querySelectorAll("[data-aud]").forEach(b => b.addEventListener("click", () => {
+    runVoices(d.question || "", {audience: b.dataset.aud, kinds: d.kinds || [], replace: d});
+  }));
+  target.querySelectorAll("[data-kind]").forEach(b => b.addEventListener("click", () => {
+    runVoices(d.question || "", {audience: d.audience || "", kinds: b.dataset.kind ? [b.dataset.kind] : [], replace: d});
+  }));
+}
+async function runVoices(question, opts){
+  opts = opts || {};
+  const turn = opts.replace || {question: question, kind: "voices", _pending: true, moments: []};
+  if(!opts.replace){ THREAD.turns.push(turn); renderThread(); }
+  try{
+    const r = await fetch("/voices/search", {method:"POST", headers:{"content-type":"application/json"},
+      body: JSON.stringify({q: question || "", audience: opts.audience || "", kinds: opts.kinds || [], limit: 30})});
+    const d = await r.json();
+    if(!r.ok){ Object.assign(turn, {_pending:false, moments:[], counts:{}, register:(d.detail||"Voices is unavailable right now.")}); renderThread(); return; }
+    Object.assign(turn, d, {question: question, kind: "voices", _pending: false,
+                            audience: opts.audience || "", kinds: opts.kinds || []});
+  }catch(e){
+    Object.assign(turn, {_pending:false, moments:[], counts:{}, register:"Couldn't reach the voices corpus — " + (e.message||e)});
+  }
+  renderThread();
+}
+
 // A suggestion is {question, tag} (tag = an optional lens label, e.g. CEO/VC/CTO) — or a bare
 // string (legacy). Render a chip with the lens badge; the click always uses the QUESTION text.
 function _sugQ(s){ return (typeof s === "string") ? s : ((s && s.question) || ""); }

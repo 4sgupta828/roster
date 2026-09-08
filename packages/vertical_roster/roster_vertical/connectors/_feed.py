@@ -32,6 +32,56 @@ def _text(el, name: str) -> str:
     return (ch.text or "").strip() if (ch is not None and ch.text) else ""
 
 
+def _enclosure(el) -> str:
+    """The media URL an item encloses, or "". Several podcast feeds ship NO <link> at all — No
+    Priors, 20VC, This Week in Startups and The Startup Ideas Podcast all omit it — so the audio
+    enclosure is the only address the publisher gives for an episode."""
+    for ch in el:
+        if _local(ch.tag) == "enclosure":
+            href = ch.get("url") or ch.get("href")
+            if href:
+                return href.strip()
+        if _local(ch.tag) == "link" and (ch.get("rel") or "") == "enclosure" and ch.get("href"):
+            return ch.get("href").strip()
+    return ""
+
+
+def _image(el) -> str:
+    """The item's own artwork: <itunes:image href> (podcasts) or <media:thumbnail url> (video)."""
+    for ch in el:
+        n = _local(ch.tag)
+        if n in ("image", "thumbnail"):
+            href = ch.get("href") or ch.get("url")
+            if href:
+                return href.strip()
+        if n == "group":                       # media:group wraps media:thumbnail on YouTube
+            inner = _image(ch)
+            if inner:
+                return inner
+    return ""
+
+
+def channel_meta(raw: bytes) -> dict:
+    """Show-level title and artwork. Every episode of a show shares its cover when it has no own
+    artwork, and a card with no picture next to cards with pictures looks broken rather than plain."""
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError:
+        return {}
+    node = _find(root, "channel") or root
+    out = {"title": _text(node, "title")}
+    img = ""
+    for ch in node:
+        n = _local(ch.tag)
+        if n == "image":
+            img = (ch.get("href") or "").strip() or _text(ch, "url")
+            if img:
+                break
+    if img:
+        out["image"] = img
+    return {k: v for k, v in out.items() if v}
+
+
 def _rss_item(it, publication: str) -> dict:
     link = _text(it, "link")
     guid = _text(it, "guid")
@@ -51,6 +101,8 @@ def _rss_item(it, publication: str) -> dict:
         "published": _text(it, "pubDate") or _text(it, "date"),
         "summary": _text(it, "description"),
         "content": content,
+        "enclosure": _enclosure(it),
+        "image": _image(it),
     }
 
 
@@ -81,6 +133,8 @@ def _atom_entry(e, publication: str) -> dict:
         "published": _text(e, "published") or _text(e, "updated"),
         "summary": _text(e, "summary"),
         "content": _text(e, "content"),
+        "enclosure": _enclosure(e),
+        "image": _image(e),
     }
 
 

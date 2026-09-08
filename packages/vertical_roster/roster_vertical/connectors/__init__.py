@@ -28,8 +28,14 @@ from .uspto import UsptoConnector
 from .wikidata import WikidataConnector
 from .wikipedia import WikipediaConnector
 from .yc import YcConnector
+from .practitioner_essay import PractitionerEssayConnector
+from .show_notes import ShowNotesConnector
+from .youtube_chapters import YoutubeChaptersConnector
 
-__all__ = ["ArxivConnector", "CompaniesHouseConnector", "CrossrefConnector", "EdgarConnector",
+__all__ = [
+    "YoutubeChaptersConnector",
+    "ShowNotesConnector",
+    "PractitionerEssayConnector","ArxivConnector", "CompaniesHouseConnector", "CrossrefConnector", "EdgarConnector",
            "EngBlogConnector",
            "ExpertFeedConnector", "GdeltConnector", "GithubConnector", "HackerNewsConnector",
            "HuggingFaceConnector", "LobstersConnector", "NihReporterConnector", "NsfConnector",
