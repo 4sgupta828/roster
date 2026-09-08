@@ -2180,9 +2180,21 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
                 app.state._voices_pg = src
             return src
 
+        async def _voices_llm(system: str, user: str) -> dict:
+            """One small strict-JSON call, only when a reader opens a card (api.model_json routes
+            DeepSeek first, OpenAI on a provider error, with a cooldown after 402/401)."""
+            import asyncio as _a
+            from api.model_json import llm_json as _lj
+            return await _a.to_thread(lambda: _lj(system, user, timeout=60))
+
+        async def _voices_user(token: str):
+            # resolved at CALL time: _optional_user is defined further down this factory
+            return await _optional_user(token)
+
         app.include_router(build_voices_router(
             _voices_pool, manifest=load_active_vertical(), pg_source_of=_voices_pg,
-            tenant_id="demo", admin_token=os.environ.get("ROSTER_ADMIN_TOKEN", "")))
+            tenant_id="demo", admin_token=os.environ.get("ROSTER_ADMIN_TOKEN", ""),
+            llm_json=_voices_llm, user_of=_voices_user))
 
     @app.get("/health")
     def health() -> dict:

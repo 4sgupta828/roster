@@ -13,6 +13,7 @@ A parsed feed item is a plain dict with (best-effort across RSS+Atom shapes):
 """
 from __future__ import annotations
 
+import html
 import re
 
 _MAX_BODY = 16000
@@ -46,7 +47,11 @@ def facets(rec: dict) -> dict:
 
 
 def _strip_html(raw: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", raw)).strip()
+    # UNESCAPE FIRST. Feeds ship entity-encoded prose and several double-encode it, so a body reached
+    # the corpus reading "the team&#x2019;s mind" — and that is the text a card, a snippet and a
+    # summary all show. Twice, because "&amp;#x2019;" is what a double-encoded feed actually sends.
+    txt = html.unescape(html.unescape(raw or ""))
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", txt)).strip()
 
 
 def to_markdown(rec: dict) -> str:

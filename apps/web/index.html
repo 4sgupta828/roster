@@ -695,6 +695,83 @@
   .vx-go{display:inline-flex;align-items:center;min-height:40px;gap:.3rem;font-size:.8rem;text-decoration:none;color:var(--gold-strong);}
   .vx-empty{color:var(--muted);font-size:.9rem;padding:.8rem 0;}
   @media (max-width:560px){ .vx-h{font-size:.72rem;} .vx-t{font-size:.9rem;} .vx-f{font-size:.74rem;} }
+  /* ═══ VOICES — a reading surface, not a result list ═══════════════════════════════════════════
+     Two objects, two colours, so a reader sees the difference before reading a word: an ESSAY is
+     someone's own words (gold, quoted); a CHAPTER is a producer's marker (blue, plain, with its
+     offset) and is never a quotation. Everything is sized for a phone first. */
+  .vo-reg-top{margin:.1rem 0 .7rem;padding:.55rem .75rem;border:1px solid var(--hair);border-left:4px solid var(--gold);
+    border-radius:9px;background:var(--panel);color:var(--muted);font-size:.79rem;line-height:1.5;}
+  .vo-filters{display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;margin:0 0 .5rem;}
+  .vo-chip,.vo-swin{font:inherit;font-size:.78rem;min-height:40px;padding:.3rem .75rem;cursor:pointer;
+    border:1px solid var(--hair);border-radius:999px;background:var(--panel);color:var(--ink);transition:all .15s;}
+  .vo-chip:hover,.vo-swin:hover{border-color:var(--gold);}
+  .vo-chip.on{background:var(--gold);color:var(--on-accent);border-color:var(--gold);font-weight:650;}
+  .vo-swin.on{background:rgba(var(--gold-rgb),.12);border-color:var(--gold);font-weight:650;}
+  .vo-blabel{font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-right:.15rem;}
+  .vo-browse[hidden]{display:none;}
+  .vo-shelves{display:flex;flex-wrap:wrap;gap:.35rem;margin:.35rem 0 .7rem;}
+  .vo-shelf{font:inherit;font-size:.78rem;min-height:40px;padding:.3rem .8rem;cursor:pointer;border-radius:999px;
+    border:1px dashed var(--hair);background:transparent;color:var(--ink);}
+  .vo-shelf:hover{border-style:solid;border-color:var(--gold);background:rgba(var(--gold-rgb),.07);}
+  .vo-note{margin:.1rem 0 .8rem;font-size:.79rem;color:var(--muted);line-height:1.5;}
+  .vo-cards{display:flex;flex-direction:column;gap:.7rem;}
+  .vo-card{border:1px solid var(--hair);border-left-width:4px;border-radius:12px;background:var(--panel);
+    padding:.7rem .8rem .55rem;transition:border-color .15s, box-shadow .15s;}
+  .vo-card:hover{box-shadow:0 3px 14px -8px rgba(0,0,0,.35);}
+  .vo-card.essay{border-left-color:var(--gold);}
+  .vo-card.podcast,.vo-card.video{border-left-color:#4f7cff;}
+  .vo-top{display:flex;gap:.7rem;align-items:flex-start;}
+  .vo-art{flex:none;width:76px;height:76px;border-radius:9px;object-fit:cover;background:var(--panel2);border:1px solid var(--hair);}
+  .vo-main{min-width:0;flex:1;}
+  .vo-kicker{display:flex;flex-wrap:wrap;gap:.3rem;align-items:baseline;font-size:.72rem;color:var(--muted);margin-bottom:.2rem;}
+  .vo-kind{flex:none;font-size:.64rem;text-transform:uppercase;letter-spacing:.07em;font-weight:800;}
+  .vo-card.essay .vo-kind{color:var(--gold-strong);}
+  .vo-card.podcast .vo-kind,.vo-card.video .vo-kind{color:#4f7cff;}
+  .vo-dot{opacity:.5;}
+  .vo-stamp{font-variant-numeric:tabular-nums;font-weight:700;color:#4f7cff;}
+  .vo-title{margin:.05rem 0 .2rem;font-size:1rem;line-height:1.4;font-weight:600;color:var(--ink);}
+  .vo-card.essay .vo-title{font-style:italic;font-weight:500;}
+  .vo-title .vo-hit{background:rgba(var(--gold-rgb),.3);border-radius:3px;padding:0 .1em;}
+  .vo-sub{font-size:.76rem;color:var(--muted);line-height:1.45;}
+  .vo-who{color:var(--ink);font-weight:600;}
+  /* what the speaker IS — the affordance the advice register needs: a vendor's take on their own
+     product and a working recruiter's take are not the same evidence, and the card has to say so */
+  .vo-role{display:inline-block;margin-left:.3rem;font-size:.63rem;text-transform:uppercase;letter-spacing:.05em;
+    padding:.08rem .4rem;border-radius:999px;border:1px solid var(--hair);color:var(--muted);}
+  .vo-role.vendor{border-color:var(--gold);color:var(--gold-strong);}
+  .vo-player{margin:.55rem 0 .1rem;}
+  .vo-player iframe{width:100%;aspect-ratio:16/9;border:0;border-radius:9px;display:block;}
+  .vo-player audio{width:100%;}
+  .vo-foot{display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;margin-top:.5rem;}
+  .vo-btn{font:inherit;font-size:.78rem;min-height:40px;padding:.3rem .75rem;cursor:pointer;border-radius:9px;
+    border:1px solid var(--hair);background:var(--panel2);color:var(--ink);text-decoration:none;
+    display:inline-flex;align-items:center;gap:.25rem;}
+  .vo-btn:hover{border-color:var(--gold);}
+  .vo-btn.primary{background:rgba(var(--gold-rgb),.12);border-color:var(--gold);color:var(--gold-strong);font-weight:600;}
+  .vo-btn.play{background:#4f7cff;border-color:#4f7cff;color:#fff;font-weight:600;}
+  .vo-star[aria-pressed="true"]{color:var(--gold-strong);border-color:var(--gold);}
+  .vo-nolink{font-size:.74rem;color:var(--muted);}
+  .vo-reg{margin-top:.45rem;font-size:.71rem;color:var(--muted);line-height:1.45;}
+  .vo-body{margin-top:.6rem;padding-top:.55rem;border-top:1px dashed var(--hair);}
+  .vo-body h5{margin:.2rem 0 .35rem;font-size:.8rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);}
+  .vo-body h6{margin:.7rem 0 .25rem;font-size:.84rem;color:var(--ink);}
+  .vo-sum ul{margin:.1rem 0 .3rem;padding-left:1.1rem;}
+  .vo-sum li{margin:.2rem 0;font-size:.88rem;line-height:1.5;}
+  .vo-quote{margin:.4rem 0;padding:.35rem .7rem;border-left:3px solid var(--gold);color:var(--ink);
+    font-style:italic;font-size:.88rem;line-height:1.5;}
+  .vo-read p{margin:.4rem 0;font-size:.88rem;line-height:1.6;}
+  .vo-chapline{font-size:.84rem;line-height:1.55;color:var(--ink);padding:.1rem 0;}
+  .vo-empty{padding:1.1rem .2rem;color:var(--muted);font-size:.9rem;line-height:1.6;}
+  .vo-srcs{font-size:.8rem;line-height:1.6;}
+  .vo-srcs table{width:100%;border-collapse:collapse;font-size:.76rem;}
+  .vo-srcs td,.vo-srcs th{padding:.25rem .4rem;border-bottom:1px solid var(--hair);text-align:left;}
+  .vo-srcwrap{overflow-x:auto;}
+  @media (max-width:560px){
+    .vo-art{width:56px;height:56px;}
+    .vo-title{font-size:.94rem;}
+    .vo-chip,.vo-swin,.vo-btn,.vo-shelf{font-size:.74rem;padding:.3rem .6rem;}
+    .vo-filters{gap:.3rem;}
+  }
   .frail{margin:.5rem 0 .7rem;border:1px solid var(--hair);border-radius:10px;padding:.45rem .6rem;background:var(--panel);}
   .frail-h{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;font-size:.72rem;color:var(--muted);margin-bottom:.25rem;}
   .frail-h select{font:inherit;font-size:.72rem;padding:.15rem .35rem;border:1px solid var(--hair);border-radius:6px;background:var(--panel);color:var(--ink);min-height:30px;}
@@ -1955,6 +2032,34 @@
     <span class="evf-lbl">Must have</span><span id="evfchips"></span>
   </div>
 
+  <section id="voicesbody" aria-label="Voices — what practitioners say about hiring and job search" hidden>
+    <p class="vo-reg-top" id="vo-register">🎙 Practitioner advice and pointers — what these people argue and where they said it. Not verified outcomes, and not Roster's recommendation.</p>
+    <div class="vo-filters" id="vo-aud" role="group" aria-label="Who this is for">
+      <button type="button" class="vo-chip on" data-aud="" aria-pressed="true">Everyone</button>
+      <button type="button" class="vo-chip" data-aud="job_seeker" aria-pressed="false">🙋 For job seekers</button>
+      <button type="button" class="vo-chip" data-aud="hiring_team" aria-pressed="false">🏢 For hiring teams</button>
+      <button type="button" class="vo-chip" id="vo-sources" style="margin-left:auto" title="Every source, and the measurement that admitted it">ⓘ Sources</button>
+      <button type="button" class="vo-chip" id="vo-kept" aria-pressed="false" title="The moments you kept">★ Kept</button>
+    </div>
+    <div class="vo-filters" id="vo-kinds" role="group" aria-label="Kind of source">
+      <button type="button" class="vo-chip on" data-kind="" aria-pressed="true">Everything</button>
+      <button type="button" class="vo-chip" data-kind="essay" aria-pressed="false">✎ Essays</button>
+      <button type="button" class="vo-chip" data-kind="podcast" aria-pressed="false">🎧 Podcasts</button>
+      <button type="button" class="vo-chip" data-kind="video" aria-pressed="false">▶ Videos</button>
+    </div>
+    <div class="vo-filters vo-browse" id="vo-window" role="group" aria-label="Time window">
+      <span class="vo-blabel">Showing</span>
+      <button type="button" class="vo-swin" data-days="7" aria-pressed="false">this week</button>
+      <button type="button" class="vo-swin" data-days="30" aria-pressed="false">this month</button>
+      <button type="button" class="vo-swin on" data-days="90" aria-pressed="true">this quarter</button>
+      <button type="button" class="vo-swin" data-days="0" aria-pressed="false">all time</button>
+      <button type="button" class="vo-swin" id="vo-sort" data-order="watched" aria-pressed="false" title="Ordered by the view count YouTube itself publishes">▶ most watched</button>
+    </div>
+    <div class="vo-shelves" id="vo-shelves"></div>
+    <p class="vo-note" id="vo-note"></p>
+    <div class="vo-cards" id="vo-cards"></div>
+  </section>
+
   <section id="out" aria-live="polite">
   </section>
   <!-- Expert Panel body — lives in the SAME shell as Q&A (shared header + heading + mode switch +
@@ -2577,6 +2682,15 @@ function setSearchMode(m){
   const h = document.getElementById("heading"); if(h) h.textContent = PJ_COPY[SEARCH_MODE].h;
   const q = document.getElementById("q"); if(q) q.setAttribute("placeholder", PJ_COPY[SEARCH_MODE].ph);
   if(typeof renderEvFilters === "function") renderEvFilters();
+  // VOICES owns its own surface — a reading feed, not a thread of answers. Entering the tab shows it
+  // and hides #out; leaving restores whatever that tab's thread was.
+  const vb = document.getElementById("voicesbody");
+  if(vb){
+    const on = SEARCH_MODE === "voices";
+    vb.hidden = !on;
+    if(outEl) outEl.hidden = on || outEl.hidden;
+    if(on && typeof VO !== "undefined"){ VO.wire(); VO.enter(); document.body.classList.add("chatting"); }
+  }
 }
 let DUEL_ENABLED = false;       // A/B duel: fresh questions run standard + reasoned engines, user votes
 let PULSE_ENABLED = false;      // Evidence Pulse: watches, inbox, answer-integrity banners
@@ -3935,10 +4049,6 @@ function render(data, target, opts){
       + `<button type="button" class="stopbtn" onclick="cancelResearch()">■ Stop</button>`;
     return;
   }
-  // VOICES: practitioner moments, never an answer. There is no synthesis here on purpose — the
-  // corpus is opinion, and composing one answer out of it would be exactly the laundering the
-  // mode is designed not to do. The reader gets the takes, labelled, and decides.
-  if(data.kind === "voices"){ target.innerHTML = voicesMarkup(data); wireVoices(target, data); return; }
   // Ambiguous follow-up → the agent asks a clarifying question instead of answering. Render the
   // prompt (not an answer) and stop; the user's next reply carries this in history so it resolves.
   if(data.clarification){
@@ -6503,7 +6613,7 @@ async function askQuestion(question, opts){
   // EXPLICIT mode: the People/Jobs toggle decides routing — no keyword guessing. Jobs → ATS search;
   // People → the grounded people index (server routes it). (Legacy keyword fallback kept for safety.)
   if(SEARCH_MODE === "jobs"){ await runJobs(question, {contract: opts.contract}); if(opts.contract) PENDING_INTAKE_TRANSCRIPT = null; return; }
-  if(SEARCH_MODE === "voices"){ await runVoices(question); return; }
+  if(SEARCH_MODE === "voices"){ VO.search(question); return; }
   // Q&A: with the NATIVE router live, fall THROUGH to the full conversational research flow below
   // (thread, follow-ups, streaming, suggestions — the eigen experience); the server's intent router
   // picks the engine per question. Legacy (router off) keeps the one-shot runQA path.
@@ -7094,7 +7204,6 @@ function turnFoldLabel(t){
     return `▸ ${(t.jobs||[]).length} role${(t.jobs||[]).length===1?"":"s"} — expand`;
   if(Array.isArray(t.people_rows) && t.people_rows.length)
     return `▸ ${t.people_rows.length} ${t.people_rows.length===1?"person":"people"} — expand`;
-  if(t.kind === "voices") return `▸ ${(t.moments||[]).length} take${(t.moments||[]).length===1?"":"s"} — expand`;
   if(t.clarification) return `▸ asked to clarify — expand`;
   const a = (t.answer||"").replace(/\[\[\/?[FRK]\]\]/g,"").replace(/[#*_`]/g,"").replace(/\s+/g," ").trim();
   return a ? `▸ ${a.slice(0,120)}${a.length>120?"…":""}` : "▸ expand";
@@ -7157,77 +7266,262 @@ function renderThread(){
   const last = out.querySelector(".turn:last-child"); if(last) last.scrollIntoView({behavior:"smooth", block:"start"});
   syncComposerPad();
 }
-// ── VOICES ───────────────────────────────────────────────────────────────────────────────────────
-// What practitioners say about hiring and job search. Deliberately NOT an answer: the corpus is
-// opinion, and composing one answer out of it would launder a YouTuber's take into a Roster
-// recommendation. The reader gets the takes, each labelled with what it is and who said it.
-const VX_KIND = {essay:"Essay", podcast:"Podcast", video:"Video"};
-function vxStamp(sec){
-  const s = Math.max(0, parseInt(sec,10)||0), h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
-  return (h ? h + ":" + String(m).padStart(2,"0") : String(m)) + ":" + String(s%60).padStart(2,"0");
-}
-// ts_headline marks the matched passage with « » — turn those into a highlight, never into raw HTML
-function vxText(t){
-  return esc(String(t||"")).replace(/«([^»]*)»/g, '<span class="vx-hit">$1</span>');
-}
-function vxCard(m){
-  const kind = m.kind || "essay";
-  const who = [m.speaker, m.show].filter(Boolean).join(" · ");
-  const when = m.published ? String(m.published).slice(0,10) : "";
-  const stamp = (kind !== "essay" && m.t_start) ? `<span class="vx-stamp">${vxStamp(m.t_start)}</span>` : "";
-  const open = m.url
-    ? `<a class="vx-go" href="${esc(m.url)}" target="_blank" rel="noopener">${kind === "essay" ? "Read it ↗" : (kind === "video" ? "Watch from here ↗" : "Listen from here ↗")}</a>`
-    : "";
-  // An ESSAY is quoted — they are the author's own words. A CHAPTER never is: a producer wrote it.
-  const body = m.quotable ? `<span class="vx-t">“${vxText(m.text)}”</span>` : `<span class="vx-t">${stamp}${vxText(m.text)}</span>`;
-  return `<div class="vx-card ${esc(kind)}">
-    <div class="vx-h"><span class="vx-kind">${esc(VX_KIND[kind]||kind)}</span>
-      ${who ? `<span class="vx-who">${esc(who)}</span>` : ""}${when ? `<span>· ${esc(when)}</span>` : ""}
-      ${m.title && m.title !== m.text ? `<span>· ${esc(String(m.title).slice(0,90))}</span>` : ""}</div>
-    ${body}
-    <div class="vx-reg-line">${esc(m.register||"")}</div>${open}</div>`;
-}
-function voicesMarkup(d){
-  const ms = d.moments || [];
-  const A = [["", "Everyone"], ["job_seeker", "For job seekers"], ["hiring_team", "For hiring teams"]];
-  const K = [["", "All"], ["essay", "Essays"], ["podcast", "Podcasts"], ["video", "Videos"]];
-  const f = (list, cur, attr) => list.map(([v, lbl]) =>
-    `<button type="button" class="vx-f${(cur||"")===v?" on":""}" data-${attr}="${esc(v)}">${esc(lbl)}</button>`).join("");
-  const c = d.counts || {};
-  const widened = (d.window && d.window.widened)
-    ? ` <span class="tgt-q-hint">· that window was thin, so this is everything</span>` : "";
-  return `<div class="vx-reg">🎙 ${esc(d.register||"")}</div>
-    <div class="vx-bar">${f(A, d.audience, "aud")}<span style="width:.5rem;"></span>${f(K, (d.kinds||[])[0]||"", "kind")}</div>
-    <div class="vx-bar"><b>${c.total||0}</b> take${(c.total||0)===1?"":"s"}
-      ${c.quotable ? `· ${c.quotable} quotable` : ""}${c.pointers ? ` · ${c.pointers} moment${c.pointers===1?"":"s"} to listen to` : ""}
-      ${d.matched_on ? `· matched on ${esc(d.matched_on)}` : ""}${widened}
-      <span class="tgt-q-hint">· ranked by words (no semantic ranking yet)</span></div>
-    ${ms.length ? ms.map(vxCard).join("") : `<div class="vx-empty">Nothing in the voices corpus matches that yet. Try fewer words, or switch the filters above — this corpus is small and deliberately curated.</div>`}`;
-}
-function wireVoices(target, d){
-  target.querySelectorAll("[data-aud]").forEach(b => b.addEventListener("click", () => {
-    runVoices(d.question || "", {audience: b.dataset.aud, kinds: d.kinds || [], replace: d});
-  }));
-  target.querySelectorAll("[data-kind]").forEach(b => b.addEventListener("click", () => {
-    runVoices(d.question || "", {audience: d.audience || "", kinds: b.dataset.kind ? [b.dataset.kind] : [], replace: d});
-  }));
-}
-async function runVoices(question, opts){
-  opts = opts || {};
-  const turn = opts.replace || {question: question, kind: "voices", _pending: true, moments: []};
-  if(!opts.replace){ THREAD.turns.push(turn); renderThread(); }
-  try{
-    const r = await fetch("/voices/search", {method:"POST", headers:{"content-type":"application/json"},
-      body: JSON.stringify({q: question || "", audience: opts.audience || "", kinds: opts.kinds || [], limit: 30})});
-    const d = await r.json();
-    if(!r.ok){ Object.assign(turn, {_pending:false, moments:[], counts:{}, register:(d.detail||"Voices is unavailable right now.")}); renderThread(); return; }
-    Object.assign(turn, d, {question: question, kind: "voices", _pending: false,
-                            audience: opts.audience || "", kinds: opts.kinds || []});
-  }catch(e){
-    Object.assign(turn, {_pending:false, moments:[], counts:{}, register:"Couldn't reach the voices corpus — " + (e.message||e)});
+// ═══ VOICES ══════════════════════════════════════════════════════════════════════════════════════
+// A reading surface, deliberately NOT an answer. The corpus is opinion, and composing one answer out
+// of it would launder a practitioner's take into a Roster recommendation. The reader gets the takes,
+// each labelled with what it is and who said it, and decides.
+const VO = (function(){
+  const STATE = {q:"", kind:"", audience:"", days:90, order:"recent", view:"search", moments:[], loading:false};
+  const $$ = id => document.getElementById(id);
+  const cards = () => $$("vo-cards"), note = () => $$("vo-note");
+
+  // One-tap starts. The empty state of a small curated corpus should be a destination, not a blank
+  // box: these are the questions this corpus is actually good at, phrased as a reader would ask.
+  const SHELVES = {
+    job_seeker: [["Fake résumé claims", "resume claims verification"], ["Beating the screen", "resume screening what recruiters look for"],
+                 ["System design prep", "system design interview preparation"], ["Behavioural interviews", "behavioral interview stories"],
+                 ["Negotiating an offer", "salary negotiation offer"], ["Referrals & outreach", "referral cold outreach recruiter"]],
+    hiring_team: [["Fake candidates", "fake candidates identity fraud"], ["AI in the interview", "AI assisted cheating detection"],
+                  ["Structured interviews", "structured interview scorecard rubric"], ["Take-home vs live", "take home assessment live coding"],
+                  ["Sourcing", "sourcing outreach boolean"], ["Debriefs & decisions", "debrief hiring decision calibration"]],
+    "": [["Fake candidates", "fake candidates identity fraud"], ["AI in the interview", "AI assisted cheating detection"],
+         ["System design prep", "system design interview preparation"], ["What a screen should catch", "screening what a screen should catch"],
+         ["Résumés", "resume what recruiters look for"], ["Negotiating an offer", "salary negotiation offer"]],
+  };
+  const ROLE_WORD = {recruiter:"recruiter", coach:"career coach", engineer:"engineer", manager:"eng manager",
+                     operator:"operator", vendor:"vendor"};
+  const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  // A plain date is read field by field: new Date("2026-09-07") is UTC midnight, which west of UTC
+  // displays as the 6th — an off-by-one on every card.
+  function shortDate(raw){
+    const t = String(raw||"").trim(); if(!t) return "";
+    const iso = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if(iso) return parseInt(iso[3],10) + " " + MONTHS[parseInt(iso[2],10)-1] + " " + iso[1];
+    if(/^\d{4}$/.test(t)) return t;
+    const d = new Date(t); return isNaN(d) ? t.slice(0,16) : (d.getDate()+" "+MONTHS[d.getMonth()]+" "+d.getFullYear());
   }
-  renderThread();
-}
+  function stamp(sec){
+    const n = Math.max(0, parseInt(sec,10)||0), h = Math.floor(n/3600), m = Math.floor((n%3600)/60);
+    return (h ? h+":"+String(m).padStart(2,"0") : String(m)) + ":" + String(n%60).padStart(2,"0");
+  }
+  // the platform's own number, shown as a fact about the video and never turned into our ranking
+  function views(n){ n = parseInt(n,10)||0;
+    return n >= 1e6 ? (n/1e6).toFixed(n>=1e7?0:1)+"M views" : (n >= 1000 ? Math.round(n/1000)+"K views" : (n?n+" views":"")); }
+  // ts_headline marks the matched passage with « » — a highlight, never raw HTML
+  function hl(t){ return esc(String(t||"")).replace(/«([^»]*)»/g, '<span class="vo-hit">$1</span>'); }
+  function authHeaders_(){ return (typeof USER !== "undefined" && USER && USER.token) ? {"X-Roster-Token": USER.token} : {}; }
+
+  function card(m, i){
+    const pointer = m.kind === "podcast" || m.kind === "video";
+    const art = m.image ? '<img class="vo-art" src="'+esc(m.image)+'" alt="" loading="lazy" referrerpolicy="no-referrer">' : "";
+    const kick = ['<span class="vo-kind">'+esc(m.kind)+'</span>'];
+    if(m.show) kick.push("<span>"+esc(m.show)+"</span>");
+    if(m.published) kick.push('<span class="vo-dot">·</span><span>'+esc(shortDate(m.published))+"</span>");
+    if(pointer && m.t_start) kick.push('<span class="vo-dot">·</span><span class="vo-stamp">⏱ '+stamp(m.t_start)+"</span>");
+    if(m.views) kick.push('<span class="vo-dot">·</span><span>'+esc(views(m.views))+"</span>");
+    const role = m.role ? '<span class="vo-role'+(m.role==="vendor"?" vendor":"")+'">'+esc(ROLE_WORD[m.role]||m.role)+"</span>" : "";
+    const who = m.speaker ? '<span class="vo-who">'+esc(m.speaker)+"</span>"+role : role;
+    const piece = (m.title && m.title !== m.text) ? esc(String(m.title).slice(0,120)) : "";
+    const sub = [who, piece].filter(Boolean).join(' <span class="vo-dot">·</span> ');
+    // An ESSAY is quoted — the author's own words. A CHAPTER never is: a producer wrote it.
+    const title = pointer ? hl(m.text) : "“"+hl(m.text)+"”";
+    // a chapter that opens the piece has no offset worth naming — "Open at 0:00" reads like a bug
+    const openLbl = m.kind === "essay" ? "Read the original ↗"
+                  : (m.t_start ? "Open at "+stamp(m.t_start)+" ↗" : (m.kind === "video" ? "Watch ↗" : "Listen ↗"));
+    const open = m.url ? '<a class="vo-btn primary" href="'+esc(m.url)+'" target="_blank" rel="noopener noreferrer">'+openLbl+"</a>"
+                       : '<span class="vo-nolink">no link in this feed</span>';
+    const playBtn = m.media && m.media.kind ? '<button type="button" class="vo-btn play" data-play="'+i+'">▶ Play here</button>' : "";
+    return '<article class="vo-card '+esc(m.kind)+'" data-i="'+i+'">'
+      + '<div class="vo-top">'+art+'<div class="vo-main">'
+      +   '<div class="vo-kicker">'+kick.join("")+"</div>"
+      +   '<div class="vo-title">'+title+"</div>"
+      +   (sub ? '<div class="vo-sub">'+sub+"</div>" : "")
+      + "</div></div>"
+      + '<div class="vo-player" id="vo-play-'+i+'" hidden></div>'
+      + '<div class="vo-foot">'+playBtn
+      +   '<button type="button" class="vo-btn" data-open="'+i+'" aria-expanded="false">☰ What it says</button>'
+      +   open
+      +   '<button type="button" class="vo-btn vo-star" data-fav="'+i+'" aria-pressed="'+(m.saved?"true":"false")
+      +     '" title="Keep this — it follows your account, not this browser">'+(m.saved?"★ Kept":"☆ Keep")+"</button>"
+      + "</div>"
+      + '<div class="vo-reg">'+esc(m.register||"")+"</div>"
+      + '<div class="vo-body" id="vo-body-'+i+'" hidden></div></article>';
+  }
+
+  // Play WHERE THE READER IS. A video embeds and starts at the moment; an audio enclosure plays from
+  // the same offset. Either way the publisher still gets the traffic through the link beside it.
+  function play(i){
+    const m = STATE.moments[i], box = $$("vo-play-"+i);
+    if(!m || !box || !m.media) return;
+    if(!box.hidden){ box.hidden = true; box.innerHTML = ""; return; }
+    box.hidden = false;
+    box.innerHTML = m.media.kind === "youtube"
+      ? '<iframe src="https://www.youtube-nocookie.com/embed/'+esc(m.media.id)+"?start="+(parseInt(m.media.t,10)||0)
+        + '&autoplay=1" allow="accelerometer; autoplay; encrypted-media; picture-in-picture" allowfullscreen title="'+esc(m.title||"video")+'"></iframe>'
+      : '<audio controls autoplay preload="none" src="'+esc(m.media.url)+"#t="+(parseInt(m.media.t,10)||0)+'"></audio>';
+  }
+
+  async function expand(i){
+    const m = STATE.moments[i], el = $$("vo-body-"+i), btn = cards().querySelector('[data-open="'+i+'"]');
+    if(!m || !el) return;
+    if(!el.hidden){ el.hidden = true; if(btn) btn.setAttribute("aria-expanded","false"); return; }
+    el.hidden = false; if(btn) btn.setAttribute("aria-expanded","true");
+    if(el.dataset.loaded) return;
+    el.innerHTML = '<div class="vo-sum">reading the whole piece…</div>';
+    try{
+      const r = await fetch("/voices/summary", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({id: m.id})});
+      const d = await r.json();
+      if(!r.ok) throw new Error(d.detail || ("summary failed ("+r.status+")"));
+      el.dataset.loaded = "1";
+      const pts = (d.points||[]).map(x => "<li>"+esc(x)+"</li>").join("");
+      const quotes = (d.quotes||[]).map(x => '<blockquote class="vo-quote">“'+esc(x)+"”</blockquote>").join("");
+      // the piece as the AUTHOR'S OWN paragraphs, grouped under headings — nothing is rewritten
+      const secs = (d.sections||[]).map(sec => "<section>"+(sec.title?"<h6>"+esc(sec.title)+"</h6>":"")
+        + (sec.paragraphs||[]).map(par => "<p>"+esc(par)+"</p>").join("")+"</section>").join("");
+      el.innerHTML = (pts ? "<h5>"+esc(d.heading||"What it says")+'</h5><div class="vo-sum"><ul>'+pts+"</ul></div>" : "")
+        + quotes + (secs ? '<h5>The piece</h5><div class="vo-read">'+secs+"</div>" : "")
+        + (d.note ? '<div class="vo-reg">'+esc(d.note)+"</div>" : "");
+      if(!pts && !secs) el.innerHTML = '<div class="vo-reg">Nothing more to show for this one.</div>';
+    }catch(e){ el.innerHTML = '<div class="vo-reg">Could not read this one: '+esc(e.message||e)+"</div>"; }
+  }
+
+  async function keep(i){
+    const m = STATE.moments[i], btn = cards().querySelector('[data-fav="'+i+'"]');
+    if(!m || !btn) return;
+    const on = btn.getAttribute("aria-pressed") === "true";
+    try{
+      const r = on ? await fetch("/voices/favorites/"+encodeURIComponent(m.id), {method:"DELETE", headers: authHeaders_()})
+                   : await fetch("/voices/favorites", {method:"POST",
+                       headers: Object.assign({"content-type":"application/json"}, authHeaders_()),
+                       body: JSON.stringify({moment: m})});
+      if(r.status === 401){ note().textContent = "Sign in to keep moments — they follow your account, not this browser."; return; }
+      if(!r.ok) throw new Error("could not save ("+r.status+")");
+      btn.setAttribute("aria-pressed", on ? "false" : "true");
+      btn.textContent = on ? "☆ Keep" : "★ Kept"; m.saved = !on;
+      if(STATE.view === "kept" && on){ const c = btn.closest(".vo-card"); if(c) c.remove(); }
+    }catch(e){ note().textContent = "Could not update your kept list: " + (e.message||e); }
+  }
+
+  function shelves(){
+    const box = $$("vo-shelves"); if(!box) return;
+    // the shelves are a landing affordance; once a search is on screen the results are the surface
+    box.innerHTML = (STATE.q || STATE.view === "kept") ? ""
+      : (SHELVES[STATE.audience] || SHELVES[""]).map(([lbl, q]) =>
+          '<button type="button" class="vo-shelf" data-shelf="'+esc(q)+'">'+esc(lbl)+"</button>").join("");
+  }
+  function chips(){
+    document.querySelectorAll("#vo-aud .vo-chip[data-aud]").forEach(b => {
+      const on = (b.dataset.aud||"") === STATE.audience; b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); });
+    document.querySelectorAll("#vo-kinds .vo-chip[data-kind]").forEach(b => {
+      const on = (b.dataset.kind||"") === STATE.kind; b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); });
+    document.querySelectorAll("#vo-window .vo-swin[data-days]").forEach(b => {
+      const on = String(STATE.days) === b.dataset.days && STATE.order !== "watched";
+      b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); });
+    const srt = $$("vo-sort"); if(srt){ const on = STATE.order === "watched";
+      srt.classList.toggle("on", on); srt.setAttribute("aria-pressed", on); }
+    const win = $$("vo-window"); if(win) win.hidden = !!STATE.q || STATE.view === "kept";
+    const kb = $$("vo-kept"); if(kb){ const on = STATE.view === "kept";
+      kb.classList.toggle("on", on); kb.setAttribute("aria-pressed", on); }
+  }
+  function paint(){
+    chips(); shelves();
+    const box = cards(); if(!box) return;
+    if(STATE.loading){ box.innerHTML = '<div class="vo-empty">Reading what practitioners said…</div>'; return; }
+    box.innerHTML = STATE.moments.length
+      ? STATE.moments.map(card).join("")
+      : '<div class="vo-empty">'+(STATE.view === "kept"
+          ? "Nothing kept yet. Tap ☆ Keep on a card and it follows your account."
+          : "Nothing here matches that yet. This corpus is small and deliberately curated — try fewer words, a different filter, or one of the starts above.")+"</div>";
+  }
+
+  async function run(){
+    STATE.loading = true; paint();
+    try{
+      const r = await fetch("/voices/search", {method:"POST",
+        headers: Object.assign({"content-type":"application/json"}, authHeaders_()),
+        body: JSON.stringify({q: STATE.q, kinds: STATE.kind ? [STATE.kind] : [], audience: STATE.audience,
+                              limit: 30, days: STATE.q ? 0 : STATE.days, order: STATE.order})});
+      const d = await r.json();
+      if(!r.ok) throw new Error(d.detail || ("search failed ("+r.status+")"));
+      STATE.moments = d.moments || [];
+      const c = d.counts || {};
+      const bits = [(c.total||0)+" take"+((c.total||0)===1?"":"s")];
+      if(c.quotable) bits.push(c.quotable+" quotable");
+      if(c.pointers) bits.push(c.pointers+" moment"+(c.pointers===1?"":"s")+" to play");
+      if(d.matched_on) bits.push("matched on "+d.matched_on);
+      if(d.window && d.window.widened) bits.push("that window was thin, so this is everything");
+      bits.push("ranked by words");
+      note().innerHTML = esc(bits.join(" · "))
+        + (STATE.q ? ' <button type="button" class="vo-shelf" id="vo-clear" style="min-height:28px;padding:.1rem .55rem;font-size:.72rem;">← back to what\'s new</button>' : "");
+      const reg = $$("vo-register"); if(reg && d.register) reg.textContent = "🎙 " + d.register;
+    }catch(e){ STATE.moments = []; note().textContent = "Voices is unavailable right now — " + (e.message||e); }
+    STATE.loading = false; paint();
+  }
+
+  async function kept(){
+    STATE.view = "kept"; STATE.loading = true; paint();
+    try{
+      const r = await fetch("/voices/favorites", {headers: authHeaders_()});
+      if(r.status === 401){ STATE.moments = []; note().textContent = "Sign in to keep moments — they follow your account, not this browser."; }
+      else { const d = await r.json(); STATE.moments = (d.moments||[]).map(m => Object.assign({saved:true}, m));
+             note().textContent = STATE.moments.length + " kept"; }
+    }catch(e){ STATE.moments = []; note().textContent = "Could not load your kept list — " + (e.message||e); }
+    STATE.loading = false; paint();
+  }
+
+  async function sources(){
+    STATE.view = "sources"; STATE.moments = []; paint();
+    const box = cards();
+    box.innerHTML = '<div class="vo-empty">Loading the source list…</div>';
+    try{
+      const d = await (await fetch("/voices/sources")).json();
+      const rows = (d.sources||[]).map(x =>
+        "<tr><td>"+esc(x.label)+"</td><td>"+esc(x.kind)+"</td><td>"+esc(x.author||"—")+"</td><td>"+esc(x.role||"—")
+        + "</td><td>"+(x.audience==="both"?"either":esc((x.audience||"").replace("_"," ")))+"</td><td>"+x.yield_pct+"%</td><td>"+x.on_topic_pct+"%</td></tr>").join("");
+      const rej = (d.rejected||[]).map(x => "<li><b>"+esc(x.label)+"</b> — "+esc(x.why)+"</li>").join("");
+      box.innerHTML = '<div class="vo-srcs"><p>Every source here was admitted by MEASUREMENT, not taste: '
+        + "a podcast or channel needs a timestamped chapter list on at least "+(d.bars&&d.bars.podcast||30)
+        + "% of its items, an essay feed needs full text on at least "+(d.bars&&d.bars.essay||50)
+        + "%, and everything needs to be about this subject at least "+(d.bars&&d.bars.on_topic||50)+"% of the time.</p>"
+        + '<div class="vo-srcwrap"><table><tr><th>Source</th><th>Kind</th><th>Who</th><th>Role</th><th>For</th><th>Yield</th><th>On topic</th></tr>'
+        + rows + "</table></div>"
+        + (rej ? "<h5 style=\"margin-top:.9rem\">Kept out on purpose</h5><ul>"+rej+"</ul>" : "") + "</div>";
+    }catch(e){ box.innerHTML = '<div class="vo-empty">Could not load the source list — '+esc(e.message||e)+"</div>"; }
+  }
+
+  // A reading feed that starts 900px below the fold is not a reading feed. The shell above (nav,
+  // account nudge, tabs) is the same on every tab; here it is simply in the way, so entering the
+  // mode or running a search brings the surface itself to the top of the viewport.
+  function reveal(){
+    const b = $$("voicesbody"); if(!b) return;
+    const y = b.getBoundingClientRect().top + window.scrollY - 8;
+    if(y > 24) window.scrollTo({top: y, behavior: "smooth"});
+  }
+  function search(q){ STATE.q = String(q||"").trim(); STATE.view = "search"; run().then(reveal); }
+  function enter(){
+    if(STATE.view === "sources") STATE.view = "search";
+    if(!STATE.moments.length && !STATE.loading) run().then(reveal); else setTimeout(reveal, 30);
+  }
+
+  function wire(){
+    const body = $$("voicesbody"); if(!body || body.dataset.wired) return; body.dataset.wired = "1";
+    body.addEventListener("click", e => {
+      const t = e.target.closest("button, a"); if(!t) return;
+      if(t.dataset.aud !== undefined && t.classList.contains("vo-chip")){ STATE.audience = t.dataset.aud; STATE.view = "search"; run(); return; }
+      if(t.dataset.kind !== undefined && t.classList.contains("vo-chip")){ STATE.kind = t.dataset.kind; STATE.view = "search"; run(); return; }
+      if(t.dataset.days !== undefined){ STATE.days = parseInt(t.dataset.days,10)||0; STATE.order = "recent"; STATE.view = "search"; run(); return; }
+      if(t.id === "vo-sort"){ STATE.order = STATE.order === "watched" ? "recent" : "watched"; STATE.view = "search"; run(); return; }
+      if(t.id === "vo-kept"){ if(STATE.view === "kept"){ STATE.view = "search"; run(); } else kept(); return; }
+      if(t.id === "vo-sources"){ sources(); return; }
+      if(t.dataset.shelf){ const qq = $$("q"); if(qq) qq.value = t.dataset.shelf; search(t.dataset.shelf); return; }
+      if(t.id === "vo-clear"){ const qq = $$("q"); if(qq) qq.value = ""; STATE.q = ""; STATE.view = "search"; run(); return; }
+      if(t.dataset.play !== undefined){ play(parseInt(t.dataset.play,10)); return; }
+      if(t.dataset.open !== undefined){ expand(parseInt(t.dataset.open,10)); return; }
+      if(t.dataset.fav !== undefined){ keep(parseInt(t.dataset.fav,10)); return; }
+    });
+  }
+  return {search, enter, wire, state: STATE};
+})();
 
 // A suggestion is {question, tag} (tag = an optional lens label, e.g. CEO/VC/CTO) — or a bare
 // string (legacy). Render a chip with the lens badge; the click always uses the QUESTION text.
