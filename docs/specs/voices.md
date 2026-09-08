@@ -284,3 +284,67 @@ YouTube's own number and never turns it into a ranking of ours.
 - The summary's model call passed `timeout` positionally against a keyword-only parameter, so every
   summary silently fell back to extractive and cached that outage for three days. `refresh: true`
   now exists precisely so an outage's result cannot outlive it.
+
+---
+
+## 7. Semantic ranking and the role strip (2026-09-08, later still)
+
+### 7.1 Vectors — measured at $0.0037, not the $3 I projected
+
+Phase 1 shipped keyword-only. The embedding backfill cost **$0.0037** for 1,516 blocks (685k characters
+≈ 185k tokens on text-embedding-3-small at $0.02/M) and ran in **9.7 seconds** with zero failures. My
+first estimate to the owner was ~$3 — wrong by about 800×, because I priced it as if these were LLM
+tokens. Recorded here so the next projection starts from the real number.
+
+`roster_kernel/retrieval/backfill.py` is the mechanism, and it is domain-free: "some rows lack vectors,
+fill them" belongs to any vertical. It is idempotent and resumable (it only ever selects rows with no
+vector), it stops rather than spins when a provider is failing, and `count_missing` reports what a run
+would cost before it runs. `POST /admin/voices/jobs {"kind":"embed","dry_run":true}` prints the
+projection; without `dry_run` it does the work.
+
+### 7.2 Hybrid, and why the ladder changes when meaning is available
+
+A search now runs BOTH legs and fuses them with **reciprocal rank fusion** — not a weighted blend of
+`ts_rank` and cosine distance, which live on different scales and would be a guess dressed up as a
+number. RRF reads only POSITION, the one thing the two legs agree on the meaning of.
+
+The subtler change: **the keyword leg is asked differently once a vector leg exists.** Two of its
+behaviours were compensations for having no semantics —
+
+- dropping the domain's near-universal words ("candidate", "interview", "hiring"), and
+- relaxing the query ladder down to "any word" to fill a page.
+
+Both add noise back when meaning is available, so with a vector they are switched off: the words are
+taken literally and the loosest rung is skipped. That is what finally removed the false positive this
+work started from — "fake candidates" had been matching a video titled *"Being Enthusiastic Is Not
+Being Fake"*, a block containing "fake" and no candidate at all.
+
+Measured after: "AI cheating in interviews" now surfaces *"seen a five-fold increase in cheating
+detection rates"*, a passage keyword-only never found.
+
+### 7.3 The role strip — why this corpus lives in a job product
+
+`POST /voices/for_role` answers "how do I prepare for THIS one" on a job card, which is where the
+question is actually asked. Three decisions, each measured:
+
+1. **Meaning only.** A role probe is a phrase, not keywords. OR-ing its words is what put "Economics of
+   building software" under an account-executive posting. The keyword leg remains only as a fallback
+   when no embedder is configured, and then strictly (AND), never loosely.
+2. **A floor of 0.40, set from data.** Across five role probes a genuinely useful moment scores
+   0.44–0.54 and the tail below 0.40 is filler.
+3. **It returns FEWER rather than padding.** A strip is an aside on someone else's card, so the bar is
+   higher than a search's. The control case proves it works: a *Warehouse Forklift Operator* posting
+   gets **one** moment (generic "Hiring manager interview"), not three padded rows — abstain, never
+   "close enough".
+
+Job-seeker material only: a hiring team's take on running the loop is not preparation advice.
+
+### 7.4 Two bugs this pass caught
+
+- **Decimal HTML entities survived.** The earlier fix was right but the earlier CHECK was not — it
+  looked for `&#x` (hex) and the feeds ship `&#8220;` (decimal), so two stale blocks kept rendering
+  `don&#8217;t` in a job card. A block keys on a hash of its text, so corrected text makes NEW rows and
+  leaves the old ones behind: the corpus was purged and rebuilt (1,516 blocks, 0 entities of any form).
+- **🎙 Prepare also opened the Apply modal.** A job card is a dense cluster of document-level click
+  handlers, and a bubble-phase listener cannot stop the ones registered before it. The handler now
+  captures.

@@ -87,6 +87,28 @@ def embed_unavailable_for() -> float:
     return max(0.0, _EMBED_DOWN_UNTIL[0] - _t.monotonic())
 
 
+def embed_texts(texts: list[str], *, max_chars: int = 8000) -> list[str | None]:
+    """Embed MANY texts in one call → pgvector literals, aligned to the input list (None where a text
+    is empty or the call failed). The batch form exists because a per-row call over a whole corpus is
+    a thousand HTTP round trips for work the provider does in one."""
+    key = os.environ.get("OPENAI_API_KEY")
+    items = [(i, (t or "").strip()[:max_chars]) for i, t in enumerate(texts or [])]
+    out: list[str | None] = [None] * len(items)
+    send = [(i, t) for i, t in items if t]
+    if not key or not send:
+        return out
+    body = json.dumps({"model": "text-embedding-3-small", "input": [t for _i, t in send]}).encode()
+    req = urllib.request.Request("https://api.openai.com/v1/embeddings", data=body,
+        headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        data = json.load(r)["data"]
+    for (i, _t), rec in zip(send, sorted(data, key=lambda d: d.get("index", 0))):
+        v = rec.get("embedding")
+        if v:
+            out[i] = "[" + ",".join(f"{x:.6f}" for x in v) + "]"
+    return out
+
+
 def embed_query(text: str) -> str | None:
     """Embed the query with text-embedding-3-small → a pgvector literal '[...]'. None on any failure
     (the caller falls back to the exact facet path). Never raises to the route."""
