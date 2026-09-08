@@ -272,6 +272,39 @@ horizontally; tap targets ≥ 40 px; the rail folds behind one "Filter · N acti
 "must have" chips and "Center around level" disappear as separate controls (they are `must:evidence` and
 `center:level` in the rail). Every facet chip has a tooltip with its provenance.
 
+### 7.2 WHERE — the scope question, answered before any other (2026-09-08)
+
+**The default is ALL US, any city.** It used to be the reader's own detected metro, which silently hid
+most of the index: a Bay Area default answered "backend engineer" with Bay Area roles and nothing on
+screen said the rest of the country had been excluded. The detected metro is still the FIRST option in
+the header selector, one click away; it is simply not the default. Only a choice the reader makes
+explicitly is remembered across sessions.
+
+**The jobs search never applied the scope at all.** The people path promoted `scope.country` into
+`must.country`; the jobs path passed the scope to the compiler and dropped it, so a US search returned
+German and Indian postings mixed in. Both paths now promote the stated scope — country, and a metro or
+state when the reader chose one — *unless the question itself named a place*, which always wins.
+
+**The rail owns the levels.** Geography has levels — the whole world, a country, a state, a city — and
+twenty chips in a row is not the same affordance as being able to say "only Texas". A **Where** row
+sits at the top of the rail with three selects (Any country / Any state / Any city) built from the
+counts already in the response, so it offers only places these results actually contain, and a
+**🌍 Worldwide** button that clears all three. Choosing a country clears a state and city that no
+longer sit inside it.
+
+Two deliberate differences from the chips below it:
+- **It applies at once.** A scope is not a filter you stage: chips stage behind Apply, Where does not.
+- **It is a select, not a chip.** "Any city" is one answer out of hundreds, and a level is a choice
+  rather than a toggle.
+
+The three geography keys are removed from the chip rows, so there is one control per question.
+
+**Place names are vocabulary, so they live in the vertical.** `KEYED_VALUE_LABELS` is keyed BY FACET
+because the codes collide — `in` is India and Indiana, `de` is Germany and Delaware — and one shared
+table would rename one of them wrongly. `uk` and `gb` both read "United Kingdom", because side by side
+on a rail they look like a bug rather than two spellings. Metros have no table and are title-cased:
+"san francisco" reads as data, "San Francisco" reads as somewhere to work.
+
 ### 7.1 The rail costs the counts, never a re-search (2026-09-07)
 
 **The chips are a property of the contract's must-slice, not of the ranked page.** Opening a saved map used to

@@ -3060,6 +3060,11 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             # THE EVALUATOR (docs/specs/facet-contract-evaluator.md): brief → contract → rows + counts.
             from api.facets_engine import compile_contract, downgrade_uncovered_musts
             from api.people_population import job_brief_contract
+            # THE DEFAULT SCOPE IS ALL US (owner, 2026-09-08). The people path already promoted the
+            # country scope to a must; the jobs path never did, so "backend engineer" returned German
+            # and Indian postings mixed into a US search with nothing on screen saying so. A scope the
+            # caller states is a scope the search applies — and the rail's Where row is how a reader
+            # widens it to worldwide or narrows it to a state or a city.
             _scope = {"country": (body.country or "us").strip().lower()}
             if body.contract and str(body.contract.get("kind") or "job") == "job":
                 from roster_kernel.facets import Contract as _Contract
@@ -3077,6 +3082,16 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 _plain_t = {"plain.compile": round(_j1 - _j0, 2), "plain.coverage_and_index_aware": round(_jtm.monotonic() - _j1, 2)}
             if body.levels and body.levels[0]:
                 _c.center = {"key": "level", "value": body.levels[0], "span": int(body.level_span)}
+            # The stated scope becomes a FILTER unless the question itself named a place. Without
+            # this the jobs search ignored the scope entirely: a US search returned German and
+            # Indian postings with nothing on screen saying so. The rail's Where row is how a
+            # reader widens it to worldwide or narrows it to a state or a city.
+            if _scope.get("country") and not _c.must.get("country"):
+                _c.must["country"] = [_scope["country"]]
+            if (body.metro or "").strip() and not _c.must.get("metro"):
+                _c.must["metro"] = [body.metro.strip().lower()]
+            elif (body.state or "").strip() and not _c.must.get("state"):
+                _c.must["state"] = [body.state.strip().lower()]
             for _m in (body.job_must or []):
                 if _m in ("remote", "hybrid"):
                     _c.must.setdefault("work_mode", []).append(_m)
@@ -4162,6 +4177,12 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     if _signal or _c.center:                       # a role / field / level / skill / place was named → the evaluator
                         if _scope_c and not _c.must.get("country"):
                             _c.must["country"] = [_scope_c]
+                        # a narrower scope than the country, when the reader chose one and the
+                        # question did not name a place of its own
+                        if (body.metro or "").strip() and not _c.must.get("metro"):
+                            _c.must["metro"] = [body.metro.strip().lower()]
+                        elif (body.state or "").strip() and not _c.must.get("state"):
+                            _c.must["state"] = [body.state.strip().lower()]
                         if body.evidence_kinds:
                             _c.must["evidence"] = [str(x) for x in body.evidence_kinds]
                         if body.levels and body.levels[0]:
@@ -6198,9 +6219,11 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     def _facet_labels(kind: str) -> dict:
         """The vocabulary's display names for a kind — schema only, no I/O. The rail needs them to draw, so any
         surface that already has counts (a saved map's snapshot) can render without re-running a search."""
-        from roster_vertical.facet_schema import VALUE_LABELS
+        from roster_vertical.facet_schema import KEYED_VALUE_LABELS, VALUE_LABELS
         sch = _facet_schema()
         return {"keys": {k.key: k.label for k in sch.for_kind(kind)}, "values": VALUE_LABELS,
+                # per-key labels: a country code and a state code collide ("in" is India AND Indiana)
+                "values_by_key": KEYED_VALUE_LABELS,
                 "types": {k.key: k.type.value for k in sch.for_kind(kind) if k.navigable},
                 "order": [k.key for k in sch.for_kind(kind) if k.navigable]}
 

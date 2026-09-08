@@ -123,3 +123,35 @@ VALUE_LABELS = {"data_ml": "data / ML", "clinical_pharma": "clinical / pharma", 
                 "100k_150k": "$100k–150k", "150k_200k": "$150k–200k", "200k_300k": "$200k–300k", "300k_plus": "$300k+",
                 "0_2": "0–2 yrs", "3_5": "3–5 yrs", "6_10": "6–10 yrs", "11_15": "11–15 yrs", "16_plus": "16+ yrs",
                 "week": "this week", "month": "this month", "older": "older", "full_time": "full-time", "part_time": "part-time"}
+
+# PLACE NAMES. A rail row reading "us 154810 · de 8712 · gb 5328" asks the reader to decode ISO codes,
+# and "gb" beside "uk" looks like a bug rather than two spellings of one country. These are display
+# labels only — the stored facet values never change.
+_COUNTRY_LABELS = {
+    "us": "United States", "ca": "Canada", "mx": "Mexico", "br": "Brazil", "ar": "Argentina",
+    "uk": "United Kingdom", "gb": "United Kingdom", "ie": "Ireland", "de": "Germany", "fr": "France",
+    "es": "Spain", "pt": "Portugal", "it": "Italy", "nl": "Netherlands", "be": "Belgium",
+    "ch": "Switzerland", "at": "Austria", "se": "Sweden", "no": "Norway", "dk": "Denmark",
+    "fi": "Finland", "pl": "Poland", "cz": "Czechia", "ro": "Romania", "ua": "Ukraine",
+    "in": "India", "cn": "China", "jp": "Japan", "kr": "South Korea", "sg": "Singapore",
+    "au": "Australia", "nz": "New Zealand", "il": "Israel", "ae": "United Arab Emirates",
+    "za": "South Africa", "ng": "Nigeria", "ke": "Kenya", "eg": "Egypt", "tr": "Türkiye",
+    "ph": "Philippines", "id": "Indonesia", "my": "Malaysia", "th": "Thailand", "vn": "Vietnam",
+    "cl": "Chile", "co": "Colombia", "pe": "Peru", "cr": "Costa Rica", "remote": "Remote",
+}
+_STATE_LABELS = {
+    "al": "Alabama", "ak": "Alaska", "az": "Arizona", "ar": "Arkansas", "ca": "California",
+    "co": "Colorado", "ct": "Connecticut", "de": "Delaware", "dc": "District of Columbia",
+    "fl": "Florida", "ga": "Georgia", "hi": "Hawaii", "id": "Idaho", "il": "Illinois",
+    "in": "Indiana", "ia": "Iowa", "ks": "Kansas", "ky": "Kentucky", "la": "Louisiana",
+    "me": "Maine", "md": "Maryland", "ma": "Massachusetts", "mi": "Michigan", "mn": "Minnesota",
+    "ms": "Mississippi", "mo": "Missouri", "mt": "Montana", "ne": "Nebraska", "nv": "Nevada",
+    "nh": "New Hampshire", "nj": "New Jersey", "nm": "New Mexico", "ny": "New York",
+    "nc": "North Carolina", "nd": "North Dakota", "oh": "Ohio", "ok": "Oklahoma", "or": "Oregon",
+    "pa": "Pennsylvania", "ri": "Rhode Island", "sc": "South Carolina", "sd": "South Dakota",
+    "tn": "Tennessee", "tx": "Texas", "ut": "Utah", "vt": "Vermont", "va": "Virginia",
+    "wa": "Washington", "wv": "West Virginia", "wi": "Wisconsin", "wy": "Wyoming", "pr": "Puerto Rico",
+}
+# A country code and a state code collide ("in" is India and Indiana; "de" is Germany and Delaware),
+# so the labels are namespaced per key and the UI asks for the one it is rendering.
+KEYED_VALUE_LABELS = {"country": _COUNTRY_LABELS, "state": _STATE_LABELS}
