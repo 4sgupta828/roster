@@ -56,6 +56,19 @@ def classify(source_key: str, facets: dict[str, str] | None, title: str = "", te
     if src_kind == "corp_eng" or sk == "eng_blog":
         return "technical_signal"
 
+    # 3a-i) POINTER — a producer's or uploader's CHAPTER TITLE. It says where to listen, never what was
+    # said, so it is not evidence at all (`authority.is_evidence` is False) and the manifest's
+    # non_evidence_facets keeps it out of the research loop structurally, not by anyone remembering.
+    if src_kind == "chapter_pointer" or sk in ("show_notes", "youtube_chapters"):
+        return "pointer"
+
+    # 3a-ii) PRACTITIONER ADVICE — counsel about finding work or hiring, from a named practitioner on
+    # the record. Above raw sentiment (someone is accountable for it), below an expert's analysis of a
+    # field: this genre rewards confident, engagement-optimised advice and much of it is simply wrong.
+    # It supports "this author argues X" and NEVER "X works". STRUCTURAL: reads the stamped kind.
+    if sk == "practitioner_essay":
+        return "practitioner_advice"
+
     # 3b) EXPERT ANALYSIS — a NAMED expert's interpretation/foresight (essays, newsletters, recorded
     # expert/practitioner discussion). Opinion above an unreviewed preprint, below fact-checked press;
     # never controlling. STRUCTURAL: reads the source_kind the connector stamped, judges nothing.

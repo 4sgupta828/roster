@@ -28,7 +28,9 @@ from .connectors import (ArxivConnector, CompaniesHouseConnector, CrossrefConnec
                          ExpertFeedConnector, GdeltConnector, GithubConnector, HackerNewsConnector,
                          HuggingFaceConnector, LobstersConnector, NihReporterConnector, NsfConnector,
                          OpenAlexConnector,
-                         OpenReviewConnector, PatentsViewConnector, PodcastConnector, RedditConnector,
+                         OpenReviewConnector, PatentsViewConnector, PodcastConnector,
+                         PractitionerEssayConnector, RedditConnector, ShowNotesConnector,
+                         YoutubeChaptersConnector,
                          SemanticScholarConnector, StackExchangeConnector, UsptoConnector,
                          WikidataConnector, WikipediaConnector, YcConnector)
 from .use_case_lenses import USE_CASE_LENSES
@@ -124,12 +126,28 @@ def build_manifest() -> VerticalManifest:
             "gdelt": GdeltConnector(),
             # YC company directory — the startup POPULATION seed (name/batch/founders/desc), public Algolia.
             "yc": YcConnector(),
+            # VOICES (docs/specs/voices.md) — practitioner material about finding work and finding
+            # people. Essays are quotable AS OPINION; the two chapter connectors are POINTERS that say
+            # where to listen and can never support a claim.
+            "practitioner_essay": PractitionerEssayConnector(),
+            "show_notes": ShowNotesConnector(),
+            "youtube_chapters": YoutubeChaptersConnector(),
         },
         retrieval_sources={"corpus": TechRetrievalSource()},
         gating_policy=TechGatingPolicy(),
         citation_verifier=None,       # block_span handled by the kernel
         persona=TechPersona(),
         authority_policy=TechAuthorityPolicy(),
+        # THE VOICES CORPUS IS SEALED OFF FROM THE RESEARCH PATH. Two separate reasons, so both
+        # facets are declared and either alone would do the job:
+        #   source_kind=chapter_pointer — a producer's navigation marker is not speech at all, so no
+        #     claim may rest on it; quoting one would manufacture a statement nobody made.
+        #   voices=1 — the whole of this material is ADVICE. It answers "what do practitioners say",
+        #     and it must never be reachable when the engine is answering a question of fact about a
+        #     person or a company, where it would be laundered into Roster's own voice.
+        # Declaring them here makes the bar structural: the retrieval source excludes them on EVERY
+        # request, so no caller can forget the distinction (docs/specs/voices.md §3.2).
+        non_evidence_facets={"source_kind": ("chapter_pointer",), "voices": ("1",)},
         evidence_classifier=evidence_kind.classify,   # structural facets → evidence tier (Rule 18)
         discovery_entity_of=discovery.entity_of,       # "who is working on X" scouting (M&A/corp-dev)
         # Analytical modes / USE-CASE LENSES: acquirer (M&A) + the deep-tech-intelligence lenses

@@ -21,7 +21,7 @@ async def ingest_connector_to_postgres(
     pg_source,
     *,
     tenant_id: str,
-    embedder: Embedder,
+    embedder: Embedder | None = None,
     workspace_id: str | None = None,
     parsers: ParserRegistry | None = None,
     window: dict | None = None,
@@ -35,6 +35,11 @@ async def ingest_connector_to_postgres(
 
     Raw fetched artifacts land in `object_store` (pass an S3ObjectStore to persist
     them to R2/S3; defaults to in-memory). The searchable index goes to `pg_source`.
+
+    `embedder=None` ingests WITHOUT vectors. `rs_block.tsv` is a generated column, so the rows are
+    keyword-searchable the moment they land and the embedding column stays NULL until a later pass
+    fills it — which is what lets a corpus be built while a model account is empty, and what lets a
+    caller decide that a body of text is not worth vectors yet.
     """
     store = object_store or InMemoryObjectStore()
     repo = InMemoryCorpusRepository()
@@ -47,7 +52,8 @@ async def ingest_connector_to_postgres(
     for doc in repo.iter_documents():
         index_document(doc, store.get(doc.sha256), parsers=parsers, repo=repo,
                        min_chars=min_chars, target_chars=target_chars)
-    embed_pending(repo, embedder, batch_size=embed_batch_size)
+    if embedder is not None:
+        embed_pending(repo, embedder, batch_size=embed_batch_size)
 
     await pg_source.ensure_schema()
     return await materialize_to_postgres(repo, pg_source, facet_overrides=facet_overrides)

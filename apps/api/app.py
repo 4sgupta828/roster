@@ -1595,7 +1595,10 @@ def build_default_service() -> ResearchService:
         covers = next((s.covers() for s in manifest.retrieval_sources.values()
                        if hasattr(s, "covers")), {})
         pg = PostgresRetrievalSource(dsn, dim=embedder.dim, table="rs_block", covers=covers,
-                                     currency_demote=pulse_enabled())
+                                     currency_demote=pulse_enabled(),
+                                     # a chapter title is a navigation marker, not speech: the
+                                     # research loop must never be able to cite one (voices.md §3.1)
+                                     never_return=getattr(manifest, "non_evidence_facets", {}))
         corpus_key = next(iter(manifest.retrieval_sources), "corpus")
         sources[corpus_key] = pg
         connectors = dict(manifest.connectors)
@@ -1847,8 +1850,10 @@ async def _gap_processor_loop(dsn: str, vertical: str) -> None:
     from roster_kernel.runtime.build import build_embedder, load_active_vertical
     q = GapQueue(dsn, vertical=vertical)
     embedder = build_embedder(mode=resolve_mode())
-    pg = PostgresRetrievalSource(dsn, dim=embedder.dim, table="rs_block")
-    connectors = dict(load_active_vertical().connectors)
+    _mf = load_active_vertical()
+    pg = PostgresRetrievalSource(dsn, dim=embedder.dim, table="rs_block",
+                                 never_return=getattr(_mf, "non_evidence_facets", {}))
+    connectors = dict(_mf.connectors)
     # Persist raw fetched artifacts to the SAME R2 bucket as other deployments, under a distinct
     # folder (ROSTER_R2_PREFIX, default "roster/raw") so roster's objects never collide. Keys are
     # <prefix>/<sha256> (content-addressed dedup). None → raw stays in-memory (index-only).
@@ -2153,6 +2158,32 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
     if video_enabled():
         app.include_router(build_video_router(attach_video=_attach_video))
 
+    # VOICES — practitioner material about finding work and finding people (docs/specs/voices.md).
+    # Flag-gated and fully out of the research path: the corpus it builds is graded "pointer" and
+    # "practitioner_advice", and the pointer half is excluded from retrieval structurally.
+    from api.voices.routes import build_router as build_voices_router, voices_enabled
+    if voices_enabled():
+        def _voices_pool():
+            cs = _claim_store_cached()
+            if cs is None:
+                raise HTTPException(status_code=503, detail="the corpus is unavailable right now")
+            return cs._get_pool()
+
+        def _voices_pg():
+            from roster_kernel.retrieval.postgres import PostgresRetrievalSource
+            dsn = os.environ.get("ROSTER_CORPUS_DSN", "")
+            if not dsn:
+                raise HTTPException(status_code=503, detail="no corpus DSN configured")
+            src = getattr(app.state, "_voices_pg", None)
+            if src is None:
+                src = PostgresRetrievalSource(dsn, dim=1536, table="rs_block")
+                app.state._voices_pg = src
+            return src
+
+        app.include_router(build_voices_router(
+            _voices_pool, manifest=load_active_vertical(), pg_source_of=_voices_pg,
+            tenant_id="demo", admin_token=os.environ.get("ROSTER_ADMIN_TOKEN", "")))
+
     @app.get("/health")
     def health() -> dict:
         return {"status": "ok"}
@@ -2232,6 +2263,7 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             "people_geo_scope_enabled": people_geo_scope_enabled(),
             "jobs_enabled": jobs_enabled(),
             "eigen_qa_enabled": eigen_qa_enabled(),
+            "voices_enabled": __import__("api.voices.routes", fromlist=["voices_enabled"]).voices_enabled(),
             "insights_qa_enabled": insights_qa_enabled(),
             "qa_router_enabled": qa_router_enabled(),
             "jd_exclude_source_co_enabled": jd_exclude_source_co_enabled(),

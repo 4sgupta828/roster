@@ -39,6 +39,13 @@ class VerticalManifest:
 
     # Retrieval + policy (P2)
     retrieval_sources: dict[str, RetrievalSource] = field(default_factory=dict)
+    # Facet values that are NOT evidence and must never reach the research loop — {facet_key: values}.
+    # A vertical may index text that is displayable and searchable but can never support a claim (a
+    # producer's chapter title is the case that forced this: it says where to listen, not what was
+    # said). Declaring it here makes the bar STRUCTURAL — the retrieval source excludes these on every
+    # request, so a caller cannot forget. The kernel never inspects the values; they are the
+    # vertical's vocabulary.
+    non_evidence_facets: dict[str, tuple[str, ...]] = field(default_factory=dict)
     gating_policy: GatingPolicy | None = None
     citation_verifier: CitationVerifier | None = None
 
