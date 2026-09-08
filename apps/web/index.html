@@ -1139,6 +1139,20 @@
   .fdiag-drop{min-height:34px;}
   .frail-done{color:var(--verified);font-weight:600;}
   .frail-done b{color:var(--gold-strong);}
+  /* ALREADY APPLIED — top-left, and deliberately loud. The whole point is to be seen before the
+     title is read, so a role you have already gone after is never applied to twice. Two states:
+     SUBMITTED is done; STARTED is a plan waiting to be finished, which is an invitation, not a stop. */
+  .appliedflag{position:absolute;top:-1px;left:-1px;z-index:3;font-family:var(--mono);font-size:.6rem;
+    font-weight:800;text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;
+    color:#fff;background:var(--verified,#12805c);padding:.2rem .6rem .22rem;border-radius:10px 0 10px 0;
+    box-shadow:0 1px 4px rgba(0,0,0,.22);pointer-events:none;}
+  /* dark theme's --verified is a LIGHT green, so white on it is unreadable — the ink flips with it */
+  :root[data-theme="dark"] .appliedflag{color:var(--on-accent);}
+  .appliedflag.started{background:var(--gold);color:var(--on-accent);}
+  .ppl-card.has-applied{border-color:var(--verified,#12805c);}
+  .ppl-card.has-applied .ppl-body{padding-top:.5rem;}     /* the title never runs under the badge */
+  .ppl-card.has-applied .ppl-name{opacity:.85;}
+  @media (max-width:560px){ .appliedflag{font-size:.55rem;padding:.16rem .45rem .18rem;} }
   .newflag{position:absolute;top:-1px;right:-1px;z-index:2;font-family:var(--mono);font-size:.58rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;
     color:var(--on-accent);background:var(--gold);padding:.18rem .55rem .2rem;border-radius:0 10px 0 10px;box-shadow:0 1px 3px rgba(0,0,0,.18);pointer-events:none;}
   .ppl-card.is-new{border-color:rgba(var(--gold-rgb),.6);}
@@ -2866,6 +2880,8 @@ async function loadConfig(){
         $("#idmodal").hidden = false;
       }
       if(USER && USER.token && typeof maybeShowSavedBtn === "function") maybeShowSavedBtn();
+      // the roles this account already applied to, so the first result set is already flagged
+      if(USER && USER.token && typeof loadApplied === "function") loadApplied().then(()=>{ try{ markAppliedCards(); }catch(e){} });
     }
     PANEL_SPECIALISTS = c.panel_specialists || [];
     PANEL_EXAMPLES = c.panel_examples || [];
@@ -3314,7 +3330,8 @@ function jobsMarkup(d){
     const fchip = (key, label) => { const v = (jf[key]||[])[0]; if(!v) return ""; const txt = key === "comp" ? (jd.comp || LB[v] || v) : (LB[v] || String(v).replace(/_/g," ")); const pv = String(jp[key]||""); return `<span class="ppl-tag" title="${esc(label)}: ${esc(txt)} — ${esc(PROV[pv.split(':')[0]] || pv || "model facet")}">${esc(txt)}</span>`; };
     const facetLine = Object.keys(jf).length ? `<span class="ppl-tags" style="gap:.25rem;">${fchip("field","Field")}${fchip("function","Function")}${fchip("level","Level")}${fchip("work_type","Work type")}${fchip("work_mode","Work mode")}${fchip("employment_type","Employment")}${fchip("comp","Compensation")}${fchip("company_type","Company type")}</span>` : "";
     const fitChip = fitChipHtml(j);
-    return `<div class="ppl-card job-card${j._new ? " is-new" : ""}" data-jref="${esc(String(jref))}" title="Click for a summary of this posting">${j._new ? `<span class="newflag" title="Not in the previous result">new</span>` : ""}${jsave}<span class="ppl-body">
+    const _ap = (typeof appliedOf === "function") ? appliedOf(j, jref) : null;
+    return `<div class="ppl-card job-card${j._new ? " is-new" : ""}${_ap ? " has-applied" : ""}" data-jref="${esc(String(jref))}" title="Click for a summary of this posting">${_ap ? appliedBadgeHtml(_ap) : ""}${j._new ? `<span class="newflag" title="Not in the previous result">new</span>` : ""}${jsave}<span class="ppl-body">
       <span class="ppl-name">${esc(j.title)}${pct}</span>
       <span class="ppl-blurb">${j.company_site ? `<a class="job-co" href="${esc(j.company_site)}" target="_blank" rel="noopener noreferrer" title="${esc(j.company_site)}">${co} ↗</a>` : co}${j.employer_url ? ` <a class="job-alljobs" href="${esc(j.employer_url)}" target="_blank" rel="noopener noreferrer" title="Every open role at this company">All jobs ↗</a>` : ""}${j.source?` · via ${esc(j.source)}`:""}${jr}</span>
       ${loc||dept?`<span class="ppl-tags">${loc}${dept}</span>`:""}
@@ -7623,6 +7640,73 @@ document.addEventListener("click", e => {
   }
 }, true);
 
+// ── ALREADY APPLIED ───────────────────────────────────────────────────────────────────────────────
+// A search that shows a role you already went after invites you to do it twice. The index is the
+// user's OWN applications, so it is loaded once per page and never leaves this browser's session.
+// Two states, because they mean different things to the reader: SUBMITTED is "done, do not repeat";
+// STARTED is "you have a plan waiting" — a prompt to finish, not a warning.
+window.APPLIED = null;
+function normJobUrl(u){
+  try{ const x = new URL(String(u)); return (x.host + x.pathname).replace(/\/+$/, "").toLowerCase(); }
+  catch(e){ return String(u||"").trim().toLowerCase(); }
+}
+const APPLIED_MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function shortDay(raw){
+  const t = String(raw||"").trim(); if(!t) return "";
+  const m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);          // read the date FIELD BY FIELD: parsing an
+  if(m) return parseInt(m[3],10) + " " + APPLIED_MONTHS[parseInt(m[2],10)-1];   // ISO date as UTC shows
+  const d = new Date(t);                                   // the previous day west of UTC
+  return isNaN(d) ? "" : d.getDate() + " " + APPLIED_MONTHS[d.getMonth()];
+}
+async function loadApplied(force){
+  if(!loggedIn()){ window.APPLIED = {byUrl:new Map(), byRef:new Map()}; return window.APPLIED; }
+  if(window.APPLIED && !force) return window.APPLIED;
+  const idx = {byUrl:new Map(), byRef:new Map()};
+  try{
+    const r = await fetch("/me/applications", {headers: authHeaders()});
+    if(r.ok){
+      for(const a of ((await r.json()).applications || [])){
+        const rec = {id:a.id, status:a.status, at:(a.submitted_at || a.updated_at || a.created_at),
+                     title:a.title||"", company:a.company||""};
+        for(const u of [a.url, a.form_url]) if(u) idx.byUrl.set(normJobUrl(u), rec);
+        if(a.job_ref) idx.byRef.set(String(a.job_ref), rec);
+      }
+    }
+  }catch(e){}
+  window.APPLIED = idx;
+  return idx;
+}
+function appliedOf(j, jref){
+  const i = window.APPLIED; if(!i || !j) return null;
+  return (j.url ? i.byUrl.get(normJobUrl(j.url)) : null) || (jref ? i.byRef.get(String(jref)) : null) || null;
+}
+function appliedBadgeHtml(a){
+  if(!a) return "";
+  const done = a.status === "submitted";
+  const when = shortDay(a.at);
+  const label = (done ? "Applied" : "Started") + (when ? " · " + when : "");
+  const why = done
+    ? `You submitted this application${when ? " on " + when : ""} — no need to apply again.`
+    : `You started an application here${when ? " on " + when : ""}. Open 🚀 Apply to finish it.`;
+  return `<span class="appliedflag${done ? "" : " started"}" title="${esc(why)}">${esc(label)}</span>`;
+}
+// Cards can render before the index has loaded (the first search of a session), so the badge is also
+// stamped on afterwards. Both paths are idempotent.
+function markAppliedCards(root){
+  const idx = window.APPLIED; if(!idx) return;
+  (root || document).querySelectorAll(".job-card[data-jref]").forEach(card => {
+    const j = (window.JOBS_INDEX||{})[card.dataset.jref] || (window.MATCH_JOBS||{})[card.dataset.jref];
+    const a = appliedOf(j, card.dataset.jref);
+    const have = card.querySelector(":scope > .appliedflag");
+    if(!a){ if(have) have.remove(); card.classList.remove("has-applied"); return; }
+    const html = appliedBadgeHtml(a);
+    if(have) have.outerHTML = html; else card.insertAdjacentHTML("afterbegin", html);
+    card.classList.add("has-applied");
+  });
+}
+// after anything that can change the answer, re-read and re-stamp — never re-run the search
+async function refreshApplied(){ await loadApplied(true); markAppliedCards(); }
+
 // A suggestion is {question, tag} (tag = an optional lens label, e.g. CEO/VC/CTO) — or a bare
 // string (legacy). Render a chip with the lens badge; the click always uses the QUESTION text.
 function _sugQ(s){ return (typeof s === "string") ? s : ((s && s.question) || ""); }
@@ -8816,6 +8900,7 @@ async function apLoadPlan(){
     const r2 = await fetch(`/me/applications/${APPLY.appId}`, {headers: authHeaders()}); if(!r2.ok) throw new Error("load");
     const d2 = await r2.json(); APPLY.app = d2;
     apHeader(); renderPlanPane(d2); apWirePlan(d2.id); renderSubmitPane(d2); apCardStatus(d2); apMark("plan", true); apMark("submit", d2.status === "submitted");
+    if(typeof refreshApplied === "function") refreshApplied();
     renderApplications();
   }catch(e){ apMark("plan", false); box.innerHTML = `<div class="sethint">Couldn't plan that application — <button type="button" class="ppl-lnk" onclick="apLoadPlan()">↻ Retry</button></div>`; }
 }
@@ -9003,9 +9088,9 @@ async function renderApplications(){
       <button type="button" class="histbtn" onclick="deleteApplication(${Number(a.id)})" title="Remove from the list">✕</button></div>`).join("");
   }catch(e){ el.innerHTML = "<span class='acctmuted'>couldn't load</span>"; }
 }
-async function deleteApplication(id){ try{ await fetch(`/me/applications/${id}`, {method:"DELETE", headers: authHeaders()}); }catch(e){} renderApplications(); }
+async function deleteApplication(id){ try{ await fetch(`/me/applications/${id}`, {method:"DELETE", headers: authHeaders()}); }catch(e){} renderApplications(); if(typeof refreshApplied === "function") refreshApplied(); }
 async function markSubmitted(id){
-  try{ const r = await fetch(`/me/applications/${id}/mark-submitted`, {method:"POST", headers: authHeaders()}); if(r.ok){ const n = $("#apsubnote"); if(n) n.textContent = "Recorded as submitted by you."; renderApplications(); APPLY.appId = id; setTimeout(apLoadPlan, 300); } }catch(e){}
+  try{ const r = await fetch(`/me/applications/${id}/mark-submitted`, {method:"POST", headers: authHeaders()}); if(r.ok){ const n = $("#apsubnote"); if(n) n.textContent = "Recorded as submitted by you."; renderApplications(); if(typeof refreshApplied === "function") refreshApplied(); APPLY.appId = id; setTimeout(apLoadPlan, 300); } }catch(e){}
 }
 async function saveApplicationAnswers(id){ return apSaveNow(id); }   // kept: answers now save themselves
 document.addEventListener("click", (e)=>{
@@ -10836,6 +10921,7 @@ function rerenderPeople(pid){
   return nw;
 }
 function gotoJobsPage(jpid, page){
+  if(typeof loadApplied === "function") loadApplied().then(()=>{ try{ markAppliedCards(); }catch(e){} });
   const d = (window.JOBS_RENDERS||{})[jpid]; if(!d) return;
   const n = Math.max(1, Math.ceil((d.jobs||[]).length / 20));
   d._jpage = Math.min(n - 1, Math.max(0, page || 0));
