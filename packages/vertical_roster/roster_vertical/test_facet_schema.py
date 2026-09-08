@@ -60,3 +60,30 @@ def test_manifest_exposes_the_schema():
     from roster_vertical.manifest import build_manifest
     m = build_manifest()
     assert m.extraction_schema is FACET_SCHEMA
+
+
+# ── place names ───────────────────────────────────────────────────────────────────────────────────
+
+def test_country_and_state_labels_are_namespaced_because_the_codes_collide():
+    """"in" is India AND Indiana; "de" is Germany AND Delaware. One shared table would rename one of
+    them wrongly wherever it appeared, so the labels are keyed by the facet they belong to."""
+    from roster_vertical.facet_schema import KEYED_VALUE_LABELS
+    assert KEYED_VALUE_LABELS["country"]["in"] == "India"
+    assert KEYED_VALUE_LABELS["state"]["in"] == "Indiana"
+    assert KEYED_VALUE_LABELS["country"]["de"] == "Germany"
+    assert KEYED_VALUE_LABELS["state"]["de"] == "Delaware"
+
+
+def test_both_spellings_of_the_united_kingdom_read_the_same():
+    """The index carries `uk` and `gb`; side by side on a rail they look like a bug, not two codes."""
+    from roster_vertical.facet_schema import KEYED_VALUE_LABELS
+    c = KEYED_VALUE_LABELS["country"]
+    assert c["uk"] == c["gb"] == "United Kingdom"
+
+
+def test_every_us_state_the_index_ranks_by_has_a_name():
+    from roster_vertical.facet_schema import KEYED_VALUE_LABELS
+    st = KEYED_VALUE_LABELS["state"]
+    for code in ("ca", "ny", "tx", "wa", "ma", "il", "fl", "va", "oh", "az", "nc", "ga", "dc", "pr"):
+        assert st.get(code), code
+    assert len(st) >= 51                                   # 50 states + DC

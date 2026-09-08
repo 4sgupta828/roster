@@ -242,3 +242,45 @@ def test_semantic_query_parameters_line_up_on_both_paths(monkeypatch):
                 assert refs and max(refs) == len(args) and refs == set(range(1, len(args) + 1)), (small, kind, sorted(refs), len(args), sql[:100])
             joined = " ".join(sql for sql, _ in pool.c.calls)
             assert ("MATERIALIZED" in joined) == small
+
+
+# ── the stated scope is the scope the search applies ─────────────────────────────────────────────
+
+def _scoped(c, *, country="us", metro="", state=""):
+    """The promotion the jobs and people routes apply: a scope the caller states becomes a filter,
+    unless the question itself already named a place. Mirrors apps/api/app.py."""
+    if country and not c.must.get("country"):
+        c.must["country"] = [country]
+    if metro and not c.must.get("metro"):
+        c.must["metro"] = [metro]
+    elif state and not c.must.get("state"):
+        c.must["state"] = [state]
+    return c
+
+
+def test_a_search_with_no_place_named_is_scoped_to_the_stated_country():
+    from roster_kernel.facets import Contract
+    c = _scoped(Contract(kind="job", text="backend engineer"))
+    assert c.must["country"] == ["us"]          # not a worldwide search dressed as a US one
+
+
+def test_a_question_that_names_its_own_place_is_never_overridden():
+    from roster_kernel.facets import Contract
+    c = _scoped(Contract(kind="job", text="backend engineer in berlin", must={"country": ["de"]}))
+    assert c.must["country"] == ["de"]
+
+
+def test_a_chosen_metro_narrows_and_a_state_only_applies_without_one():
+    from roster_kernel.facets import Contract
+    a = _scoped(Contract(kind="job", text="x"), metro="bay_area", state="ca")
+    assert a.must["metro"] == ["bay_area"] and "state" not in a.must    # the city wins over its state
+    b = _scoped(Contract(kind="job", text="x"), state="tx")
+    assert b.must["state"] == ["tx"] and "metro" not in b.must
+
+
+def test_worldwide_is_expressible_by_the_absence_of_a_country():
+    """The rail's Worldwide button deletes the country/state/metro musts and sends the contract as is,
+    so a contract that already ran must never have a scope re-imposed on it."""
+    from roster_kernel.facets import Contract
+    c = Contract(kind="job", text="backend engineer")     # no country: the reader chose worldwide
+    assert "country" not in c.must

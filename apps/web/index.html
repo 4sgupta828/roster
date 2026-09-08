@@ -813,6 +813,16 @@
   .fchip.prefer{border-color:var(--verified);background:rgba(19,122,84,.10);color:var(--verified);font-weight:600;}
   .fchip.avoid{border-color:var(--gap);background:rgba(224,96,72,.10);color:var(--gap);text-decoration:line-through;}
   .fchip.unknown{color:var(--muted);border-style:dashed;}
+  /* WHERE — the scope question, given its own row at the top of the rail. Selects rather than chips
+     because "any city" is one answer out of hundreds, and a level (country → state → city) is a
+     choice, not a toggle. It applies at once: a scope is not a filter you stage. */
+  .frail-where{gap:.35rem;flex-wrap:wrap;padding-bottom:.35rem;margin-bottom:.3rem;border-bottom:1px dashed var(--hair);}
+  .frail-where select.fwhere{font:inherit;font-size:.74rem;min-height:40px;padding:.2rem .45rem;border:1px solid var(--hair);
+    border-radius:8px;background:var(--panel);color:var(--ink);max-width:44vw;}
+  .frail-where select.fwhere:focus{border-color:var(--gold);outline:none;}
+  .fwhere-btn{font:inherit;font-size:.74rem;min-height:40px;padding:.2rem .6rem;border:1px solid var(--gold);
+    border-radius:999px;background:rgba(var(--gold-rgb),.10);color:var(--gold-strong);cursor:pointer;font-weight:600;}
+  @media (max-width:560px){ .frail-where select.fwhere{max-width:40vw;font-size:.72rem;} }
   .frail-pills{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.3rem;}
   .frail-apply{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.45rem;padding-top:.4rem;border-top:1px dashed var(--hair);font-size:.76rem;color:var(--muted);}
   .frail-merge,.frail-relaxed{margin-bottom:.4rem;padding-bottom:.4rem;border-bottom:1px dashed var(--hair);font-size:.74rem;color:var(--muted);}
@@ -2826,7 +2836,9 @@ async function loadConfig(){
     // LOCAL SCOPE: results default to the user's own metro ("📍 Near me · Bay Area"), expandable to
     // their state or all US, then other countries. Where they are comes from the browser's location
     // when granted, else the request IP (server-side, best-effort); the choice is stored locally.
-    try{ window.ROSTER_SCOPE = localStorage.getItem("roster_scope") || ""; }catch(e){ window.ROSTER_SCOPE = ""; }
+    // only an EXPLICIT choice is restored; otherwise every session starts at all-US
+    try{ window.ROSTER_SCOPE = (localStorage.getItem("roster_scope_explicit") === "1")
+           ? (localStorage.getItem("roster_scope") || "us") : "us"; }catch(e){ window.ROSTER_SCOPE = "us"; }
     if(c.people_geo_scope_enabled){
       const cs = document.getElementById("countryscope"), sel = document.getElementById("countrysel");
       if(cs && sel){
@@ -8449,9 +8461,16 @@ function facetEdit(c, key, value, mode){
   return n;
 }
 function facetLabel(d, key, value){
-  const L = d.labels || {}; const vl = (L.values||{})[value];
+  const L = d.labels || {};
   if(value === "unknown") return "unknown";
-  return vl || String(value).replace(/_/g, " ");
+  // A PER-KEY label wins: a country code and a state code collide — "in" is India and Indiana, "de"
+  // is Germany and Delaware — so a shared table would rename one of them wrongly.
+  const byKey = ((L.values_by_key||{})[key]||{})[value];
+  const plain = String(value).replace(/_/g, " ");
+  // a PLACE is a proper noun: "san francisco" and "bay area" read as data, not as somewhere to work
+  const titled = ["country", "state", "metro"].includes(key)
+    ? plain.replace(/\b[a-z]/g, ch => ch.toUpperCase()) : plain;
+  return byKey || (L.values||{})[value] || titled;
 }
 function facetRenderOf(id){ return (window.JOBS_RENDERS||{})[id] || (window.PEOPLE_RENDERS||{})[id] || null; }
 // MERGED SEARCH (spec guided-intake §12 step 2): the judge's read is a labelled MODEL read on the card, never a fact.
@@ -8507,13 +8526,45 @@ function degradedMarkup(d){
   if(cov.degraded !== "semantic_unavailable") return "";
   return `<div class="frail-degraded">⚠ <b>Ranked by filters only</b> — the semantic ranking is unavailable right now, so these are the rows that meet the filters, in index order. Chips still work.</div>`;
 }
+// WHERE is the question people ask before any other, and it has LEVELS: the whole world, a country,
+// a state, a city. Buried among twenty chips, geography is not the same thing as being able to say
+// "only Texas". This reads the counts already in the response, so it offers only places these results
+// actually contain — and unlike a chip it applies AT ONCE, because a scope is not a filter you stage.
+const GEO_KEYS = ["country", "state", "metro"];
+function whereRowMarkup(d){
+  const counts = d.counts || {}, c = facetDraft(d);
+  const level = (key, anyLabel) => {
+    const vals = Object.entries(counts[key] || {})
+      .filter(([v, n]) => v && v !== "unknown" && n)
+      .sort((a, b) => b[1] - a[1]).slice(0, 40);
+    const cur = ((c.must || {})[key] || []);
+    if(!vals.length && !cur.length) return "";
+    const seen = new Set(vals.map(([v]) => v));
+    // a value the reader has ALREADY chosen must stay in its own select even when the current
+    // result set no longer contains it — otherwise the control silently forgets the filter it is applying
+    const all = vals.concat(cur.filter(v => !seen.has(v)).map(v => [v, 0]));
+    const opts = all.map(([v, n]) =>
+      `<option value="${esc(v)}"${cur.includes(v) ? " selected" : ""}>${esc(facetLabel(d, key, v))}${n ? ` (${n})` : ""}</option>`).join("");
+    return `<select class="fwhere" data-jpid="${esc(d._jpid)}" data-wherekey="${esc(key)}" title="${esc(anyLabel)} — the counts are of these results, not the whole index">`
+      + `<option value="">${esc(anyLabel)}</option>${opts}</select>`;
+  };
+  const sels = [level("country", "Any country"), level("state", "Any state"), level("metro", "Any city")].filter(Boolean).join("");
+  if(!sels) return "";
+  const anySet = GEO_KEYS.some(k => (((c.must || {})[k]) || []).length);
+  const wide = anySet
+    ? `<button type="button" class="fwhere-btn" data-jpid="${esc(d._jpid)}" data-worldwide="1" title="Drop every place filter and search the whole index">🌍 Worldwide</button>`
+    : `<span class="tgt-q-hint">searching everywhere</span>`;
+  return `<div class="frail-row frail-where"><span class="frail-k" title="Restrict these results to a place. Counts are of these results, not the whole index.">Where</span>${sels}${wide}</div>`;
+}
 function facetRailMarkup(d){
   const c = facetDraft(d), L = d.labels || {};
   // AN EMPTY POOL (owner, 2026-09-06): the chips must not vanish with the counts — the user needs them to change the
   // filters that emptied it. The last non-empty counts stay on the rail, labelled, beside the diagnosis.
   const stale = countsEmpty(d.counts) && d._lastCounts && !countsEmpty(d._lastCounts);
   const counts = stale ? d._lastCounts : (d.counts || {});
-  const order = (L.order || Object.keys(counts)).filter(k => counts[k] && Object.keys(counts[k]).length);
+  const order = (L.order || Object.keys(counts))
+    .filter(k => counts[k] && Object.keys(counts[k]).length)
+    .filter(k => !GEO_KEYS.includes(k));      // geography is the Where row above, not twenty chips
   const rows = order.map(key => {
     const entries = Object.entries(counts[key]).sort((a, b) => (a[0] === "unknown") - (b[0] === "unknown") || b[1] - a[1]).slice(0, 14);
     const chips = entries.map(([v, n]) => {
@@ -8536,7 +8587,7 @@ function facetRailMarkup(d){
       <button type="button" class="idgo frail-go" data-jpid="${esc(d._jpid)}">Apply</button><button type="button" class="histbtn frail-reset" data-jpid="${esc(d._jpid)}">Reset</button></div>`
     : `<div class="frail-apply">${d._applied && d._delta ? `<span class="frail-done">Applied ✓ — ${d._delta.after} shown${d._delta.added ? ` · <b>${d._delta.added} new</b>` : ""}${d._delta.removed ? ` · ${d._delta.removed} dropped` : ""}${!d._delta.added && !d._delta.removed ? " · same rows, order may differ" : ""}${(d._delta.prevPool != null && d._delta.pool != null && d._delta.prevPool !== d._delta.pool) ? ` · pool ${d._delta.prevPool} → ${d._delta.pool}` : ""}</span> ${d._delta.added && !d._newFirst ? (() => { const rowsNow = Array.isArray(d.people_rows) ? d.people_rows : (d.jobs||[]); const per = 20, pg = Array.isArray(d.people_rows) ? (d._page||0) : (d._jpage||0); const onPage = rowsNow.slice(pg*per, pg*per+per).filter(r => r._new).length; return `${onPage ? ` <span class="frail-note">${onPage} of them on this page (corner flag)</span>` : ` <span class="frail-note">none of them on this page</span>`} <button type="button" class="histbtn frail-shownew" data-jpid="${esc(d._jpid)}">Show the ${d._delta.added} new first</button>`; })() : ""}` : "Tap chips to stage changes, then apply once. "}${saveBtn}</div>`;
   const empty = (cov.diagnosis && !facetPending(d)) ? diagnosisMarkup({...cov.diagnosis, best_match: cov.best_match}, d._jpid, L) : "";
-  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}">${degradedMarkup(d)}${relaxedMarkup(d)}${mergeMarkup(d)}<div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : (cov.slice != null ? `· ${Number(cov.slice).toLocaleString()} match these filters` : "")}${stale ? ` <span class="frail-note" title="The pool is empty, so these counts are from the last result that had rows — change a filter and apply">· chips from the last result</span>` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
+  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}">${degradedMarkup(d)}${relaxedMarkup(d)}${mergeMarkup(d)}<div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : (cov.slice != null ? `· ${Number(cov.slice).toLocaleString()} match these filters` : "")}${stale ? ` <span class="frail-note" title="The pool is empty, so these counts are from the last result that had rows — change a filter and apply">· chips from the last result</span>` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${whereRowMarkup(d)}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
 }
 // EMPTY RESULT → which must is doing it (leave-one-out from the evaluator), with one-tap Drop (staged)
 function diagnosisMarkup(diag, jpid, L){
@@ -8632,6 +8683,15 @@ document.addEventListener("click", (e)=>{
     if(Array.isArray(vals)) vals.forEach(v => { c = facetEdit(c, dr.dataset.key, v, "off"); });
     else { c = JSON.parse(JSON.stringify(c)); if(c.must) delete c.must[dr.dataset.key]; }      // a numeric range must
     d._draft = c; rerenderRail(dr.dataset.jpid); return; }
+  const ww = e.target.closest && e.target.closest("[data-worldwide]");
+  if(ww){
+    e.preventDefault(); e.stopPropagation();
+    const d = facetRenderOf(ww.dataset.jpid); if(!d || !d.contract) return;
+    const c = JSON.parse(JSON.stringify(facetDraft(d)));
+    c.must = c.must || {};
+    for(const k of GEO_KEYS) delete c.must[k];
+    d._draft = c; facetReevaluate(ww.dataset.jpid, c, false); return;
+  }
   const ch = e.target.closest && e.target.closest(".fchip, .fpill button");
   if(!ch || ch.disabled) return;
   e.preventDefault(); e.stopPropagation();
@@ -8640,6 +8700,17 @@ document.addEventListener("click", (e)=>{
   rerenderRail(ch.dataset.jpid);
 });
 document.addEventListener("change", (e)=>{
+  const w = e.target.closest && e.target.closest("select.fwhere");
+  if(w){
+    const d = facetRenderOf(w.dataset.jpid); if(!d || !d.contract) return;
+    const c = JSON.parse(JSON.stringify(facetDraft(d)));
+    c.must = c.must || {};
+    if(w.value) c.must[w.dataset.wherekey] = [w.value]; else delete c.must[w.dataset.wherekey];
+    // choosing a country clears a state/city that no longer sits inside it
+    if(w.dataset.wherekey === "country") { delete c.must.state; delete c.must.metro; }
+    if(w.dataset.wherekey === "state") delete c.must.metro;
+    d._draft = c; facetReevaluate(w.dataset.jpid, c, false); return;
+  }
   const sel = e.target.closest && e.target.closest("select.frank"); if(!sel) return;
   const d = facetRenderOf(sel.dataset.jpid); if(!d || !d.contract) return;
   d._draft = {...facetDraft(d), rank_by: sel.value}; rerenderRail(sel.dataset.jpid);
@@ -10691,11 +10762,13 @@ async function initLocalScope(sel, applySel){
   }
   const gc = addGroup("Other countries");
   countryOpts.forEach(([v, t]) => { if(v !== "us") addOpt(gc, v, t); });
-  // default: a choice the user made explicitly; else the user's metro (or state) when detected; else all US
+  // DEFAULT: ALL US, any city. Defaulting to the reader's own metro silently hid most of the index —
+  // a Bay Area default answers "backend engineer" with Bay Area roles and no sign that the rest of
+  // the country was excluded. The detected metro stays the FIRST option, one click away, and the
+  // rail's Where row narrows or widens from there. An explicit choice is still remembered.
   let explicit = false; try{ explicit = localStorage.getItem("roster_scope_explicit") === "1"; }catch(e){}
   const stored = explicit ? window.ROSTER_SCOPE : "";
-  const want = stored && sel.querySelector(`option[value="${CSS.escape(stored)}"]`) ? stored
-             : (geo && geo.country === "us" && geo.metro ? "metro:" + geo.metro : (geo && geo.country === "us" && geo.state ? "state:" + geo.state : (window.ROSTER_COUNTRY || "us")));
+  const want = stored && sel.querySelector(`option[value="${CSS.escape(stored)}"]`) ? stored : "us";
   sel.value = want; applySel();
   // the browser's own location (when the user grants it) refines an IP guess — silently, once
   if(navigator.geolocation && (!geo || geo.source !== "browser") && !localStorage.getItem("roster_geo_asked")){
