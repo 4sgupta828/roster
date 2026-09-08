@@ -16,8 +16,15 @@ from pydantic import BaseModel
 
 from . import favorites
 from .ingest import VOICE_CONNECTORS, ingest_voices, mark_boilerplate
-from .search import AUDIENCES, build_query, dedupe, moment, terms, tsqueries
+from .search import (AUDIENCES, VOICE_SOURCE_KEYS, build_query, build_vector_query, dedupe, fuse,
+                     moment, terms, tsqueries)
 from .summarize import cached, store, summarize
+
+
+# The similarity a moment must reach to be shown UNDER A ROLE. Measured 2026-09-08 across five role
+# probes: useful moments score 0.44-0.54 and the filler tail sits below 0.40. A strip is an aside on
+# someone else's card, so its bar is higher than a search's — a reader did not ask for three rows.
+MIN_ROLE_SCORE = 0.40
 
 
 def voices_enabled() -> bool:
@@ -45,9 +52,18 @@ class FavoriteIn(BaseModel):
     note: str = ""
 
 
+class RoleIn(BaseModel):
+    """A job card asking what practitioners say about preparing for THIS role."""
+    title: str = ""
+    company: str = ""
+    facets: dict = {}              # the posting's own facets: field, function, level, skill, specialty
+    limit: int = 3
+
+
 class JobIn(BaseModel):
     kind: str = "ingest"
     limit: int = 60
+    dry_run: bool = False          # "embed": report what it would cost without spending it
 
 
 def _window(days: int) -> str:
@@ -60,7 +76,7 @@ def _window(days: int) -> str:
 
 
 def build_router(pool_of, *, manifest=None, pg_source_of=None, tenant_id: str = "default",
-                 admin_token: str = "", llm_json=None, user_of=None) -> APIRouter:
+                 admin_token: str = "", llm_json=None, user_of=None, embed=None, embed_many=None) -> APIRouter:
     router = APIRouter()
 
     async def _user(token: str) -> str:
@@ -106,13 +122,28 @@ def build_router(pool_of, *, manifest=None, pg_source_of=None, tenant_id: str = 
                                       order=body.order, per_document=browse, tsquery=tsquery)
             return await _rows(sql, params)
 
-        # A question is answered STRICTLY first and relaxed only when the strict answer is thin.
-        matched = ""
+        # THE SEMANTIC LEG runs first, because whether it is available CHANGES how the keyword leg is
+        # asked. Words alone matched "Being Enthusiastic Is Not Being Fake" for "fake candidates" —
+        # the words overlap, the meanings do not. Neither leg replaces the other: the vector leg
+        # cannot see a block with no vector yet, and the keyword leg cannot see a paraphrase.
+        matched, ranking, qvec = "", "keyword", None
+        if not browse and embed is not None:
+            try:
+                qvec = await embed(body.q)
+            except Exception:          # noqa: BLE001 — no vector is a degraded search, not a failed one
+                qvec = None
+
         if browse:
             rows = await _fetch(since_=since)
         else:
+            # With meaning available the words are taken LITERALLY: the generic-word stripping and
+            # the loosest rung of the ladder are both compensations for having no semantics, and
+            # leaving them on when the vector leg is running only adds noise back.
+            rungs = tsqueries(terms(body.q, keep_generic=bool(qvec))) or [("any word", "")]
+            if qvec and len(rungs) > 1:
+                rungs = rungs[:-1]
             rows = []
-            for label, tq in tsqueries(terms(body.q)) or [("any word", "")]:
+            for label, tq in rungs:
                 rows = await _fetch(tsquery=tq)
                 matched = label
                 # Stop at the strictest rung that answers with enough, from more than one voice. A
@@ -121,6 +152,15 @@ def build_router(pool_of, *, manifest=None, pg_source_of=None, tenant_id: str = 
                 voices = {str((r.get("facets") or {}).get("publication") or "") for r in rows}
                 if len(rows) >= 6 and len(voices) >= 2:
                     break
+            if qvec:
+                sql, params = build_vector_query(qvec=qvec, kinds=tuple(body.kinds), audience=audience,
+                                                 speaker=body.speaker, limit=want * 3, per_document=browse)
+                vrows = await _rows(sql, params)
+                if vrows:
+                    rows = fuse(rows, vrows, limit=want * 6)
+                    ranking = "hybrid"
+                    if not matched:
+                        matched = "meaning"
         # A window that returns almost nothing is worse than a wider one: widen rather than show an
         # empty week, and say which window the reader is actually looking at.
         if since and len(rows) < 6:
@@ -140,7 +180,7 @@ def build_router(pool_of, *, manifest=None, pg_source_of=None, tenant_id: str = 
                        "quotable": sum(1 for m in moments if m["quotable"]),
                        "pointers": sum(1 for m in moments if not m["quotable"])},
             # Said plainly so the surface never has to guess or imply otherwise.
-            "ranking": "keyword",
+            "ranking": ranking,
             "matched_on": matched,
             "window": {"since": since, "widened": widened},
             "audience": audience,
@@ -199,6 +239,65 @@ def build_router(pool_of, *, manifest=None, pg_source_of=None, tenant_id: str = 
             await store(conn, doc, out)
         return {**out, "cached": False}
 
+    @router.post("/voices/for_role")
+    async def voices_for_role(body: RoleIn) -> dict:
+        """PREPARE FOR THIS ONE — the moments a candidate for this specific posting would want.
+
+        This is the reason the corpus lives inside a job product rather than in a reader: the question
+        "how do I prepare for this" is asked ON a role, not in a search box. The role's own words are
+        the query, which is what the semantic leg is for — a posting title is a phrase, not keywords.
+
+        Job-seeker material only. A hiring team's take on running the loop is not preparation advice,
+        and mixing them would be the surface answering a question nobody asked.
+        """
+        if not voices_enabled():
+            raise HTTPException(status_code=404, detail="voices mode is not enabled")
+        want = max(1, min(int(body.limit or 3), 8))
+        f = body.facets if isinstance(body.facets, dict) else {}
+
+        def vals(key: str, n: int = 2) -> list[str]:
+            v = f.get(key)
+            v = v if isinstance(v, list) else ([v] if v else [])
+            return [str(x).replace("_", " ") for x in v[:n] if x]
+
+        # The probe reads as the question a candidate would actually ask, because that is what the
+        # vector leg matches against — not a bag of facet tokens.
+        bits = ["preparing for a"] + vals("level", 1) + [str(body.title or "").strip()] + ["interview"]
+        extra = vals("specialty", 2) + vals("skill", 3) + vals("function", 1) + vals("field", 1)
+        probe = " ".join(x for x in bits if x) + (" — " + ", ".join(extra) if extra else "")
+
+        qvec = None
+        if embed is not None:
+            try:
+                qvec = await embed(probe)
+            except Exception:      # noqa: BLE001
+                qvec = None
+        # MEANING ONLY, and a floor. A role probe is a PHRASE, so the vector leg is the right
+        # instrument; OR-ing its words was what put "Economics of building software" under an
+        # account-executive posting. Measured 2026-09-08 over five role probes: a genuinely useful
+        # moment scores 0.44-0.54 against this corpus, and the tail below 0.40 is filler. Three
+        # weak rows are worse than one good one, so the strip returns FEWER rather than padding —
+        # the same fail-safe the rest of the product uses: abstain, never "close enough".
+        rows: list[dict] = []
+        if qvec:
+            sql, params = build_vector_query(qvec=qvec, audience="job_seeker", limit=want * 6,
+                                             per_document=True)
+            rows = [r for r in await _rows(sql, params) if float(r.get("score") or 0) >= MIN_ROLE_SCORE]
+        else:
+            # no embedder: a STRICT keyword query, never a loose one. Nothing beats noise here.
+            kw = terms(str(body.title or "") + " " + " ".join(extra))
+            if kw:
+                sql, params = build_query(q=" ".join(kw), audience="job_seeker", limit=want * 4,
+                                          per_document=True, tsquery=" & ".join(kw[:4]))
+                rows = await _rows(sql, params)
+        # ONE moment per piece and one per publisher: three chapters of the same episode is not
+        # three answers, and three takes from one channel is not a range of views.
+        moments = dedupe([moment(r) for r in rows], limit=want, per_document=1, per_source=1)
+        return {"moments": moments, "probe": probe,
+                "ranking": "meaning" if qvec else "keyword",
+                "register": ("What practitioners say about preparing for a role like this — advice, "
+                             "not a guide to this employer's process.")}
+
     @router.get("/voices/favorites")
     async def voices_favorites(x_roster_token: str = Header(default="")) -> dict:
         if not voices_enabled():
@@ -246,6 +345,21 @@ def build_router(pool_of, *, manifest=None, pg_source_of=None, tenant_id: str = 
             out = await ingest_voices(manifest, src, tenant_id=tenant_id,
                                       limit=max(1, min(int(body.limit or 60), 300)))
             return {"ok": True, "kind": "ingest", "blocks": out, "connectors": list(VOICE_CONNECTORS)}
+        if body.kind == "embed":
+            # Give vectors to the blocks that have none. Idempotent and resumable; the cost is
+            # reported first so a run is never launched blind.
+            from roster_kernel.retrieval.backfill import count_missing, embed_missing
+            pool = await pool_of()
+            n, chars = await count_missing(pool, source_keys=list(VOICE_SOURCE_KEYS))
+            if embed_many is None:
+                return {"ok": False, "kind": "embed", "missing": n, "chars": chars,
+                        "detail": "no embedder is configured here"}
+            if body.dry_run:
+                return {"ok": True, "kind": "embed", "dry_run": True, "missing": n, "chars": chars,
+                        "projected_usd": round(chars / 3.7 / 1e6 * 0.02, 4)}
+            out = await embed_missing(pool, embed_many, source_keys=list(VOICE_SOURCE_KEYS),
+                                      batch=128, limit=max(1, min(int(body.limit or 2000), 20000)))
+            return {"ok": True, "kind": "embed", "missing_before": n, **out}
         if body.kind == "mark_boilerplate":
             return {"ok": True, "kind": body.kind, "stamped": await mark_boilerplate(await pool_of())}
         raise HTTPException(status_code=400, detail=f"unknown job kind: {body.kind}")

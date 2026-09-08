@@ -144,3 +144,69 @@ def test_one_voice_is_held_back_but_not_thrown_away_when_the_page_would_be_thin(
     ms = [_m(i, f"d{i}", "A", f"t{i}") for i in range(6)]
     out = dedupe(ms, per_source=3, limit=10)
     assert len(out) == 6 and [m["id"] for m in out[:3]] == ["d0::0", "d1::1", "d2::2"]
+
+
+# ── the semantic leg and the fusion ──────────────────────────────────────────────────────────────
+
+def test_both_legs_search_the_same_corpus_under_the_same_filters():
+    """A filter honoured by one leg and not the other is a lie either way, so the WHERE is written
+    once. This pins that they stay in step."""
+    from api.voices.search import build_vector_query
+    kw, kwp = build_query(q="resume", kinds=("essay",), audience="job_seeker", speaker="Hung")
+    vec, vp = build_vector_query(qvec="[0.1]", kinds=("essay",), audience="job_seeker", speaker="Hung")
+    for clause in ("NOT (facets ? 'boilerplate')", "text NOT LIKE 'URL: %'", "'both'", "ILIKE"):
+        assert clause in kw and clause in vec
+    assert kwp[0] == vp[0] == ["practitioner_essay"]        # same slice of the corpus
+    assert "embedding IS NOT NULL" in vec and "embedding" not in kw
+
+
+def test_the_semantic_leg_orders_by_distance_and_never_invents_a_vector():
+    from api.voices.search import build_vector_query
+    sql, params = build_vector_query(qvec="[0.1,0.2]", limit=5)
+    assert "(embedding <=> $2::vector)" in sql and "ORDER BY (embedding <=> $2::vector) ASC" in sql
+    assert params[1] == "[0.1,0.2]" and params[-1] == 5
+
+
+def test_rrf_puts_what_both_legs_found_above_what_only_one_did():
+    """Not a weighted blend: ts_rank and cosine distance live on different scales, and mixing them is
+    a guess dressed up as a number. RRF reads POSITION, which both legs agree on the meaning of."""
+    from api.voices.search import fuse
+    kw = [{"document_id": "d", "block_id": "kw_only"}, {"document_id": "d", "block_id": "both"}]
+    vec = [{"document_id": "d", "block_id": "both"}, {"document_id": "d", "block_id": "vec_only"}]
+    assert [r["block_id"] for r in fuse(kw, vec)] == ["both", "kw_only", "vec_only"]
+
+
+def test_fusion_keeps_the_keyword_legs_highlighted_snippet():
+    """The vector leg returns the block's opening; the keyword leg returns the passage that matched.
+    A fused row must keep the one a reader learns from."""
+    from api.voices.search import fuse
+    kw = [{"document_id": "d", "block_id": "1", "snippet": "…the «resume» screen…"}]
+    vec = [{"document_id": "d", "block_id": "1", "snippet": "the opening of the piece"}]
+    assert fuse(vec, kw)[0]["snippet"] == "…the «resume» screen…"
+
+
+def test_one_leg_alone_still_answers():
+    from api.voices.search import fuse
+    only = [{"document_id": "d", "block_id": "1"}]
+    assert len(fuse(only, [])) == 1 and len(fuse([], only)) == 1 and fuse([], []) == []
+
+
+def test_the_generic_words_are_kept_once_meaning_is_available():
+    """Stripping them compensates for having no semantics. With a vector leg the words are literal —
+    which is what stops "fake candidates" matching a block that says "fake" and no candidate."""
+    assert terms("fake candidates") == ["fake"]                                  # keyword-only
+    assert terms("fake candidates", keep_generic=True) == ["fake", "candidates"]  # hybrid
+    assert tsqueries(terms("fake candidates", keep_generic=True))[0] == ("all words", "fake & candidates")
+
+
+def test_the_role_strip_has_a_floor_and_would_rather_show_less():
+    """A strip is an aside on someone else's card: three weak rows are worse than one good one, so it
+    abstains rather than pads. The floor is measured, not chosen — see MIN_ROLE_SCORE."""
+    from api.voices.routes import MIN_ROLE_SCORE
+    assert 0.3 < MIN_ROLE_SCORE < 0.5
+    rows = [{"document_id": "d1", "block_id": "1", "score": 0.52, "text": "[00:12:38] Coding interview",
+             "source_key": "youtube_chapters", "facets": {"source_kind": "chapter_pointer"}},
+            {"document_id": "d2", "block_id": "1", "score": 0.31, "text": "[00:02:00] Economics of software",
+             "source_key": "youtube_chapters", "facets": {"source_kind": "chapter_pointer"}}]
+    kept = [r for r in rows if float(r.get("score") or 0) >= MIN_ROLE_SCORE]
+    assert [r["document_id"] for r in kept] == ["d1"]

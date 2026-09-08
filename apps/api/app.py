@@ -2191,10 +2191,21 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             # resolved at CALL time: _optional_user is defined further down this factory
             return await _optional_user(token)
 
+        async def _voices_embed(text: str):
+            import asyncio as _a
+            from api.people_population import embed_query as _eq
+            return await _a.to_thread(_eq, text)
+
+        async def _voices_embed_many(texts: list):
+            import asyncio as _a
+            from api.people_population import embed_texts as _et
+            return await _a.to_thread(_et, texts)
+
         app.include_router(build_voices_router(
             _voices_pool, manifest=load_active_vertical(), pg_source_of=_voices_pg,
             tenant_id="demo", admin_token=os.environ.get("ROSTER_ADMIN_TOKEN", ""),
-            llm_json=_voices_llm, user_of=_voices_user))
+            llm_json=_voices_llm, user_of=_voices_user,
+            embed=_voices_embed, embed_many=_voices_embed_many))
 
     @app.get("/health")
     def health() -> dict:

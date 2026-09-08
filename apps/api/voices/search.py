@@ -41,14 +41,24 @@ _GENERIC = {"job", "jobs", "role", "roles", "hire", "hiring", "hired", "candidat
             "applicant", "applicants", "process"}
 
 
-def terms(q: str) -> list[str]:
-    """Query words, cleaned for `to_tsquery`. Punctuation out, stopwords out, duplicates out."""
+def terms(q: str, *, keep_generic: bool = False) -> list[str]:
+    """Query words, cleaned for `to_tsquery`. Punctuation out, stopwords out, duplicates out.
+
+    `keep_generic` keeps the domain's near-universal words ("candidate", "interview", "hiring").
+    DROPPING THEM IS A COMPENSATION FOR HAVING NO MEANING: in a keyword-only search they are noise,
+    because every third block contains them and OR-ing them drowns the words that matter. When a
+    SEMANTIC leg is running, meaning is handled there and the words should be taken literally — which
+    is what stops "fake candidates" from matching a video called "Being Enthusiastic Is Not Being
+    Fake", a block that contains "fake" and no candidate at all.
+    """
     out: list[str] = []
     for raw in re.split(r"[^A-Za-z0-9']+", (q or "").lower()):
         w = raw.strip("'")
         if len(w) < 2 or w in _STOP or w in out:
             continue
         out.append(w)
+    if keep_generic:
+        return out[:12]
     specific = [w for w in out if w not in _GENERIC]
     # …unless the whole question is made of them ("how do recruiters read a resume"), in which case
     # they are all we have and dropping them would leave nothing to search.
@@ -180,13 +190,10 @@ def moment(row: dict) -> dict:
     }
 
 
-def build_query(*, q: str, kinds: tuple[str, ...] = (), audience: str = "", speaker: str = "",
-                limit: int = 30, table: str = "rs_block", per_document: bool = False,
-                since: str = "", order: str = "relevance", tsquery: str = "") -> tuple[str, list]:
-    """Keyword search over the voices corpus. Returns (sql, params) — no I/O, so it is testable.
-
-    An empty `q` is a BROWSE, not a failed search. A browse orders by the piece's own PUBLICATION
-    date (`published_at`, ISO text, so it sorts as text), never by when we happened to ingest a row.
+def _filters(*, kinds: tuple[str, ...] = (), audience: str = "", speaker: str = "",
+             since: str = "", order: str = "") -> tuple[list[str], list]:
+    """The WHERE both legs share. Written once so the keyword and semantic legs can never drift into
+    searching different corpora — a filter honoured by one leg and not the other is a lie either way.
     """
     where = [
         "source_key = ANY($1)",
@@ -202,8 +209,6 @@ def build_query(*, q: str, kinds: tuple[str, ...] = (), audience: str = "", spea
         "text NOT LIKE '%Chapter pointers written by the publisher%'",
     ]
     params: list = [list(VOICE_SOURCE_KEYS)]
-    n = 1
-
     if kinds:
         by_kind = {"podcast": ["show_notes"], "video": ["youtube_chapters"],
                    "chapter": ["show_notes", "youtube_chapters"],
@@ -217,22 +222,78 @@ def build_query(*, q: str, kinds: tuple[str, ...] = (), audience: str = "", spea
     if audience in AUDIENCES:
         # "both" material answers either reader, so it is never filtered out — only the OTHER
         # audience's material is. A source with no audience stamped is treated as "both".
-        n += 1
-        where.append(f"(NOT (facets ? 'audience') OR facets->>'audience' IN (${n}, 'both'))")
         params.append(audience)
+        where.append(f"(NOT (facets ? 'audience') OR facets->>'audience' IN (${len(params)}, 'both'))")
     if since:
-        n += 1
-        where.append(f"(facets->>'published_at') >= ${n}")
         params.append(since)
+        where.append(f"(facets->>'published_at') >= ${len(params)}")
     if order == "watched":
-        n += 1
-        where.append(f"(facets->>'views') ~ ${n}")
         params.append(r"^\d+$")
+        where.append(f"(facets->>'views') ~ ${len(params)}")
     if speaker:
-        n += 1
-        where.append(f"(facets->>'guest' ILIKE ${n} OR facets->>'author' ILIKE ${n} "
-                     f"OR facets->>'publication' ILIKE ${n})")
         params.append(speaker)
+        where.append(f"(facets->>'guest' ILIKE ${len(params)} OR facets->>'author' ILIKE ${len(params)} "
+                     f"OR facets->>'publication' ILIKE ${len(params)})")
+    return where, params
+
+
+def build_vector_query(*, qvec: str, kinds: tuple[str, ...] = (), audience: str = "",
+                       speaker: str = "", limit: int = 30, table: str = "rs_block",
+                       per_document: bool = False, since: str = "") -> tuple[str, list]:
+    """The SEMANTIC leg: the nearest blocks to the query vector, under the same filters as the keyword
+    leg. Rows with no vector are simply absent from it — the keyword leg still finds them, which is
+    why the two are FUSED rather than one replacing the other.
+
+    This is what makes "fake candidates" stop matching a video called "Being Enthusiastic Is Not Being
+    Fake": the words overlap, the meanings do not.
+    """
+    where, params = _filters(kinds=kinds, audience=audience, speaker=speaker, since=since)
+    where.append("embedding IS NOT NULL")
+    params.append(qvec)
+    n = len(params)
+    dist = f"(embedding <=> ${n}::vector)"
+    cols = (f"document_id, block_id, text, document_title, source_key, facets, created_at, "
+            f"(1.0 - {dist}) AS score, left(text, 320) AS snippet")
+    params.append(int(max(1, min(limit, 200))))
+    if per_document:
+        return (f"SELECT * FROM (SELECT DISTINCT ON (document_id) {cols} FROM {table} "
+                f"WHERE {' AND '.join(where)} ORDER BY document_id, {dist} ASC) s "
+                f"ORDER BY score DESC LIMIT ${len(params)}", params)
+    return (f"SELECT {cols} FROM {table} WHERE {' AND '.join(where)} "
+            f"ORDER BY {dist} ASC LIMIT ${len(params)}", params)
+
+
+def fuse(*ranked: list[dict], k: int = 60, limit: int = 60) -> list[dict]:
+    """RECIPROCAL RANK FUSION of the keyword and semantic legs.
+
+    Not a weighted blend of the two scores: `ts_rank` and cosine distance live on different scales and
+    mixing them is a guess dressed up as a number. RRF only reads POSITION, which is the one thing the
+    two legs agree on the meaning of — a row near the top of either leg surfaces, and a row near the
+    top of BOTH surfaces above either.
+    """
+    scores: dict[str, float] = {}
+    rows: dict[str, dict] = {}
+    for leg in ranked:
+        for i, r in enumerate(leg or []):
+            key = f"{r.get('document_id')}::{r.get('block_id')}"
+            scores[key] = scores.get(key, 0.0) + 1.0 / (k + i + 1)
+            # the keyword leg carries the ts_headline snippet; keep the richer row when both have one
+            if key not in rows or (r.get("snippet") and "«" in str(r.get("snippet") or "")):
+                rows[key] = r
+    order = sorted(scores, key=lambda x: -scores[x])
+    return [rows[x] for x in order[:limit]]
+
+
+def build_query(*, q: str, kinds: tuple[str, ...] = (), audience: str = "", speaker: str = "",
+                limit: int = 30, table: str = "rs_block", per_document: bool = False,
+                since: str = "", order: str = "relevance", tsquery: str = "") -> tuple[str, list]:
+    """Keyword search over the voices corpus. Returns (sql, params) — no I/O, so it is testable.
+
+    An empty `q` is a BROWSE, not a failed search. A browse orders by the piece's own PUBLICATION
+    date (`published_at`, ISO text, so it sorts as text), never by when we happened to ingest a row.
+    """
+    where, params = _filters(kinds=kinds, audience=audience, speaker=speaker, since=since, order=order)
+    n = len(params)
 
     q_terms = terms(q)
     q_expr = ""

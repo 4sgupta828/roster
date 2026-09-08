@@ -695,6 +695,19 @@
   .vx-go{display:inline-flex;align-items:center;min-height:40px;gap:.3rem;font-size:.8rem;text-decoration:none;color:var(--gold-strong);}
   .vx-empty{color:var(--muted);font-size:.9rem;padding:.8rem 0;}
   @media (max-width:560px){ .vx-h{font-size:.72rem;} .vx-t{font-size:.9rem;} .vx-f{font-size:.74rem;} }
+  /* 🎙 Prepare — the voices strip inside a job card. Compact by design: it is an aside on the card,
+     not a second card, and it links out rather than trying to be the reading surface. */
+  .js-prep{display:block;margin:.45rem 0 .1rem;padding:.5rem .6rem;border:1px solid var(--hair);
+    border-left:3px solid #4f7cff;border-radius:9px;background:var(--panel2);}
+  .js-prep-h{display:block;font-size:.71rem;color:var(--muted);line-height:1.45;margin-bottom:.25rem;}
+  .js-prep-row{display:block;margin:.3rem 0;font-size:.8rem;line-height:1.5;}
+  .js-prep-k{display:inline-block;font-size:.6rem;text-transform:uppercase;letter-spacing:.06em;font-weight:800;
+    padding:.05rem .35rem;margin-right:.35rem;border-radius:999px;border:1px solid var(--hair);color:var(--muted);}
+  .js-prep-k.essay{color:var(--gold-strong);border-color:var(--gold);}
+  .js-prep-k.podcast,.js-prep-k.video{color:#4f7cff;border-color:#4f7cff;}
+  .js-prep-t{color:var(--ink);}
+  .js-prep-w{color:var(--muted);}
+  .ppl-lnk.job-prep.on{border-color:#4f7cff;color:#4f7cff;}
   /* ═══ VOICES — a reading surface, not a result list ═══════════════════════════════════════════
      Two objects, two colours, so a reader sees the difference before reading a word: an ESSAY is
      someone's own words (gold, quoted); a CHAPTER is a producer's marker (blue, plain, with its
@@ -3257,7 +3270,11 @@ function jobsMarkup(d){
     window.JOBS_INDEX = window.JOBS_INDEX || {}; window.JOBS_INDEX[String(jref)] = j;
     const apply = j.url?`<button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="One flow, right here: your fit, every application answer planned from your profile, résumé & cover letter, then fill it in your browser — you submit">🚀 Apply</button><a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer" title="Go straight to the company's apply page">Apply directly ↗</a>`:"";
     const intro = j.company ? `<button type="button" class="ppl-lnk job-intro" data-ref="${esc(String(jref))}" title="Who you know at this company (your LinkedIn export) and likely hiring managers from public data">🤝 Intro path</button>` : "";
-    const prep = "";   // folded into 🚀 Apply
+    // PREPARE FOR THIS ONE (voices): what practitioners say about a role like this. Lazy — one
+    // request per card, only when a reader asks, because most cards are never opened.
+    const prep = window.VOICES_ENABLED
+      ? `<button type="button" class="ppl-lnk job-prep" data-ref="${esc(String(jref))}" title="What practitioners say about preparing for a role like this — advice, not this employer's process">🎙 Prepare</button>`
+      : "";
     const jsave = `<div class="ppl-acts"><button type="button" class="rsave" data-kind="job" data-ref="${esc(String(jref))}" data-label="${esc(j.title||"")}" data-sub="${esc(((j.company||"").replace(/_/g," "))+(j.location?" · "+j.location:""))}" data-url="${esc(j.url||"")}" title="Save to a shortlist">☆</button></div>`;
     const pct = j.match_pct ? ` <span style="color:var(--gold);font-weight:700;font-size:.76rem;" title="How far this posting sits above your résumé's own noise floor (what an unrelated posting scores), after the field check and named skills. The verified fit table in 🚀 Apply is the definitive read.">${j.match_pct}% match</span>` : "";
     const jr = (j.reasons&&j.reasons.length) ? ` <span style="color:var(--muted);font-size:.74rem;">· ${j.reasons.map(esc).join(" · ")}</span>` : "";
@@ -7450,7 +7467,7 @@ const VO = (function(){
       if(c.pointers) bits.push(c.pointers+" moment"+(c.pointers===1?"":"s")+" to play");
       if(d.matched_on) bits.push("matched on "+d.matched_on);
       if(d.window && d.window.widened) bits.push("that window was thin, so this is everything");
-      bits.push("ranked by words");
+      bits.push(d.ranking === "hybrid" ? "ranked by meaning + words" : "ranked by words");
       note().innerHTML = esc(bits.join(" · "))
         + (STATE.q ? ' <button type="button" class="vo-shelf" id="vo-clear" style="min-height:28px;padding:.1rem .55rem;font-size:.72rem;">← back to what\'s new</button>' : "");
       const reg = $$("vo-register"); if(reg && d.register) reg.textContent = "🎙 " + d.register;
@@ -7522,6 +7539,59 @@ const VO = (function(){
   }
   return {search, enter, wire, state: STATE};
 })();
+
+// 🎙 PREPARE (voices, on a job card). The reason this corpus lives in a job product rather than a
+// reader: "how do I prepare for this" is asked ON a role, not in a search box.
+async function jobPrep(ref, btn){
+  const box = document.querySelector('.js-prepbox[data-ref="'+CSS.escape(String(ref))+'"]');
+  const j = (window.JOBS_INDEX||{})[String(ref)];
+  if(!box || !j) return;
+  if(box.dataset.open === "1"){ box.dataset.open = "0"; box.innerHTML = ""; if(btn) btn.classList.remove("on"); return; }
+  box.dataset.open = "1"; if(btn) btn.classList.add("on");
+  box.innerHTML = '<span class="js-prep"><span class="js-prep-h">reading what practitioners say…</span></span>';
+  try{
+    const r = await fetch("/voices/for_role", {method:"POST", headers:{"content-type":"application/json"},
+      body: JSON.stringify({title: j.title||"", company: j.company||"", facets: j.facets||{}, limit: 3})});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || ("prepare failed ("+r.status+")"));
+    const ms = d.moments || [];
+    if(!ms.length){ box.innerHTML = '<span class="js-prep"><span class="js-prep-h">Nothing in the voices corpus speaks to this role yet.</span></span>'; return; }
+    const rows = ms.map(m => {
+      const pointer = m.kind === "podcast" || m.kind === "video";
+      const st = pointer && m.t_start ? '<b>'+vxStampShort(m.t_start)+'</b> ' : "";
+      const who = [m.speaker, m.show].filter(Boolean).join(" · ");
+      const go = m.url ? '<a href="'+esc(m.url)+'" target="_blank" rel="noopener noreferrer">'
+        + (m.kind === "essay" ? "read ↗" : (m.kind === "video" ? "watch ↗" : "listen ↗")) + "</a>" : "";
+      // a strip is an ASIDE on someone else's card: one line of the take, not the whole passage
+      const txt = String(m.text||"").length > 170 ? String(m.text).slice(0,170).replace(/\s+\S*$/, "") + "…" : String(m.text||"");
+      return '<span class="js-prep-row"><span class="js-prep-k '+esc(m.kind)+'">'+esc(m.kind)+"</span>"
+        + '<span class="js-prep-t">'+st+(m.quotable ? "“"+esc(txt)+"”" : esc(txt))
+        + (who ? ' <span class="js-prep-w">— '+esc(who)+"</span>" : "") + " " + go + "</span></span>";
+    }).join("");
+    box.innerHTML = '<span class="js-prep"><span class="js-prep-h">🎙 '+esc(d.register||"")+"</span>"+rows
+      + '<span class="js-prep-h"><a href="#" class="js-prep-more" data-ref="'+esc(String(ref))+'">more in Voices →</a></span></span>';
+  }catch(e){ box.innerHTML = '<span class="js-prep"><span class="js-prep-h">Couldn\'t load it — '+esc(e.message||e)+"</span></span>"; }
+}
+function vxStampShort(sec){
+  const n = Math.max(0, parseInt(sec,10)||0), h = Math.floor(n/3600), m = Math.floor((n%3600)/60);
+  return (h ? h+":"+String(m).padStart(2,"0") : String(m)) + ":" + String(n%60).padStart(2,"0");
+}
+// CAPTURE phase: the job card is a dense cluster of click handlers (Apply, Intro path, the card's
+// own summary toggle) bound at document level, and a bubble-phase listener cannot stop the ones
+// registered before it — pressing 🎙 Prepare opened the Apply modal as well. Capturing stops the
+// event before any of them see it.
+document.addEventListener("click", e => {
+  const b = e.target.closest && e.target.closest(".job-prep");
+  if(b){ e.preventDefault(); e.stopPropagation(); jobPrep(b.dataset.ref, b); return; }
+  const more = e.target.closest(".js-prep-more");
+  if(more){
+    e.preventDefault(); e.stopPropagation();
+    const j = (window.JOBS_INDEX||{})[String(more.dataset.ref)] || {};
+    const qq = document.getElementById("q"); if(qq) qq.value = "preparing for a " + (j.title||"") + " interview";
+    if(typeof setSearchMode === "function") setSearchMode("voices");
+    if(typeof VO !== "undefined") VO.search("preparing for a " + (j.title||"") + " interview");
+  }
+}, true);
 
 // A suggestion is {question, tag} (tag = an optional lens label, e.g. CEO/VC/CTO) — or a bare
 // string (legacy). Render a chip with the lens badge; the click always uses the QUESTION text.
