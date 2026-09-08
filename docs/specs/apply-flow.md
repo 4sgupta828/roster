@@ -133,3 +133,68 @@ need attention — a count sends someone hunting a forty-field form.
 - `apps/api/test_apply_plan.py` — four new cases pinning what the card says after a fill: a clean fill
   says nothing, an unconfirmed field is reported like a missing one, one field reads as "1 field", and
   a long list is named-then-trimmed rather than counted.
+
+---
+
+## 5. The fill bug, actually found (2026-09-08, later)
+
+§2.4 shipped honest REPORTING of a fill and claimed the setter was sound. The owner then hit the same
+thing on a live Ashby form: Name accepted, **Email / LinkedIn / Phone / Desired work location /
+work-eligibility all visibly filled and all rejected as "Missing entry for required field"**.
+
+So this time the harness was built to be the form, not a proxy for it: a React-controlled page with
+Ashby's `data-field-path` containers, a combobox whose committed value is separate from its search
+box, Yes/No as `role=radio` BUTTONS, and **a validator that reads React state** — then the REAL
+shipped `content.js` is loaded into it with a stubbed `chrome.runtime` and told to fill.
+
+### What that found — three defects, all now fixed
+
+1. **`clickOption` clicked the CONTAINER, not the control.** A listbox holding one option has exactly
+   the option's text, and so does every wrapper around it. `pool.find(text === want)` returned the
+   first match in document order — the wrapper — and clicking a wrapper fires nobody's handler. This
+   is the whole combobox failure: "San Francisco, CA (Hybrid)" sat in the box with the form empty.
+   Candidates are now ranked, a real control (`[role=option]`, `label`, `button`, `li`) above a
+   generic box, then the deepest node.
+2. **Everything was verified in the same tick it was set.** React commits on its own schedule, so a
+   verification that runs immediately reads the state as it was BEFORE our event — which reported two
+   working radio groups as "unconfirmed" and would have sent the reader to retype them.
+3. **The setter had `execCommand` first.** Now the native prototype setter runs first, with
+   `_valueTracker` reset to the previous value so React cannot treat our event as a no-op, and
+   `execCommand` is kept only as a second attempt when the value did not stick. Plus a yield between
+   fields, so a synchronous loop cannot race the framework's re-render.
+
+### And two corrections to the verification itself
+
+- **A combobox is verified ONLY by an actual option click** (or the widget's own `aria-selected` /
+  chip). Two weaker rules were tried and both are unsound: reading our own text back out of the
+  search box (it returns exactly what we typed while the form holds nothing), and "the option list
+  has closed" — a list filtered to NO MATCHES is closed too, which is precisely the case where
+  nothing was committed. Measured: asking for a value the widget has no option for now reports
+  `unconfirmed`, where the closed-list rule reported `filled`.
+- **`aria-checked` counts.** Ashby's Yes/No pair is two BUTTONS with no `.checked` property at all.
+
+### The result, measured
+
+| | before | after |
+|---|---|---|
+| the form's own verdict | "Missing entry for required field: Desired work location" | **accepts every required field** |
+| what the extension claimed | "filled" for a field the form never took | matches the form exactly |
+| a value the widget cannot commit | claimed as filled | reported `unconfirmed` |
+
+### What is NOT resolved
+
+**The harness never reproduced the Email / LinkedIn / Phone failure.** Plain controlled inputs update
+React state correctly on every path tried — with `execCommand`, with it forced off, and across
+`text`/`email`/`url`/`tel`/`number`/`search`/`password`/`date`. The panel's leading hypothesis
+(Gemini; Codex's account model was 404 and it could not be consulted) is **re-render detachment**: a
+synchronous loop fills nodes that a pending re-render then replaces. The yield between fields and the
+re-query on verification both address that, but neither is *proven* against the real page.
+
+So the extension now carries a **diagnostic**. Every fill records, per field: which selector matched,
+the value at t=0 and t≈1s, whether the node was still attached both times, `aria-invalid`, and any
+"required/missing/invalid" text the page printed beside it. "Copy diagnostics" in the popup hands it
+back as JSON. The next occurrence answers the question instead of producing another guess.
+
+### Tests
+`apps/extension/test_fill.mjs` is 15 cases now (`node --test apps/extension/test_fill.mjs`), including
+the combobox that must not be trusted, the closed-list trap, the detached node, and `aria-checked`.

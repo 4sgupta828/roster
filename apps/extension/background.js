@@ -67,6 +67,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       } else if (msg.type === "resume") {
         sendResponse({ ok: true, ...(await getResume()) });
       } else if (msg.type === "executed") {
+        // keep the last run's field-by-field record so the popup can hand it back verbatim
+        try { await chrome.storage.local.set({ roster_last_diag: {
+                at: new Date().toISOString(), url: msg.note || "", id: msg.id,
+                filled: msg.filled || [], unconfirmed: msg.unconfirmed || [], missing: msg.missing || [],
+                fields: msg.diag || [] } }); } catch (e) {}
         await api(`/me/applications/${msg.id}/executed`, { method: "POST", headers: { "content-type": "application/json" },
                   body: JSON.stringify({ filled: msg.filled || [], unconfirmed: msg.unconfirmed || [],
                                          missing: msg.missing || [], note: msg.note || "" }) });
