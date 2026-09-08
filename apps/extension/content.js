@@ -6,35 +6,48 @@
   if (window.__rosterApplyLoaded) return;
   window.__rosterApplyLoaded = true;
 
-  // Set a text-like value the way TYPING would: focus, select what is there, insert through the browser's
-  // editing pipeline (execCommand insertText → real beforeinput/input events every form library accepts), and
-  // only then fall back to the prototype setter + a synthetic InputEvent. Ends with change → blur → focusout so
-  // "touched" + validation state update too (owner, 2026-09-05: fields looked filled but submit complained
-  // until they were touched — the form's own state had never registered the value).
+  // ── SETTING A VALUE THE FRAMEWORK ACTUALLY HEARS ────────────────────────────────────────────────
+  // The native prototype setter comes FIRST, not `execCommand`. React 16+ keeps a `_valueTracker` on
+  // every controlled input and skips its own onChange when the tracked value already equals the
+  // current one — the box shows the text and the app's state never moves, which is exactly the
+  // "filled right, submit says empty" report. Resetting the tracker to the PREVIOUS value guarantees
+  // React sees a delta. This is the sequence testing-library's user-event uses, for the same reason.
+  //
+  // `execCommand("insertText")` is kept only as a SECOND attempt when the value did not stick: it is
+  // deprecated, it is a no-op in some frames, and it was the primary path here for one reason —
+  // the event it produces is trusted, which a small number of widgets check.
   const setNative = (el, v) => {
     const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : (el.tagName === "SELECT" ? HTMLSelectElement.prototype : HTMLInputElement.prototype);
     const d = Object.getOwnPropertyDescriptor(proto, "value");
-    const set = () => { if (d && d.set) d.set.call(el, v); else el.value = v; };
+    const prev = el.value;
     try { el.focus(); el.dispatchEvent(new FocusEvent("focus", { bubbles: false })); el.dispatchEvent(new FocusEvent("focusin", { bubbles: true })); } catch (e) {}
-    let typed = false;
-    if (el.tagName !== "SELECT") {
+    const put = (val) => {
+      if (d && d.set) d.set.call(el, val); else el.value = val;
+      // the tracker must disagree with the new value or React swallows the event as a no-op
+      try { const t = el._valueTracker; if (t && typeof t.setValue === "function") t.setValue(prev === val ? "\u0000" : prev); } catch (e) {}
+      try { el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: val })); }
+      catch (e) { el.dispatchEvent(new Event("input", { bubbles: true })); }
+    };
+    put(v);
+    if (el.value !== v && el.tagName !== "SELECT") {      // a mask or a widget refused it: try typing
       try {
         if (typeof el.select === "function") el.select();
         else if (typeof el.setSelectionRange === "function") el.setSelectionRange(0, (el.value || "").length);
-        typed = document.execCommand("insertText", false, v) && el.value === v;
-      } catch (e) { typed = false; }
-    }
-    if (!typed) {
-      set();
-      try { el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: v })); }
-      catch (e) { el.dispatchEvent(new Event("input", { bubbles: true })); }
+        document.execCommand("insertText", false, v);
+      } catch (e) {}
+      if (el.value !== v) put(v);
     }
     el.dispatchEvent(new Event("change", { bubbles: true }));
     try { el.blur(); } catch (e) {}
     el.dispatchEvent(new FocusEvent("blur", { bubbles: false }));
     el.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
   };
+
   const norm = s => (s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+  // Let the framework commit before we look. React batches its work, so a verification in the same
+  // tick reads the state as it was BEFORE our event — which reports a field that worked as one that
+  // did not, and sends the user to retype something that was already right.
+  const settle = (ms) => new Promise(r => setTimeout(r, ms == null ? 120 : ms));
   // Three outcomes, three colours — because "we tried" and "the form took it" are different facts and
   // a reader deciding whether to retype a field needs to see which one they are looking at.
   const COLOUR = { verified: "#6c5ce7", entered: "#e1a100", missing: "#d63031" };
@@ -73,24 +86,65 @@
   }
 
   // Did this question end up actually set? Returns OK / SOFT / NONE.
-  //   OK   — something we can read confirms the value (the element itself, or its committed twin)
+  //   OK   — something we can read confirms the value (a re-queried element, or its committed twin)
   //   SOFT — we entered it and cannot confirm the form took it (the user must check this one)
   //   NONE — nothing is set
-  function verifyValue(el, want, box) {
-    const twin = committedTwin(el, box);
-    const seen = (el.value || "").trim();
+  //
+  // `isCombo` is decisive: a combobox's visible box is a SEARCH FIELD, and reading our own text back
+  // out of it proves nothing at all — measured, that read-back returns exactly what we typed while
+  // the form holds nothing. So a combobox is only ever OK on committed evidence.
+  function verifyValue(el, want, box, opts) {
+    const o = opts || {};
+    // RE-QUERY. The node we filled may have been replaced by a re-render, in which case the value we
+    // can read off our stale reference says nothing about the form the user is looking at.
+    const live = (o.selector && fresh(o.selector, el)) || el;
+    // Only a POSITIVE "this node is gone" counts against a field. Where attachment cannot be
+    // determined at all, absence of proof is not proof of absence.
+    const detached = !!(document.body && typeof document.body.contains === "function" && !document.body.contains(live));
+    const twin = committedTwin(live, box);
+    const seen = (live.value || "").trim();
     const w = norm(want);
     if (twin !== undefined) {
       const tv = norm(twin.value || "");
       if (tv && (tv === w || tv.includes(w) || w.includes(tv))) return OK;
       return seen ? SOFT : NONE;          // the box shows it; the form holds nothing → SOFT, never OK
     }
+    if (o.isCombo) {
+      // A COMBOBOX IS ONLY SET BY PICKING ONE OF ITS OPTIONS. Reading our own text back out of the
+      // search box proves nothing, and neither does a closed option list — a list filtered to NO
+      // MATCHES is closed too, which is precisely the case where nothing was committed. So: the
+      // widget's own selection marker, or the fact that we actually clicked an option. Nothing else.
+      const picked = box && box.querySelector("[aria-selected='true'], [data-selected='true'], .chip, [class*='multiValue'], [class*='singleValue']");
+      if (picked && norm(picked.textContent).includes(w)) return OK;
+      const s2 = norm(seen);
+      if (o.clicked && seen && (s2 === w || s2.includes(w) || w.includes(s2))) return OK;
+      return seen ? SOFT : NONE;
+    }
+    if (detached) return SOFT;            // we filled a node that is no longer on the page
     if (!seen) return NONE;
     const s = norm(seen);
     return (s === w || s.includes(w) || w.includes(s)) ? OK : SOFT;
   }
 
-  function verifyChecked(ctl) { return ctl && ctl.checked ? OK : SOFT; }
+  // the same field, looked up again — a re-render swaps the node, and a stale reference then reports
+  // a value nobody can see
+  function fresh(selector, fallback) {
+    for (const sel of String(selector || "").split(",").map(x => x.trim()).filter(Boolean)) {
+      try { const el = document.querySelector(sel); if (el) return el; } catch (e) {}
+    }
+    return fallback;
+  }
+
+  // A control is checked if the DOM says so OR the widget says so: Ashby's Yes/No pair is a pair of
+  // BUTTONS with aria-checked, which has no `.checked` property at all.
+  function verifyChecked(ctl) {
+    if (!ctl) return SOFT;
+    if (ctl.checked) return OK;
+    const a = ctl.getAttribute && ctl.getAttribute("aria-checked");
+    if (a === "true") return OK;
+    const anc = ctl.closest && ctl.closest("[aria-checked='true'],[aria-selected='true'],[data-state='checked']");
+    return anc ? OK : SOFT;
+  }
 
   function findAll(q) {
     const sels = (q.selector || "").split(",").map(s => s.trim()).filter(Boolean);
@@ -135,7 +189,16 @@
     if (!want) return false;
     const pool = [...scope.querySelectorAll("label, button, [role='radio'], [role='checkbox'], [role='option'], li, span, div")]
       .filter(el => visible(el) && el.children.length < 4);
-    let best = pool.find(el => norm(el.textContent) === want) || pool.find(el => norm(el.textContent).startsWith(want)) || pool.find(el => norm(el.textContent).includes(want) && norm(el.textContent).length < want.length + 40);
+    // PICK THE CONTROL, NOT ITS CONTAINER. A listbox holding one option has exactly the option's
+    // text, and so does every wrapper around it — clicking the container fires nobody's handler,
+    // which is how "San Francisco, CA (Hybrid)" ended up in the box with the form still empty.
+    // Rank a real control above a generic box, then prefer the deepest (smallest) node.
+    const control = el => el.matches("[role='option'], [role='radio'], [role='checkbox'], label, button, li") ? 0 : 1;
+    const rank = (a, b) => (control(a) - control(b)) || (a.querySelectorAll("*").length - b.querySelectorAll("*").length);
+    const pick = (test) => pool.filter(test).sort(rank)[0];
+    let best = pick(el => norm(el.textContent) === want)
+            || pick(el => norm(el.textContent).startsWith(want))
+            || pick(el => norm(el.textContent).includes(want) && norm(el.textContent).length < want.length + 40);
     if (!best) return false;
     // the real control: an input inside the match, the label's own control, or the input next to it
     // (a BUTTON is the control itself — Ashby's Yes / No pair sits next to one hidden checkbox whose
@@ -199,19 +262,25 @@
       }
       if (!el) return NONE;
       const box0 = fieldBox(q);
-      if (el.getAttribute("role") === "combobox" || (el.getAttribute("aria-autocomplete") || "") !== "") {
+      const isCombo = el.getAttribute("role") === "combobox" || (el.getAttribute("aria-autocomplete") || "") !== "";
+      let clicked = false;
+      if (isCombo) {
         // A COMBOBOX IS NOT SET BY TYPING INTO IT. The visible box will read back the text we typed
         // while the form still holds nothing, which is precisely the "filled right, submit says
         // empty" report. Typing only opens the list; the OPTION CLICK is what commits.
         setNative(el, val); await new Promise(r => setTimeout(r, 500));
         const scope = box0 || document;
-        if (!clickOption(scope, val)) {
-          const opt = scope.querySelector("[role='option']") || document.querySelector("[role='option']");
-          if (opt) opt.click(); else el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        clicked = clickOption(scope, val);
+        if (!clicked) {
+          // an EXACT option only: clicking whatever happens to be first commits the wrong place
+          const opt = scope.querySelector("[role='option']");
+          if (opt && norm(opt.textContent) === norm(val)) { opt.click(); clicked = true; }
+          else el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
         }
         await new Promise(r => setTimeout(r, 250));
       } else setNative(el, val);
-      const st = verifyValue(el, val, box0);
+      await settle();
+      const st = verifyValue(el, val, box0, {selector: q.selector, isCombo: isCombo, clicked: clicked});
       mark(el, st); return st;
     }
     // NATIVE SELECT
@@ -222,6 +291,7 @@
       const i2 = idx >= 0 ? idx : [...sel.options].findIndex(o => norm(o.text).includes(w) || w.includes(norm(o.text)) && norm(o.text).length > 2);
       if (i2 >= 0) { try { sel.focus(); } catch (e) {} sel.selectedIndex = i2; sel.dispatchEvent(new Event("input", { bubbles: true })); sel.dispatchEvent(new Event("change", { bubbles: true })); try { sel.blur(); } catch (e) {} sel.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
         // a native select reports its own truth: the option it now holds
+        await settle(0);
         const st = norm(sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].text : "") ? OK : SOFT;
         mark(sel, st); return st; }
     }
@@ -232,36 +302,69 @@
       const combo = box.querySelector("[role='combobox'], input[aria-autocomplete]");
       if (combo && kind !== "boolean") {
         combo.focus(); setNative(combo, val); await new Promise(r => setTimeout(r, 500));
-        const clicked = clickOption(box, val) || clickOption(document, val);
-        if (!clicked) combo.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-        await new Promise(r => setTimeout(r, 250));
-        const st = verifyValue(combo, val, box);
+        const hit = clickOption(box, val) || clickOption(document, val);
+        if (!hit) combo.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        await settle(250);
+        const st = verifyValue(combo, val, box, {isCombo: true, clicked: hit});
         mark(combo, st); return st;
       }
       const vals = kind === "multiselect" ? String(val).split(/\s*[;|\n]\s*/).filter(Boolean) : [val];
       let ok = false;
       for (const v of vals) ok = clickOption(box, v) || ok;
       // an option click we could not confirm through a checked control is ENTERED, not verified
-      if (ok) { const ctl = box.querySelector("input[type=radio]:checked, input[type=checkbox]:checked");
-                return ctl ? OK : SOFT; }
+      if (ok) {
+        await settle();
+        const ctl = box.querySelector("input[type=radio]:checked, input[type=checkbox]:checked, [aria-checked='true'], [aria-selected='true']");
+        return ctl ? OK : SOFT;
+      }
     }
     // then RADIO / CHECKBOX groups that share the question's name
     const grp = els.filter(el => el.type === "radio" || el.type === "checkbox");
     if (grp.length) {
       const w = norm(val);
       const hit = grp.find(el => { const l = el.labels && el.labels[0] ? el.labels[0].textContent : (el.closest("label") || {}).textContent || el.value; return norm(l) === w || norm(l).startsWith(w) || w.startsWith(norm(l)); });
-      if (hit) { if (!hit.checked) hit.click(); const st = verifyChecked(hit);
+      if (hit) { if (!hit.checked) hit.click(); await settle(); const st = verifyChecked(hit);
                  mark(hit.closest("label") || hit, st); return st; }
     }
     return NONE;
   }
 
+  // A field-by-field record of what we did and what the page did back. It exists because the failure
+  // that matters — a value in the box and nothing in the form — cannot be reproduced from a bug
+  // report, and asking someone to run devtools commands is not a diagnosis. The reader copies this
+  // out of the popup and it says which selector matched, what the field held immediately and a
+  // second later, whether the node survived, and what the page said next to it.
+  const DIAG = [];
+  async function record(q, state) {
+    const rec = { field: String(q.label || "").slice(0, 80), kind: q.kind, required: !!q.required,
+                  selector: String(q.selector || "").slice(0, 120), verdict: state };
+    try {
+      const el = fresh(q.selector, null) || (fieldBox(q) || document).querySelector("input, textarea, select");
+      if (el) {
+        rec.t0 = String(el.value == null ? "" : el.value).slice(0, 60);
+        rec.attached = !!(document.body && document.body.contains(el));
+        rec.ariaInvalid = el.getAttribute && el.getAttribute("aria-invalid");
+        const box = el.closest && el.closest("[data-field-path], label, fieldset, div");
+        const txt = box ? (box.innerText || "").replace(/\s+/g, " ").trim() : "";
+        const m = txt.match(/(required|missing|invalid|must |please )[^.]{0,60}/i);
+        if (m) rec.pageSays = m[0].slice(0, 80);
+        await settle(900);
+        rec.t1000 = String(el.value == null ? "" : el.value).slice(0, 60);
+        rec.stillAttached = !!(document.body && document.body.contains(el));
+      } else rec.t0 = null;
+    } catch (e) { rec.err = String(e && e.message || e).slice(0, 80); }
+    DIAG.push(rec);
+  }
+
   async function run(application, resume) {
     const plan = application.plan || [];
     const filled = [], unconfirmed = [], missing = [];
+    DIAG.length = 0;
     for (const q of plan) {
       try {
+        await new Promise(r => setTimeout(r, 0));   // let the framework commit the previous field
         const r = await fillOne(q, resume);
+        if (r !== null) await record(q, r);
         if (r === OK) filled.push(q.label);
         else if (r === SOFT) unconfirmed.push(q.label);
         else if (r === NONE) missing.push(q.label);
@@ -269,7 +372,7 @@
     }
     // `missing` stays the field the caller already understands: everything the reader must handle.
     return { filled, unconfirmed, missing, needs_you: unconfirmed.concat(missing),
-             frame: location.href.slice(0, 120) };
+             diag: DIAG.slice(0, 60), frame: location.href.slice(0, 120) };
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -281,7 +384,8 @@
       // nothing at all, so a total miss looked identical to never having pressed the button.
       if (res.filled.length || res.unconfirmed.length || res.missing.length) {
         chrome.runtime.sendMessage({ type: "executed", id: msg.application.id, filled: res.filled,
-                                     unconfirmed: res.unconfirmed, missing: res.missing, note: res.frame });
+                                     unconfirmed: res.unconfirmed, missing: res.missing, note: res.frame,
+                                     diag: res.diag });
         // NAME the fields the reader has to handle. "3 not found" sends someone hunting a 40-field
         // form; the amber outlines plus these names send them straight to the three that need them.
         const need = res.needs_you;

@@ -31,5 +31,17 @@ async function refresh() {
   }));
 }
 function esc(s) { return String(s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+// COPY DIAGNOSTICS — the last fill, field by field. A bug report saying "some fields didn't take"
+// cannot be acted on; this says which selector matched, what the field held immediately and a second
+// later, whether the node survived a re-render, and what the page printed beside it.
+const dbg = document.getElementById("diag");
+if (dbg) dbg.addEventListener("click", async () => {
+  const s = await chrome.storage.local.get(["roster_last_diag"]);
+  const d = s.roster_last_diag;
+  if (!d) { $("#note").textContent = "No fill recorded yet — press Fill this page first."; return; }
+  try { await navigator.clipboard.writeText(JSON.stringify(d, null, 1));
+        $("#note").textContent = `Copied the last fill (${(d.fields || []).length} fields) — paste it into the bug report.`; }
+  catch (e) { $("#note").textContent = "Couldn't copy: " + (e && e.message || e); }
+});
 $("#save").addEventListener("click", async () => { const t = $("#token").value.trim(); if (!t) return; await chrome.storage.local.set({ roster_token: t }); refresh(); });
 refresh();
