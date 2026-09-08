@@ -44,6 +44,16 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
     import asyncio as _aio
     import time as _time
     _t = {"start": _time.monotonic()}
+    # depth {"rows": False} = COUNTS ONLY. The navigable counts are a property of the contract's MUST-SLICE,
+    # not of the ranked page — so a caller that already has rows on screen (a saved map opening its snapshot)
+    # must not re-run the search to draw its chips. On the production index the pool legs are 19–33 s of a
+    # 23–37 s evaluate and the counts are 3; this path pays only the 3.
+    if (depth or {}).get("rows") is False:
+        counts = await store.counts(contract.kind, must, schema, depth=depth)
+        _el = round(_time.monotonic() - _t["start"], 2)
+        return {"rows": [], "counts": counts, "contract": contract.to_dict(),
+                "coverage": {"counts_only": True, "slice": pool_from_counts(counts, schema, contract.kind),
+                             "legs": {}, "unknown": {}, "timings": {"legs": 0.0, "counts": _el, "total": _el}}}
     # 1) POOL — every leg is asked with the musts; the union keeps the best similarity per id
     pool: dict[str, dict] = {}
     legs = {"semantic": 0, "enumerate": 0, "angles": 0, "prefer": 0}

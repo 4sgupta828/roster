@@ -317,3 +317,26 @@ def test_a_text_search_whose_semantic_leg_is_unavailable_falls_back_to_the_filte
     # a healthy semantic leg is untouched (no enumerate)
     out3 = run(evaluate(Contract(kind="e", text="anything", must={"k1": ["a"]}), InMemoryFacetStore(rows, sch), sch))
     assert out3["coverage"]["legs"]["enumerate"] == 0 and "degraded" not in out3["coverage"]
+
+
+def test_counts_only_depth_skips_every_row_leg_and_still_draws_the_rail():
+    """depth {'rows': False}: the navigable counts come back, the store's row legs are never asked. A surface
+    that already has rows on screen (a saved map's snapshot) draws its chips without re-running the search."""
+    s = _schema()
+
+    class NoRows(InMemoryFacetStore):
+        async def semantic(self, kind, text, must, cap=200):        # noqa: D102
+            raise AssertionError("a counts-only evaluate must not run a semantic leg")
+
+        async def enumerate(self, kind, must, cap=200):             # noqa: A003, D102
+            raise AssertionError("a counts-only evaluate must not enumerate rows")
+
+    c = Contract(kind="thing", text="q", must={"colour": ["green"]}, prefer={"tags": ["wool"]}, limit=10)
+    out = _run(evaluate(c, NoRows(_rows()), s, depth={"rows": False}))
+    full = _run(evaluate(c, InMemoryFacetStore(_rows()), s, noise_floor=0.40))
+    assert out["rows"] == []
+    assert out["counts"] == full["counts"]                          # the chips are identical to the full search's
+    assert out["contract"] == full["contract"]
+    assert out["coverage"]["counts_only"] is True
+    assert out["coverage"]["slice"] == full["coverage"]["pool"] == 1   # the must-slice, read off the counts
+    assert "pool" not in out["coverage"]                            # no rows were ranked: none is claimed

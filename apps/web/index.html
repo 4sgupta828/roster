@@ -8037,7 +8037,7 @@ function facetRailMarkup(d){
       <button type="button" class="idgo frail-go" data-jpid="${esc(d._jpid)}">Apply</button><button type="button" class="histbtn frail-reset" data-jpid="${esc(d._jpid)}">Reset</button></div>`
     : `<div class="frail-apply">${d._applied && d._delta ? `<span class="frail-done">Applied ✓ — ${d._delta.after} shown${d._delta.added ? ` · <b>${d._delta.added} new</b>` : ""}${d._delta.removed ? ` · ${d._delta.removed} dropped` : ""}${!d._delta.added && !d._delta.removed ? " · same rows, order may differ" : ""}${(d._delta.prevPool != null && d._delta.pool != null && d._delta.prevPool !== d._delta.pool) ? ` · pool ${d._delta.prevPool} → ${d._delta.pool}` : ""}</span> ${d._delta.added && !d._newFirst ? (() => { const rowsNow = Array.isArray(d.people_rows) ? d.people_rows : (d.jobs||[]); const per = 20, pg = Array.isArray(d.people_rows) ? (d._page||0) : (d._jpage||0); const onPage = rowsNow.slice(pg*per, pg*per+per).filter(r => r._new).length; return `${onPage ? ` <span class="frail-note">${onPage} of them on this page (corner flag)</span>` : ` <span class="frail-note">none of them on this page</span>`} <button type="button" class="histbtn frail-shownew" data-jpid="${esc(d._jpid)}">Show the ${d._delta.added} new first</button>`; })() : ""}` : "Tap chips to stage changes, then apply once. "}${saveBtn}</div>`;
   const empty = (cov.diagnosis && !facetPending(d)) ? diagnosisMarkup({...cov.diagnosis, best_match: cov.best_match}, d._jpid, L) : "";
-  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}">${degradedMarkup(d)}${relaxedMarkup(d)}${mergeMarkup(d)}<div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : ""}${stale ? ` <span class="frail-note" title="The pool is empty, so these counts are from the last result that had rows — change a filter and apply">· chips from the last result</span>` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
+  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}">${degradedMarkup(d)}${relaxedMarkup(d)}${mergeMarkup(d)}<div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : (cov.slice != null ? `· ${Number(cov.slice).toLocaleString()} match these filters` : "")}${stale ? ` <span class="frail-note" title="The pool is empty, so these counts are from the last result that had rows — change a filter and apply">· chips from the last result</span>` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
 }
 // EMPTY RESULT → which must is doing it (leave-one-out from the evaluator), with one-tap Drop (staged)
 function diagnosisMarkup(diag, jpid, L){
@@ -9495,7 +9495,9 @@ async function saveJobMap(jpid){
   const briefTxt = d.matched_on === "resume" ? "Match jobs to my résumé" : (t.question||CURRENT_Q||"Job search");
   const _lastRender = (window.JOBS_RENDERS && Object.values(window.JOBS_RENDERS).slice(-1)[0]) || {};
   const body = {tenant_id:"demo", map_type:"jobs", brief:briefTxt, title:briefTxt.slice(0,80), contract:(_lastRender.contract||null),
-    rows, coverage:{must:d.must||null, geo_scope:d.geo_scope||null, linkedin_profile:d.linkedin_profile||null, note:d.note||"", brief_contract:d.brief_contract||null}, filters:(d.query||{})};
+    rows, coverage:{must:d.must||null, geo_scope:d.geo_scope||null, linkedin_profile:d.linkedin_profile||null, note:d.note||"", brief_contract:d.brief_contract||null,
+                    counts:(d.counts||null)},   // the rail travels with the map: reopening it draws the chips at once
+    filters:(d.query||{})};
   try{
     const r = await fetch("/maps", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(body)});
     if(!r.ok){ const e = await r.json().catch(()=>({})); alert(e.detail || "Couldn't save the job map."); return; }
@@ -9514,7 +9516,7 @@ async function saveTalentMap(){
   const t = lastPeopleTurn(); if(!t) return;
   const cb = t.coverage_basis || {};
   const body = {tenant_id:"demo", map_type:"talent", brief:(t.question||CURRENT_Q||""), title:(t.question||"").slice(0,80),
-    rows:(t.people_rows||[]).slice(0,400), coverage:cb, filters:(cb.query_facets||{}), contract:(t.contract||null)};
+    rows:(t.people_rows||[]).slice(0,400), coverage:{...cb, counts:(t.counts||null)}, filters:(cb.query_facets||{}), contract:(t.contract||null)};
   try{
     const r = await fetch("/maps", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(body)});
     if(!r.ok){ const e = await r.json().catch(()=>({})); alert(e.detail || "Couldn't save the map."); return; }
@@ -9529,7 +9531,7 @@ async function loadMapView(id, token){
   try{
     const r = await fetch(`/maps/${encodeURIComponent(id)}${token?`?t=${encodeURIComponent(token)}`:""}`, {headers: authHeaders()});
     if(!r.ok){ if(out) out.innerHTML = `<div class="pitem-empty">This map isn't available — the link may be incomplete or private.</div>`; return; }
-    const m = (await r.json()).map;
+    const _mj = await r.json(); const m = _mj.map, _labels = _mj.labels || null;
     if(m.map_type === "jobs"){
       if(typeof setSearchMode === "function") setSearchMode("jobs");
       window.ACTIVE_MAP = {id:m.id, map_type:"jobs", title:m.title, notes:m.notes||"", share_path:m.share_path||"", token:(token||""), refresh_every:(m.refresh_every||"off"), last_checked_at:(m.last_checked_at||""),
@@ -9539,12 +9541,12 @@ async function loadMapView(id, token){
       const cov = m.coverage || {};
       THREAD = {session_id:null, turns:[{question:m.brief||m.title||"Job Map", kind:"jobs", jobs:(m.rows||[]), query:(m.filters||{}), stats:{},
         geo_scope:cov.geo_scope||null, must:cov.must||null, linkedin_profile:cov.linkedin_profile||null, note:cov.note||"", brief_contract:cov.brief_contract||null, related_jobs:[], answer:"",
-        contract:(m.contract||null), counts:(cov.counts||null), labels:null, coverage:null, _map_id:m.id, _map_token:(token||""), _map_owner:!!m.is_owner}]};
+        contract:(m.contract||null), counts:(cov.counts||null), labels:_labels, coverage:null, _map_id:m.id, _map_token:(token||""), _map_owner:!!m.is_owner}]};
       TAB_THREADS.jobs = THREAD;
       renderThread(); window.scrollTo({top:0});
-      if(m.contract){   // the rail's live counts for this map's contract (the snapshot stays until you apply)
+      if(m.contract){   // REFRESH the rail against the live index — counts only, no re-search (the snapshot stays)
         try{
-          const nr = await fetch(`/maps/${encodeURIComponent(m.id)}/navigate`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({t: token||""})});
+          const nr = await fetch(`/maps/${encodeURIComponent(m.id)}/navigate`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({t: token||"", rows:false})});
           if(nr.ok){ const nd = await nr.json(); const t0 = THREAD.turns[0]; t0.counts = nd.counts; t0.labels = nd.labels; t0.coverage = nd.coverage; t0.contract = nd.contract; t0.group_options = nd.group_options || t0.group_options || []; if(t0._jpid) gotoJobsPage(t0._jpid, t0._jpage||0); else renderThread(); }
         }catch(e){}
       }
@@ -9555,12 +9557,12 @@ async function loadMapView(id, token){
       is_owner:!!m.is_owner, reviews:(m.reviews||{}), feedback:(m.feedback||[]), revisions:(m.revisions||[]), brief_contract:((m.coverage||{}).brief_contract||null),
       n_rows:(m.rows||[]).length, created_at:m.created_at};
     THREAD = {session_id:null, turns:[{question:m.brief||m.title||"Talent Map", people_rows:(m.rows||[]), coverage_basis:(m.coverage||{}), grounded:true, claims:[], coverage_gaps:[],
-      contract:(m.contract||null), counts:((m.coverage||{}).counts||null), labels:null, coverage:null, _map_id:m.id, _map_token:(token||""), _map_owner:!!m.is_owner}]};
+      contract:(m.contract||null), counts:((m.coverage||{}).counts||null), labels:_labels, coverage:null, _map_id:m.id, _map_token:(token||""), _map_owner:!!m.is_owner}]};
     TAB_THREADS.people = THREAD;
     renderThread(); window.scrollTo({top:0});
-    if(m.contract){   // the rail's live counts for this map's contract (the snapshot stays until you apply)
+    if(m.contract){   // REFRESH the rail against the live index — counts only, no re-search (the snapshot stays)
       try{
-        const nr = await fetch(`/maps/${encodeURIComponent(m.id)}/navigate`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({t: token||""})});
+        const nr = await fetch(`/maps/${encodeURIComponent(m.id)}/navigate`, {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({t: token||"", rows:false})});
         if(nr.ok){ const nd = await nr.json(); const t0 = THREAD.turns[0]; t0.counts = nd.counts; t0.labels = nd.labels; t0.coverage = nd.coverage; t0.contract = nd.contract; t0.group_options = nd.group_options || t0.group_options || []; if(t0._pid) rerenderPeople(t0._pid); else renderThread(); }
       }catch(e){}
     }

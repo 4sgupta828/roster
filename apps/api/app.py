@@ -1274,6 +1274,7 @@ class MapIn(BaseModel):
 class MapNavigateIn(BaseModel):       # navigate a saved map: re-evaluate its contract (⊕ edits); save = a revision
     contract: dict | None = None
     save: bool = False
+    rows: bool = True                  # False = the RAIL ONLY: chip counts for the contract, no re-search
     t: str = ""                        # share token for viewers (read-only navigation)
 
 
@@ -6073,7 +6074,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=404, detail="map not found")
         if m.get("is_owner"):
             m["share_path"] = f"#m/{m['id']}?t={m['share_token']}"
-        return {"map": m}
+        return {"map": m, "labels": _facet_labels("job" if (m.get("map_type") == "jobs") else "person")}
 
     @app.patch("/maps/{map_id}")
     async def map_patch(map_id: str, body: MapPatchIn,
@@ -6137,6 +6138,15 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
 
     def _facet_schema():
         return load_active_vertical().extraction_schema
+
+    def _facet_labels(kind: str) -> dict:
+        """The vocabulary's display names for a kind — schema only, no I/O. The rail needs them to draw, so any
+        surface that already has counts (a saved map's snapshot) can render without re-running a search."""
+        from roster_vertical.facet_schema import VALUE_LABELS
+        sch = _facet_schema()
+        return {"keys": {k.key: k.label for k in sch.for_kind(kind)}, "values": VALUE_LABELS,
+                "types": {k.key: k.type.value for k in sch.for_kind(kind) if k.navigable},
+                "order": [k.key for k in sch.for_kind(kind) if k.navigable]}
 
     def _facet_store():
         """The Postgres facet store (tests may pin app.state.facet_store to the kernel's in-memory reference)."""
@@ -6363,15 +6373,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             out = await evaluate(c, store, _facet_schema(), FACET_WEIGHTS, depth=depth)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"contract: {e}") from e
-        # the vocabulary's display labels ride along so the UI never hard-codes them
-        from roster_vertical.facet_schema import VALUE_LABELS
-        sch = _facet_schema()
         _meta = getattr(store, "last_counts_meta", None) or {}
         if int(_meta.get("sample") or 1) > 1:
             out["coverage"]["counts_sampled"] = int(_meta["sample"])              # the rail shows ≈
-        out["labels"] = {"keys": {k.key: k.label for k in sch.for_kind(c.kind)}, "values": VALUE_LABELS,
-                         "types": {k.key: k.type.value for k in sch.for_kind(c.kind) if k.navigable},
-                         "order": [k.key for k in sch.for_kind(c.kind) if k.navigable]}
+        out["labels"] = _facet_labels(c.kind)
         return out
 
     def _briefs_fn_for(acc):
@@ -6835,6 +6840,17 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=400, detail="this map was saved before contracts — search again and save it to navigate it")
         cdict = dict(body.contract or base)
         cdict["kind"] = base.get("kind") or ("job" if m.get("map_type") == "jobs" else "person")
+        if not body.rows:
+            # OPENING a saved map: its snapshot is already on screen, so the only thing missing is the rail — and
+            # the chip counts are a property of the contract's must-slice, not of a re-ranked page. Re-running the
+            # search here cost 23 s (jobs) / 37 s (people) on the production index to produce rows the surface
+            # throws away; the counts alone cost 3, and nothing for ten minutes after (the store caches them).
+            if body.save:
+                raise HTTPException(status_code=400, detail="a rail-only navigation has no rows to save")
+            out = await _evaluate_contract(cdict, depth={"rows": False})
+            return {"rows": [], "counts": out["counts"], "coverage": out["coverage"], "contract": out["contract"],
+                    "labels": out.get("labels"), "counts_only": True,
+                    "group_options": _group_options([r for r in (m.get("rows") or []) if isinstance(r, dict)])}
         out = await _evaluate_contract(cdict)
         new_rows = await _rows_from_eval(m.get("map_type") or "jobs", out)
         res = {"rows": new_rows, "counts": out["counts"], "coverage": out["coverage"], "contract": out["contract"], "labels": out.get("labels")}
