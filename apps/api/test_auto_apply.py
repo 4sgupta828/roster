@@ -1,0 +1,141 @@
+"""Controlled auto-apply: the CODE-OWNED parts (ATS detection, label → profile-field mapping, the fill
+plan) — no browser here."""
+from api.auto_apply import detect_ats, map_label, plan_fill, value_for
+
+
+def test_ats_detection():
+    assert detect_ats("https://boards.greenhouse.io/stripe/jobs/123") == "greenhouse"
+    assert detect_ats("https://pinterestcareers.com/jobs/?gh_jid=55") == "greenhouse"
+    assert detect_ats("https://jobs.lever.co/offchainlabs/abc") == "lever"
+    assert detect_ats("https://jobs.ashbyhq.com/level/xyz") == "ashby"
+    assert detect_ats("https://acme.wd5.myworkdayjobs.com/en-US/careers/job/1") == "workday"
+    assert detect_ats("https://careers.example.com/apply") == "generic"
+
+
+def test_labels_map_to_profile_fields_and_custom_questions_stay_open():
+    assert map_label("First Name *") == "first_name" and map_label("Last name") == "last_name"
+    assert map_label("Email") == "email" and map_label("Phone number") == "phone"
+    assert map_label("LinkedIn Profile") == "linkedin" and map_label("Resume/CV") == "resume"
+    assert map_label("Current company") == "current_company"
+    assert map_label("Are you authorized to work in the United States?") == ""
+    assert map_label("Why do you want to work here?") == ""
+
+
+def test_plan_fill_uses_profile_then_saved_answers_and_flags_required_open_questions():
+    profile = {"first_name": "Ada", "last_name": "Lovelace", "email": "ada@example.com", "phone": "555", "linkedin": "https://linkedin.com/in/ada",
+               "city": "Austin", "region": "TX"}
+    fields = [{"label": "First Name", "kind": "text", "name": "first_name", "required": True},
+              {"label": "Last Name", "kind": "text", "name": "last_name", "required": True},
+              {"label": "Email", "kind": "email", "name": "email", "required": True},
+              {"label": "Resume/CV", "kind": "file", "name": "resume", "required": True},
+              {"label": "Location (City)", "kind": "text", "name": "loc", "required": False},
+              {"label": "Are you authorized to work in the US?", "kind": "select", "name": "q1", "required": True, "options": ["Yes", "No"]},
+              {"label": "Why this role?", "kind": "textarea", "name": "q2", "required": False}]
+    plan = plan_fill(fields, profile, {})
+    keys = {f["key"]: f["value"] for f in plan["filled"]}
+    assert keys["first_name"] == "Ada" and keys["email"] == "ada@example.com" and keys["resume"] == "<résumé file>"
+    assert keys["city"] == "Austin, TX"
+    assert [q["label"] for q in plan["open"]] == ["Are you authorized to work in the US?", "Why this role?"]
+    assert [q["label"] for q in plan["blocking"]] == ["Are you authorized to work in the US?"]   # required + unanswered blocks submit
+    plan2 = plan_fill(fields, profile, {"Are you authorized to work in the US?": "Yes"})
+    assert not plan2["blocking"] and any(f["key"] == "answer" and f["value"] == "Yes" for f in plan2["filled"])
+    assert value_for("full_name", profile) == "Ada Lovelace" and value_for("github", profile) == ""
+
+
+def test_options_group_into_one_question_and_voluntary_ones_are_flagged():
+    from api.auto_apply import group_fields
+    fields = [{"label": "Yes, I will require sponsorship", "kind": "radio", "name": "visa", "group_key": "g1", "group_label": "Will you require visa sponsorship? *", "selector": "#v1"},
+              {"label": "No, I will not", "kind": "radio", "name": "visa", "group_key": "g1", "group_label": "Will you require visa sponsorship? *", "selector": "#v2"},
+              {"label": "East Asian", "kind": "checkbox", "name": "c1", "group_key": "g2", "group_label": "What are your racial, ethnic, and origin identities?", "selector": "#c1"},
+              {"label": "White", "kind": "checkbox", "name": "c2", "group_key": "g2", "group_label": "What are your racial, ethnic, and origin identities?", "selector": "#c2"},
+              {"label": "I certify the above is true", "kind": "checkbox", "name": "ack", "group_key": "g3", "group_label": "Overview Application", "selector": "#a1"},
+              {"label": "Start typing...", "kind": "text", "name": "loc", "group_label": "Intended work location (city, state)", "selector": "#loc"}]
+    g = group_fields(fields)
+    labels = [(x["label"], x["kind"], len(x.get("options") or [])) for x in g]
+    assert labels[0] == ("Will you require visa sponsorship?", "radio", 2)
+    assert labels[1] == ("What are your racial, ethnic, and origin identities?", "checkbox", 2)
+    assert labels[2] == ("I certify the above is true", "checkbox", 1)          # page chrome never names a question
+    assert labels[3] == ("Intended work location (city, state)", "text", 0)   # a placeholder is not a label
+    plan = plan_fill(fields, {"first_name": "A"}, {})
+    vol = [q for q in plan["open"] if q.get("voluntary")]
+    assert [q["label"] for q in vol] == ["What are your racial, ethnic, and origin identities?"]
+    assert any(f["key"] == "answer" for f in plan_fill(fields, {}, {"Will you require visa sponsorship?": "No, I will not"})["filled"])
+
+
+def test_standard_questions_are_answered_from_the_profile_and_the_answer_bank():
+    from api.auto_apply import norm_question, standard_answer
+    prof = {"requires_sponsorship": "No", "us_authorized_to_work": "Yes", "preferred_name": "Sam", "pronouns": "He/Him", "work_location": "Austin, TX, USA",
+            "ack_privacy": "Yes", "ack_certify": "No", "veteran_status": "Prefer not to say", "gender": "Man", "desired_salary": "$200k"}
+    yes_no = ["Yes, I will require visa sponsorship for employment with Sift now or in the future", "No, I will not require visa sponsorship for employment with Sift now or in the future"]
+    assert standard_answer("Will you now or in the future require visa sponsorship for employment at Sift?", "radio", yes_no, prof).startswith("No,")
+    assert standard_answer("Are you eligible to work in the country in which you are applying?", "radio", ["Yes", "No"], prof) == "Yes"
+    assert standard_answer("Preferred First Name", "text", [], prof) == "Sam"
+    assert standard_answer("What are your pronouns?", "checkbox", ["She/Her/Hers", "He/Him/His", "They/Them/Theirs"], prof) == "He/Him/His"
+    assert standard_answer("Please list the location where you expect to work.", "text", [], prof) == "Austin, TX, USA"
+    assert standard_answer("Point of data transfer — Yes, I acknowledge Sift's Global Recruitment Privacy Notice", "radio", ["Yes, I acknowledge Sift’s Global Recruitment Privacy Notice"], prof).startswith("Yes")
+    assert standard_answer("I certify that all information provided is true, accurate, and complete", "checkbox", ["I certify …"], prof) == ""   # not pre-approved
+    assert standard_answer("Veteran status", "radio", ["I am not a protected veteran", "I identify as a protected veteran", "Prefer not to say"], prof) == "Prefer not to say"
+    assert standard_answer("What gender do you identify as?", "radio", ["Woman", "Man", "Non-binary"], prof) == "Man"
+    assert standard_answer("Why do you want to work here?", "textarea", [], prof) == ""                     # never a guess
+    assert norm_question("Why do you want to work here?!") == "why do you want to work here"
+    fields = [{"label": "Why do you want to work here?", "kind": "textarea", "name": "q", "required": True}]
+    assert plan_fill(fields, {}, {"Why do you want to work here?!": "Because of the mission."})["filled"][0]["value"] == "Because of the mission."
+
+
+def test_links_to_work_and_legal_name_come_from_the_profile():
+    from api.auto_apply import standard_answer
+    prof = {"github": "https://github.com/ada", "portfolio_website": "https://ada.dev", "linkedin": "https://linkedin.com/in/ada"}
+    assert standard_answer("Please share links to your most relevant technical work.", "textarea", [], prof) == "https://github.com/ada\nhttps://ada.dev\nhttps://linkedin.com/in/ada"
+    assert map_label("Full Legal Name") == "full_name" and map_label("Legal name *") == "full_name"
+    assert standard_answer("Please share links to your most relevant technical work.", "textarea", [], {}) == ""
+
+
+def test_date_and_address_questions_answer_from_code_and_profile():
+    import datetime
+    from api.auto_apply import map_label, standard_answer, value_for
+    prof = {"address_line1": "1 Main St", "city": "Austin", "region": "TX", "postal_code": "78701"}
+    assert standard_answer("Today's Date of Application (MM/DD/YY Format)", "text", [], prof) == datetime.date.today().strftime("%m/%d/%y")
+    assert standard_answer("Application date (DD/MM/YYYY)", "text", [], prof) == datetime.date.today().strftime("%d/%m/%Y")
+    # address-block lines go through the profile mapping the planner uses for text fields
+    field = lambda lab: value_for(map_label(lab), prof)
+    assert field("Home Address Line 1") == "1 Main St"
+    assert field("Home Address City") == "Austin" and field("Home Address State") == "TX"
+    assert field("Home Address Zip Code") == "78701"
+    assert field("Location") == "Austin, TX"        # a Location field wants City, State; the address City line does not
+    # a one-line "city, state and country" question wants the whole location (Promise's Ashby form gave just 'TX')
+    prof["country"] = "United States"
+    assert field("Specify your city, state, and country of residence.") == "Austin, TX, United States"
+    assert field("Home Address State") == "TX"
+
+
+def test_decline_never_resolves_to_a_yes_no_option():
+    from api.auto_apply import _pick_option
+    opts = ["Yes", "No", "I prefer not to answer"]
+    assert _pick_option(opts, "prefer not to say") == "I prefer not to answer"      # was 'No' ('no' ⊂ 'prefer NOt to say')
+    assert _pick_option(["Male", "Female", "Decline to self-identify"], "Prefer not to say") == "Decline to self-identify"
+    assert _pick_option(["Man", "Woman", "Non-Binary"], "Man") == "Man"             # exact beats the substring in 'Woman'
+    assert _pick_option(["Yes", "No"], "No") == "No" and _pick_option(["Yes", "No"], "yes") == "Yes"
+
+
+def test_citizenship_and_onsite_questions_answer_from_the_profile_only():
+    from api.auto_apply import standard_answer
+    yn = ["Yes", "No"]
+    prof = {"us_citizen_or_permanent_resident": "Yes", "can_work_onsite": "No"}
+    assert standard_answer("Are you a U.S. Citizen or Green Card holder?", "boolean", yn, prof) == "Yes"
+    assert standard_answer("Are you able to work in person at the Promise office location listed in the job description at least four times per week?", "boolean", yn, prof) == "No"
+    # not in the profile → no guess
+    assert standard_answer("Are you a U.S. Citizen or Green Card holder?", "boolean", yn, {}) == ""
+    assert standard_answer("Are you able to work in person at the office?", "boolean", yn, {"remote_preference": "Remote"}) == ""
+
+
+def test_phone_gets_its_country_code_from_the_profile():
+    from api.auto_apply import normalize_phone, value_for
+    assert normalize_phone("555-010-0100", "United States") == "+1 555-010-0100"
+    assert normalize_phone("(555) 010 0100", "us") == "+1 555-010-0100"
+    assert normalize_phone("1 555 010 0100", "US") == "+1 555-010-0100"
+    assert normalize_phone("+44 20 7946 0958", "us") == "+442079460958"           # an explicit code is kept
+    assert normalize_phone("020 7946 0958", "United Kingdom") == "+44 02079460958"
+    assert normalize_phone("98765 43210", "in") == "+91 9876543210"
+    assert normalize_phone("555-0100", "") == "555-0100"                          # unknown country → as typed
+    assert value_for("phone", {"phone": "555 010 0100", "country": "United States"}) == "+1 555-010-0100"
+    assert value_for("phone", {"phone": "555 010 0100", "country": "United States"}, {"phone": "+1 999"}) == "+1 999"   # the user's own answer wins

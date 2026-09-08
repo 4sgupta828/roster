@@ -77,11 +77,24 @@ def people_semantic_first_enabled() -> bool:
     return os.environ.get("ROSTER_PEOPLE_SEMANTIC_FIRST", "").lower() in ("1", "true", "yes")
 
 
+_EMBED_DOWN_UNTIL = [0.0]        # an out-of-credit / dead-key embedding provider: remembered, so a search degrades instantly
+EMBED_COOLDOWN = 120.0
+
+
+def embed_unavailable_for() -> float:
+    """Seconds the embedding provider is still considered down (0 = healthy). The routes report it."""
+    import time as _t
+    return max(0.0, _EMBED_DOWN_UNTIL[0] - _t.monotonic())
+
+
 def embed_query(text: str) -> str | None:
     """Embed the query with text-embedding-3-small → a pgvector literal '[...]'. None on any failure
     (the caller falls back to the exact facet path). Never raises to the route."""
+    import time as _t
     key = os.environ.get("OPENAI_API_KEY")
     if not key or not (text or "").strip():
+        return None
+    if _EMBED_DOWN_UNTIL[0] > _t.monotonic():
         return None
     try:
         body = json.dumps({"model": "text-embedding-3-small", "input": [text[:2000]]}).encode()
@@ -90,6 +103,16 @@ def embed_query(text: str) -> str | None:
         with urllib.request.urlopen(req, timeout=15) as r:
             v = json.load(r)["data"][0]["embedding"]
         return "[" + ",".join(f"{x:.6f}" for x in v) + "]"
+    except urllib.error.HTTPError as e:  # noqa: BLE001
+        detail = ""
+        try:
+            detail = e.read()[:200].decode("utf-8", "replace")
+        except Exception:   # noqa: BLE001
+            pass
+        if e.code in (401, 402, 429):
+            _EMBED_DOWN_UNTIL[0] = _t.monotonic() + EMBED_COOLDOWN
+        _log.warning("embed_query failed: HTTP %s %s", e.code, detail[:120])
+        return None
     except Exception as e:  # noqa: BLE001
         _log.warning("embed_query failed: %s", e)
         return None
@@ -116,7 +139,7 @@ _SEN_RE = [
     (re.compile(r"\b(intern|internship|co-?op)\b", re.I), "intern"),
     (re.compile(r"\b(junior|jr\.?|entry[- ]?level|new ?grad|graduate|associate)\b", re.I), "junior"),
     (re.compile(r"\b(principal|staff|distinguished|fellow)\b", re.I), "staff_plus"),
-    (re.compile(r"\b(director|vp|vice ?president|head of|chief|cto|ceo|cfo)\b", re.I), "leadership"),
+    (re.compile(r"\b(director|vp|vice ?president|head of|chief|cto|ceo|cfo|founder|founding|co-?founder)\b", re.I), "leadership"),
     (re.compile(r"\b(senior|sr\.?|lead)\b", re.I), "senior"),
 ]
 def _title_seniority(title: str) -> str:
@@ -124,6 +147,473 @@ def _title_seniority(title: str) -> str:
         if rx.search(title or ""):
             return lvl
     return "mid"
+
+
+def _title_level(title: str) -> tuple[str, bool]:
+    """(level, known): the level a TITLE states, and whether it states one at all. An unmarked
+    'Software Engineer' is UNKNOWN — never a confident 'mid' (wrong level is worse than no level)."""
+    for rx, lvl in _SEN_RE:
+        if rx.search(title or ""):
+            return lvl, True
+    return "mid", False
+
+
+# ENGINEERING FAMILIES a title or a profile can STATE explicitly. Used only for a soft demotion when a
+# title names a family the profile never mentions — never as a gate (titles vary by company).
+_FAMILY_RX = {
+    "backend / infra": re.compile(r"\b(backend|back-end|back end|server-side|infra|infrastructure|platform|sre|site reliability|devops|reliability|distributed systems|systems engineer|cloud engineer)\b", re.I),
+    "frontend": re.compile(r"\b(frontend|front-end|front end|ui engineer|web developer|react|angular|vue)\b", re.I),
+    "mobile": re.compile(r"\b(mobile|ios|android|flutter|react native)\b", re.I),
+    "security": re.compile(r"\b(security|appsec|infosec|penetration|threat)\b", re.I),
+    "data / ML": re.compile(r"\b(data scientist|data science|data analyst|analytics engineer|machine learning|ml engineer|ai engineer|research scientist)\b", re.I),
+    "QA / test": re.compile(r"\b(qa engineer|quality assurance|test engineer|sdet|automation engineer)\b", re.I),
+    "hardware": re.compile(r"\b(hardware|firmware|embedded|fpga|asic|silicon)\b", re.I),
+    # OTHER FIELDS (owner, 2026-09-05: a pharma "Senior Director, Clinical Translational Scientist" showed
+    # 55% for a Founder CTO — the embedding sees leadership vocabulary; the field must count)
+    "clinical / pharma": re.compile(r"\b(clinical|pharmac\w*|translational|biolog\w*|biostatist\w*|medical (director|affairs|writer|science)|physician|nurse|nursing|therapeut\w*|regulatory affairs|drug (safety|development)|pharmacovigilance|toxicolog\w*|immunolog\w*|oncolog\w*)\b", re.I),
+    "finance / accounting": re.compile(r"\b(accountant|accounting|controller|treasury|actuar\w*|auditor|tax (manager|analyst|director)|fp&a|financial (analyst|planning|controller|reporting)|bookkeep\w*|payroll)\b", re.I),
+    "sales": re.compile(r"\b(sales|account executive|business development|bdr|sdr|sales development|account manager|customer success)\b", re.I),
+    "marketing": re.compile(r"\b(marketing|brand manager|seo|content (strategist|marketer|writer)|demand generation|communications manager|public relations)\b", re.I),
+    "legal": re.compile(r"\b(counsel|attorney|paralegal|legal|compliance officer)\b", re.I),
+    "people / HR": re.compile(r"\b(recruit\w*|talent acquisition|human resources|hr (business|generalist|manager|director)|people (operations|partner))\b", re.I),
+    "operations / supply chain": re.compile(r"\b(supply chain|logistics|procurement|warehouse|fleet|facilities manager|operations (manager|coordinator|associate))\b", re.I),
+    "design": re.compile(r"\b(product designer|ux|ui/ux|graphic design\w*|visual designer|industrial designer)\b", re.I),
+    "mechanical / civil / electrical": re.compile(r"\b(mechanical engineer\w*|civil engineer\w*|structural engineer\w*|electrical engineer\w*|hvac|manufacturing engineer\w*|process engineer\w*|quality engineer\w*|turbomachinery|turbine\w*|propulsion|aerospace|aerodynamic\w*|combustion|thermodynamic\w*|rotor\w*|compressor\w*|piping|solidworks|ansys|cad design\w*|mechanical design|power electronics|pcb)\b", re.I),
+}
+_TECH_FAMILIES = {"backend / infra", "frontend", "mobile", "security", "data / ML", "QA / test", "hardware"}
+
+# FIELD TAXONOMY (owner, 2026-09-05: "meaning-based match via LLM; regex only as fallback"). The model
+# picks a posting's / a profile's field from this list (vocabulary supplied to it, never matched by
+# pattern); matching compares the two choices. The regex families above remain ONLY the fallback for a
+# posting that has no model facets yet.
+JOB_FIELDS = ("software", "data_ml", "hardware", "product", "design", "clinical_pharma", "finance", "sales",
+              "marketing", "legal", "people_hr", "operations", "mechanical_civil_electrical", "research", "other")
+FIELD_LABELS = {"software": "software engineering", "data_ml": "data / ML", "hardware": "hardware", "product": "product management",
+                "design": "design", "clinical_pharma": "clinical / pharma", "finance": "finance / accounting", "sales": "sales",
+                "marketing": "marketing", "legal": "legal", "people_hr": "people / HR", "operations": "operations / supply chain",
+                "mechanical_civil_electrical": "mechanical / civil / electrical engineering", "research": "research / science", "other": "other"}
+_TECH_FIELDS = {"software", "data_ml", "hardware"}
+JOB_LEVELS = ("intern", "junior", "mid", "senior", "staff_plus", "leadership")
+_REGEX_FAMILY_TO_FIELD = {"backend / infra": "software", "frontend": "software", "mobile": "software", "security": "software",
+                          "QA / test": "software", "data / ML": "data_ml", "hardware": "hardware", "clinical / pharma": "clinical_pharma",
+                          "finance / accounting": "finance", "sales": "sales", "marketing": "marketing", "legal": "legal",
+                          "people / HR": "people_hr", "operations / supply chain": "operations", "design": "design",
+                          "mechanical / civil / electrical": "mechanical_civil_electrical"}
+
+
+def profile_fields(profile: dict | None, prefs: dict | None = None, text: str = "") -> set[str]:
+    """The FIELDS a profile is in, model-first: the résumé parser's `field`/`fields`, the cached candidate
+    brief's `fields` (prefs['profile_fields']); regex families over the text only when the model said nothing."""
+    out: set[str] = set()
+    for src in ((profile or {}).get("fields") or []), ((prefs or {}).get("profile_fields") or []), [(profile or {}).get("field") or ""]:
+        for f in src:
+            f = str(f or "").strip().lower()
+            if f in JOB_FIELDS and f != "other":
+                out.add(f)
+    if not out and text:
+        out = {_REGEX_FAMILY_TO_FIELD[f] for f in text_families(text) if f in _REGEX_FAMILY_TO_FIELD}
+    return out
+
+
+def job_facets(j: dict) -> dict:
+    f = j.get("facets") if isinstance(j, dict) else None
+    if isinstance(f, str):
+        try:
+            import json as _json
+            f = _json.loads(f)
+        except Exception:   # noqa: BLE001
+            f = None
+    return f if isinstance(f, dict) else {}
+
+
+def job_level(j: dict) -> tuple[str, bool]:
+    """(level, known) — the model's level for the posting when it has facets; the title heuristic only as fallback."""
+    lv = str(job_facets(j).get("level") or "").strip().lower()
+    if lv in JOB_LEVELS:
+        return lv, True
+    if job_facets(j) and lv == "unknown":
+        return "mid", False
+    return _title_level(j.get("title") or "")
+
+
+def job_field_penalty(prof_fields: set[str], j: dict) -> tuple[float, str]:
+    """(penalty, reason) when a posting is in a field the profile is not: model facets first; the regex
+    families (title, then body) only for a posting that has no facets yet. A different field entirely
+    costs 0.20; another tech discipline (software vs data/ML vs hardware) 0.10. Never a gate."""
+    if not prof_fields:
+        return 0.0, ""
+    jf = job_facets(j)
+    field = str(jf.get("field") or "").strip().lower()
+    if field in JOB_FIELDS:
+        if field == "other" or field in prof_fields:
+            return 0.0, ""
+        if field in _TECH_FIELDS and prof_fields & _TECH_FIELDS:
+            return 0.10, f"a different discipline: {FIELD_LABELS[field]}"
+        return 0.20, f"a different field: {FIELD_LABELS[field]}"
+    # FALLBACK (no model facets on this row yet)
+    fam_prof = {f for f, fld in _REGEX_FAMILY_TO_FIELD.items() if fld in prof_fields}
+    return family_penalty(fam_prof, j.get("title") or "", str(j.get("body_head") or ""))
+
+# FIELD TAXONOMY (owner, 2026-09-05: "meaning-based match via LLM; regex only as fallback"). The model
+# picks a posting's / a profile's field from this list (vocabulary supplied to it, never matched by
+# pattern); matching compares the two choices. The regex families above remain ONLY the fallback for a
+# posting that has no model facets yet.
+JOB_FIELDS = ("software", "data_ml", "hardware", "product", "design", "clinical_pharma", "finance", "sales",
+              "marketing", "legal", "people_hr", "operations", "mechanical_civil_electrical", "research", "other")
+FIELD_LABELS = {"software": "software engineering", "data_ml": "data / ML", "hardware": "hardware", "product": "product management",
+                "design": "design", "clinical_pharma": "clinical / pharma", "finance": "finance / accounting", "sales": "sales",
+                "marketing": "marketing", "legal": "legal", "people_hr": "people / HR", "operations": "operations / supply chain",
+                "mechanical_civil_electrical": "mechanical / civil / electrical engineering", "research": "research / science", "other": "other"}
+_TECH_FIELDS = {"software", "data_ml", "hardware"}
+JOB_LEVELS = ("intern", "junior", "mid", "senior", "staff_plus", "leadership")
+_REGEX_FAMILY_TO_FIELD = {"backend / infra": "software", "frontend": "software", "mobile": "software", "security": "software",
+                          "QA / test": "software", "data / ML": "data_ml", "hardware": "hardware", "clinical / pharma": "clinical_pharma",
+                          "finance / accounting": "finance", "sales": "sales", "marketing": "marketing", "legal": "legal",
+                          "people / HR": "people_hr", "operations / supply chain": "operations", "design": "design",
+                          "mechanical / civil / electrical": "mechanical_civil_electrical"}
+
+
+def profile_fields(profile: dict | None, prefs: dict | None = None, text: str = "") -> set[str]:
+    """The FIELDS a profile is in, model-first: the résumé parser's `field`/`fields`, the cached candidate
+    brief's `fields` (prefs['profile_fields']); regex families over the text only when the model said nothing."""
+    out: set[str] = set()
+    for src in ((profile or {}).get("fields") or []), ((prefs or {}).get("profile_fields") or []), [(profile or {}).get("field") or ""]:
+        for f in src:
+            f = str(f or "").strip().lower()
+            if f in JOB_FIELDS and f != "other":
+                out.add(f)
+    if not out and text:
+        out = {_REGEX_FAMILY_TO_FIELD[f] for f in text_families(text) if f in _REGEX_FAMILY_TO_FIELD}
+    return out
+
+
+def job_facets(j: dict) -> dict:
+    f = j.get("facets") if isinstance(j, dict) else None
+    if isinstance(f, str):
+        try:
+            import json as _json
+            f = _json.loads(f)
+        except Exception:   # noqa: BLE001
+            f = None
+    return f if isinstance(f, dict) else {}
+
+
+def job_level(j: dict) -> tuple[str, bool]:
+    """(level, known) — the model's level for the posting when it has facets; the title heuristic only as fallback."""
+    lv = str(job_facets(j).get("level") or "").strip().lower()
+    if lv in JOB_LEVELS:
+        return lv, True
+    if job_facets(j) and lv == "unknown":
+        return "mid", False
+    return _title_level(j.get("title") or "")
+
+
+def job_field_penalty(prof_fields: set[str], j: dict) -> tuple[float, str]:
+    """(penalty, reason) when a posting is in a field the profile is not: model facets first; the regex
+    families (title, then body) only for a posting that has no facets yet. A different field entirely
+    costs 0.20; another tech discipline (software vs data/ML vs hardware) 0.10. Never a gate."""
+    if not prof_fields:
+        return 0.0, ""
+    jf = job_facets(j)
+    field = str(jf.get("field") or "").strip().lower()
+    if field in JOB_FIELDS:
+        if field == "other" or field in prof_fields:
+            return 0.0, ""
+        if field in _TECH_FIELDS and prof_fields & _TECH_FIELDS:
+            return 0.10, f"a different discipline: {FIELD_LABELS[field]}"
+        return 0.20, f"a different field: {FIELD_LABELS[field]}"
+    # FALLBACK (no model facets on this row yet)
+    fam_prof = {f for f, fld in _REGEX_FAMILY_TO_FIELD.items() if fld in prof_fields}
+    return family_penalty(fam_prof, j.get("title") or "", str(j.get("body_head") or ""))
+
+
+_BODY_FAMILIES = ("clinical / pharma", "mechanical / civil / electrical", "finance / accounting", "legal")
+
+
+def family_of_body(body: str) -> str:
+    """The FIELD a posting body is about, when its title says nothing: one of the distinctive non-software
+    families, and only when the body names at least two different terms of it (a software posting that
+    mentions 'the sales team' once must not turn into a sales role)."""
+    txt = (body or "")[:1200]
+    if not txt:
+        return ""
+    best, best_n = "", 0
+    for fam in _BODY_FAMILIES:
+        hits = {m.group(0).lower() for m in _FAMILY_RX[fam].finditer(txt)}
+        if len(hits) >= 2 and len(hits) > best_n:
+            best, best_n = fam, len(hits)
+    return best
+
+
+def family_penalty(profile_families: set[str], title: str, body: str = "") -> tuple[float, str]:
+    """(score penalty, reason) for a title that STATES a family the profile does not: a different
+    field entirely (pharma for a software profile) costs 0.20 and says so; another engineering
+    discipline costs 0.10 (titles vary by company). ('' → no penalty.)"""
+    fam = family_mismatch(profile_families, title)
+    if fam:
+        if fam in _TECH_FAMILIES:
+            return 0.10, f"title says {fam}"
+        return 0.20, f"title says {fam} — a different field"
+    if profile_families and body and not text_families(title):
+        bf = family_of_body(body)
+        if bf and bf not in profile_families:
+            return 0.20, f"posting is about {bf} — a different field"
+    return 0.0, ""
+
+
+# MATCH PERCENT, calibrated (owner, 2026-09-05: "55% match … 0% against my résumé"). Raw cosine
+# similarity sits near 0.55 for ANY résumé against its nearest postings (random postings score ~0.28,
+# never above ~0.50), so a raw percentage showed the pool's floor as a 55% fit. The percent now measures
+# how far above the résumé's own noise floor a posting sits: floor = what an unrelated posting can reach
+# (the p90 of a random sample for this query), span 0.25 → the best matches read ~90, the floor ~0.
+_DEFAULT_SIM_FLOOR, _SIM_SPAN = 0.40, 0.25
+
+
+def calibrated_pct(sim: float, floor: float | None = None) -> int:
+    f = _DEFAULT_SIM_FLOOR if floor is None else float(floor)
+    return int(max(1, min(99, round(100.0 * (float(sim or 0.0) - f) / _SIM_SPAN))))
+
+
+def text_families(text: str) -> set[str]:
+    return {fam for fam, rx in _FAMILY_RX.items() if rx.search(text or "")}
+
+
+def family_mismatch(profile_families: set[str], title: str) -> str:
+    """The family a TITLE states that the profile does not — '' when the title states none, the
+    profile states none, or they overlap (a full-stack profile is never demoted either way)."""
+    if not profile_families:
+        return ""
+    stated = text_families(title)
+    if not stated or stated & profile_families:
+        return ""
+    return sorted(stated)[0]
+
+
+_SKILL_LEXICON = ("java", "kotlin", "scala", "python", "go", "golang", "rust", "c++", "c#", ".net", "ruby", "php", "swift",
+                  "typescript", "javascript", "node", "react", "angular", "vue", "next.js", "graphql", "rest", "grpc",
+                  "kubernetes", "k8s", "docker", "terraform", "ansible", "helm", "linux", "aws", "gcp", "azure",
+                  "postgres", "postgresql", "mysql", "mongodb", "redis", "cassandra", "dynamodb", "elasticsearch",
+                  "kafka", "rabbitmq", "spark", "flink", "airflow", "snowflake", "dbt", "sql", "nosql",
+                  "pytorch", "tensorflow", "jax", "llm", "langchain", "spring", "django", "flask", "fastapi", "rails",
+                  "microservices", "distributed systems", "ci/cd", "observability", "prometheus", "grafana", "datadog",
+                  "sre", "devops", "security", "ios", "android", "flutter", "react native", "figma")
+
+
+def profile_skills(text: str, limit: int = 8) -> list[str]:
+    """Skills the profile NAMES (lexicon match, code-owned) — for the interpreted-brief strip."""
+    t = " " + re.sub(r"[^a-z0-9+#./ ]+", " ", (text or "").lower()) + " "
+    out = []
+    for s in _SKILL_LEXICON:
+        if f" {s} " in t or f" {s}," in t or f" {s}." in t:
+            if s not in out:
+                out.append(s)
+    return out[:limit]
+
+
+_MUST_LABELS = {"remote": "remote", "hybrid": "hybrid", "f500": "Fortune 500", "public": "public company",
+                "startup": "startup", "leadership": "leadership"}
+
+
+def job_brief_contract(*, question: str, plan: dict | None = None, query: dict | None = None,
+                       job_must: list[str] | None = None, scope: dict | None = None,
+                       profile_text: str = "", matched_on: str = "", stated_seniority: str = "",
+                       levels: list[str] | None = None, level_span: int = 1) -> dict:
+    """The INTERPRETED BRIEF for a job search — the same contract shape the Talent Map shows: what
+    FILTERED the list (hard), what only RANKS it (soft), the search angles, how the profile was read
+    (résumé path), the assumptions, and how the order was produced. Code-owned; nothing here is a
+    model's judgment beyond the planner's own fields, which are labeled as such."""
+    plan = plan or {}
+    query = query or {}
+    hard: dict[str, list[str]] = {}
+    soft: dict[str, list[str]] = {}
+    assumptions: list[str] = []
+    cos = [str(c).replace("_", " ") for c in (query.get("company") or plan.get("company") or []) if str(c).strip()]
+    if cos:
+        hard["company"] = cos[:6]
+    loc = str(query.get("location") or plan.get("location") or "").strip()
+    if loc:
+        hard["location"] = [loc]
+    if job_must:
+        hard["must have"] = [_MUST_LABELS.get(str(m), str(m)) for m in job_must]
+    _lv = ["centered on " + LEVEL_LABELS[l] + ("" if level_span == 0 else " (nearby levels too)" if level_span == 1 else " (wide)") for l in (levels or [])[:1] if l in LEVEL_LABELS]
+    if scope and scope.get("label"):
+        hard["scope"] = [str(scope["label"])]
+    profile: dict = {}
+    if profile_text:
+        fams = sorted(text_families(profile_text))
+        skills = profile_skills(profile_text)
+        yrs = re.search(r"(?i)\b(\d{1,2})\+?\s*years?\b", profile_text)
+        levels = sorted(years_to_levels(profile_text))
+        profile = {"source": matched_on, "families": fams, "skills": skills,
+                   "years": (yrs.group(1) if yrs else ""), "level_pref": [l.replace("_", " ") for l in levels]}
+        if fams:
+            soft["discipline"] = fams
+        if skills:
+            soft["skills"] = skills[:6]
+        if _lv:
+            soft["level"] = _lv
+        elif levels:
+            soft["level"] = [l.replace("_", " ") for l in levels]
+        else:
+            assumptions.append("years of experience not stated — all levels shown; titles that state a level rank by it")
+        if not fams:
+            assumptions.append("no discipline named (backend, frontend, data…) — titles of any discipline are eligible")
+    else:
+        kw = [str(k) for k in (plan.get("must_have") or query.get("title_keywords") or []) if str(k).strip()]
+        if kw:
+            soft["title words"] = kw[:6]
+        sen = (stated_seniority or plan.get("seniority") or "").strip()
+        if _lv:
+            soft["level"] = _lv
+        elif sen:
+            soft["level"] = [sen]
+        else:
+            assumptions.append("level not stated — all levels shown; titles that state a level rank by it")
+    angles = [str(a) for a in (plan.get("variants") or []) if str(a).strip()][:5]
+    if profile_text:
+        ranking = ("how closely each posting's title and team match your profile first; the stated level, your location "
+                   "scope and titles that name a different discipline adjust it — the reasons are on each card")
+    elif angles:
+        ranking = (f"how closely each posting's title matches your search across {len(angles) + 1} angles first; agreement "
+                   "across angles, must-have title words and the stated level adjust it — the reasons are on each card")
+    else:
+        ranking = "title and company match to your search first, then location and level"
+    return {"hard": hard, "soft": soft, "angles": angles, "intent": str(plan.get("intent") or "")[:200],
+            "profile": profile, "assumptions": assumptions[:3], "ranking": ranking}
+
+
+# EXPLICIT LEVEL FILTER (owner, 2026-09-04): junior / mid / senior / staff+ / exec chips on both Talent Map
+# and Jobs. Buckets map the index's seniority vocabulary and the title heuristic onto five user-facing levels.
+LEVEL_BUCKETS = {
+    "junior": {"junior", "intern", "student", "entry", "associate", "new_grad"},
+    "mid": {"mid", "researcher", "ic"},
+    "senior": {"senior", "lead"},
+    "staff": {"staff_plus", "staff", "principal", "distinguished_scientist", "distinguished", "fellow", "architect"},
+    "exec": {"leadership", "engineering_manager", "senior_manager", "director", "head", "vp", "c_level", "cto", "ceo", "cfo", "founder"},
+}
+LEVEL_LABELS = {"junior": "Junior", "mid": "Mid", "senior": "Senior", "staff": "Staff+", "exec": "Manager / Exec"}
+
+
+def level_bucket(value: str) -> str:
+    v = (value or "").strip().lower().replace(" ", "_").replace("-", "_")
+    for b, vals in LEVEL_BUCKETS.items():
+        if v in vals:
+            return b
+    return ""
+
+
+_LEVEL_ORDER = ["junior", "mid", "senior", "staff", "exec"]
+
+
+def apply_level_pref(rows: list[dict], level: str, *, kind: str, span: int = 1) -> tuple[list[dict], dict]:
+    """LEVEL PREFERENCE (owner, 2026-09-04: levels are not calibrated across companies, so a level is
+    a centre, never a gate). Stable partition: the stated level EXACTLY the preference leads, then
+    ±1 level, then rows whose level is UNSTATED (neutral — an unmarked title is not a level), then
+    the rest (still shown, ranked down). `kind` = 'job' (level from the title) | 'person' (seniority)."""
+    want = (level or "").strip().lower()
+    if want not in LEVEL_BUCKETS or not rows:
+        return list(rows or []), {}
+    wi = _LEVEL_ORDER.index(want)
+    exact, near, unstated, far = [], [], [], []
+    for r in rows:
+        if kind == "job":
+            t = r.get("title") or ""
+            lvl, known = job_level(r)
+            b = level_bucket(lvl) if known else ""
+            if not b and re.search(r"(?i)\bmanager\b", t) and not re.search(r"(?i)\b(account|technical account|program|project|community|office)\s+manager\b", t):
+                b = "exec"
+        else:
+            sen = next((a.get("display") for a in (r.get("attributes") or []) if a.get("key") == "seniority" and a.get("display")), "")
+            b = level_bucket(sen)
+        if not b:
+            unstated.append(r)
+        elif b == want:
+            exact.append(r)
+        elif abs(_LEVEL_ORDER.index(b) - wi) <= max(0, int(span)):
+            near.append(r)
+        else:
+            far.append(r)
+    for r in exact:
+        r.setdefault("reasons", [])
+        if "level match" not in r["reasons"]:
+            r["reasons"] = list(r["reasons"]) + ["level match"]
+    for r in near:
+        r.setdefault("reasons", [])
+        if "nearby level" not in r["reasons"]:
+            r["reasons"] = list(r["reasons"]) + ["nearby level"]
+    info = {"level": want, "label": LEVEL_LABELS[want], "span": max(0, int(span)), "exact": len(exact), "near": len(near),
+            "unstated": len(unstated), "far": len(far)}
+    return exact + near + unstated + far, info
+
+
+def profile_search_prefs(question: str, *, brief_search_text: str = "", saved_config: dict | None = None,
+                         title_keywords: list[str] | None = None, level: str = "", country: str = "us",
+                         metro: str = "", state: str = "", limit: int = 60) -> dict:
+    """PROFILE-STEERED job search (owner, 2026-09-04: 'Match jobs to résumé works wonderfully; make Find
+    jobs that good'): the résumé-match engine's preferences for a free-text query. The query STEERS
+    (brief_text leads the embedding; its title words lead the slate) while the résumé's synthesized
+    brief and the user's remembered fine-tune preferences (locations, remote, company types, exclusions)
+    still shape the match. Code-owned merge; nothing is a model's call here."""
+    cfg = saved_config or {}
+    kws = [str(k).strip().lower() for k in (title_keywords or []) if str(k).strip()][:6]
+    brief = (question or "").strip()
+    if brief_search_text:
+        brief = brief + "\n\n" + brief_search_text.strip()
+    prefs = {"brief_text": brief[:4000], "role_keywords": kws or [str(k) for k in (cfg.get("role_keywords") or [])][:6],
+             "limit": limit, "country": country, "metro": metro, "state": state,
+             "locations": [str(x) for x in (cfg.get("locations") or [])][:8], "remote": bool(cfg.get("remote")),
+             "company_types": [str(x) for x in (cfg.get("company_types") or [])][:3],
+             "exclude_keywords": [str(x) for x in (cfg.get("exclude_keywords") or [])][:10]}
+    _CHIP = {"junior": {"junior"}, "mid": {"mid"}, "senior": {"senior"}, "staff": {"staff_plus"}, "exec": {"leadership"}}
+    lv = _CHIP.get((level or "").strip().lower()) or wanted_levels(level or "")
+    if lv:
+        prefs["seniorities"] = sorted(lv)
+    elif cfg.get("seniorities"):
+        prefs["seniorities"] = [str(x) for x in cfg["seniorities"]][:4]
+    return {k: v for k, v in prefs.items() if v not in ([], "", None, False) or k in ("limit", "country")}
+
+
+_WANT_LEVELS = {"intern": {"intern"}, "junior": {"junior"}, "entry": {"junior"}, "new grad": {"junior"},
+                "mid": {"mid"}, "senior": {"senior"}, "staff": {"staff_plus"}, "principal": {"staff_plus"},
+                "lead": {"senior", "leadership"}, "leadership": {"leadership"}, "manager": {"leadership"},
+                "director": {"leadership"}, "vp": {"leadership"}, "executive": {"leadership"}}
+
+
+def wanted_levels(seniority: str) -> set[str]:
+    """The title levels a seeker's stated seniority accepts ('senior' → senior; 'staff' → staff_plus…)."""
+    s = (seniority or "").strip().lower()
+    out: set[str] = set()
+    for k, v in _WANT_LEVELS.items():
+        if k in s:
+            out |= v
+    return out
+
+
+# A SELF-DESCRIPTION typed into a search box ("SDE/SRE roles for me. I'm a software engineer with 5
+# years…", "my resume…") is a PROFILE, not a query: it goes to résumé matching, never to free-text search.
+_SELF_DESC_RX = re.compile(
+    r"(?i)(\bfor me\b|\bmy (?:r[ée]sum[ée]|cv|background|profile|experience|skills)\b|\bi(?:'|’)?m an?\b|"
+    r"\bi am an?\b|\bi have \d+\+? years|\b\d+\+? years of experience\b|\bi(?:'|’)?ve (?:been|worked|built)\b|"
+    r"\bmy current (?:role|title|company|job)\b|\bbased on my\b)")
+
+
+def is_self_description(question: str) -> bool:
+    return bool(_SELF_DESC_RX.search(question or ""))
+
+
+def years_to_levels(text: str) -> set[str]:
+    """Stated years of experience → the title levels worth ranking up (a ranking preference)."""
+    m = re.search(r"(?i)\b(\d{1,2})\+?\s*(?:\+\s*)?years?\b", text or "")
+    if not m:
+        return set()
+    y = int(m.group(1))
+    if y < 2:
+        return {"junior"}
+    if y < 5:
+        return {"mid"}
+    if y < 8:
+        return {"mid", "senior"}
+    return {"senior", "staff_plus"}
 
 # job-location → country, from explicit geography tokens (parse, not semantic inference). Used to
 # honor the country scope in match; a location we can't place stays ambiguous and is NOT dropped.
@@ -215,7 +705,7 @@ async def widen_jobs_locally(store, rows: list[dict], *, qvec: str | None, terms
         if j.get("id") in seen or k in seen_k:
             continue
         if j.get("sim") is not None:
-            j["match_pct"] = min(99, round(float(j["sim"]) * 100))
+            j["match_pct"] = calibrated_pct(float(j["sim"]))
         out.append(j); seen.add(j.get("id")); seen_k.add(k)
     if any(r.get("sim") is not None for r in out):
         out.sort(key=lambda r: -(float(r.get("sim") or 0.0)))
@@ -280,9 +770,15 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
         qtext = (brief_text + "\n\n" + qtext).strip() if qtext else brief_text
     if not qtext:
         return {"jobs": [], "note": "Add or parse a résumé first — no profile content to match on."}
+    _prof_fields = profile_fields(profile, prefs, qtext)   # model-named fields first; regex families only as fallback
+    _prof_skills = set(profile_skills(qtext, limit=30))   # the skills the profile names (matched against posting bodies)
     qvec = embed_query(qtext)
     if not qvec:
         return {"jobs": [], "note": "Matching is unavailable right now."}
+    try:                                        # this résumé's noise floor, for the calibrated percent
+        _floor = await store.similarity_baseline(qvec)
+    except Exception:   # noqa: BLE001
+        _floor = None
     # EXPOSURE: the deeper the user has rotated (seen more), the deeper the candidate pool reaches —
     # otherwise rotation would just cycle inside the same top-400 forever.
     _seen_n = len(prefs.get("seen_ids") or [])
@@ -336,12 +832,23 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
     # USER-LED exclusions: titles containing any excluded word are DROPPED outright ("roles I don't
     # even want") — the one hard filter, because the user explicitly asked to never see them.
     excl_kw = [str(k).strip().lower() for k in (prefs.get("exclude_keywords") or []) if str(k).strip()]
+    # JOB-MAP CALIBRATION prefs (reviewer taps on a card's own facts — see calibration.job_feedback_to_prefs)
+    excl_co = {_norm_co(str(c)) for c in (prefs.get("exclude_companies") or []) if str(c).strip()}
+    pref_co = {_norm_co(str(c)) for c in (prefs.get("prefer_companies") or []) if str(c).strip()}
+    avoid_lv = {str(l).lower().replace(" ", "_") for l in (prefs.get("avoid_levels") or []) if str(l).strip()}
+    avoid_loc = [str(l).lower() for l in (prefs.get("avoid_locations") or []) if str(l).strip()]
+    avoid_mode = [str(m).lower() for m in (prefs.get("avoid_modes") or []) if str(m).strip()]
+    excl_refs = {str(x) for x in (prefs.get("exclude_refs") or []) if str(x).strip()}
     dropped_excluded = 0
     for j in cands:
         title, loc, co = j.get("title") or "", (j.get("location") or "").lower(), (j.get("company") or "")
         if not _country_ok(loc, want_country):     # honor the country scope — drop clearly-foreign jobs
             dropped_country += 1; continue
         if excl_kw and any(k in title.lower() for k in excl_kw):
+            dropped_excluded += 1; continue
+        if excl_co and _norm_co(co) in excl_co:
+            dropped_excluded += 1; continue
+        if excl_refs and (str(j.get("id") or "") in excl_refs or (co + "|" + title + "|" + (j.get("location") or "")) in excl_refs):
             dropped_excluded += 1; continue
         sim = float(j.get("sim") or 0.0)
         score, reasons = sim, []
@@ -352,10 +859,33 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
             score += 0.15; reasons.append("remote")
         if locs and any(l in loc for l in locs):
             score += 0.15; reasons.append("location")
-        jsen = _title_seniority(title)
-        if want_sens and jsen in want_sens:
+        jsen, _jsen_known = job_level(j)                 # the model's level when the posting has facets
+        if want_sens and _jsen_known and jsen in want_sens:
             score += 0.12; reasons.append(f"{jsen.replace('_', ' ')} level")
-        if role_kw and any(k in title.lower() for k in role_kw):
+        # SOFT family demotion (never a gate): a title that STATES a different discipline from the
+        # profile's ("SDE I - Frontend", "Security Engineer" for a backend/SRE profile) moves down with
+        # the reason shown; unstated titles ("Software Engineer") are left alone — titles vary by company.
+        _fam_pen, _fam_why = job_field_penalty(_prof_fields, j)
+        if _fam_pen:
+            score -= _fam_pen; reasons.append(_fam_why)
+        _jsk = [str(x) for x in (j.get("skills") or []) if x]
+        _hit = [x for x in _jsk if x in _prof_skills][:4]
+        if _hit:                                        # the POSTING BODY names skills the profile has
+            score += min(0.20, 0.05 * len(_hit)); reasons.append("skills: " + ", ".join(_hit))
+        # the DISPLAYED percent reflects fit only: similarity, the field penalty and named skills —
+        # never the user's preference bonuses (location, company type), which only order the slate
+        _sim_fit = sim - _fam_pen + min(0.05, 0.0125 * len(_hit))
+        if pref_co and _norm_co(co) in pref_co:
+            score += 0.15; reasons.append("preferred company")
+        if avoid_lv and _jsen_known and jsen in avoid_lv:
+            score -= 0.10; reasons.append(f"{jsen.replace('_', ' ')} level ranked down")
+        if avoid_loc and any(l in loc for l in avoid_loc):
+            score -= 0.10; reasons.append("location ranked down")
+        if avoid_mode and any(m in loc for m in avoid_mode):
+            score -= 0.10; reasons.append("work mode ranked down")
+        _rf = str(job_facets(j).get("role_family") or "").replace("_", " ").strip().lower()
+        if role_kw and ((_rf and any(_rf == k or _rf in k or k in _rf for k in role_kw))
+                        or any(re.search(r"(?<![a-z0-9])" + re.escape(k) + r"(?![a-z0-9])", title.lower()) for k in role_kw)):
             score += 0.10; reasons.append("role match")
         if "f500" in want and is_f500:
             score += 0.12; reasons.append("Fortune 500")
@@ -373,7 +903,7 @@ async def match_resume_jobs(store, profile: dict, prefs: dict) -> dict:
             score -= 0.30       # already shown → fresh comparable matches lead this run
         out.append({**{k: j.get(k) for k in ("id", "company", "title", "location", "url", "source")},
                     "key": _key,
-                    "score": round(score, 4), "match_pct": min(99, round(sim * 100)),
+                    "score": round(score, 4), "match_pct": calibrated_pct(_sim_fit, _floor),
                     "seniority": jsen, "company_types": types, "reasons": reasons,
                     "fresh": fresh})
     out.sort(key=lambda x: -x["score"])
@@ -615,6 +1145,10 @@ class _CandidateBrief(BaseModel):
     target_roles: list[str] = []         # roles a recruiter would pitch them for (canonical, snake_case)
     seniority: str = ""                  # intern|junior|mid|senior|staff|principal|lead|manager|director|vp|c_level
     search_text: str = ""                # a rich recency-weighted paragraph — the query used to find jobs
+    field: str = ""                      # the candidate's field, one of JOB_FIELDS
+    fields: list[str] = []               # every field they credibly fit (primary first), from JOB_FIELDS
+    field: str = ""                      # the candidate's field, one of JOB_FIELDS
+    fields: list[str] = []               # every field they credibly fit (primary first), from JOB_FIELDS
 
 
 async def build_candidate_brief(resume_text: str, profile: dict, llm) -> dict | None:
@@ -655,7 +1189,9 @@ async def build_candidate_brief(resume_text: str, profile: dict, llm) -> dict | 
                 "— team size, IC vs manager), key_contributions (what they built/shipped), major_achievements "
                 "(impact/scale/outcomes). target_roles: 3–6 job-title phrases a recruiter would pitch them for, "
                 "in PLAIN lowercase words (e.g. 'staff machine learning engineer', 'ml infrastructure lead') — "
-                f"NOT snake_case. seniority: EXACTLY ONE of [{_SEN}] — no other value. search_text: a rich 4–8 "
+                f"NOT snake_case. seniority: EXACTLY ONE of [{_SEN}] — no other value. field: the candidate's field, "
+                f"EXACTLY ONE of [{' | '.join(JOB_FIELDS)}]; fields: every field they credibly fit from that same list, "
+                "primary first (a CTO who codes: software first, then data_ml if they built ML). search_text: a rich 4–8 "
                 "sentence paragraph capturing the SOUL of this candidate (recent focus, strengths, level, "
                 "domains) — the query used to retrieve matching jobs, so make it dense with the signal a great "
                 "match shares. Ground everything in the résumé; do not invent."),
@@ -673,6 +1209,8 @@ async def build_candidate_brief(resume_text: str, profile: dict, llm) -> dict | 
                 # against job titles, so a leaked 'staff_ml_engineer' must still become 'staff ml engineer'.
                 "target_roles": [str(r).strip().lower().replace("_", " ") for r in (b.target_roles or []) if str(r).strip()][:6],
                 "seniority": sen if sen in _SEN_OK else "",
+                "field": (str(b.field or "").strip().lower() if str(b.field or "").strip().lower() in JOB_FIELDS else ""),
+                "fields": [str(f).strip().lower() for f in (b.fields or []) if str(f).strip().lower() in JOB_FIELDS][:4],
                 "search_text": (b.search_text or "").strip()}
     except Exception as e:   # noqa: BLE001 — never break matching; fall back to raw résumé
         _log.warning("build_candidate_brief failed: %s", e)
@@ -1322,7 +1860,7 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
             if _hits:
                 score += min(0.15, 0.05 * len(_hits)); reasons.append("skills: " + ", ".join(_hits[:3]))
         card = _person_row_from_facets(r)
-        card["match_pct"] = min(99, round(sim * 100)); card["reasons"] = reasons; card["_score"] = score
+        card["match_pct"] = calibrated_pct(sim); card["reasons"] = reasons; card["_score"] = score
         out.append(card)
     out.sort(key=lambda x: -x["_score"])
     for c in out:
@@ -1481,6 +2019,53 @@ def topic_terms_for(facets: dict, llm_terms: list[str] | None) -> list[str]:
     return out[:6]
 
 
+_TOPIC_DROP = {"engineer", "engineers", "developer", "developers", "people", "person", "talent", "candidates", "candidate",
+               "senior", "staff", "principal", "lead", "leads", "junior", "experienced", "expert", "experts", "specialist",
+               "specialists", "who", "with", "in", "at", "for", "the", "a", "an", "of", "and", "or", "map", "find", "me",
+               "need", "looking", "around", "near", "from", "top", "best", "good", "great", "strong", "software", "us",
+               "remote", "hybrid", "onsite", "experience", "background", "skills", "skill", "work", "working", "worked",
+               "on", "to", "is", "are", "have", "has", "that", "this", "some", "any", "all", "about", "roles", "role"}
+
+
+_TOPIC_GENERIC_WORDS = {"design", "engineering", "systems", "system", "platform", "platforms", "development", "software",
+                        "data", "research", "science", "learning", "search", "infrastructure", "infra", "technology",
+                        "applications", "application", "services", "service", "products", "product", "solutions", "tools"}
+
+
+def expand_topic_terms(terms: list[str], question: str = "") -> list[str]:
+    """A multi-word subject also anchors on its DISTINCTIVE words — but only words the USER wrote
+    ("chip design engineers" → + "chip"; "vector search" → + "vector"). Words that only the compiler
+    introduced ("database", "similarity", "approximate") never anchor alone: they drowned the map
+    in people who merely mention databases. Generic words never anchor alone either."""
+    q_words = set(re.sub(r"[^a-z0-9\s]", " ", (question or "").lower()).split())
+    out: list[str] = []
+    for t in terms or []:
+        t = str(t).strip().lower()
+        if t and t not in out:
+            out.append(t)
+        for w in t.split():
+            if len(w) >= 4 and w in q_words and w not in _TOPIC_GENERIC_WORDS and w not in _TOPIC_DROP and w not in out:
+                out.append(w)
+    return out[:8]
+
+
+def topic_terms_from_question(question: str, facets: dict | None = None) -> list[str]:
+    """LAST-RESORT subject terms straight from the brief's words: strip role/seniority/glue words and
+    any named company or place, keep the remaining 1–3 content words as one phrase ("chip design
+    engineers at Nvidia" → "chip design"). Code-owned; used only when neither the compiler nor the
+    facets yielded a subject, so anchoring never depends on the compile."""
+    q = re.sub(r"[^a-z0-9\s+#.-]", " ", (question or "").lower())
+    named = set()
+    for k in ("company", "worked_at", "metro", "state", "country"):
+        for v in (facets or {}).get(k) or []:
+            named.update(str(v).lower().replace("_", " ").split())
+    toks = [t for t in q.split() if t not in _TOPIC_DROP and t not in named and len(t) >= 3]
+    if not toks:
+        return []
+    phrase = " ".join(toks[:3])
+    return [phrase] if len(phrase) >= 4 else []
+
+
 def topic_hit(row: dict, terms: list[str]) -> str:
     """The first topic term that appears in the row's grounded text (attributes + blurb + artifact
     titles), else ''. Code-owned; whole-word-ish substring match on normalized text."""
@@ -1616,6 +2201,10 @@ class _JobPlan(BaseModel):
     company: list[str] = []
     seniority: str = ""
     location: str = ""
+    field: str = ""                  # the field the seeker wants, one of JOB_FIELDS ('' if unstated)
+    level: str = ""                  # the level, one of JOB_LEVELS ('' if unstated)
+    field: str = ""                  # the field the seeker wants, one of JOB_FIELDS ('' if unstated)
+    level: str = ""                  # the level, one of JOB_LEVELS ('' if unstated)
 
 
 async def _llm_job_plan(question: str, llm) -> dict:
@@ -1626,7 +2215,9 @@ async def _llm_job_plan(question: str, llm) -> dict:
         "platform engineer','MLOps engineer','distributed training engineer']). `must_have` (2-4 key "
         "terms a strong match's TITLE should contain). `company` (member companies if a GROUP is named "
         "e.g. FAANG/big tech, else []). `seniority` (senior/staff/leadership/… or ''). `location` (a "
-        "city, 'remote', or ''). JSON only.\n\nQuery: " + question)
+        f"city, 'remote', or ''). `field`: the FIELD the seeker wants, exactly one of [{' | '.join(JOB_FIELDS)}] or ''. "
+        f"`level`: exactly one of [{' | '.join(JOB_LEVELS)}] or '' (a founder / CTO / VP / head-of query is leadership). "
+        "JSON only.\n\nQuery: " + question)
     try:
         comp = await llm.complete(system="You plan an intelligent, multi-angle job search. Return only the object.",
                                   messages=[{"role": "user", "content": prompt}],
@@ -1636,9 +2227,11 @@ async def _llm_job_plan(question: str, llm) -> dict:
                 "variants": [str(v).strip() for v in (p.query_variants or []) if str(v).strip()][:5],
                 "must_have": [str(m).strip().lower() for m in (p.must_have or []) if str(m).strip()][:4],
                 "company": [str(c).strip().lower().replace(" ", "_") for c in (p.company or []) if str(c).strip()],
-                "seniority": (p.seniority or "").strip().lower(), "location": (p.location or "").strip()}
+                "seniority": (p.seniority or "").strip().lower(), "location": (p.location or "").strip(),
+                "field": (str(p.field or "").strip().lower() if str(p.field or "").strip().lower() in JOB_FIELDS else ""),
+                "level": (str(p.level or "").strip().lower() if str(p.level or "").strip().lower() in JOB_LEVELS else "")}
     except Exception:   # noqa: BLE001
-        return {"intent": "", "variants": [], "must_have": [], "company": [], "seniority": "", "location": ""}
+        return {"intent": "", "variants": [], "must_have": [], "company": [], "seniority": "", "location": "", "field": "", "level": ""}
 
 
 async def agentic_job_search(store, question: str, llm, country: str = "us") -> dict:
@@ -1668,6 +2261,12 @@ async def agentic_job_search(store, question: str, llm, country: str = "us") -> 
                 if sim > e["best"]:
                     e["best"] = sim; e["job"] = j
     want_country = (country or "").lower()
+    # SENIORITY the seeker stated ("senior", "staff", "new grad") RANKS: a title that states the wanted
+    # level moves up; a title that states a clearly different level moves down; an unmarked title is
+    # unknown and moves nowhere (never a confident 'mid').
+    want_lv = wanted_levels(plan.get("seniority") or "") | ({plan["level"]} if plan.get("level") else set())
+    _ORDER = {"intern": 0, "junior": 1, "mid": 2, "senior": 3, "staff_plus": 4, "leadership": 5}
+    _want_fields = {plan["field"]} if plan.get("field") else profile_fields(None, None, question)
     out, dropped = [], 0
     for e in pool.values():
         j = e["job"]; loc = (j.get("location") or "").lower(); title_l = (j.get("title") or "").lower()
@@ -1680,13 +2279,24 @@ async def agentic_job_search(store, question: str, llm, country: str = "us") -> 
             score += 0.08 * len(hits); reasons.append("matches " + ", ".join(hits))
         if e["legs"] > 1:
             reasons.append(f"{e['legs']} search angles")
+        lvl, known = job_level(j)
+        if want_lv and known:
+            if lvl in want_lv:
+                score += 0.06; reasons.append(f"{lvl.replace('_', ' ')} level")
+            elif min(abs(_ORDER.get(lvl, 2) - _ORDER.get(w, 2)) for w in want_lv) >= 2:
+                score -= 0.08; reasons.append(f"title says {lvl.replace('_', ' ')}")
+        _fpen, _fwhy = job_field_penalty(_want_fields, j)
+        if _fpen:
+            score -= _fpen; reasons.append(_fwhy)
         out.append({**{k: j.get(k) for k in ("id", "company", "title", "location", "url", "source")},
-                    "score": round(score, 4), "match_pct": min(99, round(e["best"] * 100)), "reasons": reasons})
+                    "score": round(score, 4), "match_pct": calibrated_pct(e["best"] - _fpen), "reasons": reasons,
+                    "seniority": (lvl if known else ""), "level_source": ("title" if known else "unknown")})
     out.sort(key=lambda x: -x["score"])
     note = ((f"{want_country.upper()} only · " if want_country else "")
             + f"agentic — {len(legs)} angles, {len(pool)} candidates")
     return {"jobs": out[:60], "intent": plan["intent"], "query_angles": legs, "note": note,
-            "dropped_out_of_country": dropped}
+            "dropped_out_of_country": dropped, "must_have": list(plan.get("must_have") or []),
+            "plan_seniority": plan.get("seniority") or "", "plan_location": plan.get("location") or ""}
 
 
 def linkedin_search_link(name: str, attrs: list[dict]) -> dict:
@@ -2076,6 +2686,51 @@ def _facet_summary(facets: dict[str, list[str]]) -> str:
     return "; ".join(parts)
 
 
+_SENIOR_WORDS_RX = re.compile(r"\b(senior|staff|principal|lead|head|director|vp|chief|distinguished)\b", re.I)
+_GEO_WORDS_RX = re.compile(r"\b(remote|anywhere|worldwide|global|in|near|based|located|area|bay area|nyc|sf|london|europe|india)\b", re.I)
+
+
+def brief_contract_for(question: str, facets: dict, *, hard_keys: list[str], soft_keys: list[str],
+                       guard_added: list[str] | None = None, relaxed_from: list[str] | None = None,
+                       semantic_first: bool = False, ev_kinds: list[str] | None = None,
+                       scope: dict | None = None, topic_terms: list[str] | None = None) -> dict:
+    """THE INTERPRETED BRIEF as a code-owned contract (recruiter-workflows P1): which constraints
+    GATED the cohort ("must") and which only RANK it ("prefer"), the scope, what the search
+    assumed because the brief did not say, and at most ONE clarifying question that ships WITH the
+    map (never before it). Everything here is derived from how this run actually filtered."""
+    facets = facets or {}
+    def vals(k):
+        return [str(v).replace("_", " ") for v in (facets.get(k) or []) if str(v).strip()]
+    hard = {k: vals(k) for k in hard_keys if vals(k)}
+    soft = {k: vals(k) for k in soft_keys if vals(k) and k not in hard}
+    if ev_kinds:
+        hard["evidence"] = list(ev_kinds)
+    scope = scope or {}
+    assumptions: list[str] = []
+    clarification: dict | None = None
+    q = question or ""
+    if _SENIOR_WORDS_RX.search(q) and not facets.get("seniority"):
+        assumptions.append("seniority was not compiled as a filter — all levels are shown, senior-sounding titles rank first")
+        clarification = {"ask": "Which level do you mean — senior IC, staff/principal, or manager/lead?",
+                         "why": "your brief reads senior but no level gated the search",
+                         "key": "seniority"}
+    if not (facets.get("metro") or facets.get("state") or facets.get("country")) and not scope.get("label"):
+        assumptions.append("no location in the brief and no scope selected — results are worldwide")
+    elif scope.get("label") and not (facets.get("metro") or facets.get("state")):
+        assumptions.append(f"location follows your scope selector ({scope.get('label')}) — the brief named no place")
+    if relaxed_from:
+        assumptions.append("relaxed to find people: " + ", ".join(str(k).replace("_", " ") for k in relaxed_from) + " became preferences, not filters")
+    if guard_added:
+        assumptions.append("company kept as a filter from your wording: " + ", ".join(str(c).replace("_", " ") for c in guard_added))
+    if semantic_first and not hard:
+        assumptions.append("no hard filter applied — ranked by how closely each profile's wording matches the brief")
+    if not hard and not soft and not topic_terms:
+        assumptions.append("nothing compiled into filters — pure wording match")
+    return {"hard": hard, "soft": soft, "scope": {k: scope.get(k) for k in ("label", "metro", "state") if scope.get(k)},
+            "topic": list(topic_terms or [])[:6], "assumptions": assumptions[:4], "clarification": clarification,
+            "guard_added": list(guard_added or []), "relaxed": list(relaxed_from or [])}
+
+
 def _coverage_basis(facets, stats, matches: int) -> dict:
     return {
         "query_facets": facets,
@@ -2226,13 +2881,113 @@ class _Narrative(BaseModel):
     text: str = ""
 
 
+def rows_to_people(rows: list[dict]) -> list[dict]:
+    """Store rows (entity + facets) → people CARDS: attributes, links (with the LinkedIn search aid),
+    one grounded citation, and the code-derived evidence packet. Shared by the population search and
+    the intro path (hiring managers at a company)."""
+    from api.evidence import evidence_packet
+    people_rows = []
+    for r in rows:
+        # one representative grounded citation per person (first facet carrying a source)
+        cite = next(({"document_id": f["document_id"], "block_id": f["block_id"]}
+                     for f in r["facets"] if f.get("document_id")), None)
+        # `link_*` facets are the person's OTHER profiles (linkedin/x/website/medium/email), enriched
+        # from the source profile — surfaced as clickable links on the card, not filter attributes.
+        links, attrs = [], []
+        for f in r["facets"]:
+            if f["facet_key"].startswith("link_"):
+                links.append({"kind": f["facet_key"][5:], "url": f["display_value"]})
+            else:
+                attrs.append({"key": f["facet_key"], "display": _attr_display(f),
+                              "document_id": f["document_id"], "block_id": f["block_id"]})
+        links, attrs = _dedupe_links(links), _dedupe_attrs(attrs)
+        # LinkedIn PROXY: when we have no direct LinkedIn link, synthesize a Google search over the
+        # person's name + role + company that reliably lands on their LinkedIn — a navigation aid
+        # (clearly a SEARCH, not grounded evidence). Skipped when a real LinkedIn link exists.
+        if not any(l["kind"] == "linkedin" for l in links):
+            links.append(linkedin_search_link(r["name"], attrs))
+        people_rows.append({
+            "entity_id": r["entity_id"], "name": r["name"], "blurb": _person_blurb(attrs),
+            "attributes": attrs, "links": links, "citation": cite,
+            "evidence": evidence_packet(r["facets"], r["entity_id"])})
+    return people_rows
+
+
+_MANAGER_LEVELS = {"engineering_manager", "senior_manager", "director", "head", "vp", "lead", "c_level", "cto"}
+_MANAGER_TITLE_RX = re.compile(r"(?i)\b(manager|director|head of|vp\b|vice president|lead\b|chief|cto|ceo|founder|principal)\b")
+# titles that carry 'manager' / 'lead' but do not HIRE for an engineering / product opening
+_NON_HIRING_RX = re.compile(r"(?i)\b(account manager|technical account|program manager|project manager|community|office manager|"
+                            r"customer success|talent|recruit|people ops|people partner|hr\b|payroll|events?|partnerships?|"
+                            r"sales|marketing|communications|legal|finance|accounting)\b")
+_ENG_LEADER_RX = re.compile(r"(?i)\b(engineering|technology|platform|infrastructure|software|product|data|design|research|science|cto)\b")
+
+
+async def hiring_managers_at(store, *, tenant_id: str, company: str, title: str = "", department: str = "",
+                             cap: int = 300, limit: int = 8) -> dict:
+    """PUBLIC hiring-manager map for one company + one posting: people in Roster's index at that
+    company whose level / title reads as a manager, ranked by (a) discipline match between their
+    role / function / title and the posting's title + department, then (b) evidence strength. Every
+    row carries its evidence packet; the caller shows WHY each person is suggested. Code-owned."""
+    co = _norm_co(company)
+    if not co:
+        return {"managers": [], "n_at_company": 0}
+    try:
+        rows = await store.enumerate_by_facets({"company": [co]}, tenant_id=tenant_id, cap=cap)
+    except Exception:  # noqa: BLE001
+        rows = []
+    people = rows_to_people(rows)
+    want = text_families((title or "") + " " + (department or ""))
+    _EV_RANK = {"strong": 3, "corroborated": 3, "mixed": 2, "weak": 1, "self-stated": 1, "": 0}
+
+    def _a(p, key):
+        return " ".join(str(a.get("display") or "") for a in p.get("attributes") or [] if a.get("key") == key)
+
+    out = []
+    for p in people:
+        sen = _a(p, "seniority").lower().replace(" ", "_")
+        title_txt = " ".join([_a(p, "title"), _a(p, "role"), _a(p, "function")])
+        is_mgr = sen in _MANAGER_LEVELS or bool(_MANAGER_TITLE_RX.search(title_txt)) or bool(_MANAGER_TITLE_RX.search(p.get("blurb") or ""))
+        if not is_mgr:
+            continue
+        fams = text_families(title_txt + " " + (p.get("blurb") or ""))
+        # a posting with a discipline wants people who LEAD that discipline; a 'manager' title from
+        # sales / HR / program management is not a hiring manager for it unless the posting is in that family
+        posting_txt = (title or "") + " " + (department or "")
+        if want and _NON_HIRING_RX.search(title_txt) and not _NON_HIRING_RX.search(posting_txt):
+            continue
+        if want and fams & want:
+            disc = 2
+        elif want and _ENG_LEADER_RX.search(title_txt) and not fams:
+            disc = 1                                           # generic engineering leadership (e.g. 'Engineering Manager')
+        elif not want:
+            disc = 1
+        else:
+            disc = 0
+        ev = (p.get("evidence") or {}).get("strength") or ""
+        why = []
+        if disc == 2:
+            why.append("leads " + ", ".join(sorted(fams & want)))
+        if sen:
+            why.append(sen.replace("_", " "))
+        why.append(f"evidence: {ev or 'unstated'}")
+        out.append((disc, _EV_RANK.get(ev, 0), {**p, "why": why}))
+    out.sort(key=lambda t: (-t[0], -t[1], t[2].get("name") or ""))
+    managers = [t[2] for t in out if t[0] > 0][:limit] or [t[2] for t in out][:limit]
+    return {"managers": managers, "n_at_company": len(people), "discipline": sorted(want)}
+
+
 async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                                    scope_country: str = "",
                                    prior_facets: dict | None = None,
                                    assume_people: bool = False,
                                    prior_person: str = "", prior_context: str = "",
                                    scope_metro: str = "", scope_state: str = "",
-                                   evidence_kinds: list[str] | None = None) -> dict:
+                                   evidence_kinds: list[str] | None = None,
+                                   exclude_ids: list[str] | None = None,
+                                   exclude_companies: list[str] | None = None,
+                                   avoid_terms: list[str] | None = None,
+                                   fixed_facets: dict | None = None,
+                                   levels: list[str] | None = None, level_span: int = 1) -> dict:
     """Answer a people-enumeration question from the grounded people index. Always returns a structured
     result (never raises to the route): a compiled facet filter, grounded rows, and honest coverage.
 
@@ -2277,7 +3032,21 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
                 if w.lower() not in _seen_ctx:
                     _seen_ctx.add(w.lower()); _ctx_parts.append(w)
         return await lookup_person(store, prior_person, " ".join(_ctx_parts), tenant_id=tenant_id)
-    if _prior:
+    # FIXED CONTRACT (map revision from reviewer feedback): the filter is CODE-OWNED and final — no
+    # compile, no refinement parse, no guard re-adding what a reviewer removed. The question only
+    # drives wording match and subject terms (the "prefer …" tail is a ranking preference).
+    _fixed: dict | None = None
+    if fixed_facets is not None:
+        from roster_vertical.people_facets import PEOPLE_FACET_KEYS
+        _okf = set(PEOPLE_FACET_KEYS) | {"country", "state", "metro"}
+        _fixed = {k: [str(v).strip().lower().replace(" ", "_") for v in vals if str(v).strip()][:6]
+                  for k, vals in fixed_facets.items() if k in _okf and isinstance(vals, (list, tuple))}
+        _fixed = {k: v for k, v in _fixed.items() if v}
+    if _fixed is not None:
+        facets, person, ctx = dict(_fixed), "", ""
+        _core_q = re.split(r"\s+[—-]+\s+prefer\s+", question, maxsplit=1)[0]   # the brief without its preference tail
+        topic_terms = expand_topic_terms(topic_terms_from_question(_core_q, facets), _core_q)
+    elif _prior:
         # REFINEMENT turn: the model applies the utterance to the RUNNING filter — narrow, expand,
         # remove, or replace, following the user's lead (Rule 18) — and returns the full new filter.
         facets, person, ctx = await parse_people_refinement(question, _prior, llm), "", ""
@@ -2287,13 +3056,16 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             facets = {**_prior, **f2} if f2 else {}
     else:
         facets, person, ctx, topic_terms = await parse_people_facets_full(question, llm)
-        topic_terms = topic_terms_for(facets, topic_terms)
+        topic_terms = expand_topic_terms(topic_terms_for(facets, topic_terms) or topic_terms_from_question(question, facets), question)
     # COMPANY GUARD (code-owned): a company the question names gates the cohort even when the
     # compiler dropped it — unless this is a single-person lookup ("Mukul Gupta at Cisco")
-    if not (not facets and person):
+    guard_added: list[str] = []
+    _orig_facets = dict(facets or {})              # the compiler's read, before guard / relaxation edits
+    if not (not facets and person) and _fixed is None:
         facets = await company_guard(question, facets, store)
-        if facets.get("_company_guard"):
-            _log.info("company guard added %s for %r", facets["_company_guard"], question[:80])
+        guard_added = list(facets.get("_company_guard") or [])
+        if guard_added:
+            _log.info("company guard added %s for %r", guard_added, question[:80])
             facets.pop("_company_guard", None)
     if not facets and person and not _prior:
         # SINGLE-PERSON identity/profile lookup — everything the index holds on them, on demand
@@ -2539,6 +3311,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     # stays the gate and role/function/skill become ranking signals: everyone at the company,
     # role-matching people first. Honest note via relaxed_from.
     _soft_keys = [k for k in ("role", "function", "skill", "seniority") if facets.get(k)]
+    _thin_soft: list[str] = []                   # the keys that became preferences on a thin company cohort
     if facets.get("company") and _soft_keys and len(rows) < 10:
         _wide = await _enum_recall({k: v for k, v in facets.items() if k not in _soft_keys}, cap=200)
         if len(_wide) > len(rows):
@@ -2549,6 +3322,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             _hit_ids = {r["entity_id"] for r in _hits}
             rows = _hits + [r for r in _wide if r["entity_id"] not in _hit_ids]
             relaxed_from = list(dict.fromkeys(relaxed_from + _soft_keys))
+            _thin_soft = list(_soft_keys)
             facets = {k: v for k, v in facets.items() if k not in _soft_keys}
     coverage = _coverage_basis(facets, stats, len(rows))
     if _worked_at_union_used:
@@ -2560,34 +3334,52 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     coverage["semantic_used"] = semantic_used   # observability: did embedding ranking engage?
     coverage["semantic_first"] = semantic_first  # observability: semantic-first (facets soft) vs facet-gated
 
-    people_rows = []
-    for r in rows:
-        # one representative grounded citation per person (first facet carrying a source)
-        cite = next(({"document_id": f["document_id"], "block_id": f["block_id"]}
-                     for f in r["facets"] if f.get("document_id")), None)
-        # `link_*` facets are the person's OTHER profiles (linkedin/x/website/medium/email), enriched
-        # from the source profile — surfaced as clickable links on the card, not filter attributes.
-        links, attrs = [], []
-        for f in r["facets"]:
-            if f["facet_key"].startswith("link_"):
-                links.append({"kind": f["facet_key"][5:], "url": f["display_value"]})
-            else:
-                attrs.append({"key": f["facet_key"], "display": _attr_display(f),
-                              "document_id": f["document_id"], "block_id": f["block_id"]})
-        links, attrs = _dedupe_links(links), _dedupe_attrs(attrs)
-        # LinkedIn PROXY: when we have no direct LinkedIn link, synthesize a Google search over the
-        # person's name + role + company that reliably lands on their LinkedIn — a navigation aid
-        # (clearly a SEARCH, not grounded evidence). Skipped when a real LinkedIn link exists.
-        if not any(l["kind"] == "linkedin" for l in links):
-            links.append(linkedin_search_link(r["name"], attrs))
-        from api.evidence import evidence_packet
-        people_rows.append({
-            "entity_id": r["entity_id"], "name": r["name"], "blurb": _person_blurb(attrs),
-            "attributes": attrs, "links": links, "citation": cite,
-            "evidence": evidence_packet(r["facets"], r["entity_id"])})
+    people_rows = rows_to_people(rows)
 
     _seen_ids: set = set()
     people_rows = [p for p in people_rows if not (p["entity_id"] in _seen_ids or _seen_ids.add(p["entity_id"]))]
+    # COMPANY INVARIANT (code-owned, compile-independent): when the brief names companies, every row
+    # must carry one of them as current employer or past employer — whatever path produced it
+    _named_cos = {_norm_co(c) for c in (facets.get("company") or []) + (facets.get("worked_at") or []) if _norm_co(c)}
+    if _named_cos:
+        def _carries(p):
+            for a in p.get("attributes") or []:
+                if a.get("key") in ("company", "worked_at"):
+                    n = _norm_co(a.get("display") or "")
+                    if n and any(c == n or (len(c) >= 4 and c in n) for c in _named_cos):
+                        return True
+            return False
+        _before_co = len(people_rows)
+        people_rows = [p for p in people_rows if _carries(p)]
+        if _before_co != len(people_rows):
+            coverage["company_gate_dropped"] = _before_co - len(people_rows)
+    # CALIBRATION (recruiter-workflows P2b, code-owned): reviewer feedback edits the CONTRACT of the next
+    # map — rows a reviewer marked "less like this"/"not relevant" leave; rows at a company marked the
+    # wrong target leave; rows carrying a demoted value (a wrong level, a wrong domain) are flagged so
+    # the final order sends them to the back. Never a model's judgment, never the evidence.
+    _ex_ids = {str(x) for x in (exclude_ids or []) if x}
+    _ex_cos = {_norm_co(c) for c in (exclude_companies or []) if _norm_co(c)}
+    _avoid = {re.sub(r"[^a-z0-9]+", "_", str(t).lower()).strip("_") for t in (avoid_terms or []) if str(t).strip()}
+    if _ex_ids or _ex_cos or _avoid:
+        _before_cal = len(people_rows)
+
+        def _at_excluded(p):
+            for a in p.get("attributes") or []:
+                if a.get("key") in ("company", "worked_at"):
+                    n = _norm_co(a.get("display") or "")
+                    if n and any(c == n or (len(c) >= 4 and c in n) for c in _ex_cos):
+                        return True
+            return False
+        people_rows = [p for p in people_rows if p["entity_id"] not in _ex_ids and not (_ex_cos and _at_excluded(p))]
+        _n_demoted = 0
+        for p in people_rows:
+            vals = {re.sub(r"[^a-z0-9]+", "_", str(a.get("display") or "").lower()).strip("_")
+                    for a in (p.get("attributes") or []) if a.get("key") in ("role", "function", "skill", "seniority", "metro")}
+            if vals & _avoid:
+                p["calibration_demoted"] = True
+                _n_demoted += 1
+        coverage["calibration"] = {"excluded": _before_cal - len(people_rows), "demoted": _n_demoted,
+                                   "avoid_terms": sorted(_avoid)[:12]}
     if semantic_first:                            # surface the relevance score on each card (like JD-match)
         for p in people_rows:
             s = sf_sim.get(p["entity_id"])
@@ -2728,7 +3520,7 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
     # are minted so the gap heals. Max 3 gap companies per query. Off with ROSTER_COMPANY_GAP_DISCOVERY=0.
     _gap_min = int(os.environ.get("ROSTER_COMPANY_GAP_MIN", "10") or 10)
     _named_cos = [c for c in (facets.get("company") or []) if str(c).strip()]
-    if _named_cos and os.environ.get("ROSTER_COMPANY_GAP_DISCOVERY", "1") == "1":
+    if _named_cos and os.environ.get("ROSTER_COMPANY_GAP_DISCOVERY", "1") == "1" and not _ev_kinds:
         _have_ids = {p["entity_id"] for p in people_rows}
         _per_co_n = {}
         for c in _named_cos:
@@ -2825,6 +3617,18 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
         grounded = False
 
     # EVIDENCE DISTRIBUTION (spec: coverage is a first-class surface) — how many rows per headline
+    # EXPLICIT LEVEL FILTER (chips) — LAST, after every leg that can add rows (local widening, the
+    # company-gap web discovery): stated levels outside the selection leave; people with no stated
+    # level leave too and are COUNTED (an explicit filter is a filter) — the strip says so.
+    if levels:
+        people_rows, _lv_info = apply_level_pref(people_rows, (levels or [""])[0], kind="person", span=level_span)
+        if _lv_info:
+            coverage["level_pref"] = _lv_info
+    # CALIBRATION DEMOTION (last partition, stable): rows carrying a reviewer-demoted value go to the
+    # back, each group keeping its order — they remain visible (feedback edits rank, never evidence).
+    if people_rows and any(p.get("calibration_demoted") for p in people_rows):
+        people_rows = ([p for p in people_rows if not p.get("calibration_demoted")]
+                       + [p for p in people_rows if p.get("calibration_demoted")])
     # evidence state, counted by code from the per-row packets (rows are fully built here).
     if people_rows:
         # PUBLIC ARTIFACTS (evidence-model-v2 step 1) were attached before ranking; count the
@@ -2835,6 +3639,32 @@ async def answer_people_population(*, question: str, tenant_id: str, store, llm,
             await attach_artifacts(store, people_rows)
         coverage["footprint"] = footprint_coverage(people_rows)
         coverage["evidence_groups"] = evidence_groups(people_rows)
+        _hard_keys = list(_identity_facets) + [k for k in ("country", "state", "metro") if facets.get(k)]
+        _soft_all = [k for k in ("role", "function", "skill", "seniority", "industry", "stage", "accelerator") if facets.get(k)]
+        if not semantic_first:                       # facet-gated run: the non-identity facets DID gate
+            _hard_keys += [k for k in _soft_all if k not in (relaxed_from or []) and k not in _thin_soft]
+        _contract_facets = {**_orig_facets, **facets}   # relaxed keys keep their original values under "prefer"
+        _soft_all = [k for k in ("role", "function", "skill", "seniority", "industry", "stage", "accelerator") if _contract_facets.get(k)]
+        coverage["brief_contract"] = brief_contract_for(
+            question, _contract_facets, hard_keys=_hard_keys, soft_keys=_soft_all, guard_added=guard_added,
+            relaxed_from=relaxed_from, semantic_first=semantic_first, ev_kinds=_ev_kinds,
+            scope=(coverage.get("geo_scope") or {}), topic_terms=topic_terms)
+        if levels and coverage.get("level_pref"):
+            _bc0 = coverage["brief_contract"]
+            _lp = coverage["level_pref"]
+            _bc0["soft"] = {**{"level": [f"centered on {_lp['label']}" + ("" if _lp["span"] == 0 else " (nearby levels too)" if _lp["span"] == 1 else " (wide)")]}, **{k: v for k, v in (_bc0.get("soft") or {}).items() if k != "seniority"}}
+            _bc0["hard"] = {k: v for k, v in (_bc0.get("hard") or {}).items() if k != "seniority"}
+            _bc0["assumptions"] = [a for a in (_bc0.get("assumptions") or []) if "seniority" not in a and "level" not in a]
+            _bc0["clarification"] = None
+            _bc0["assumptions"].insert(0, f"centered on {_lp['label']}: {_lp['exact']} at that level lead, {_lp['near']} nearby next, "
+                                          f"{_lp['unstated']} with no stated level stay neutral, {_lp['far']} further away rank last — nobody is dropped (levels aren't calibrated across companies)")
+        if _fixed is not None:
+            # a REVISED map: the contract came from reviewer feedback — no clarifying question (the
+            # reviewers already answered it) and the assumption line says where the filters came from
+            _bc = coverage["brief_contract"]
+            _bc["clarification"] = None
+            _bc["assumptions"] = []          # the revision box on the map says where the filters came from
+            _bc["revised"] = True
         coverage["ranking"] = ("how closely each profile's wording matches your brief first; among "
                                "near-equal matches, the strength of public evidence (confirmed employer, "
                                "linked papers and repos, recent activity, LinkedIn headline fit) — the "

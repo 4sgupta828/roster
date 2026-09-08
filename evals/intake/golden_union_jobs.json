@@ -1,0 +1,1205 @@
+{
+ "scenario": "seeker_terse_description",
+ "kind": "job",
+ "brief": "I'm looking for my next role. software. Python, Go, Kubernetes. new_york, bay_area",
+ "contract": {
+  "must": {
+   "employment_type": [
+    "full_time"
+   ],
+   "field": [
+    "software"
+   ],
+   "metro": [
+    "bay_area",
+    "new_york"
+   ]
+  },
+  "prefer": {
+   "company_type": [
+    "other"
+   ],
+   "function": [
+    "engineering"
+   ],
+   "level": [
+    "senior",
+    "staff_plus"
+   ],
+   "role_family": [
+    "software engineer"
+   ],
+   "skill": [
+    "go",
+    "kubernetes",
+    "python"
+   ],
+   "work_type": [
+    "ic"
+   ]
+  },
+  "center": {
+   "key": "level",
+   "value": "senior",
+   "span": 1
+  }
+ },
+ "confirmed": false,
+ "agreement_baseline": null,
+ "note": "PROPOSED labels come from the eval judge; a person confirms or edits `label` per row, then sets confirmed=true. Add adversarial rows by hand (wrong company, wrong level, adjacent specialty, stale role, keyword-only) with label 'no'.",
+ "rows": [
+  {
+   "id": "616915",
+   "title": "Application Developer",
+   "company": "city_of_new_york",
+   "location": "New York City, us",
+   "blurb": null,
+   "facets": {
+    "company": [
+     "city_of_new_york"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "metro": [
+     "new_york"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "application developer"
+    ],
+    "skill": [
+     "application development"
+    ],
+    "specialty": [
+     "application development"
+    ],
+    "state": [
+     "ny"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "missing required skills: python, go"
+  },
+  {
+   "id": "617667",
+   "title": "Senior Software Engineer",
+   "company": "city_of_new_york",
+   "location": "New York City, us",
+   "blurb": null,
+   "facets": {
+    "company": [
+     "city_of_new_york"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "senior"
+    ],
+    "metro": [
+     "new_york"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "software engineer"
+    ],
+    "skill": [
+     "software engineering"
+    ],
+    "specialty": [
+     "software engineering"
+    ],
+    "state": [
+     "ny"
+    ],
+    "work_mode": [
+     "onsite"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "missing required skills: python, go"
+  },
+  {
+   "id": "167631",
+   "title": "Senior Software Engineer, Full-Stack",
+   "company": "standard_bots",
+   "location": "New York City, NY",
+   "blurb": null,
+   "facets": {
+    "comp": [
+     "150k_200k"
+    ],
+    "company": [
+     "standard_bots"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "senior"
+    ],
+    "metro": [
+     "new_york"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "software engineer"
+    ],
+    "skill": [
+     "c++",
+     "docker",
+     "kubernetes",
+     "node",
+     "python",
+     "react",
+     "typescript"
+    ],
+    "specialty": [
+     "full-stack"
+    ],
+    "state": [
+     "ny"
+    ],
+    "work_mode": [
+     "onsite"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "partial",
+   "proposed_why": "missing preferred skills: python, go"
+  },
+  {
+   "id": "134585",
+   "title": "Application developer",
+   "company": "merge_api_integration_sandbox",
+   "location": "new york",
+   "blurb": null,
+   "facets": {
+    "company": [
+     "merge_api_integration_sandbox"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "metro": [
+     "new_york"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "application developer"
+    ],
+    "skill": [
+     "angular",
+     "aws",
+     "c#",
+     "docker",
+     "java",
+     "javascript",
+     "kubernetes",
+     ".net",
+     "node",
+     "python",
+     "react",
+     "vue"
+    ],
+    "specialty": [
+     "full-stack development"
+    ],
+    "state": [
+     "ny"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "missing required skills: python, go"
+  },
+  {
+   "id": "615826",
+   "title": "Java Developer With UI",
+   "company": "sonsoft_inc",
+   "location": "New York, us",
+   "blurb": null,
+   "facets": {
+    "company": [
+     "sonsoft_inc"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "metro": [
+     "new_york"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "developer"
+    ],
+    "skill": [
+     "java",
+     "ui"
+    ],
+    "specialty": [
+     "java",
+     "ui"
+    ],
+    "state": [
+     "ny"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "missing required skills: python, go"
+  },
+  {
+   "id": "167630",
+   "title": "Staff Software Engineer",
+   "company": "standard_bots",
+   "location": "New York City, NY",
+   "blurb": null,
+   "facets": {
+    "company": [
+     "standard_bots"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "staff_plus"
+    ],
+    "metro": [
+     "new_york"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "staff software engineer"
+    ],
+    "skill": [
+     "c++",
+     "kubernetes",
+     "llm",
+     "python",
+     "react",
+     "security"
+    ],
+    "specialty": [
+     "ai",
+     "robotics"
+    ],
+    "state": [
+     "ny"
+    ],
+    "work_mode": [
+     "hybrid"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "partial",
+   "proposed_why": "missing preferred skills: python"
+  },
+  {
+   "id": "121179",
+   "title": "Software Engineer III \u2014 Developer Portal",
+   "company": "id_me",
+   "location": "Mountain View, California, United States",
+   "blurb": null,
+   "facets": {
+    "company": [
+     "id_me"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "mid"
+    ],
+    "metro": [
+     "bay_area"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "software engineer"
+    ],
+    "skill": [
+     "java",
+     "next.js",
+     "node",
+     "rails",
+     "react",
+     "rest",
+     "ruby",
+     "spring",
+     "sql",
+     "typescript"
+    ],
+    "specialty": [
+     "developer portal"
+    ],
+    "state": [
+     "ca"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "missing required skills: python, go"
+  },
+  {
+   "id": "134586",
+   "title": "Application Developer",
+   "company": "merge_api_integration_sandbox",
+   "location": "Newyork",
+   "blurb": null,
+   "facets": {
+    "company": [
+     "merge_api_integration_sandbox"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "metro": [
+     "new_york"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "application developer"
+    ],
+    "skill": [
+     "angular",
+     "aws",
+     "c#",
+     "docker",
+     "java",
+     "javascript",
+     "kubernetes",
+     ".net",
+     "node",
+     "python",
+     "react",
+     "vue"
+    ],
+    "specialty": [
+     "application development",
+     "full-stack development"
+    ],
+    "state": [
+     "ny"
+    ],
+    "work_mode": [
+     "onsite"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "missing required skills: python, go"
+  },
+  {
+   "id": "91412",
+   "title": "Staff Software Engineer",
+   "company": "caredx_inc",
+   "location": "Brisbane, CA",
+   "blurb": null,
+   "facets": {
+    "company": [
+     "caredx_inc"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "staff_plus"
+    ],
+    "metro": [
+     "bay_area"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "software engineer"
+    ],
+    "skill": [
+     "c#",
+     "devops",
+     "go",
+     "java",
+     "javascript",
+     "python",
+     "rest",
+     "sql"
+    ],
+    "state": [
+     "ca"
+    ],
+    "work_mode": [
+     "remote"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "public"
+    ],
+    "company_stage": [
+     "public"
+    ]
+   },
+   "label": "partial",
+   "proposed_why": "missing preferred skills: python"
+  },
+  {
+   "id": "616914",
+   "title": "Senior Software Developer",
+   "company": "city_of_new_york",
+   "location": "New York City, us",
+   "blurb": null,
+   "facets": {
+    "company": [
+     "city_of_new_york"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "senior"
+    ],
+    "metro": [
+     "new_york"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "software developer"
+    ],
+    "skill": [
+     "software development"
+    ],
+    "specialty": [
+     "software development"
+    ],
+    "state": [
+     "ny"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "missing required skills: python, go"
+  },
+  {
+   "id": "167634",
+   "title": "Senior Software Engineer, Infrastructure & Developer Tooling",
+   "company": "standard_bots",
+   "location": "New York City, NY",
+   "blurb": null,
+   "facets": {
+    "comp": [
+     "150k_200k"
+    ],
+    "company": [
+     "standard_bots"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "senior"
+    ],
+    "metro": [
+     "new_york"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "software engineer"
+    ],
+    "skill": [
+     "aws",
+     "azure",
+     "ci/cd",
+     "distributed systems",
+     "docker",
+     "gcp",
+     "kubernetes",
+     "postgres",
+     "python",
+     "react",
+     "terraform",
+     "typescript"
+    ],
+    "specialty": [
+     "developer tooling",
+     "infrastructure"
+    ],
+    "state": [
+     "ny"
+    ],
+    "work_mode": [
+     "hybrid"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "missing required skills: python, go"
+  },
+  {
+   "id": "616727",
+   "title": "Java J2EE Engineer",
+   "company": "sonsoft_inc",
+   "location": "Sunnyvale, us",
+   "blurb": null,
+   "facets": {
+    "company": [
+     "sonsoft_inc"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "metro": [
+     "bay_area"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "software engineer"
+    ],
+    "skill": [
+     "j2ee",
+     "java"
+    ],
+    "specialty": [
+     "j2ee",
+     "java"
+    ],
+    "state": [
+     "ca"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "missing required skills: python, go"
+  },
+  {
+   "id": "618870",
+   "title": "Java Developer",
+   "company": "esolvit_inc",
+   "location": "New York, us",
+   "blurb": null,
+   "facets": {
+    "company": [
+     "esolvit_inc"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "metro": [
+     "new_york"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "java developer"
+    ],
+    "skill": [
+     "java"
+    ],
+    "specialty": [
+     "java development"
+    ],
+    "state": [
+     "ny"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "missing required skills: python, go"
+  },
+  {
+   "id": "115583",
+   "title": "Senior Software Engineer - Full Stack",
+   "company": "grow_therapy",
+   "location": "New York City",
+   "blurb": null,
+   "facets": {
+    "company": [
+     "grow_therapy"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "senior"
+    ],
+    "metro": [
+     "new_york"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "software engineer"
+    ],
+    "skill": [
+     "go",
+     "python"
+    ],
+    "specialty": [
+     "full stack engineering"
+    ],
+    "state": [
+     "ny"
+    ],
+    "work_mode": [
+     "onsite"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "yes",
+   "proposed_why": "matches all required and preferred"
+  },
+  {
+   "id": "122807",
+   "title": "Software Engineer, Full Stack",
+   "company": "instalily_ai",
+   "location": "New York, New York, United States, San Francisco, California, United States",
+   "blurb": null,
+   "facets": {
+    "company": [
+     "instalily_ai"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "metro": [
+     "bay_area",
+     "new_york"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "software engineer"
+    ],
+    "skill": [
+     "aws",
+     "azure",
+     "ci/cd",
+     "fastapi",
+     "gcp",
+     "llm",
+     "next.js",
+     "python",
+     "react",
+     "typescript"
+    ],
+    "specialty": [
+     "full stack"
+    ],
+    "state": [
+     "ca",
+     "ny"
+    ],
+    "work_mode": [
+     "onsite"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "missing required skills: python, go"
+  },
+  {
+   "id": "615327",
+   "title": "Java Developer (GC--USC)",
+   "company": "sonsoft_inc",
+   "location": "Jersey City, us",
+   "blurb": null,
+   "facets": {
+    "company": [
+     "sonsoft_inc"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "metro": [
+     "new_york"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "java developer"
+    ],
+    "skill": [
+     "java"
+    ],
+    "specialty": [
+     "java"
+    ],
+    "state": [
+     "nj"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "missing required skills: python, go"
+  },
+  {
+   "id": "629319",
+   "title": "Android Developer",
+   "company": "hcl_america_inc",
+   "location": "Mountain View, us",
+   "blurb": null,
+   "facets": {
+    "company": [
+     "hcl_america_inc"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "metro": [
+     "bay_area"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "android developer"
+    ],
+    "skill": [
+     "android"
+    ],
+    "state": [
+     "ca"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "missing required skills: python, go"
+  },
+  {
+   "id": "629363",
+   "title": "Android Application Developer",
+   "company": "top_slate_consulting",
+   "location": "Parsippany-Troy Hills, us",
+   "blurb": null,
+   "facets": {
+    "company": [
+     "top_slate_consulting"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "metro": [
+     "new_york"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "android developer"
+    ],
+    "skill": [
+     "android"
+    ],
+    "specialty": [
+     "android"
+    ],
+    "state": [
+     "nj"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "missing required skills: python, go"
+  },
+  {
+   "id": "134649",
+   "title": "software engineer",
+   "company": "merge_api_integration_sandbox",
+   "location": "Newyork",
+   "blurb": null,
+   "facets": {
+    "company": [
+     "merge_api_integration_sandbox"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "metro": [
+     "new_york"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "software engineer"
+    ],
+    "skill": [
+     "angular",
+     "c#",
+     "docker",
+     "go",
+     "java",
+     "javascript",
+     "kubernetes",
+     ".net",
+     "node",
+     "python",
+     "react",
+     "vue"
+    ],
+    "specialty": [
+     "software engineering"
+    ],
+    "state": [
+     "ny"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "missing required skills: python, go"
+  },
+  {
+   "id": "167623",
+   "title": "Senior Software Engineer, Motion Planning",
+   "company": "standard_bots",
+   "location": "New York City, NY",
+   "blurb": null,
+   "facets": {
+    "comp": [
+     "200k_300k"
+    ],
+    "company": [
+     "standard_bots"
+    ],
+    "country": [
+     "us"
+    ],
+    "employment_type": [
+     "full_time"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "senior"
+    ],
+    "metro": [
+     "new_york"
+    ],
+    "posted": [
+     "week"
+    ],
+    "role_family": [
+     "software engineer"
+    ],
+    "skill": [
+     "c++",
+     "docker",
+     "node",
+     "python"
+    ],
+    "specialty": [
+     "motion planning"
+    ],
+    "state": [
+     "ny"
+    ],
+    "work_mode": [
+     "onsite"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "missing required skills: python, go"
+  }
+ ]
+}

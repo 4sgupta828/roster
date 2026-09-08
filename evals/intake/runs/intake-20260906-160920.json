@@ -1,0 +1,244 @@
+{
+ "base": "https://roster-api-production-3405.up.railway.app",
+ "secs": 34,
+ "results": [
+  {
+   "id": "seeker_terse_description",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:level",
+    "item:location",
+    "item:comp",
+    "key:company_type"
+   ],
+   "secs": 25.8,
+   "direction": "job",
+   "artifact": {
+    "kind": "profile",
+    "status": "present",
+    "source": "described",
+    "chars": 88
+   },
+   "contract": {
+    "angles": [
+     "software developer",
+     "programmer",
+     "application developer",
+     "software engineer"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "employment_type": [
+      "full_time"
+     ],
+     "field": [
+      "software"
+     ],
+     "metro": [
+      "bay_area",
+      "new_york"
+     ]
+    },
+    "prefer": {
+     "company_type": [
+      "other"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "level": [
+      "senior",
+      "staff_plus"
+     ],
+     "role_family": [
+      "software engineer"
+     ],
+     "skill": [
+      "go",
+      "kubernetes",
+      "python"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm looking for my next role. software. Python, Go, Kubernetes. new_york, bay_area",
+    "user_keys": [
+     "company_type",
+     "level",
+     "metro"
+    ],
+    "notes": [
+     {
+      "rule": "readings",
+      "readings": [
+       {
+        "rule": "cooccurrence",
+        "value_key": "skill",
+        "value": "go",
+        "field": "software",
+        "share": 0.361,
+        "lift": 1.75,
+        "support": 7508,
+        "home": false,
+        "model_share": 0.361
+       },
+       {
+        "rule": "cooccurrence",
+        "value_key": "skill",
+        "value": "kubernetes",
+        "field": "software",
+        "share": 0.857,
+        "lift": 4.16,
+        "support": 5410,
+        "home": true,
+        "model_share": 0.857
+       },
+       {
+        "rule": "cooccurrence",
+        "value_key": "skill",
+        "value": "python",
+        "field": "software",
+        "share": 0.541,
+        "lift": 2.63,
+        "support": 9234,
+        "home": true,
+        "model_share": 0.541
+       }
+      ]
+     }
+    ],
+    "place_or_mode": false
+   },
+   "pool": 3484,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "impossible_musts_diagnosed",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:level",
+    "item:comp"
+   ],
+   "secs": 7.8,
+   "direction": "job",
+   "artifact": {
+    "kind": "profile",
+    "status": "present",
+    "source": "described",
+    "chars": 61
+   },
+   "contract": {
+    "angles": [
+     "software developer",
+     "programmer",
+     "application developer"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "comp": [
+      "300k_plus"
+     ],
+     "field": [
+      "software"
+     ],
+     "metro": [
+      "nowhere_town"
+     ]
+    },
+    "prefer": {
+     "level": [
+      "senior"
+     ],
+     "role_family": [
+      "software engineer"
+     ],
+     "skill": [
+      "go",
+      "kubernetes",
+      "python"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm looking for my next role. software. Python, Go, Kubernetes. Acme",
+    "user_keys": [
+     "level"
+    ],
+    "notes": [
+     {
+      "rule": "readings",
+      "readings": [
+       {
+        "rule": "cooccurrence",
+        "value_key": "skill",
+        "value": "go",
+        "field": "software",
+        "share": 0.361,
+        "lift": 1.75,
+        "support": 7508,
+        "home": false,
+        "model_share": 0.361
+       },
+       {
+        "rule": "cooccurrence",
+        "value_key": "skill",
+        "value": "kubernetes",
+        "field": "software",
+        "share": 0.857,
+        "lift": 4.16,
+        "support": 5410,
+        "home": true,
+        "model_share": 0.857
+       },
+       {
+        "rule": "cooccurrence",
+        "value_key": "skill",
+        "value": "python",
+        "field": "software",
+        "share": 0.541,
+        "lift": 2.63,
+        "support": 9234,
+        "home": true,
+        "model_share": 0.541
+       }
+      ]
+     }
+    ],
+    "place_or_mode": false
+   },
+   "pool": 0,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  }
+ ]
+}

@@ -1,0 +1,236 @@
+"""GUIDED v3 — the recruiting consultant's VOCABULARY (docs/specs/guided-consultant-v3.md). The kernel (`facets/brief.py`)
+owns the brief mechanics, the move parser and the gates; this module names the fields, maps them onto the contract,
+says what readiness means, and writes the prompts: the consultant persona, the document reader, the JD interview."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from .facet_schema import FACET_SCHEMA, VALUE_LABELS
+
+DIRECTIONS = ("job", "candidate")                 # a seeker looks for a JOB; a hiring manager looks for a CANDIDATE
+SEARCH_KIND = {"job": "job", "candidate": "person"}
+DOCUMENT_LABEL = {"document": "from your document", "stored": "from your profile", "stated": "you said", "asked": "you said",
+                  "inferred": "inferred — confirm?", "skipped": "skipped", "unknown": "unknown"}
+
+
+@dataclass(frozen=True)
+class BriefField:
+    key: str                 # brief field name
+    label: str               # what the user sees
+    contract: tuple | None   # (contract key, mode) or None (artifact-only)
+    directions: tuple = ("job", "candidate")
+    ask: str = ""            # one line on what a consultant would ask about it (the planner's cue, never the question text)
+
+
+# order = the consultant's order of impact within each direction (the planner is told it; code never forces it)
+FIELDS: tuple[BriefField, ...] = (
+    BriefField("direction", "Looking or hiring", None, ask="which side the user is on — never guessed from a bare title list"),
+    # ---- hiring first (mission before title) ----
+    BriefField("mission", "What this person owns", None, ("candidate",), "what they will own and what fails if unhired — the FIRST hiring question"),
+    BriefField("success", "Success in six months", None, ("candidate",), "what good looks like at six months"),
+    BriefField("hiring_reason", "Why now", None, ("candidate",), "backfill / new team / urgent gap / exploratory"),
+    BriefField("must_have_done", "Must have done before", ("specialty", "prefer"), ("candidate",), "what they must have DONE (not skills lists)"),
+    BriefField("trainable", "Can learn on the job", None, ("candidate",), "what is nice-to-have / trainable"),
+    BriefField("calibration", "People like", None, ("candidate",), "calibration examples: people from which companies / roles"),
+    BriefField("seniority_tradeoff", "Senior vs staff trade-off", None, ("candidate",), "strong senior vs weaker staff at this comp"),
+    BriefField("team", "Team and reporting line", None, ("candidate",), "who they report to; team size and stage"),
+    BriefField("evidence", "Public proof wanted", ("evidence", "must"), ("candidate",), "repos / papers / talks as a bar — or a preference"),
+    BriefField("disqualifiers", "Rules out", None, ("candidate",), "job-relevant disqualifiers only"),
+    # ---- seeker first (posture before field) ----
+    BriefField("posture", "Step up, lateral or switch", None, ("job",), "the FIRST seeker question: step up, lateral in a better environment, or a switch"),
+    BriefField("search_posture", "Active, passive or exploring", None, ("job",), "active / passive / exploratory"),
+    BriefField("career_arc", "Career arc", None, ("job",), "the trajectory read from the résumé (tenure, moves, domain) — inferred, shown"),
+    BriefField("positioning", "Story to lead with", None, ("job",), "what the résumé should lead with for this target"),
+    BriefField("title_flexibility", "Title flexibility", None, ("job",), "titles they would and would not take"),
+    BriefField("stage_appetite", "Company stage appetite", ("company_type", "prefer"), ("job",), "startup / public / big tech appetite"),
+    BriefField("avoid_domains", "Domains to avoid", ("field", "avoid"), ("job",), "industries or domains to avoid"),
+    BriefField("risk", "Risk tolerance", None, ("job",), "seed-stage risk vs stability"),
+    BriefField("authorization", "Work authorization", None, ("job",), "sponsorship / authorization — factual, never a proxy"),
+    BriefField("confidentiality", "Confidential search", None, ("job",), "whether the search is confidential"),
+    # ---- shared ----
+    BriefField("role_family", "Role", ("role_family", "prefer"), ask="the title family (backend engineer, CTO, growth marketer)"),
+    BriefField("field", "Domain", ("field", "must"), ask="the domain the work belongs to"),
+    BriefField("function", "Function", ("function", "prefer"), ask="the kind of work day to day"),
+    BriefField("specialties", "Specialties", ("specialty", "prefer"), ask="1–3 specialties"),
+    BriefField("skills", "Skills that matter", ("skill", "prefer"), ask="the few skills that would decide it — never a list to tick"),
+    BriefField("level", "Level", ("level", "center"), ask="current level (seeker) / the level calibrated for (hiring)"),
+    BriefField("work_type", "IC or manager", ("work_type", "prefer"), ask="hands-on IC vs manager vs executive — one question settles level posture too"),
+    BriefField("metro", "Place", ("metro", "must"), ask="the metro — or remote; place-or-mode when both are said"),
+    BriefField("work_mode", "Work mode", ("work_mode", "must"), ask="remote / hybrid / onsite"),
+    BriefField("timezone", "Timezone / commute", None, ask="timezone or commute constraints"),
+    BriefField("comp", "Compensation", ("comp", "prefer"), ask="floor vs target (seeker) / range and flexibility (hiring) — propose the market number first"),
+    BriefField("comp_flexibility", "Comp flexibility", None, ask="hard cap vs equity offset"),
+    BriefField("company_type", "Company type", ("company_type", "prefer"), ask="startup / public / Fortune 500 / big tech"),
+    BriefField("employment_type", "Employment type", ("employment_type", "must"), ask="full time / contract / part time"),
+    BriefField("timing", "Timing", None, ask="start date / urgency"),
+    BriefField("deal_breakers", "Deal-breakers", None, ask="hard constraints, job-relevant only"),
+)
+
+FIELDS_BY_KEY = {f.key: f for f in FIELDS}
+FIELD_KEYS = set(FIELDS_BY_KEY)
+
+
+def fields_for(direction: str) -> list[BriefField]:
+    return [f for f in FIELDS if direction in f.directions]
+
+
+def contract_mapping(direction: str) -> dict:
+    """{brief field: (contract key, mode)} for the fields that reach the search — only keys the search kind has."""
+    kind = SEARCH_KIND.get(direction, "job")
+    legal = {k.key for k in FACET_SCHEMA.for_kind(kind)}
+    return {f.key: f.contract for f in fields_for(direction) if f.contract and f.contract[0] in legal}
+
+
+# readiness (spec §4.4): known or explicitly skipped before the search is proposed
+# readiness is the PREVIEW, not a checklist (owner, 2026-09-06: "seek clarification only where needed"): the side must be
+# known; a hiring manager building a JD from nothing needs the mission; everything else is asked only when the answer
+# would change the results — the planner judges that against the preview and the leverage
+REQUIRED = {"job": ("direction",), "candidate": ("direction", "mission")}
+MAX_QUESTIONS = 3               # any question counts; "search now" ends it from any turn
+# the consultant's opener when NOTHING but the side is known — the one question that is never a checklist item
+OPEN_QUESTION = {"job": "Tell me what you do today and what you're after — role, level, where — and I'll take it from there.",
+                 "candidate": "What will this hire own, and what fails in the next six months if you don't make it?"}
+INTENT_FIELDS = ("role_family", "field", "specialties", "skills", "mission", "must_have_done", "level", "career_arc")   # any of these = an ask exists
+REMOTE_SETTLES = ("metro",)          # a remote role / a remote-only seeker has no metro to ask for
+CONTRACT_KEYS_FOR_EFFECTS = ("field", "function", "specialty", "skill", "role_family", "level", "work_type", "metro", "state", "country", "work_mode",
+                             "employment_type", "comp", "company_type", "evidence")
+# what a document CAN state: a résumé states career facts, never a posture or a risk appetite; a JD states the role
+DOCUMENT_FIELDS = {
+    "resume": ("role_family", "field", "function", "specialties", "skills", "level", "work_type", "metro", "authorization", "positioning", "career_arc"),
+    "profile": ("metro", "authorization", "timing", "role_family", "level", "field"),
+    # the user's OWN WORDS about what they want: everything they can state in a sentence (never a posture they did not name)
+    "ask": ("role_family", "field", "function", "specialties", "skills", "level", "work_type", "metro", "work_mode", "employment_type",
+            "comp", "company_type", "mission", "must_have_done", "timing", "deal_breakers", "evidence", "team", "hiring_reason"),
+    "jd": ("mission", "success", "must_have_done", "trainable", "team", "evidence", "disqualifiers", "role_family", "field", "function", "specialties",
+           "skills", "level", "work_type", "metro", "work_mode", "comp", "company_type", "employment_type", "timing"),
+}
+MAX_FORKS = 4                  # forks per intake before `ready` is offered anyway
+MAX_PLANNER_CALLS = 8
+NEVER_ASK = ("current salary", "age", "gender", "race", "religion", "nationality", "family plans", "health", "years of experience as a number",
+             "a list of skills to tick", "what field are you in (when the résumé says)", "generic strengths / culture")
+JD_INTERVIEW = ("mission", "must_have_done", "trainable", "level", "deal_breakers", "team")   # order of impact; peers supply the market centre
+
+
+def option_label(key: str, value: str) -> str:
+    return VALUE_LABELS.get(str(value)) or str(value).replace("_", " ")
+
+
+def _vocab(kind: str) -> str:
+    return "; ".join(f"{k.key}: {', '.join(k.values)}" for k in FACET_SCHEMA.for_kind(kind) if k.values)
+
+
+def direction_prompt() -> str:
+    """The first read when the words leave the side open: settle it or ask it — nothing else."""
+    return ("You are a recruiting consultant meeting someone new. Decide from their words whether they are LOOKING for a role for themselves "
+            "(direction \"job\") or HIRING people (direction \"candidate\"). EXPLICIT signals for looking: I'm looking, my next role, my résumé, "
+            "roles/jobs/positions for me, 'jobs for a <profile>' (someone describing themselves in the third person is still looking), 'find me'. "
+            "EXPLICIT signals for hiring: hire, hiring, we need, our team, candidates, a JD, 'find people'. A bare list of titles or skills with "
+            "neither signal is AMBIGUOUS. Return ONLY JSON: {\"direction\": \"job\" | \"candidate\" | null, \"explicit\": true when a signal above "
+            "is literally present, false when you are reading between the lines, \"span\": the words that decided it, \"say\": ≤ 1 sentence}. "
+            "null only when nothing at all points either way.")
+
+
+def planner_prompt(direction: str) -> str:
+    """SEARCH-FIRST reasoning (the fix for 'a checklist wearing a persona'): the planner maps the words onto the ONE search it
+    would run now, judges the PREVIEW of that search, ranks the open facts by how much an answer would change the results,
+    and asks ONE question only when a high-impact gap remains."""
+    kind = SEARCH_KIND.get(direction, "job")
+    who = "a job seeker" if direction == "job" else "a hiring manager"
+    fields = "\n".join(f"- {f.key}: {f.label} — {f.ask}" for f in fields_for(direction) if f.key != "direction")
+    first = ("a seeker's résumé is read for the career arc; the posture (step up / lateral / switch) is worth ONE question only when the "
+             "words leave it open AND it would change the level you search at" if direction == "job" else
+             "with no JD on file, the mission (what this person owns; what fails unhired) comes before any title or skills list")
+    return (f"You are a senior recruiting consultant working with {who}. Each turn you MAP what they want onto ONE search and ask a question "
+            "ONLY if its answer would change the results materially. Reason in this order and return ONLY JSON with exactly these keys:\n"
+            "1. \"understanding\": {field: {\"value\", \"source\": \"stated\" | \"inferred\", \"span\": their words}} — what the words already fix "
+            "(role, level, domain, skills, specialties, place, mode, posture, mission, comp …). A paraphrase of THEIR words is stated; your reading is inferred. "
+            "Record every fact they state; never lose one.\n"
+            "2. \"search\": the contract you would run NOW: {\"must\": {key: [values]}, \"prefer\": {key: [values]}, \"center\": {\"key\": \"level\", \"value\"}, "
+            "\"text\": the search words}. Musts only for what they stated as a bar; preferences rank.\n"
+            "3. \"preview_verdict\": given the PREVIEW (pool and top results of the current search), \"good\" or \"off: <one line>\".\n"
+            "4. \"gaps\": open facts ranked by how much the answer would CHANGE the results: [{\"field\", \"impact\": \"high\" | \"low\", \"why\": what changes}]. "
+            "A fact the words already fix is not a gap. Company type, comp, timing, deal-breakers are low impact unless the pool is huge or the preview is off.\n"
+            "5. \"move\": \"ready\" when the preview is good and no high-impact gap remains (or they asked to search); \"ask\" for ONE high-impact gap; "
+            "\"draft\" to build the JD (hiring, no JD, mission known); \"restart\" only when they literally ask to start over or switch side; \"split\" for two roles.\n"
+            "6. \"say\": ≤ 2 sentences in a consultant's voice — for ask: the OBSERVATION from the evidence, then why this fork matters; for ready: the search in one "
+            "line and the assumptions you are making (never 'I will now summarize').\n"
+            "7. \"question\": null, or {\"field\": the brief field, \"text\": the fork in one sentence, \"options\": [{\"label\", \"value\", \"effect\": {\"must\" | \"prefer\": "
+            "{key: [values]}, \"center\": {\"key\", \"value\"}}}] (2–3 concrete options, same shape each; [] for free text), \"multi\": bool}. Hypothesis-led: "
+            "propose the default with the market number and ask for variance.\n"
+            f"Rules: {first}. With an EMPTY brief (the person has said only that they are looking / hiring), ask the open consultant question — what they do "
+            "today and what they are after (seeker) / what the hire will own (hiring) — never a facet pick like 'which field'. "
+            f"Never ask what the brief already knows; never ask twice; never ask: {', '.join(NEVER_ASK)}. A fully specified ask (role + "
+            "level + skills + place or mode) is searched, not interrogated. Contract keys and vocabularies — "
+            f"{', '.join(CONTRACT_KEYS_FOR_EFFECTS)}; {_vocab(kind)}; open keys (skill, specialty, role_family) take lowercase tokens; metro takes a token from "
+            "METRO TOKENS, never free text; a REMOTE role has no metro (work_mode = remote).\n"
+            f"BRIEF FIELDS for {who}:\n{fields}")
+
+
+def consultant_prompt(direction: str) -> str:
+    kind = SEARCH_KIND.get(direction, "job")
+    who = "a job seeker" if direction == "job" else "a hiring manager"
+    fields = "\n".join(f"- {f.key}: {f.label} — {f.ask}" for f in fields_for(direction) if f.key != "direction")
+    first = ("the seeker's FIRST question is posture — step up, lateral in a better environment, or a switch — read from the career arc; "
+             "never 'what field are you in' when the résumé says it" if direction == "job" else
+             "the hiring manager's FIRST question is the mission — what this person will own and what fails if they are not hired; "
+             "never title, years or a skills list first")
+    return (f"You are a senior recruiting consultant working with {who}. You keep a BRIEF (structured understanding) and make ONE MOVE per turn. "
+            "A consultant turn is: an OBSERVATION from the evidence → the DECISION POINT that changes the search most → its CONSEQUENCE → "
+            "2–3 concrete options. Hypothesis-led: propose a default with the market number and ask for variance ('Staff ML in SF clusters "
+            "$200–250k base — does that match, or higher?'); consolidate intent ('hands-on IC or management track?' settles level posture, "
+            f"role and work type together). {first}. Never ask what the brief already knows (source document / stored / stated / asked); "
+            f"never ask: {', '.join(NEVER_ASK)}. Never write a line that has no source. Be direct and brief; say WHY when you ask.\n"
+            "Return ONLY JSON: {\"move\": one of infer | confirm | fork | challenge | trade_off | draft | split | ready | restart, "
+            "\"say\": ≤ 2 sentences to the user, \"brief_delta\": {field: {\"value\", \"source\": \"inferred\" | \"stated\", \"span\": the words it came from}}, "
+            "\"question\": null | {\"field\": the brief field it resolves, \"text\", \"why\": why it matters for the search, "
+            "\"options\": [{\"label\", \"value\", \"effect\": {\"must\" | \"prefer\" | \"avoid\": {key: [values]}, \"center\": {\"key\", \"value\"}}}], \"multi\": bool}, "
+            "\"contract_delta\": same effect shape, \"ready\": bool}. ONE question at most; its options MUST come from the LEVERAGE given "
+            "(measured splits of the current pool) or be a confirm / posture / mission question. An option's `effect` is a SEARCH effect and uses ONLY "
+            f"these contract keys: {', '.join(CONTRACT_KEYS_FOR_EFFECTS)} — never a brief field name; every option of one question uses the SAME shape "
+            "(all `center` on level, or all `must` on one key). A brief-only question (direction, posture, mission, deal_breakers, timing …) carries "
+            f"`value` only and NO effect. Vocabularies — {_vocab(kind)}; open keys (skill, specialty, role_family) take lowercase tokens; metro takes a "
+            "token from METRO TOKENS given below, never free text. A REMOTE role has no metro: record work_mode = remote and never ask which city. "
+            "If any REQUIRED field is still open, your move is a question on the most "
+            "impactful open one (or `ready` when the user asks to search). "
+            "Every turn, RECORD every fact the user states into brief_delta (role_family, level, comp, skills, must_have_done, work_mode, timing, "
+            "deal_breakers, team …) — nothing the user said may be lost; a paraphrase of THEIR words is `stated` ('senior backend engineer at Acme' → "
+            "role_family backend engineer, level senior, both stated). A free-text question has \"options\": [] (never a placeholder option). "
+            "`stated` only for what the user actually wrote; `inferred` for your reading (it ranks, never filters, until confirmed). "
+            "`ready` when the required fields are settled or the user asks to search: `say` STATES the search in one line and the assumptions "
+            "you are making (never 'I will now summarize'). "
+            "`restart` ONLY when the user literally asks to start over or says they are on the other side after all; `split` when there are two roles. `draft` to build or revise the "
+            f"document.\nBRIEF FIELDS for {who}:\n{fields}")
+
+
+def document_reader_prompt(kind: str, direction: str) -> str:
+    """Reads a résumé / JD / profile INTO the brief: value + the exact span it came from; nothing inferred beyond the words."""
+    what = {"resume": "a résumé or self-description", "jd": "a job description or a hiring manager's role notes", "profile": "a stored profile record",
+            "ask": "the person's OWN WORDS about the search they want"}.get(kind, "a document")
+    fields = "\n".join(f"- {f.key}: {f.label}" for f in fields_for(direction) if f.key != "direction")
+    if kind == "ask":
+        return (f"You read {what} into a recruiting brief. Return ONLY JSON: {{\"fields\": {{field: {{\"value\": short, \"span\": the exact words "
+                "it comes from, copied verbatim}}}}}}. Read what they ASK FOR, not what they are: 'jobs for a mid level software engineer "
+                "skilled in java and k8s' states role_family software engineer, level mid, skills java / kubernetes, field software. Only what "
+                "the words state; never invent; values under 12 words; use the vocabulary tokens where one fits. NEVER echo a field's own name "
+                "or label as its value, and never emit a field the words do not mention — omit it. Set fields (skills, specialties) are JSON "
+                "LISTS of single tokens, never one comma-joined string.\n"
+                f"Fields:\n{fields}\nVocabulary — {_vocab(SEARCH_KIND.get(direction, 'job'))}; metro tokens: new_york, bay_area, seattle, "
+                "los_angeles, boston, chicago, austin, london, bangalore; skills / specialties / role_family are lowercase free tokens.")
+    arc = ("Also write `career_arc`: two sentences on tenure, trajectory and domain (e.g. 'six years in ML infrastructure, from senior engineer to "
+           "head of a 12-person team; fintech throughout') — this is the one field you may compose; mark it source inferred. "
+           if kind == "resume" else "Also write `mission` from the responsibilities if the text states what the person owns. ")
+    return (f"You read {what} into a recruiting brief. Return ONLY JSON: {{\"fields\": {{field: {{\"value\": short, \"span\": the exact sentence or "
+            f"phrase it comes from}}}}}}. Only fields the text STATES; never invent; keep values under 12 words; copy each span VERBATIM from the text. For level and role_family use the CURRENT (most recent) "
+            "position — 'Head of' / VP / CTO / director = leadership, principal / staff = staff_plus, senior / lead = senior. A résumé never states a "
+            "posture, a risk appetite or a compensation target — leave those out. "
+            f"{arc}Fields:\n{fields}\nVocabulary hints — {_vocab(SEARCH_KIND.get(direction, 'job'))}; for metro write the index token "
+            "(new_york, bay_area, seattle, los_angeles, boston, chicago, austin, london, bangalore, remote) when the place is one of them.")
+
+
+def jd_assemble_prompt() -> str:
+    return ("You write a complete job description from (a) the BRIEF (the hiring manager's own answers — cite as \"you\") and (b) the market "
+            "CENTRE (requirement groups that recur across peer postings, each with its count). Return ONLY JSON: {\"title\": str, \"summary\": "
+            "≤ 70 words, \"sections\": [{\"heading\": str, \"lines\": [str], \"source\": \"you\" | \"peers\" | \"both\"}]}. Sections: What you will "
+            "own; What you must have done; Nice to have; Level and team; Location and mode; Compensation (only if the manager gave a range — "
+            "peers' pay is a market signal shown separately). Every section's source is honest; never a line that neither the manager nor the "
+            "peers said. Plain, specific language; no boilerplate.")

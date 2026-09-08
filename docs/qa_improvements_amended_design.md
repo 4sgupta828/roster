@@ -644,7 +644,7 @@ Implementation should not be considered complete until:
 1. `/qa` and `/qa/stream` are native Roster routes.
 2. People-population no longer blocks general Q&A.
 3. Named-person questions produce grounded dossiers or clarification, not only search
-   links.
+   links.We
 4. Company hiring questions use company reader plus hiring-specific answer contracts.
 5. JD questions cite the JD text or ask for it.
 6. Connection questions use graph paths when available.

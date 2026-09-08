@@ -17,6 +17,7 @@ Best-effort like SessionStore: a persistence failure must never break an answer.
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import secrets
@@ -132,15 +133,107 @@ CREATE TABLE IF NOT EXISTS roster_outreach (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_ro_user ON roster_outreach (user_id, created_at DESC);
+-- NOTIFICATIONS (2026-09-04): in-app inbox — a map refresh found new rows, an application moved, …
+-- Read by the FE bell and by the Roster Apply extension (native Chrome notifications). Per user.
+CREATE TABLE IF NOT EXISTS roster_notification (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    kind        TEXT NOT NULL DEFAULT '',        -- map_refresh | application | system
+    title       TEXT NOT NULL,
+    body        TEXT NOT NULL DEFAULT '',
+    url         TEXT NOT NULL DEFAULT '',        -- in-app hash route (#m/<id>) or a link
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    read_at     TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_rn_user ON roster_notification (user_id, created_at DESC);
+-- BRIEFS (guided intake §2.2): a hiring manager's job descriptions (one row per kind of hire, keyed by role_key,
+-- versioned) and a job seeker's improved résumé versions. Saved only on an explicit tap; never invented content.
+CREATE TABLE IF NOT EXISTS roster_brief (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     TEXT NOT NULL,
+    kind        TEXT NOT NULL,                   -- jd | resume
+    title       TEXT NOT NULL DEFAULT '',
+    role_key    TEXT NOT NULL DEFAULT '',        -- <field>/<function>/<level>/<title-slug> for a JD; 'resume' for a résumé
+    text        TEXT NOT NULL,
+    structured  JSONB NOT NULL DEFAULT '{}'::jsonb,
+    sources     JSONB NOT NULL DEFAULT '{}'::jsonb,
+    version     INTEGER NOT NULL DEFAULT 1,
+    active      BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_rb_user ON roster_brief (user_id, kind, active, updated_at DESC);
 -- RÉSUMÉ → PROFILE autofill: docling+LLM parse runs in a SEPARATE process; these columns hold its
 -- status and the suggested fields (the FE prefills the form from parsed_profile for the user to review).
 ALTER TABLE roster_candidate_profile ADD COLUMN IF NOT EXISTS parse_status TEXT;      -- pending|done|failed
 ALTER TABLE roster_candidate_profile ADD COLUMN IF NOT EXISTS parsed_profile JSONB;
 ALTER TABLE roster_candidate_profile ADD COLUMN IF NOT EXISTS parsed_at TIMESTAMPTZ;
+-- LINKEDIN CONNECTIONS (intro path): the user's OWN export (LinkedIn → Settings → Data privacy → Get a
+-- copy of your data → Connections.csv), uploaded once, private to the account, deletable. Used only
+-- to answer "who do I know at <company>" on a job card. Never scraped, never shared, never a search
+-- signal for other users.
+CREATE TABLE IF NOT EXISTS roster_connection (
+    id            BIGSERIAL PRIMARY KEY,
+    user_id       TEXT NOT NULL,
+    first_name    TEXT NOT NULL DEFAULT '',
+    last_name     TEXT NOT NULL DEFAULT '',
+    url           TEXT NOT NULL DEFAULT '',
+    company       TEXT NOT NULL DEFAULT '',
+    company_norm  TEXT NOT NULL DEFAULT '',
+    position      TEXT NOT NULL DEFAULT '',
+    connected_on  TEXT NOT NULL DEFAULT '',
+    uploaded_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_rc_user_co ON roster_connection (user_id, company_norm);
+-- APPLICATIONS (controlled auto-apply): one row per posting the user queued. The agent fills and
+-- screenshots (status filled / needs_you); the user approves; only then it submits. Tracks what was
+-- applied to, where, when, with what answers. Screenshot = the filled form as the user saw it.
+CREATE TABLE IF NOT EXISTS roster_application (
+    id            BIGSERIAL PRIMARY KEY,
+    user_id       TEXT NOT NULL,
+    job_ref       TEXT NOT NULL DEFAULT '',
+    company       TEXT NOT NULL DEFAULT '',
+    title         TEXT NOT NULL DEFAULT '',
+    url           TEXT NOT NULL,
+    ats           TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'queued',   -- queued|filled|needs_you|approved|submitted|failed
+    reason        TEXT NOT NULL DEFAULT '',
+    filled        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    open_questions JSONB NOT NULL DEFAULT '[]'::jsonb,
+    answers       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    drafts        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    screenshot    BYTEA,
+    submitted_at  TIMESTAMPTZ,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ra_user ON roster_application (user_id, created_at DESC);
+ALTER TABLE roster_application ADD COLUMN IF NOT EXISTS submit_screenshot BYTEA;   -- the page after a submit attempt (the prepare shot stays)
+ALTER TABLE roster_application ADD COLUMN IF NOT EXISTS submitted_by TEXT;          -- 'roster' | 'user' (submitted in their own browser)
+ALTER TABLE roster_application ADD COLUMN IF NOT EXISTS form_url TEXT;              -- the form's OWN page (the ATS-hosted application form)
+ALTER TABLE roster_application ADD COLUMN IF NOT EXISTS plan JSONB NOT NULL DEFAULT '[]'::jsonb;   -- the application plan (every question: answer, source, policy, selector)
+-- ANSWER BANK: every answer the user gives in an application review, keyed by the normalized question,
+-- so the same question is filled next time (the user reviews instead of retyping).
+CREATE TABLE IF NOT EXISTS roster_answer_bank (
+    user_id     TEXT NOT NULL,
+    qnorm       TEXT NOT NULL,
+    question    TEXT NOT NULL DEFAULT '',
+    answer      TEXT NOT NULL DEFAULT '',
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, qnorm)
+);
 """
 
 _MAX_TOKENS_PER_USER = 10   # prune oldest beyond this (a lost device's token eventually ages out)
 
+
+
+def _norm_company(name: str) -> str:
+    """'Stripe, Inc.' / 'STRIPE' / 'Stripe Inc' → 'stripe' — the same loose key the job index uses for companies."""
+    import re as _re
+    s = _re.sub(r"[^a-z0-9 ]+", " ", (name or "").lower())
+    s = _re.sub(r"\b(inc|llc|ltd|limited|corp|corporation|co|company|plc|gmbh|sa|ag|the)\b", " ", s)
+    return _re.sub(r"\s+", " ", s).strip().replace(" ", "_")
 
 
 def _hash(token: str) -> str:
@@ -566,6 +659,225 @@ class AccountStore:
                 bytes(row["resume_bytes"]))
 
     # ---- résumé→profile parse status (the docling+LLM work runs in a SEPARATE process) ----
+    # ---- LinkedIn connections (the user's own export; intro path) ----
+    async def replace_connections(self, user_id: str, rows: list[dict]) -> int:
+        """Replace the user's connections with a fresh export (idempotent re-upload). Returns rows kept."""
+        await self._ensure()
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("DELETE FROM roster_connection WHERE user_id = $1", user_id)
+                n = 0
+                for r in rows[:20000]:
+                    co = (r.get("company") or "").strip()
+                    if not (r.get("first_name") or r.get("last_name")):
+                        continue
+                    await conn.execute(
+                        """INSERT INTO roster_connection (user_id, first_name, last_name, url, company, company_norm, position, connected_on)
+                           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)""",
+                        user_id, (r.get("first_name") or "")[:80], (r.get("last_name") or "")[:80], (r.get("url") or "")[:300],
+                        co[:160], _norm_company(co), (r.get("position") or "")[:160], (r.get("connected_on") or "")[:40])
+                    n += 1
+        return n
+
+    async def connections_summary(self, user_id: str) -> dict:
+        await self._ensure()
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            r = await conn.fetchrow("SELECT count(*) n, count(DISTINCT company_norm) cos, max(uploaded_at) at FROM roster_connection WHERE user_id = $1", user_id)
+        return {"count": int(r["n"] or 0), "companies": int(r["cos"] or 0), "uploaded_at": (str(r["at"]) if r["at"] else None)}
+
+    async def connections_at(self, user_id: str, company: str, *, limit: int = 25) -> list[dict]:
+        """The user's connections whose CURRENT company (as exported) is this company — exact normalized
+        match first, then a contains-match for suffix variants ('Stripe' vs 'Stripe, Inc.')."""
+        await self._ensure()
+        n = _norm_company(company)
+        if not n:
+            return []
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT first_name, last_name, url, company, position, connected_on,
+                          (company_norm = $2) AS exact
+                   FROM roster_connection WHERE user_id = $1
+                     AND (company_norm = $2 OR (length($2) >= 4 AND company_norm LIKE $2 || '%'))
+                   ORDER BY exact DESC, connected_on DESC LIMIT $3""", user_id, n, int(limit))
+        return [{"name": (r["first_name"] + " " + r["last_name"]).strip(), "url": r["url"], "company": r["company"],
+                 "position": r["position"], "connected_on": r["connected_on"], "exact": bool(r["exact"])} for r in rows]
+
+    async def delete_connections(self, user_id: str) -> None:
+        await self._ensure()
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM roster_connection WHERE user_id = $1", user_id)
+
+    # ---- applications (controlled auto-apply) ----
+    async def queue_application(self, user_id: str, *, job_ref: str, company: str, title: str, url: str, ats: str) -> dict:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            r = await conn.fetchrow(
+                """INSERT INTO roster_application (user_id, job_ref, company, title, url, ats)
+                   VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, status, created_at""",
+                user_id, job_ref[:300], company[:160], title[:200], url[:1000], ats[:40])
+        return {"id": int(r["id"]), "status": r["status"], "created_at": str(r["created_at"])}
+
+    async def update_application(self, user_id: str, app_id: int, **fields) -> bool:
+        """Set any of: status, reason, filled, open_questions, answers, drafts, screenshot (bytes), submitted_at."""
+        await self._ensure()
+        allowed = {"status", "reason", "filled", "open_questions", "answers", "drafts", "screenshot", "submitted_at", "submit_screenshot", "submitted_by", "form_url", "plan"}
+        sets, vals = [], []
+        for k, v in fields.items():
+            if k not in allowed:
+                continue
+            vals.append(json.dumps(v) if k in ("filled", "open_questions", "answers", "drafts", "plan") else v)
+            sets.append(f"{k} = ${len(vals) + 2}" + ("::jsonb" if k in ("filled", "open_questions", "answers", "drafts", "plan") else ""))
+        if not sets:
+            return False
+        async with (await self._get_pool()).acquire() as conn:
+            res = await conn.execute(f"UPDATE roster_application SET {', '.join(sets)}, updated_at = now() WHERE user_id = $1 AND id = $2",
+                                     user_id, int(app_id), *vals)
+        return res.endswith("1")
+
+    # ---- notifications (in-app inbox; the extension polls the same list) ----
+    # ---- briefs (guided intake §2.2): JDs keyed by role, résumé versions ----
+    async def save_brief(self, user_id: str, *, kind: str, title: str, role_key: str, text: str, structured: dict | None = None,
+                         sources: dict | None = None) -> dict:
+        """Save a brief. The same (kind, role_key) becomes the NEXT version of that hire / résumé (older versions stay,
+        inactive); a different role_key is a new row. Returns {id, version, role_key}."""
+        await self._ensure()
+        kind = kind if kind in ("jd", "resume") else "jd"
+        role_key = (role_key or ("resume" if kind == "resume" else "role"))[:200]
+        async with (await self._get_pool()).acquire() as conn:
+            async with conn.transaction():
+                prev = await conn.fetchval("SELECT COALESCE(MAX(version), 0) FROM roster_brief WHERE user_id=$1 AND kind=$2 AND role_key=$3", user_id, kind, role_key)
+                await conn.execute("UPDATE roster_brief SET active = FALSE, updated_at = now() WHERE user_id=$1 AND kind=$2 AND role_key=$3 AND active", user_id, kind, role_key)
+                bid = await conn.fetchval(
+                    "INSERT INTO roster_brief (user_id, kind, title, role_key, text, structured, sources, version, active) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,TRUE) RETURNING id",
+                    user_id, kind, (title or "")[:300], role_key, text[:60000], json.dumps(structured or {}), json.dumps(sources or {}), int(prev) + 1)
+        return {"id": int(bid), "version": int(prev) + 1, "role_key": role_key}
+
+    async def list_briefs(self, user_id: str, *, kind: str | None = None, active_only: bool = True, limit: int = 50) -> list[dict]:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, kind, title, role_key, version, active, length(text) AS chars, created_at, updated_at FROM roster_brief WHERE user_id=$1 "
+                + ("AND kind=$3 " if kind else "") + ("AND active " if active_only else "") + "ORDER BY updated_at DESC LIMIT $2",
+                *([user_id, int(limit)] + ([kind] if kind else [])))
+        return [{"id": int(r["id"]), "kind": r["kind"], "title": r["title"], "role_key": r["role_key"], "version": int(r["version"]), "active": bool(r["active"]),
+                 "chars": int(r["chars"] or 0), "created_at": r["created_at"].isoformat(), "updated_at": r["updated_at"].isoformat()} for r in rows]
+
+    async def get_brief(self, user_id: str, brief_id: int) -> dict | None:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            r = await conn.fetchrow("SELECT id, kind, title, role_key, text, structured, sources, version, active, created_at, updated_at FROM roster_brief WHERE user_id=$1 AND id=$2", user_id, int(brief_id))
+        if not r:
+            return None
+        return {"id": int(r["id"]), "kind": r["kind"], "title": r["title"], "role_key": r["role_key"], "text": r["text"],
+                "structured": json.loads(r["structured"]) if isinstance(r["structured"], str) else (r["structured"] or {}),
+                "sources": json.loads(r["sources"]) if isinstance(r["sources"], str) else (r["sources"] or {}),
+                "version": int(r["version"]), "active": bool(r["active"]), "created_at": r["created_at"].isoformat(), "updated_at": r["updated_at"].isoformat()}
+
+    async def delete_brief(self, user_id: str, brief_id: int) -> bool:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            res = await conn.execute("DELETE FROM roster_brief WHERE user_id=$1 AND id=$2", user_id, int(brief_id))
+        return res.endswith("1")
+
+    async def set_resume_text(self, user_id: str, text: str, *, name: str = "resume-improved.txt") -> None:
+        """An improved résumé becomes the résumé on file: the bytes (plain text) and the parsed profile's text."""
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow("SELECT parsed_profile FROM roster_candidate_profile WHERE user_id=$1", user_id)
+                parsed = (json.loads(row["parsed_profile"]) if row and row["parsed_profile"] else {}) if row else {}
+                parsed["_resume_text"] = text[:20000]
+                await conn.execute(
+                    """INSERT INTO roster_candidate_profile (user_id, profile, resume_name, resume_type, resume_bytes, resume_at, parsed_profile, parse_status, updated_at)
+                       VALUES ($1, '{}'::jsonb, $2, 'text/plain', $3, now(), $4::jsonb, 'done', now())
+                       ON CONFLICT (user_id) DO UPDATE SET resume_name = EXCLUDED.resume_name, resume_type = EXCLUDED.resume_type, resume_bytes = EXCLUDED.resume_bytes,
+                         resume_at = now(), parsed_profile = EXCLUDED.parsed_profile, parse_status = 'done', updated_at = now()""",
+                    user_id, name[:120], text.encode("utf-8")[:2_000_000], json.dumps(parsed))
+
+    async def add_notification(self, user_id: str, *, kind: str, title: str, body: str = "", url: str = "") -> int:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            return int(await conn.fetchval(
+                "INSERT INTO roster_notification (user_id, kind, title, body, url) VALUES ($1,$2,$3,$4,$5) RETURNING id",
+                user_id, kind[:40], title[:300], body[:2000], url[:1000]))
+
+    async def list_notifications(self, user_id: str, *, unread_only: bool = False, limit: int = 50) -> list[dict]:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, kind, title, body, url, created_at, read_at FROM roster_notification WHERE user_id = $1 "
+                + ("AND read_at IS NULL " if unread_only else "") + "ORDER BY created_at DESC LIMIT $2", user_id, int(limit))
+            unread = int(await conn.fetchval("SELECT count(*) FROM roster_notification WHERE user_id = $1 AND read_at IS NULL", user_id) or 0)
+        return [{**dict(r), "id": int(r["id"]), "created_at": str(r["created_at"]), "read_at": (str(r["read_at"]) if r["read_at"] else None),
+                 "unread_total": unread} for r in rows]
+
+    async def mark_notifications_read(self, user_id: str, *, ids: list[int] | None = None) -> int:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            if ids:
+                r = await conn.execute("UPDATE roster_notification SET read_at = now() WHERE user_id = $1 AND read_at IS NULL AND id = ANY($2::bigint[])", user_id, [int(i) for i in ids])
+            else:
+                r = await conn.execute("UPDATE roster_notification SET read_at = now() WHERE user_id = $1 AND read_at IS NULL", user_id)
+        return int(r.split()[-1]) if r else 0
+
+    async def list_applications(self, user_id: str, *, limit: int = 200) -> list[dict]:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT id, job_ref, company, title, url, form_url, ats, status, reason, submitted_at, created_at, updated_at,
+                          jsonb_array_length(open_questions) AS n_open, (screenshot IS NOT NULL) AS has_shot
+                   FROM roster_application WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2""", user_id, int(limit))
+        return [{**dict(r), "submitted_at": (str(r["submitted_at"]) if r["submitted_at"] else None),
+                 "created_at": str(r["created_at"]), "updated_at": str(r["updated_at"])} for r in rows]
+
+    async def get_application(self, user_id: str, app_id: int) -> dict | None:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            r = await conn.fetchrow("SELECT * FROM roster_application WHERE user_id = $1 AND id = $2", user_id, int(app_id))
+        if not r:
+            return None
+        d = dict(r)
+        for k in ("filled", "open_questions", "answers", "drafts", "plan"):
+            d[k] = json.loads(d[k]) if isinstance(d[k], str) else (d[k] or ([] if k in ("filled", "open_questions", "plan") else {}))
+        shot = d.pop("screenshot", None)
+        d["screenshot_b64"] = base64.b64encode(shot).decode() if shot else ""
+        sshot = d.pop("submit_screenshot", None)
+        d["submit_screenshot_b64"] = base64.b64encode(sshot).decode() if sshot else ""
+        for k in ("submitted_at", "created_at", "updated_at"):
+            d[k] = str(d[k]) if d.get(k) else None
+        return d
+
+    async def remember_answers(self, user_id: str, answers: dict) -> int:
+        from api.auto_apply import norm_question
+        await self._ensure()
+        n = 0
+        async with (await self._get_pool()).acquire() as conn:
+            for q, a in (answers or {}).items():
+                qn = norm_question(str(q))
+                if not qn or not str(a).strip():
+                    continue
+                await conn.execute("""INSERT INTO roster_answer_bank (user_id, qnorm, question, answer) VALUES ($1,$2,$3,$4)
+                                      ON CONFLICT (user_id, qnorm) DO UPDATE SET answer = EXCLUDED.answer, question = EXCLUDED.question, updated_at = now()""",
+                                   user_id, qn, str(q)[:300], str(a)[:4000])
+                n += 1
+        return n
+
+    async def answer_bank(self, user_id: str) -> dict:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            rows = await conn.fetch("SELECT question, answer FROM roster_answer_bank WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 500", user_id)
+        return {r["question"]: r["answer"] for r in rows}
+
+    async def delete_application(self, user_id: str, app_id: int) -> bool:
+        await self._ensure()
+        async with (await self._get_pool()).acquire() as conn:
+            res = await conn.execute("DELETE FROM roster_application WHERE user_id = $1 AND id = $2", user_id, int(app_id))
+        return res.endswith("1")
+
     async def set_parse_pending(self, user_id: str) -> None:
         await self._ensure()
         async with (await self._get_pool()).acquire() as conn:

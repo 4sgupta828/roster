@@ -9,7 +9,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import base64
 import os
+import sys
 import urllib.parse
 import re
 import time
@@ -373,6 +375,17 @@ def discovery_enabled() -> bool:
     surfaces the companies/orgs most associated with a capability query — the scouting/sourcing surface
     for corp-dev / M&A. OFF → the endpoint 404s (byte-identical to today)."""
     return os.environ.get("ROSTER_DISCOVERY", "").lower() in ("1", "true", "yes")
+
+
+def guided_v3_enabled() -> bool:
+    """Guided v3 — the recruiting consultant (docs/specs/guided-consultant-v3.md); v2 stays until the goldens say otherwise."""
+    return os.environ.get("ROSTER_GUIDED_V3", "").lower() in ("1", "true", "yes")
+
+
+def guided_intake_enabled() -> bool:
+    """Flag (default OFF, Rule 20): the Guided intake mode (docs/specs/guided-intake.md) — POST /intake/step and
+    the ◍ Guided tab. Needs the facet evaluator (counts) and a model key."""
+    return os.environ.get("ROSTER_GUIDED_INTAKE", "").lower() in ("1", "true", "yes")
 
 
 def refine_enabled() -> bool:
@@ -1043,6 +1056,7 @@ class ResearchIn(BaseModel):
     history: list[dict] | None = None     # prior turns [{question, answer}] → follow-up context
     session_id: str | None = None         # thread to append this turn to (conversation)
     intake_transcript: list[dict] | None = None  # Guided-intake conversation [{role,text}] → saved for admin audit
+    contract: dict | None = None       # a READY intake's contract (docs/specs/guided-intake.md §5): the evaluator runs it as is
     effort: float = Field(default=1.0, ge=1.0, le=2.5)   # effort multiplier; ignored unless flag on
     audience: str = "clinician"           # "clinician" (default) | "patient"; ignored unless flag on
     mode: str = ""                        # analytical lens, e.g. "acquirer" (M&A); "" = default investor lens
@@ -1050,6 +1064,8 @@ class ResearchIn(BaseModel):
     country: str = ""                     # people geo-scope from the top-right selector (default 'us' when the flag is on)
     evidence_kinds: list[str] = []        # Talent Map evidence filter: only people with linked paper/repo/post/talk/patent
     job_must: list[str] = []              # Jobs 'must have' toggles: remote|hybrid|f500|public|startup|senior|leadership
+    levels: list[str] = []                # level PREFERENCE (both surfaces): junior|mid|senior|staff|exec — a centre, never a gate
+    level_span: int = 1                   # how far from the centre still ranks as 'nearby': 0 exact · 1 nearby · 2 wide
     metro: str = ""                       # LOCAL scope: the user's metro (e.g. 'bay_area') — clearly-elsewhere dropped,
     state: str = ""                       #   unknown kept, confirmed-local lead; or a US state code; query-named places win
     surface: str = ""                     # which UI tab asked: "people" | "jobs" | "qa" | "" — People/Jobs are
@@ -1153,6 +1169,23 @@ class ProfileIn(BaseModel):
     profile: dict                   # the superset candidate profile (free-form; FE defines the fields)
 
 
+class ApplicationIn(BaseModel):
+    job_url: str
+    job_ref: str = ""
+    company: str = ""
+    title: str = ""
+
+
+class ApplicationAnswersIn(BaseModel):
+    answers: dict = {}
+
+
+class ApplicationExecIn(BaseModel):
+    filled: list[str] = []
+    missing: list[str] = []
+    note: str = ""
+
+
 class ResumeIn(BaseModel):
     name: str
     content_type: str = "application/octet-stream"
@@ -1235,6 +1268,13 @@ class MapIn(BaseModel):
     rows: list = []
     coverage: dict | None = None
     filters: dict | None = None
+    contract: dict | None = None      # the contract the rows were evaluated from (facets/evaluator surfaces)
+
+
+class MapNavigateIn(BaseModel):       # navigate a saved map: re-evaluate its contract (⊕ edits); save = a revision
+    contract: dict | None = None
+    save: bool = False
+    t: str = ""                        # share token for viewers (read-only navigation)
 
 
 class MapPatchIn(BaseModel):
@@ -1244,8 +1284,96 @@ class MapPatchIn(BaseModel):
 
 class MapReviewIn(BaseModel):
     entity_id: str
-    state: str = "unreviewed"         # unreviewed | shortlisted | needs more evidence | reviewed
+    state: str = "unreviewed"         # unreviewed | shortlist | maybe | needs more evidence | not relevant
     note: str | None = None
+    tags: list[str] | None = None     # feedback tags (maps.FEEDBACK_TAGS) — calibrate the NEXT map, never the evidence
+    reviewer_key: str = ""            # a NAMED REVIEWER (no account): key + name + the SERVER-SIGNED token from
+    reviewer_name: str = ""           #   POST /maps/{id}/reviewer — the read-only share token never authorizes a write
+    reviewer_token: str = ""
+
+
+class MapReviewerIn(BaseModel):
+    share_token: str
+    name: str = Field(default="", max_length=80)
+
+
+class IntakeIn(BaseModel):                 # one Guided-intake turn (docs/specs/guided-intake.md §3)
+    state: dict | None = None              # the previous turn's `state` (FE-held; None = a fresh intake)
+    message: str = Field(default="", max_length=8000)
+    direction: str | None = None           # "job" | "candidate" when tapped
+    answer: dict | None = None             # {name, value} when a chip answered the pending question
+    search_now: bool = False
+    restart: bool = False                  # v3: start over (the client drops its state; a new record begins)
+    attachments: list[Attachment] | None = None   # a résumé / JD file this turn (parsed once)
+    tenant_id: str = "demo"
+    country: str = "us"
+
+
+class BriefIn(BaseModel):                  # a saved JD / résumé version (docs/specs/guided-intake.md §2.2)
+    kind: str = "jd"
+    title: str = Field(default="", max_length=300)
+    role_key: str = Field(default="", max_length=200)
+    text: str = Field(default="", min_length=1, max_length=60000)
+    structured: dict | None = None
+    sources: dict | None = None
+    make_active: bool = True             # résumé: also becomes the résumé on file
+
+
+class CompileIn(BaseModel):                # brief → contract (docs/specs/facet-contract-evaluator.md §4)
+    kind: str = "job"
+    text: str = Field(default="", max_length=4000)
+    country: str = "us"
+    limit: int = Field(default=60, ge=1, le=400)
+
+
+class EvaluateIn(BaseModel):               # contract → rows + counts + coverage
+    contract: dict
+    depth: dict | None = None
+    relax: bool = False                   # smart relaxing (first searches / evals); a rail Apply keeps the user's chips as set
+
+
+class GroupRow(BaseModel):                 # one posting, as the browser holds it
+    id: str | int
+    title: str = ""
+    specialty: list[str] = Field(default_factory=list)
+    skill: list[str] = Field(default_factory=list)
+    role_family: list[str] = Field(default_factory=list)
+
+
+class GroupIn(BaseModel):                  # AUTO grouping (docs/specs/result-grouping.md §4) — opt-in, one call
+    rows: list[GroupRow] = Field(default_factory=list, max_length=200)
+    question: str = Field(default="", max_length=500)
+    kind: str = "job"                      # job | person — a shortlist of people segments by what each person DOES
+
+
+class JudgeIn(BaseModel):                  # the blind fit judge (evals): brief + up to 60 rows → verdicts
+    kind: str = "person"
+    brief: str = Field(min_length=1, max_length=4000)
+    rows: list[dict] = Field(default_factory=list, max_length=60)
+    provider: str | None = None           # "alt" = a different provider from the in-product judge (agreement bias, §12.11)
+    contract: dict | None = None          # the ratified contract: what is REQUIRED vs PREFERRED rides into the brief
+
+
+class MapCadenceIn(BaseModel):
+    every: str = "off"                # off | daily | weekly — keep this map fresh on a cadence (owner)
+
+
+class PeopleRefreshIn(BaseModel):     # admin-only, on-demand people refresh (never automatic)
+    limit: int = Field(default=500, ge=1, le=20000)
+    older_than_days: int = Field(default=14, ge=0, le=3650)
+    logins: list[str] = Field(default_factory=list)
+    map_id: str = ""
+    dry: bool = False
+
+
+class NotificationsReadIn(BaseModel):
+    ids: list[int] = Field(default_factory=list)   # empty = all
+
+
+class MapReviseIn(BaseModel):
+    tenant_id: str = "demo"
+    preview: bool = False             # True → only the code-owned contract edits (free; no search runs)
+    country: str | None = None        # geo scope for the revised run (defaults to the map's saved scope)
 
 
 class SettingIn(BaseModel):
@@ -1394,6 +1522,7 @@ class ResearchOut(BaseModel):
     jobs: list = []                  # indexed-job rows (the Q&A jobs route) — rendered as job cards, not prose
     geo_scope: dict | None = None    # LOCAL scope applied to job rows {label, counts, statement, …}
     coverage_basis: dict | None = None  # honest coverage facts for a people-enumeration answer (else None)
+    facet_nav: dict | None = None    # the Talent rail: {contract, counts, coverage, labels} over the people index (flag)
     claims: list[Citation]           # the verified findings (evidence for the answer)
     coverage_gaps: list[str]
     rejected: int
@@ -1432,6 +1561,7 @@ class ResearchOut(BaseModel):
     reflection: dict = {}                 # ROSTER_REFLECTION=steer: {intent, answer_brief, confidence} — what
     #                                       the pass understood the user is really after (empty when off/low-conf)
     qa_route: dict | None = None          # ROSTER_QA_ROUTER: the intent-router decision that shaped this
+    brief_contract: dict | None = None    # the interpreted brief for a job-card answer (same strip as Jobs)
     #                                       answer {route, subject_kind, entities, axes, confidence} —
     #                                       observability/audit (None when the router did not run)
     redirect_to_qa: bool = False          # a SEARCH surface (People/Jobs tab) received a QUESTION —
@@ -1805,6 +1935,21 @@ async def _gap_processor_loop(dsn: str, vertical: str) -> None:
             await q.fail(job["id"], str(e))
 
 
+def thin_repeats(rows: list, *, per_title: int = 2) -> list:
+    """At most `per_title` rows with the same company AND title. A staffing aggregator (jobgether reposts other
+    companies' roles: 4.5k open postings, the largest single "employer" in the corpus) otherwise fills a whole page with
+    one title; the rest of the page is what the user came for. Order is untouched."""
+    seen: dict = {}
+    out = []
+    for r in rows or []:
+        k = (str((r or {}).get("company") or "").strip().lower(), str((r or {}).get("title") or "").strip().lower())
+        if k != ("", "") and seen.get(k, 0) >= per_title:
+            continue
+        seen[k] = seen.get(k, 0) + 1
+        out.append(r)
+    return out
+
+
 def create_app(service: ResearchService | None = None) -> FastAPI:
     app = FastAPI(title="Roster Research", version="0")
     app.state.service = service   # lazily built on first request if None
@@ -1948,6 +2093,59 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             t.start()
             app.state._gap_thread = t
 
+    @app.on_event("startup")
+    async def _warm_facet_slices() -> None:
+        """WARM-UP (2026-09-05): the first evaluate after a deploy paid ~25 s of cold database buffers on the facet
+        table and the embedding client's start; warm the common slices (all, the selector country) for both kinds,
+        and one embedding, in the background so the first user does not."""
+        if not os.environ.get("ROSTER_CORPUS_DSN") or not facet_evaluator_enabled():
+            return
+
+        async def _warm():
+            await asyncio.sleep(5)
+            try:
+                from api.people_population import embed_query
+                await asyncio.to_thread(embed_query, "warm up")
+            except Exception:   # noqa: BLE001
+                pass
+            for kind in ("job", "person"):
+                for must in ({}, {"country": ["us"]}):
+                    try:
+                        await _facet_nav(kind, text="", must=must, scope={"country": "us"})
+                    except Exception:   # noqa: BLE001
+                        pass
+            print("[facets] warm-up done", flush=True)
+        app.state._facet_warm_task = asyncio.create_task(_warm())
+
+    @app.on_event("startup")
+    async def _start_map_refresh_loop() -> None:
+        """KEEP-FRESH loop (ROSTER_MAP_REFRESH_LOOP=1, default on): every 10 minutes refresh the maps whose
+        cadence is due, capped at ROSTER_MAP_REFRESH_MAX_DAY per day (a talent-map re-run costs cents; a
+        job-map re-run is retrieval only). Runs in the API process — the compute lives here."""
+        if os.environ.get("ROSTER_MAP_REFRESH_LOOP", "1").lower() not in ("1", "true", "yes"):
+            return
+        if not os.environ.get("ROSTER_CORPUS_DSN") or getattr(app.state, "_map_refresh_task", None):
+            return
+        cap = int(os.environ.get("ROSTER_MAP_REFRESH_MAX_DAY", "50") or 50)
+
+        async def _loop():
+            import time as _time
+            done_today, day = 0, _time.monotonic()
+            await asyncio.sleep(90)              # let the service settle first
+            while True:
+                if _time.monotonic() - day > 86400:
+                    done_today, day = 0, _time.monotonic()
+                try:
+                    if done_today < cap:
+                        res = await _refresh_due_maps(limit=min(10, cap - done_today))
+                        done_today += sum(1 for r in res if r.get("refreshed"))
+                        if res:
+                            print(f"[maps] keep-fresh pass: {res}", flush=True)
+                except Exception as e:   # noqa: BLE001 — never let the loop die
+                    print(f"[maps] keep-fresh pass failed: {e}", flush=True)
+                await asyncio.sleep(600)
+        app.state._map_refresh_task = asyncio.create_task(_loop())
+
     # Answer-video add-on — separate, flag-gated router (default OFF). Kept fully out of
     # the research path: mounting it changes nothing about how answers are produced.
     from api.video import build_video_router, video_enabled
@@ -2021,7 +2219,8 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
                 for s in getattr(svc, "panel_specialists", ())] if live_panel else []),
             "panel_examples": (list(getattr(svc, "panel_examples", ())) if live_panel else []),
             "refine_enabled": refine_enabled() and bool(getattr(svc, "refine_prompt", None)),
-            "triage_enabled": False,
+            "triage_enabled": guided_intake_enabled() and facet_evaluator_enabled(),
+            "triage_v3": guided_v3_enabled() and facet_evaluator_enabled(),
             "pulse_enabled": pulse_enabled() and bool(os.environ.get("ROSTER_CORPUS_DSN")),
             "graph_enabled": graph_enabled() and bool(os.environ.get("ROSTER_CORPUS_DSN")),
             "graph_expand": graph_expand_mode(),
@@ -2537,6 +2736,14 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
 
     @app.post("/jobs")
     async def jobs(body: ResearchIn, x_roster_token: str = Header(default="")) -> dict:
+        """Every jobs answer carries its grouping menu, whatever path produced it. The menu was attached at a single
+        return site once, and the résumé path — the one a signed-in seeker takes — silently lost grouping entirely."""
+        out = await _jobs_impl(body, x_roster_token)
+        if isinstance(out, dict) and out.get("jobs") and not out.get("group_options"):
+            out["group_options"] = _group_options(out.get("jobs") or [])
+        return out
+
+    async def _jobs_impl(body: ResearchIn, x_roster_token: str = Header(default="")) -> dict:
         """JOBS MODE (flag ROSTER_JOBS): search open roles aggregated from public ATS boards
         (Greenhouse/Ashby/Lever) — LLM parses the query into company/title-keywords/location, code
         filters `rs_job`, each result carries an apply link. 404 when off."""
@@ -2557,7 +2764,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         if store is None:
             return {"jobs": [], "count": 0, "query": {}, "stats": {"jobs": 0, "companies": 0}}
 
-        async def _save_job_session(rows: list, qdesc: dict):
+        async def _save_job_session(rows: list, qdesc: dict, nav: dict | None = None):
             # Store the actual job rows on the session so History can SHOW the stored results
             # on click (never re-run the search). Cap the stored payload so a huge result set
             # doesn't bloat the row. Returns the session id (the shareable link), or None.
@@ -2570,7 +2777,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         question=body.question, answer=f"Found {count} open role{'' if count==1 else 's'}{at}.",
                         grounded=bool(count), claims=[], source_stats={}, coverage_gaps=[], rejected=0,
                         sources=body.sources, user_name=body.user_name, user_email=body.user_email,
-                        kind="jobs", extra={"jobs_count": count, "jobs": list(rows[:60]), "query": qdesc})
+                        kind="jobs", extra={"jobs_count": count, "jobs": list(rows[:60]), "query": qdesc,
+                                            # the rail and the intent strip are part of the answer: a reopened session
+                                            # that cannot show which filters produced it is not the same artifact
+                                            **{k: v for k, v in (nav or {}).items() if v}})
             except Exception:   # noqa: BLE001
                 pass
             return None
@@ -2624,6 +2834,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             if body.job_must:
                 from api.people_population import apply_job_must
                 jobs, res["must"] = await apply_job_must(store, jobs, body.job_must)
+            jobs = await _with_employer(jobs)
             res.update({"jobs": jobs, "count": len(jobs), "query": {"company": [], "title_keywords": [], "location": ""},
                         "linkedin_profile": {"name": prof.get("name"), "headline": prof.get("headline"), "url": prof.get("url")},
                         "note": ({"headline": f"Matched to {prof.get('name')}'s LinkedIn headline — “{prof.get('headline') or 'no headline shown'}” "
@@ -2631,9 +2842,208 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                   "resume": f"That profile isn't visible to search engines, so these roles are matched to the résumé on your account instead.",
                                   "pasted": f"That profile isn't visible to search engines, so these roles are matched to the text you pasted with the link."}[matched_on]),
                         "stats": await store.jobs_stats()})
+            from api.people_population import apply_level_pref, job_brief_contract
+            jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job", span=int(body.level_span))
+            res.update({"jobs": await _with_employer(jobs), "count": len(jobs)})
+            res["brief_contract"] = job_brief_contract(question=body.question or "", job_must=body.job_must, scope=res.get("geo_scope"),
+                                                       profile_text=text, matched_on=matched_on, levels=body.levels, level_span=int(body.level_span))
             res["session_id"] = await _save_job_session(jobs, res["query"])
             return res
 
+        # A RÉSUMÉ (attached PDF / text file, or pasted) or a SELF-DESCRIPTION ("SDE/SRE roles for me,
+        # I'm a software engineer with 5 years…") is a PROFILE, not a query: it goes to résumé matching
+        # (title / skills / level), never to free-text vector search over posting titles. Signed-in
+        # users with a parsed résumé on file get it used when they say "for me" / "my résumé".
+        from api.media import attachment_texts_async
+        from api.people_population import is_self_description, years_to_levels
+        from api.qa_router import extract_resume_text
+        _att_texts = await attachment_texts_async([a.model_dump() for a in (body.attachments or [])])
+        _ask, _pasted_cv = extract_resume_text(body.question or "")
+        _qs = (body.question or "").strip()
+        # a bare "jobs for me" stays a search; a description of oneself (or an explicit résumé mention) is a profile
+        _self = is_self_description(_qs) and (len(_qs) >= 60 or bool(re.search(r"(?i)\b(my r[ée]sum[ée]|my cv|based on my|my background|my profile)\b", _qs)))
+        if _att_texts or _pasted_cv or _self:
+            from api.people_population import apply_job_must, match_resume_jobs
+            cv_text, matched_on = "", ""
+            if _att_texts:
+                cv_text, matched_on = "\n\n".join(t for _, t in _att_texts)[:20000], "attachment"
+            elif _pasted_cv:
+                cv_text, matched_on = _pasted_cv, "pasted"
+            else:
+                _user = await _optional_user(x_roster_token)
+                _acc = _accounts() if _user else None
+                _parsed = ((await _acc.get_parse(_user["id"])).get("profile") or {}) if _acc else {}
+                _saved = ((await _acc.get_profile(_user["id"])).get("profile") or {}) if _acc else {}
+                _on_file = " ".join(str(x) for x in [_parsed.get("_resume_text", ""), _saved.get("summary", ""), _saved.get("current_title", "")] if x).strip()
+                if len(_on_file) >= 40:
+                    cv_text, matched_on = (body.question or "") + "\n\n" + _on_file, "resume"
+                elif len(_qs) >= 60 and re.search(r"(?i)\b(i(?:'|’)?m an?|i am an?|\d+\+? ?years?|skilled|experience (?:in|with)|worked (?:at|on|with)|proficient)\b", _qs) \
+                        and not re.search(r"(?i)\b(can i|could i|how do i|where do i|give you|upload|attach|send you)\b", _qs):
+                    cv_text, matched_on = _qs, "description"      # it DESCRIBES a person (role / years / skills), not a meta-question
+            if not cv_text:
+                return {"jobs": [], "count": 0, "query": {}, "stats": await store.jobs_stats(), "needs_profile": True,
+                        "note": "To match roles to you, attach your résumé (📎, PDF or text) or describe your background in a "
+                                "sentence — role, years, main skills — e.g. “backend engineer, 5 years, Java, Kubernetes, Postgres”."}
+            prefs = {"limit": 40, "country": (body.country or "us"), "metro": (body.metro or ""), "state": (body.state or ""),
+                     "seniorities": sorted(years_to_levels(cv_text if matched_on != "resume" else (body.question or "")) or years_to_levels(cv_text))}
+            res = await match_resume_jobs(store, {"_resume_text": cv_text, "summary": (_ask if _pasted_cv else "")}, prefs)
+            jobs = res.get("jobs") or []
+            if body.job_must:
+                jobs, res["must"] = await apply_job_must(store, jobs, body.job_must)
+            _names = ", ".join(n for n, _ in _att_texts)
+            jobs = await _with_employer(jobs)
+            res.update({"jobs": jobs, "count": len(jobs), "query": {"company": [], "title_keywords": [], "location": ""},
+                        "matched_on": matched_on,
+                        "note": {"attachment": f"Matched to your attached résumé ({_names}) — title, skills and level first, wording second.",
+                                 "pasted": "Matched to the résumé you pasted — title, skills and level first, wording second.",
+                                 "resume": "Matched to the résumé on your account plus what you wrote — title, skills and level first.",
+                                 "description": "Matched to your description — title, skills and level first. Attach a résumé (📎) for a deeper match."}[matched_on],
+                        "stats": await store.jobs_stats()})
+            from api.people_population import apply_level_pref, job_brief_contract
+            jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job", span=int(body.level_span))
+            res.update({"jobs": await _with_employer(jobs), "count": len(jobs)})
+            res["brief_contract"] = job_brief_contract(question=body.question or "", job_must=body.job_must, scope=res.get("geo_scope"),
+                                                       profile_text=cv_text, matched_on=matched_on, levels=body.levels, level_span=int(body.level_span))
+            res["session_id"] = await _save_job_session(jobs, res["query"])
+            return res
+
+        # PROFILE-STEERED search (signed in, résumé on file): the free-text query runs through the
+        # résumé-match engine — the query steers, the résumé's brief + remembered preferences shape —
+        # instead of a bare vector search over titles. What made "Match jobs to résumé" good, for Jobs.
+        _pu = await _optional_user(x_roster_token)
+        _pacc = _accounts() if _pu else None
+        if _pacc is not None and not (body.refine_query and isinstance(body.refine_query, dict) and body.refine_query.get("company")):
+            try:
+                _saved = ((await _pacc.get_profile(_pu["id"])).get("profile") or {})
+                _parsed = ((await _pacc.get_parse(_pu["id"])).get("profile") or {})
+            except Exception:  # noqa: BLE001
+                _saved, _parsed = {}, {}
+            _prof = {**_parsed, **_saved}
+            # a READY Guided contract is the ask; the résumé-on-file match must not pre-empt it (it did: the intake's
+            # ratified contract was ignored for every signed-in seeker with a résumé)
+            if len(str(_prof.get("_resume_text") or "")) >= 200 and not body.contract:
+                from api.people_population import (apply_job_must, apply_level_pref, job_brief_contract, match_resume_jobs,
+                                                   parse_job_query, profile_search_prefs)
+                try:
+                    _pq = await parse_job_query(body.question, build_llm(mode=resolve_mode()))
+                except Exception:  # noqa: BLE001
+                    _pq = {"company": [], "title_keywords": [], "location": ""}
+                _cos = [c for c in (_pq.get("company") or []) if str(c).strip()]
+                if not _cos:      # a company-named search stays the company's own board (below)
+                    _brief_txt = ""
+                    try:
+                        _cb = await _get_cached_brief(_pacc, _pu["id"])
+                        if _cb and _cb.get("hash") == _resume_fingerprint(_prof) and (_cb.get("brief") or {}).get("search_text"):
+                            _brief_txt = _cb["brief"]["search_text"]
+                    except Exception:  # noqa: BLE001
+                        _brief_txt = ""
+                    try:
+                        _cfg = json.loads(await _pacc.get_pref(_pu["id"], "match_config") or "{}")
+                    except Exception:  # noqa: BLE001
+                        _cfg = {}
+                    _geo = people_geo_scope_enabled()
+                    prefs = profile_search_prefs(body.question or "", brief_search_text=_brief_txt, saved_config=_cfg,
+                                                 title_keywords=_pq.get("title_keywords") or [], level=(body.levels or [""])[0],
+                                                 country=((body.country or "us").strip().lower() if _geo else ""),
+                                                 metro=((body.metro or "") if _geo else ""), state=((body.state or "") if _geo else ""))
+                    if facet_evaluator_enabled():
+                        # RÉSUMÉ → CONTRACT (spec §6): the brief compiles the query; the résumé's soul joins the
+                        # semantic text; named skills become prefers; the stated level centres.
+                        from api.facets_engine import compile_contract, downgrade_uncovered_musts
+                        from api.people_population import profile_skills, years_to_levels
+                        _sc = {"country": (body.country or "us").strip().lower()}
+                        _c = await asyncio.to_thread(compile_contract, "job", body.question or "", _facet_schema(), _llm_json, limit=80, scope=_sc)
+                        downgrade_uncovered_musts(_c, await _facet_coverage("job"))
+                        _c.text = ((body.question or "").strip() + "\n\n" + (_brief_txt or str(_prof.get("_resume_text") or "")[:1500])).strip()
+                        _sk = profile_skills(str(_prof.get("_resume_text") or ""), limit=8)
+                        if _sk and "skill" not in _c.prefer:
+                            _c.prefer["skill"] = sorted(set(_sk))
+                        _lvl = (body.levels or [""])[0] or (sorted(years_to_levels(str(_prof.get("_resume_text") or ""))) or [""])[0]
+                        if _lvl and not _c.center:
+                            _c.center = {"key": "level", "value": _lvl, "span": int(body.level_span)}
+                        for _m in (body.job_must or []):
+                            if _m in ("remote", "hybrid"):
+                                _c.must.setdefault("work_mode", []).append(_m)
+                            elif _m in ("f500", "public", "startup"):
+                                _c.must.setdefault("company_type", []).append("fortune500" if _m == "f500" else _m)
+                            elif _m == "leadership":
+                                _c.must.setdefault("level", []).append("leadership")
+                        _out = await _run_contract({**_c.to_dict(), "user_keys": [k for k in ("work_mode", "company_type", "level") if body.job_must]}, "job", relax=True)
+                        _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display")},
+                                  "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in _out["rows"]]
+                        _rows = await _with_employer(thin_repeats(_rows))
+                        stats = await store.jobs_stats()
+                        sid = await _save_job_session(_rows, {"title_keywords": _pq.get("title_keywords") or [], "company": [], "location": _pq.get("location") or ""})
+                        bc = job_brief_contract(question=body.question or "", plan={"variants": _c.angles, "intent": ""}, job_must=body.job_must, scope=None,
+                                                profile_text=str(_prof.get("_resume_text") or ""), matched_on="resume", levels=body.levels, level_span=int(body.level_span))
+                        bc["contract"] = _out["contract"]; bc["counts"] = _out["counts"]; bc["coverage"] = _out["coverage"]
+                        return {"jobs": _rows, "count": len(_rows), "query": _pq, "semantic": True, "stats": stats, "geo_scope": None, "session_id": sid,
+                                "must": None, "level_pref": None, "brief_contract": bc, "contract": _out["contract"], "counts": _out["counts"], "coverage": _out["coverage"],
+                                "labels": _out.get("labels"), "relaxed": _out.get("relaxed") or [], "note": f"evaluator — {_out['coverage'].get('pool', 0)} candidates · your résumé shapes"}
+                    res = await match_resume_jobs(store, _prof, prefs)
+                    jobs = list(res.get("jobs") or [])
+                    if body.job_must:
+                        jobs, res["must"] = await apply_job_must(store, jobs, body.job_must)
+                    jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job", span=int(body.level_span))
+                    bc = job_brief_contract(question=body.question or "", query=_pq, job_must=body.job_must, scope=res.get("geo_scope"),
+                                            profile_text=str(_prof.get("_resume_text") or ""), matched_on="resume",
+                                            levels=body.levels, level_span=int(body.level_span))
+                    bc["soft"] = {"title words": [str(k) for k in (_pq.get("title_keywords") or [])][:6], **bc.get("soft", {})} if _pq.get("title_keywords") else bc.get("soft", {})
+                    bc["ranking"] = ("your search steers, your résumé shapes: postings whose title carries your search words lead; within them, "
+                                     "similarity to your résumé's brief, your remembered preferences, skills the posting names, the level you "
+                                     "centered on and location — the reasons are on each card")
+                    res.update({"jobs": jobs, "count": len(jobs), "query": {"company": [], "title_keywords": _pq.get("title_keywords") or [], "location": _pq.get("location") or ""},
+                                "matched_on": "profile_search", "brief_contract": bc,
+                                "note": "Matched to your résumé, steered by this search" + (" and the brief from Fine-tune" if _brief_txt else "")
+                                        + ". Sign out (or search a company by name) for a plain search.", "stats": await store.jobs_stats()})
+                    res["session_id"] = await _save_job_session(jobs, res["query"])
+                    return res
+
+        if facet_evaluator_enabled():
+            # THE EVALUATOR (docs/specs/facet-contract-evaluator.md): brief → contract → rows + counts.
+            from api.facets_engine import compile_contract, downgrade_uncovered_musts
+            from api.people_population import job_brief_contract
+            _scope = {"country": (body.country or "us").strip().lower()}
+            if body.contract and str(body.contract.get("kind") or "job") == "job":
+                from roster_kernel.facets import Contract as _Contract
+                _c = _Contract.from_dict(body.contract); _moved = []                     # a ratified intake contract runs as is
+                if not _c.text:
+                    _c.text = body.question or ""
+            else:
+                _ex: dict = {}
+                import time as _jtm
+                _j0 = _jtm.monotonic()
+                _c = await asyncio.to_thread(compile_contract, "job", body.question or "", _facet_schema(), _llm_json, limit=80, scope=_scope, extras=_ex)
+                _j1 = _jtm.monotonic()
+                _moved = downgrade_uncovered_musts(_c, await _facet_coverage("job"))
+                _c, _ia_notes = await _index_aware(_c, kind="job", user_keys=set(k for k in ("work_mode", "company_type", "level") if body.job_must), place_or_mode=bool(_ex.get("place_or_mode")))
+                _plain_t = {"plain.compile": round(_j1 - _j0, 2), "plain.coverage_and_index_aware": round(_jtm.monotonic() - _j1, 2)}
+            if body.levels and body.levels[0]:
+                _c.center = {"key": "level", "value": body.levels[0], "span": int(body.level_span)}
+            for _m in (body.job_must or []):
+                if _m in ("remote", "hybrid"):
+                    _c.must.setdefault("work_mode", []).append(_m)
+                elif _m in ("f500", "public", "startup"):
+                    _c.must.setdefault("company_type", []).append("fortune500" if _m == "f500" else _m)
+                elif _m == "leadership":
+                    _c.must.setdefault("level", []).append("leadership")
+            _out = (await _run_contract({**dict(body.contract), **_c.to_dict()}, "job", relax=True)) if body.contract \
+                else (await _run_contract({**_c.to_dict(), "user_keys": [k for k in ("work_mode", "company_type", "level") if body.job_must], "notes": list(_ia_notes or []),
+                                           "place_or_mode": bool(_ex.get("place_or_mode"))}, "job", relax=True))
+            _out["timings"] = {**(_out.get("timings") or {}), **(_plain_t if not body.contract else {})}
+            _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display", "fit", "fit_why", "found_by")},
+                      "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in _out["rows"]]
+            _rows = await _with_employer(thin_repeats(_rows))
+            stats = await store.jobs_stats()
+            sid = await _save_job_session(_rows, {"title_keywords": [], "company": [], "location": ""})
+            bc = job_brief_contract(question=body.question or "", plan={"variants": _c.angles, "intent": ""}, job_must=body.job_must, scope=None,
+                                    levels=body.levels, level_span=int(body.level_span))
+            bc["contract"] = _out["contract"]; bc["counts"] = _out["counts"]; bc["coverage"] = _out["coverage"]
+            return {"jobs": _rows, "count": len(_rows), "query": {}, "semantic": True, "stats": stats, "geo_scope": None, "session_id": sid,
+                    "must": None, "level_pref": None, "brief_contract": bc, "contract": _out["contract"], "counts": _out["counts"], "coverage": _out["coverage"],
+                    "labels": _out.get("labels"), "merge": _out.get("merge"), "relaxed": _out.get("relaxed") or [], "timings": _out.get("timings") or {},
+                    "group_options": _group_options(_rows),
+                    "note": f"evaluator — {_out['coverage'].get('pool', 0)} candidates" + (" · ranked by filters only (semantic ranking is unavailable right now)" if (_out.get("coverage") or {}).get("degraded") else "")}
         # AGENTIC mode (flag): LLM expands the query into multiple angles → multi-leg retrieval → rerank
         if agentic_jobs_enabled():
             from api.people_population import agentic_job_search, parse_job_query
@@ -2704,9 +3114,18 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                         res["jobs"], res["geo_scope"] = apply_job_scope(
                             res["jobs"], metro=(body.metro or ""), state=(body.state or ""),
                             country=(body.country or "us"), query_location=(_q.get("location") or ""))
+                from api.people_population import apply_level_pref, job_brief_contract
+                res["jobs"], res["level_pref"] = apply_level_pref(res.get("jobs") or [], (body.levels or [""])[0], kind="job", span=int(body.level_span))
+                if res.get("related_jobs") and body.levels:
+                    res["related_jobs"], _ = apply_level_pref(res["related_jobs"], (body.levels or [""])[0], kind="job", span=int(body.level_span))
                 res["count"] = len(res.get("jobs", []))
                 res["agentic"] = True
                 res["query"] = _q if _cos else {}
+                res["brief_contract"] = job_brief_contract(
+                    question=body.question or "", plan={"variants": res.get("query_angles") or [], "intent": res.get("intent") or "",
+                                                        "must_have": res.get("must_have") or [], "seniority": res.get("plan_seniority") or "",
+                                                        "location": res.get("plan_location") or ""},
+                    query=_q, job_must=body.job_must, scope=res.get("geo_scope"), levels=body.levels, level_span=int(body.level_span))
                 if _cos:
                     _nm = ", ".join(_cos)
                     res["note"] = (f"{res.get('company_indexed', 0)} role{'s' if res.get('company_indexed', 0) != 1 else ''} "
@@ -2785,8 +3204,11 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         rows = rows[:80]
         stats = await store.jobs_stats()
         sid = await _save_job_session(rows, q)   # JOB searches appear in the user's private History
+        from api.people_population import apply_level_pref, job_brief_contract
+        rows, _lp = apply_level_pref(rows, (body.levels or [""])[0], kind="job", span=int(body.level_span))
         return {"jobs": rows, "count": len(rows), "query": q, "semantic": bool(qvec), "stats": stats,
-                "geo_scope": _gs, "session_id": sid, "must": _must}
+                "geo_scope": _gs, "session_id": sid, "must": _must, "level_pref": _lp,
+                "brief_contract": job_brief_contract(question=body.question or "", query=q, job_must=body.job_must, scope=_gs, levels=body.levels, level_span=int(body.level_span))}
 
     @app.post("/insights")
     async def insights(body: ResearchIn) -> dict:
@@ -2831,7 +3253,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 "grounded": out.grounded, "coverage_gaps": out.coverage_gaps, "source": "roster",
                 "session_id": out.session_id, "people_rows": out.people_rows, "jobs": out.jobs,
                 "coverage_basis": out.coverage_basis, "people": out.people,
-                "clarification": out.clarification, "qa_route": out.qa_route}
+                "clarification": out.clarification, "qa_route": out.qa_route,
+                "geo_scope": out.geo_scope, "brief_contract": out.brief_contract}
 
     @app.post("/qa")
     async def qa(body: ResearchIn) -> dict:
@@ -3141,6 +3564,9 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 return {"summary": hit, "cached": True, "job_url": url}
         jd = await asyncio.to_thread(_fetch_jd_text, url)
         from api.ats_posting import CLOSED
+        if jd != CLOSED and len(jd) < 300:
+            await asyncio.sleep(1.0)                 # a slow / flaky page fetch: one more try before giving up
+            jd = await asyncio.to_thread(_fetch_jd_text, url)
         if jd == CLOSED:
             return {"summary": None, "closed": True, "job_url": url,
                     "note": "This posting is no longer on the company's board — it looks closed or filled."}
@@ -3148,7 +3574,13 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=400, detail="Couldn't read that posting — open the apply link directly.")
         summ = await build_job_summary(jd, build_llm(mode=resolve_mode()), title=body.title, company=body.company)
         if not summ:
-            raise HTTPException(status_code=502, detail="Couldn't summarize right now — open the apply link directly.")
+            # TRANSIENT model failures (rate limit, timeout) are the usual cause — retry once before failing
+            await asyncio.sleep(1.5)
+            summ = await build_job_summary(jd, build_llm(mode=resolve_mode()), title=body.title, company=body.company)
+        if not summ:
+            __import__("logging").getLogger("api.jobs").warning("summarize failed twice for host=%s jd_chars=%d",
+                                                                urllib.parse.urlparse(url).netloc, len(jd))
+            raise HTTPException(status_code=502, detail="The summary didn't come back this time (a temporary model hiccup) — click the card again to retry, or open the apply link.")
         if pool is not None:
             await store_job_summary(pool, url, summ)
         return {"summary": summ, "cached": False, "job_url": url}
@@ -3649,6 +4081,40 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             must never silently become open-web people enumeration. `route_extra` (router mode)
             rides the persisted session extra for auditability."""
             store = _claim_store_cached()
+            # THE EVALUATOR FOR A PLAIN TALENT MAP SEARCH (spec step 4 cutover, owner 2026-09-05: a brief typed
+            # into Talent Map ran the old engine, so field / level / skills carried no weight and rows had no
+            # facets). A fresh brief compiles to a contract → evaluate → cards + rail. The old engine keeps what
+            # it is better at: a person's NAME (a compile that names only a company, or nothing, is a lookup)
+            # and follow-up refinement turns that carry the running filter.
+            _fresh = not (body.refine_facets or (body.prior_person or "").strip() or (body.prior_context or "").strip())
+            if facet_evaluator_enabled() and _fresh and _facet_store() is not None:
+                try:
+                    from api.facets_engine import compile_contract, downgrade_uncovered_musts
+                    _q = (question_text or body.question or "").strip()
+                    _scope_c = ((body.country or "us").strip().lower() if people_geo_scope_enabled() else "")
+                    _ex: dict = {}
+                    import time as _ptm
+                    _p0 = _ptm.monotonic()
+                    _c = await asyncio.to_thread(compile_contract, "person", _q, _facet_schema(), _llm_json, limit=100, scope={"country": _scope_c} if _scope_c else {}, extras=_ex)
+                    _p1 = _ptm.monotonic()
+                    downgrade_uncovered_musts(_c, await _facet_coverage("person"))
+                    _p2 = _ptm.monotonic()
+                    _c, _ia_notes = await _index_aware(_c, kind="person", place_or_mode=bool(_ex.get("place_or_mode")))
+                    _plain_t = {"plain.compile": round(_p1 - _p0, 2), "plain.coverage": round(_p2 - _p1, 2), "plain.index_aware": round(_ptm.monotonic() - _p2, 2)}
+                    _signal = [k for k in list(_c.must) + list(_c.prefer) if k != "company"]
+                    if _signal or _c.center:                       # a role / field / level / skill / place was named → the evaluator
+                        if _scope_c and not _c.must.get("country"):
+                            _c.must["country"] = [_scope_c]
+                        if body.evidence_kinds:
+                            _c.must["evidence"] = [str(x) for x in body.evidence_kinds]
+                        if body.levels and body.levels[0]:
+                            _c.center = {"key": "level", "value": str(body.levels[0]), "span": int(body.level_span)}
+                        return await _people_contract_route({**_c.to_dict(), "user_keys": (["evidence"] if body.evidence_kinds else []), "notes": list(_ia_notes or []),
+                                                             "place_or_mode": bool(_ex.get("place_or_mode")), "timings": _plain_t}), {"kind": "contract"}
+                except HTTPException:
+                    raise
+                except Exception:   # noqa: BLE001 — the engine is the fallback, never a dead end
+                    pass
             if store is None:
                 return ResearchOut(grounded=False, answer="The people index is unavailable right now "
                                    "— please retry.", claims=[], coverage_gaps=[], rejected=0,
@@ -3665,7 +4131,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 prior_context=(body.prior_context or "").strip()[:300],
                 scope_metro=((body.metro or "").strip().lower() if people_geo_scope_enabled() else ""),
                 scope_state=((body.state or "").strip().lower() if people_geo_scope_enabled() else ""),
-                evidence_kinds=list(body.evidence_kinds or []))
+                evidence_kinds=list(body.evidence_kinds or []), levels=list(body.levels or []), level_span=int(body.level_span))
             if res.get("kind") == "person":
                 if fallthrough:
                     return None, res      # router: grounded dossier, never only the static card
@@ -3678,6 +4144,20 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                            "or location (e.g. 'ML directors in NYC').")
             if on_event is not None:
                 await on_event({"type": "people", "count": len(res.get("people_rows") or [])})
+            # THE TALENT RAIL (spec §6/§7, flag ROSTER_FACET_EVALUATOR): the engine's compiled legacy filter,
+            # translated through the one vocabulary table, becomes the contract the rail navigates — counts
+            # over the same slice the engine filtered; applying an edit re-runs the evaluator.
+            _nav = None
+            if facet_evaluator_enabled() and res.get("kind") != "person":
+                try:
+                    from roster_vertical.facet_legacy import legacy_brief_to_contract
+                    _cb = res.get("coverage_basis") or {}
+                    _bc = _cb.get("brief_contract") or {}
+                    _tr = legacy_brief_to_contract(_bc.get("hard") or {}, _bc.get("soft") or {}, _cb.get("query_facets") or {})
+                    _nav = await _facet_nav("person", text=(question_text or body.question), must=_tr["must"], prefer=_tr["prefer"],
+                                            scope={"country": scope_country} if scope_country else {})
+                except Exception:   # noqa: BLE001 — the rail is an aid; its failure never costs the answer
+                    _nav = None
             sid = None
             sstore = _store()
             if sstore is not None:
@@ -3697,7 +4177,47 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             return ResearchOut(
                 grounded=res.get("grounded", False), answer=answer, claims=[],
                 coverage_gaps=[], rejected=0, people_rows=res.get("people_rows") or [],
-                coverage_basis=res.get("coverage_basis"), session_id=sid), res
+                coverage_basis=res.get("coverage_basis"), facet_nav=_nav, session_id=sid), res
+
+        async def _people_contract_route(cdict: dict) -> ResearchOut:
+            """A ratified contract (Guided intake) → the evaluator, hydrated to cards, with the rail (spec §5)."""
+            c = dict(cdict or {}); c["kind"] = "person"
+            if not c.get("text"):
+                c["text"] = body.question or ""
+            import time as _time
+            _t0 = _time.monotonic()
+            out = await _run_contract(c, "person", relax=True)
+            _t1 = _time.monotonic()
+            rows = await _hydrate_people(out.get("rows") or [])
+            _t2 = _time.monotonic()
+            if on_event is not None:
+                await on_event({"type": "people", "count": len(rows)})
+            nav = {"contract": out["contract"], "counts": out["counts"], "coverage": out["coverage"], "labels": out.get("labels"), "merge": out.get("merge"),
+                   "group_options": _group_options(rows),
+                   "relaxed": out.get("relaxed") or [], "timings": {"search": round(_t1 - _t0, 2), "hydrate": round(_t2 - _t1, 2), **{f"search.{k}": v for k, v in (out.get("timings") or {}).items()}, **((cdict or {}).get("timings") or {})}}
+            _cc = out["contract"]; _cv = out.get("coverage") or {}
+            _lab = (out.get("labels") or {}).get("values") or {}
+            _words = lambda vals: [(_lab.get(str(v)) or str(v).replace("_", " ")) for v in (vals if isinstance(vals, list) else [str(vals)])]
+            _stmt = (("Semantic ranking is unavailable right now, so these are the people who meet the filters, unranked. " if _cv.get("degraded") else "")
+                     + f"{len(rows)} people ranked from a pool of {_cv.get('pool', len(rows))} that meet the filters"
+                     + (f"; the closest match is {_cv.get('best_match')}% — weak; the rail says which filter keeps closer people out." if _cv.get("weak") else ".")
+                     + " Adjust filters on the rail; the counts are live.")
+            cov = {"query_facets": {}, "population_statement": _stmt,
+                   "brief_contract": {"hard": {k: _words(v) for k, v in (_cc.get("must") or {}).items()}, "soft": {k: _words(v) for k, v in (_cc.get("prefer") or {}).items()},
+                                      "topic": [], "assumptions": (["weak matches — see the rail"] if _cv.get("weak") else [])}}
+            sid = None
+            sstore = _store()
+            if sstore is not None:
+                try:
+                    sid = await sstore.save(tenant_id=body.tenant_id, workspace_id=body.workspace_id, question=body.question, answer="",
+                                            grounded=True, claims=[], source_stats={}, coverage_gaps=[], rejected=0, sources=body.sources,
+                                            user_name=body.user_name, user_email=body.user_email, kind="people_population",
+                                            extra={"coverage_basis": cov, "people_rows": rows, "contract": out["contract"],
+                                                   **({"intake_transcript": [{"role": str(m.get("role") or ""), "text": str(m.get("text") or "")[:2000]} for m in (body.intake_transcript or [])[:40] if isinstance(m, dict) and m.get("text")]} if body.intake_transcript else {})})
+                except Exception:   # noqa: BLE001
+                    sid = None
+            nav["timings"]["save"] = round(_time.monotonic() - _t2, 2)
+            return ResearchOut(grounded=True, answer="", claims=[], coverage_gaps=[], rejected=0, people_rows=rows, coverage_basis=cov, facet_nav=nav, session_id=sid)
 
         # ---- Q&A INTENT ROUTER (flag ROSTER_QA_ROUTER, default OFF — Rule 20) ----------------
         # Classifies the question BEFORE any engine short-circuit and dispatches per
@@ -3716,6 +4236,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             # PEOPLE TAB IS A SEARCH SURFACE, NOT AN ORACLE: it only ever runs the closed people
             # engine (rows / person card / coverage gap). A question-shaped input gets a no-cost
             # redirect to Q&A — never a prose answer inside People mode. No router LLM call needed.
+            if (body.surface or "").strip().lower() == "people" and body.contract and facet_evaluator_enabled():
+                return await _people_contract_route(body.contract)          # a READY intake: evaluate the contract as is
             if (body.surface or "").strip().lower() == "people" and people_population_enabled():
                 out, pres = await _people_population_route(fallthrough=True)
                 if out is not None:
@@ -3732,6 +4254,18 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     redirect_to_qa=True)
             _route = await _qr.classify_qa_route(
                 body.question, build_llm(mode=resolve_mode()), history=body.history)
+            # AN ATTACHED RÉSUMÉ decides the route (the router only sees the question text): a
+            # résumé-shaped attachment means "roles for this profile" whatever the words around it —
+            # unless the question is a JD analysis / candidates request, which reads the file as a JD.
+            _att_cv = ""
+            if body.attachments and _route.route not in ("jd_analysis", "candidates_for_jd"):
+                from api.media import attachment_texts_async
+                _att_pairs = await attachment_texts_async([a.model_dump() for a in body.attachments])
+                _att_txt = "\n\n".join(t for _, t in _att_pairs)[:20000]
+                if _att_txt and len(_qr._RESUME_MARKERS.findall(_att_txt)) >= 2:
+                    _att_cv = _att_txt
+                    _route.route = "jobs_for_profile"
+                    _route.confidence = "high"
             if on_event is not None:
                 await on_event({"type": "route", "route": _route.route,
                                 "confidence": _route.confidence})
@@ -3977,6 +4511,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 # CONNECT THE DOTS: résumé → ranked open roles from the jobs index, then a critical
                 # fit analysis (technical gems, ideal roles) over BOTH as citable documents.
                 _ask_q, _cv = _qr.extract_resume_text(body.question)
+                if not _cv and _att_cv:
+                    # an ATTACHED résumé (PDF / text, docling-parsed) is the profile — never ask to paste
+                    _cv = _att_cv
+                    _ask_q = (body.question or "").strip()
                 if not _cv and len(body.question) > 200:
                     _cv = body.question
                 if not _cv:
@@ -3986,12 +4524,35 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                                       "and I'll match open roles from Roster's jobs index.",
                         qa_route=_route.model_dump())
                 if _cstore is not None:
-                    from api.people_population import match_resume_jobs
+                    from api.people_population import job_brief_contract, match_resume_jobs, years_to_levels
+                    _geo = people_geo_scope_enabled()
+                    _prefs = {"limit": 40, "country": ((body.country or "us").strip().lower() if _geo else ""),
+                              "metro": ((body.metro or "") if _geo else ""), "state": ((body.state or "") if _geo else ""),
+                              "seniorities": sorted(years_to_levels(_cv))}
                     try:
-                        mres = await match_resume_jobs(_cstore, {"_resume_text": _cv}, {"limit": 15})
+                        mres = await match_resume_jobs(_cstore, {"_resume_text": _cv}, _prefs)
                     except Exception:   # noqa: BLE001
                         mres = {}
-                    _jobs = (mres.get("jobs") or [])[:15]
+                    _jobs = list(mres.get("jobs") or [])
+                    # BIAS TO CARDS (consistency with the Jobs tab): a résumé → roles ask returns job
+                    # CARDS with the interpreted brief. Only an explicit ask for an assessment
+                    # ("analyze the fit", "why", "how well") gets the written analysis over the matches.
+                    _wants_prose = bool(re.search(r"(?i)\b(analy[sz]e|critique|assess|evaluate|how well|why|explain|compare|fit)\b",
+                                                  body.question or ""))
+                    if _jobs and not _wants_prose:
+                        if on_event is not None:
+                            await on_event({"type": "jobs", "count": len(_jobs)})
+                        _bc = job_brief_contract(question=body.question or "", scope=mres.get("geo_scope"),
+                                                 profile_text=_cv, matched_on=("attachment" if _att_cv else "pasted"))
+                        _lead = (f"{len(_jobs)} open role{'s' if len(_jobs) != 1 else ''} matched to your résumé — title, "
+                                 f"skills and level first. Ask “analyze the fit” for a written assessment of the top matches.")
+                        sid = await _persist_route(_lead, True, "jobs",
+                                                   {"jobs_count": len(_jobs), "jobs": _jobs[:60], "query": {},
+                                                    "brief_contract": _bc, "qa_route": _route.model_dump()})
+                        return ResearchOut(grounded=True, answer=_lead, jobs=_jobs, geo_scope=mres.get("geo_scope"),
+                                           brief_contract=_bc, claims=[], coverage_gaps=[], rejected=0,
+                                           session_id=sid, qa_route=_route.model_dump())
+                    _jobs = _jobs[:15]
                     if _jobs:
                         if on_event is not None:
                             await on_event({"type": "jobs", "count": len(_jobs)})
@@ -5486,7 +6047,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         if not (body.brief or "").strip():
             raise HTTPException(status_code=400, detail="brief required")
         rows = [r for r in (body.rows or []) if isinstance(r, dict)]
-        res = await ms.create(tenant_id=body.tenant_id, map_type=(body.map_type or "talent")[:32],
+        res = await ms.create(contract=body.contract, tenant_id=body.tenant_id, map_type=(body.map_type or "talent")[:32],
                               brief=body.brief, rows=rows, coverage=body.coverage,
                               filters=body.filters, title=body.title, owner_id=user["id"])
         res["share_path"] = f"#m/{res['id']}?t={res['share_token']}"
@@ -5524,16 +6085,1109 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=404, detail="map not found")
         return {"ok": True}
 
+    _REVIEW_RATE: dict[str, list[float]] = {}     # (map|reviewer) → recent write timestamps (in-process)
+
+    def _review_rate_ok(key: str, *, per_hour: int = 240) -> bool:
+        import time as _t
+        now = _t.time()
+        hist = [t for t in _REVIEW_RATE.get(key, []) if now - t < 3600]
+        if len(hist) >= per_hour:
+            _REVIEW_RATE[key] = hist
+            return False
+        hist.append(now); _REVIEW_RATE[key] = hist
+        return True
+
+    @app.post("/maps/{map_id}/reviewer")
+    async def map_reviewer(map_id: str, body: MapReviewerIn) -> dict:
+        """A guest on the private link registers a NAME and receives a server-signed reviewer token
+        (no account). Capped per map; the token is what authorizes their review writes."""
+        ms = _require_maps()
+        if not _review_rate_ok(f"reg|{map_id}", per_hour=60):
+            raise HTTPException(status_code=429, detail="too many reviewer registrations for this map — try later")
+        res = await ms.register_reviewer(map_id, share_token=body.share_token, name=body.name)
+        if not res:
+            raise HTTPException(status_code=400, detail="invalid link, empty name, or this map already has its maximum number of reviewers")
+        return res
+
     @app.post("/maps/{map_id}/review")
     async def map_review(map_id: str, body: MapReviewIn,
                          x_roster_token: str = Header(default="")) -> dict:
+        """A human review of one row: state + feedback tags + note. The owner (signed in) writes the
+        row's headline review; a named reviewer writes their own alongside (server-signed token)."""
+        ms = _require_maps()
+        user = await _optional_user(x_roster_token)
+        who = (user or {}).get("id") or body.reviewer_key or "anon"
+        if not _review_rate_ok(f"rv|{map_id}|{who}"):
+            raise HTTPException(status_code=429, detail="too many review writes — slow down")
+        ok = await ms.review(map_id, owner_id=(user or {}).get("id"), entity_id=body.entity_id,
+                             state=body.state, note=body.note, tags=body.tags,
+                             reviewer_key=body.reviewer_key[:64], reviewer_name=body.reviewer_name[:80],
+                             reviewer_token=body.reviewer_token[:64])
+        if not ok:
+            raise HTTPException(status_code=400, detail="invalid review, or neither the owner nor a registered reviewer")
+        return {"ok": True}
+
+    # ===== FACETS: the one evaluator (docs/specs/facet-contract-evaluator.md) =====
+    def facet_evaluator_enabled() -> bool:
+        return os.environ.get("ROSTER_FACET_EVALUATOR", "").lower() in ("1", "true", "yes")
+
+    def contract_search_enabled() -> bool:
+        """Spec guided-intake §12 step 2: a ratified contract runs as several recipes, fused, with one blind judge."""
+        return os.environ.get("ROSTER_INTAKE_CONTRACT_SEARCH", "").lower() in ("1", "true", "yes")
+
+    def _facet_schema():
+        return load_active_vertical().extraction_schema
+
+    def _facet_store():
+        """The Postgres facet store (tests may pin app.state.facet_store to the kernel's in-memory reference)."""
+        ov = getattr(app.state, "facet_store", None)
+        if ov is not None:
+            return ov
+        cs = _claim_store_cached()
+        if cs is None:
+            return None
+        cached = getattr(app.state, "_facet_store", None)
+        if cached is None:
+            from api.facet_store import FacetSQLStore
+            from api.people_population import embed_query
+
+            async def _baseline(qv, kind):
+                return await cs.similarity_baseline(qv) if kind == "job" else None
+            cached = FacetSQLStore(cs._get_pool, _facet_schema(), embed=embed_query, baseline=_baseline)
+            app.state._facet_store = cached
+        return cached
+
+    def _llm_json(system: str, user: str) -> dict:
+        """One strict-JSON model call for the facets engine / compile / intake — DeepSeek first, OpenAI on a
+        provider error, with a cooldown after 402 / 401 (`api.model_json`). Sync, small."""
+        from api.model_json import llm_json
+        return llm_json(system, user, timeout=60)
+
+    async def _index_aware(c, *, kind: str, user_keys: set | None = None, place_or_mode: bool = False):
+        """The deterministic index-aware step after a compile (docs/specs/guided-intake.md §12 step 1): a place named
+        with a mode ranks; a collapsing compiled must on a relaxable key is demoted; a specialty's home field corrects
+        an unsupported field. Returns (contract, notes); a failure returns the contract untouched."""
+        from api.contract_search import index_aware
+        store = _facet_store()
+        if store is None:
+            return c, []
+        try:
+            return await index_aware(c, kind=kind, schema=_facet_schema(), user_keys=set(user_keys or ()),
+                                     slice_fn=lambda k, m: store.slice_size(k, m), counts_fn=lambda k, m: store.counts(k, m, _facet_schema()),
+                                     coverage=await _facet_coverage(kind), place_or_mode=place_or_mode)
+        except Exception:   # noqa: BLE001
+            return c, []
+
+    async def _facet_coverage(kind: str) -> dict[str, float]:
+        """Share of entities with a KNOWN value per navigable key (index-wide, cached an hour) — the number
+        that decides whether a compiled must can be a promise."""
+        cache = getattr(app.state, "_facet_cov", None) or {}
+        hit = cache.get(kind)
+        import time as _time
+        if hit and _time.monotonic() - hit[0] < 3600:
+            return hit[1]
+        store = _facet_store()
+        if store is None:
+            return {}
+        try:
+            counts = await store.counts(kind, {}, _facet_schema())
+        except Exception:   # noqa: BLE001
+            return {}
+        cov = {}
+        for key, d in (counts or {}).items():
+            total = sum(d.values()) or 1
+            cov[key] = 1.0 - (d.get("unknown", 0) / total)
+        cache[kind] = (_time.monotonic(), cov); app.state._facet_cov = cache
+        return cov
+
+    def _judge_provider() -> str:
+        """The in-product judge runs on the FAST provider (latency budget §12.9); the eval's judge takes the other one."""
+        return os.environ.get("ROSTER_JUDGE_PROVIDER", "openai").strip().lower()
+
+    def _judge_llm(system: str, user: str) -> dict:
+        from api.model_json import llm_json
+        return llm_json(system, user, timeout=60, prefer=_judge_provider())
+
+    async def _people_lines(ids: list[str]) -> dict:
+        """ONE batched profile fetch for the judge's role lines (people rows carry only facets otherwise)."""
+        cs = _claim_store_cached()
+        if cs is None or not ids:
+            return {}
+        from api.people_population import rows_to_people
+        raw = await cs.people_by_ids(ids)
+        return {p["entity_id"]: str(p.get("blurb") or "") for p in rows_to_people(raw)}
+
+    def _group_options(rows: list) -> list:
+        """Which groupings earn a place in the menu FOR THESE ROWS (docs/specs/result-grouping.md §2), ordered by how
+        usefully each splits them. Computed once, server-side, so the rule lives in the kernel and not twice."""
+        from roster_kernel.facets.grouping import eligible
+        from roster_vertical.job_grouping import GROUP_DIMENSIONS
+        rows = rows or []
+        out = []
+        for key, label, source, kind in GROUP_DIMENSIONS:
+            if key == "auto":
+                out.append({"key": "auto", "label": label, "score": 1e9, "why": "let the model segment these results"})
+                continue
+            if source == "company":
+                vals = [str((r or {}).get("company") or (((r or {}).get("facets") or {}).get("company") or [""])[0] or "").replace("_", " ").strip() for r in rows]
+            elif source == "location":
+                vals = [str((r or {}).get("location") or "").strip() or ((((r or {}).get("facets") or {}).get("metro") or [""])[0]) for r in rows]
+            else:
+                fkey = source.split(":", 1)[1]
+                vals = [(((r or {}).get("facets") or {}).get(fkey) or [""])[0] for r in rows]
+            e = eligible([str(v or "").replace("_", " ") for v in vals], kind=kind)
+            if e.ok:
+                out.append({"key": key, "label": label, "score": e.score, "groups": e.groups, "known": e.known})
+        out.sort(key=lambda o: -o["score"])
+        return out
+
+    async def _company_sites() -> dict:
+        """{company slug: the employer's own website} — harvested once per company by scripts/company_sites.py and
+        cached here for an hour (a few thousand rows; a company's site does not move)."""
+        import time as _t
+        hit = getattr(app.state, "_co_sites", None)
+        if hit and _t.monotonic() - hit[0] < 3600:
+            return hit[1]
+        cs = _claim_store_cached()
+        out: dict = {}
+        if cs is not None:
+            try:
+                pool = await cs._get_pool()
+                async with pool.acquire() as conn:
+                    out = {r["entity_id"].split(":", 1)[1]: r["display_value"] for r in await conn.fetch(
+                        "SELECT entity_id, display_value FROM roster_entity_facet WHERE entity_kind='company' AND facet_key='link_website'")}
+            except Exception:   # noqa: BLE001
+                out = {}
+        app.state._co_sites = (_t.monotonic(), out)
+        return out
+
+    async def _with_employer(rows: list) -> list:
+        """Every job row carries where to read more about the hiring company: their OWN SITE when we have harvested it
+        from their board page (`company_site`), and their board — all their open roles — derived from the posting URL
+        (`employer_url`). No guessed domains: a URL that names no employer carries nothing."""
+        from roster_vertical.employer_link import employer_page
+        sites = await _company_sites()
+        for r in rows or []:
+            if not isinstance(r, dict):
+                continue
+            if not r.get("employer_url"):
+                u = employer_page(str(r.get("url") or ""), str(r.get("source") or ""), str(r.get("company") or ""))
+                if u:
+                    r["employer_url"] = u
+            if not r.get("company_site"):
+                slug = str(r.get("company") or "").strip().lower().replace(" ", "_")
+                site = sites.get(slug)
+                if not site:
+                    # the posting itself may sit on the employer's own domain (stripe.com/jobs) — then we already know it
+                    board = str(r.get("employer_url") or "")
+                    if board and not any(h in board for h in ("ashbyhq.com", "lever.co", "greenhouse", "careerpuck", "smartrecruiters",
+                                                              "myworkdayjobs", "workable", "recruitee", "jobvite", "bamboohr",
+                                                              "teamtailor", "pinpointhq", "rippling.com", "eightfold", "icims")):
+                        from urllib.parse import urlsplit as _us
+                        p2 = _us(board)
+                        if p2.hostname:
+                            site = f"{p2.scheme}://{p2.hostname}"
+                if site:
+                    r["company_site"] = site
+        return rows or []
+
+    async def _run_contract(cdict: dict, kind: str, *, depth: dict | None = None, relax: bool = False) -> dict:
+        """A ratified contract → rows. Single evaluate by default; MERGED (spec §12 step 2: recipes fused + one
+        blind judge) when the flag is on or the contract carries merge.mode = "merged". The merged result keeps
+        the ratified contract's counts / coverage for the rail and returns `merge` (recipes, tallies, WEAK).
+        `relax` (first searches, never a rail Apply): SMART RELAXING — too few results → the least important musts
+        become preferences until the pool is a good size; the notes ride back as `relaxed`."""
+        from api.contract_search import choice_logger, merge_options, merged_search, relax_to_enough
+        from roster_kernel.facets import Contract
+        opts = merge_options(cdict)
+        mode = opts["mode"] or ("merged" if contract_search_enabled() else "single")
+        c = dict(cdict or {}); c["kind"] = kind
+        user_keys = {str(k) for k in (c.get("user_keys") or [])}
+        relaxed_notes: list = []
+        import time as _tm
+        _tt = {"t0": _tm.monotonic()}
+        if relax:
+            store0 = _facet_store()
+
+            async def _slice0(k: str, must: dict):
+                fn = getattr(store0, "slice_size", None) if store0 is not None else None
+                return (await fn(k, must)) if fn is not None else None
+            if mode != "merged":
+                out, relaxed_notes = await relax_to_enough(Contract.from_dict(c), kind=kind, user_keys=user_keys, slice_fn=_slice0, evaluate_fn=_evaluate_contract, depth=depth)
+                out["relaxed"] = relaxed_notes
+                out["contract"] = {**(out.get("contract") or {}), "user_keys": sorted(user_keys), "notes": list(c.get("notes") or []), "relaxed": relaxed_notes}
+                out["timings"] = {"relax_and_evaluate": round(_tm.monotonic() - _tt["t0"], 2), "relaxed_steps": len([n for n in relaxed_notes if n.get("rule") == "relaxed"])}
+                return out
+            # merged: relax the base contract first (the strict recipe starts from a viable pool), then the ladder
+            _probe, relaxed_notes = await relax_to_enough(Contract.from_dict(c), kind=kind, user_keys=user_keys, slice_fn=_slice0,
+                                                         evaluate_fn=lambda cd, depth=None: _evaluate_contract({**cd, "limit": 60}, depth={"counts": False}))
+            if relaxed_notes:
+                c = {**c, **{k: v for k, v in (_probe.get("contract") or {}).items() if k in ("must", "prefer")}}
+        if mode != "merged":
+            out = await _evaluate_contract(c, depth=depth)
+            out["timings"] = {"evaluate": round(_tm.monotonic() - _tt["t0"], 2)}
+            return out
+        con = Contract.from_dict(c)
+        notes = [n for n in (c.get("notes") or []) if isinstance(n, dict)]
+        _tt["ia0"] = _tm.monotonic()
+        if "notes" not in c:          # a contract that never went through the index-aware step (the intake's did — its notes ride along, even empty)
+            try:
+                _, notes = await _index_aware(Contract.from_dict(c), kind=kind, user_keys=user_keys, place_or_mode=bool(c.get("place_or_mode")))
+            except Exception:   # noqa: BLE001
+                notes = []
+        store = _facet_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="the index is unavailable right now")
+
+        async def slice_fn(k: str, must: dict) -> int | None:
+            fn = getattr(store, "slice_size", None)
+            return (await fn(k, must)) if fn is not None else None
+        cs = _claim_store_cached()
+        log_fn = choice_logger(cs._get_pool) if cs is not None else None
+        out = await merged_search(con, kind=kind, user_keys=user_keys, notes=notes, evaluate_fn=_evaluate_contract, slice_fn=slice_fn,
+                                  llm_json=getattr(app.state, "intake_llm", None) or _judge_llm, lines_fn=_people_lines, off=opts["off"], log_fn=log_fn)
+        # the options ride back on the contract so a rail edit re-runs the SAME kind of search
+        out["contract"] = {**(out.get("contract") or {}), "user_keys": sorted(user_keys), "notes": notes, "place_or_mode": bool(c.get("place_or_mode")),
+                           "merge": {"mode": "merged", "off": list(opts["off"])}, "relaxed": relaxed_notes}
+        out["relaxed"] = relaxed_notes
+        return out
+
+    async def _evaluate_contract(cdict: dict, *, depth: dict | None = None) -> dict:
+        from roster_kernel.facets import Contract, evaluate
+        from roster_vertical.facet_schema import FACET_WEIGHTS
+        store = _facet_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="the index is unavailable right now")
+        c = Contract.from_dict(cdict)
+        try:
+            out = await evaluate(c, store, _facet_schema(), FACET_WEIGHTS, depth=depth)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"contract: {e}") from e
+        # the vocabulary's display labels ride along so the UI never hard-codes them
+        from roster_vertical.facet_schema import VALUE_LABELS
+        sch = _facet_schema()
+        _meta = getattr(store, "last_counts_meta", None) or {}
+        if int(_meta.get("sample") or 1) > 1:
+            out["coverage"]["counts_sampled"] = int(_meta["sample"])              # the rail shows ≈
+        out["labels"] = {"keys": {k.key: k.label for k in sch.for_kind(c.kind)}, "values": VALUE_LABELS,
+                         "types": {k.key: k.type.value for k in sch.for_kind(c.kind) if k.navigable},
+                         "order": [k.key for k in sch.for_kind(c.kind) if k.navigable]}
+        return out
+
+    def _briefs_fn_for(acc):
+        async def briefs_fn(u: dict | None):
+            if acc is None or not u:
+                return []
+            out = []
+            for b in await acc.list_briefs(u["id"], kind="jd"):
+                full = await acc.get_brief(u["id"], b["id"])
+                if full:
+                    out.append(full)
+            return out
+        return briefs_fn
+
+    async def _peer_summaries(peers: list[dict]) -> dict:
+        """The per-posting summaries the JD centre reads: cached by url (`rs_job_summary`), built for peers that
+        have none (≈ $0.002 each; they serve the job cards afterwards)."""
+        from api.people_population import build_job_summary, cached_job_summary, store_job_summary
+        cs = _claim_store_cached()
+        if cs is None:
+            return {}
+        pool = await cs._get_pool()
+        out: dict = {}
+        missing = []
+        for p in peers:
+            url = str(p.get("url") or "")
+            sm = await cached_job_summary(pool, url) if url else None
+            if sm:
+                out[str(p.get("id"))] = sm
+            else:
+                missing.append(p)
+        if missing:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch("SELECT id, body FROM rs_job WHERE id = ANY($1::bigint[])", [int(p["id"]) for p in missing if str(p.get("id")).isdigit()])
+            bodies = {int(r["id"]): str(r["body"] or "") for r in rows}
+            llm = build_llm(mode=resolve_mode())
+            sem = asyncio.Semaphore(5)
+
+            async def _one(p):
+                body = bodies.get(int(p["id"])) if str(p.get("id")).isdigit() else ""
+                if not body or len(body) < 200:
+                    return
+                async with sem:
+                    try:
+                        sm = await build_job_summary(body, llm, title=str(p.get("title") or ""), company=str(p.get("company") or ""))
+                    except Exception:   # noqa: BLE001
+                        sm = None
+                if sm:
+                    out[str(p.get("id"))] = sm
+                    try:
+                        await store_job_summary(pool, str(p.get("url") or ""), sm)
+                    except Exception:   # noqa: BLE001
+                        pass
+            await asyncio.gather(*[_one(p) for p in missing])          # ten peers in parallel, not one after another
+        return out
+
+    def _draft_fn(compile_fn):
+        from api.jd_draft import build_jd_draft
+        async def draft_fn(role_text: str, context: dict) -> dict:
+            return await build_jd_draft(role_text=role_text, context=context or {}, evaluate_fn=_evaluate_contract, summaries_fn=_peer_summaries,
+                                        compile_fn=compile_fn, llm_json=getattr(app.state, "intake_llm", None) or _llm_json)
+        return draft_fn
+
+    def _redraft_fn():
+        from api.jd_draft import redraft
+        async def redraft_fn(draft: dict, change: str) -> dict:
+            return await redraft(draft, change, getattr(app.state, "intake_llm", None) or _llm_json)
+        return redraft_fn
+
+    @app.post("/intake/improve")
+    async def intake_improve(body: IntakeIn, x_roster_token: str = Header(default="")) -> dict:
+        """A fuller résumé / JD from ONLY the original text + the conversation (spec §2.2). Nothing is saved here —
+        the user reads the diff and taps Save (POST /me/briefs)."""
+        if not guided_intake_enabled():
+            raise HTTPException(status_code=404, detail="guided intake is not enabled")
+        from api.intake import IntakeService
+        svc = IntakeService(schema=_facet_schema(), llm_json=getattr(app.state, "intake_llm", None) or _llm_json, counts_fn=None, compile_fn=None)
+        return await svc.improve(state=body.state or {})
+
+    @app.get("/me/briefs")
+    async def me_briefs(kind: str = "", x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return {"briefs": await store.list_briefs(user["id"], kind=(kind or None))}
+
+    @app.get("/me/briefs/{brief_id}")
+    async def me_brief(brief_id: int, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        b = await store.get_brief(user["id"], brief_id)
+        if b is None:
+            raise HTTPException(status_code=404, detail="brief not found")
+        return {"brief": b}
+
+    @app.post("/me/briefs")
+    async def me_save_brief(body: BriefIn, x_roster_token: str = Header(default="")) -> dict:
+        """Save a JD or an improved résumé (explicit tap). A JD is keyed by role: the same key becomes the next
+        version; a different key is a new hire. An improved résumé can also become the résumé on file."""
+        from roster_vertical.intake import role_key as _role_key
+        store, user = await _require_user(x_roster_token)
+        kind = body.kind if body.kind in ("jd", "resume") else "jd"
+        facets = dict((body.structured or {}).get("facets") or {})
+        if kind == "jd" and not facets:
+            try:   # the JD's own facets name its key (field / function / level) — one small extraction over the text
+                from api.facets_engine import extract_envelopes
+                envs = await asyncio.to_thread(extract_envelopes, "job", [{"title": body.title or "", "text": (body.text or "")[:1500]}], _facet_schema(), _llm_json, provenance="brief")
+                facets = {k: [x.get("value") for x in v] for k, v in ((envs[0] or {}).get("facets") or {}).items()} if envs else {}
+            except Exception:   # noqa: BLE001
+                facets = {}
+        rk = "resume" if kind == "resume" else (body.role_key or _role_key(body.title or "", facets))
+        rec = await store.save_brief(user["id"], kind=kind, title=(body.title or "")[:300], role_key=rk, text=body.text,
+                                     structured={**(body.structured or {}), "facets": facets}, sources=body.sources or {})
+        if kind == "resume" and body.make_active:
+            await store.set_resume_text(user["id"], body.text)
+        return {"ok": True, **rec}
+
+    @app.delete("/me/briefs/{brief_id}")
+    async def me_delete_brief(brief_id: int, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return {"deleted": await store.delete_brief(user["id"], brief_id)}
+
+    @app.post("/intake/step")
+    async def intake_step(body: IntakeIn, x_roster_token: str = Header(default="")) -> dict:
+        """One Guided-intake turn (docs/specs/guided-intake.md §3). Stateless: the FE returns `state` each turn.
+        A typed reply costs one small model call; a chip tap costs nothing; counts come from the facet store."""
+        if not guided_intake_enabled():
+            raise HTTPException(status_code=404, detail="guided intake is not enabled")
+        from api.facets_engine import compile_contract
+        from api.intake import IntakeService
+        from api.media import attachment_texts_async
+        store = _facet_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="the index is unavailable right now")
+        user = await _optional_user(x_roster_token)
+        acc = _accounts()
+
+        async def counts_fn(kind: str, must: dict) -> dict:
+            nav = await _facet_nav(kind, text="", must=must, scope={"country": (body.country or "us").lower()})
+            return (nav or {}).get("counts") or {}
+
+        def compile_fn(kind: str, text: str, *, limit: int = 60, scope: dict | None = None, extras: dict | None = None):
+            return compile_contract(kind, text, _facet_schema(), _llm_json, limit=limit, scope=scope or {"country": (body.country or "us").lower()}, extras=extras)
+
+        async def profile_fn(u: dict | None) -> dict | None:
+            if acc is None or not u:
+                return None
+            return ((await acc.get_parse(u["id"])).get("profile") or {}) or None
+
+        svc = getattr(app.state, "intake_service", None) or IntakeService(schema=_facet_schema(), llm_json=getattr(app.state, "intake_llm", None) or _llm_json,
+                                                                              counts_fn=counts_fn, compile_fn=compile_fn, profile_fn=profile_fn, jd_fetch_fn=_fetch_jd_text,
+                                                                              briefs_fn=_briefs_fn_for(acc), draft_fn=_draft_fn(compile_fn), redraft_fn=_redraft_fn(),
+                                                                              index_aware_fn=_index_aware)
+        att_texts = []
+        if body.attachments:
+            try:
+                att_texts = [t for _n, t in await attachment_texts_async([a.model_dump() for a in body.attachments]) if t]
+            except Exception:   # noqa: BLE001
+                att_texts = []
+        return await svc.step(state=body.state, message=body.message, direction=body.direction, answer=body.answer,
+                              search_now=body.search_now, attachments_text=att_texts, user=user)
+
+    @app.post("/intake/v3/step")
+    async def intake_v3_step(body: IntakeIn, x_roster_token: str = Header(default="")) -> dict:
+        """One turn of the recruiting consultant (docs/specs/guided-consultant-v3.md): documents read once, leverage
+        measured before the single planner call, the move parsed and gated in the kernel, the hand-off = the one contract."""
+        if not guided_v3_enabled():
+            raise HTTPException(status_code=404, detail="guided v3 is not enabled")
+        from api.consultant import IntakeConsultant, record_writer
+        from api.facets_engine import compile_contract
+        from api.media import attachment_texts_async
+        store = _facet_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="the index is unavailable right now")
+        user = await _optional_user(x_roster_token)
+        acc = _accounts()
+
+        async def counts_fn(kind: str, must: dict) -> dict:
+            nav = await _facet_nav(kind, text="", must=must, scope={"country": (body.country or "us").lower()})
+            return (nav or {}).get("counts") or {}
+
+        async def slice_fn(kind: str, must: dict):
+            fn = getattr(store, "slice_size", None)
+            return (await fn(kind, must)) if fn is not None else None
+
+        def compile_fn(kind: str, text: str, *, limit: int = 60, scope: dict | None = None, extras: dict | None = None):
+            return compile_contract(kind, text, _facet_schema(), _llm_json, limit=limit, scope=scope or {"country": (body.country or "us").lower()}, extras=extras)
+
+        async def profile_fn(u: dict | None) -> dict | None:
+            if acc is None or not u:
+                return None
+            return ((await acc.get_parse(u["id"])).get("profile") or {}) or None
+
+        async def stored_fn(u: dict | None) -> dict | None:
+            if acc is None or not u:
+                return None
+            return await acc.get_profile(u["id"])
+        cs = _claim_store_cached()
+
+        def _planner_llm(system: str, user_msg: str) -> dict:
+            """The ONE strategic call per turn runs on the best reasoning model the account can actually reach (owner:
+            'best model for planner'); the cheap extractor keeps the direction read and the document reader. A provider
+            that is out of credit is skipped by `llm_json` itself, so this degrades instead of failing."""
+            from api.model_json import llm_json
+            provider = os.environ.get("ROSTER_PLANNER_PROVIDER", "deepseek").strip().lower() or None
+            model = os.environ.get("ROSTER_PLANNER_MODEL", "deepseek-chat")
+            effort = os.environ.get("ROSTER_PLANNER_EFFORT", "low") if model.startswith(("gpt-5", "o3", "o4")) else None
+            return llm_json(system, user_msg, timeout=90, prefer=provider, model=model, reasoning_effort=effort)
+        svc = getattr(app.state, "consultant_service", None) or IntakeConsultant(
+            schema=_facet_schema(), llm_json=getattr(app.state, "intake_llm", None) or _llm_json, counts_fn=counts_fn, slice_fn=slice_fn,
+            profile_fn=profile_fn, stored_fn=stored_fn, briefs_fn=_briefs_fn_for(acc), draft_fn=_draft_fn(compile_fn), index_aware_fn=_index_aware,
+            record_fn=(record_writer(cs._get_pool, (user or {}).get("id")) if cs is not None else None), jd_fetch_fn=_fetch_jd_text,
+            planner_llm=(getattr(app.state, "intake_llm", None) or _planner_llm), evaluate_fn=_evaluate_contract, lines_fn=_people_lines)
+        att_texts = []
+        if body.attachments:
+            try:
+                att_texts = [t for _n, t in await attachment_texts_async([a.model_dump() for a in body.attachments]) if t]
+            except Exception:   # noqa: BLE001
+                att_texts = []
+        st_in = dict(body.state or {})
+        st_in["scope"] = {"country": (body.country or "us").lower()}
+        return await svc.step(state=(st_in if body.state else None), message=body.message or "", answer=body.answer, attachments_text=att_texts, user=user, restart=bool(body.restart),
+                              search_now=bool(body.search_now), direction_tap=(body.direction if body.direction in ("job", "candidate") else None))
+
+    @app.post("/search/compile")
+    async def search_compile(body: CompileIn) -> dict:
+        """Brief → contract (the model maps the brief onto schema keys; code validates; cached by text)."""
+        from api.facets_engine import compile_contract
+        kind = body.kind if body.kind in ("job", "person") else "job"
+        key = f"compile:{kind}:{hashlib.sha1((body.text or '').strip().lower().encode()).hexdigest()[:16]}"
+        cache = getattr(app.state, "_compile_cache", None)
+        if cache is None:
+            cache = app.state._compile_cache = {}
+        c = cache.get(key)
+        if c is None:
+            c = await asyncio.to_thread(compile_contract, kind, body.text, _facet_schema(), _llm_json, limit=body.limit, scope={"country": (body.country or "us").lower()})
+            if len(cache) > 500:
+                cache.clear()
+            cache[key] = c
+        return {"contract": c.to_dict()}
+
+    async def _facet_nav(kind: str, *, text: str, must: dict, prefer: dict | None = None, scope: dict | None = None, limit: int = 60) -> dict | None:
+        """The rail WITHOUT rows: a validated contract + counts over its must-slice + labels (no embedding, no
+        model call; counts cached 10 min per (kind, musts) — the index moves slowly). None when the index or
+        the contract is unavailable, so a surface degrades to no rail rather than an error."""
+        from roster_kernel.facets import Contract, validate_contract
+        store = _facet_store()
+        if store is None:
+            return None
+        c = Contract(kind=kind, text=(text or "")[:500], must=dict(must or {}), prefer=dict(prefer or {}), scope=dict(scope or {}), limit=limit)
+        if validate_contract(c, _facet_schema()):
+            c = Contract(kind=kind, text=c.text, scope=c.scope, limit=limit)          # an untranslatable filter → an open rail
+        import time as _time
+        cache = getattr(app.state, "_nav_counts", None)
+        if cache is None:
+            cache = app.state._nav_counts = {}
+        key = f"{kind}:{json.dumps(c.must, sort_keys=True)}"
+        hit = cache.get(key)
+        if hit and _time.monotonic() - hit[0] < 600:
+            counts = hit[1]
+        else:
+            try:
+                counts = await store.counts(kind, c.must, _facet_schema())
+            except Exception:   # noqa: BLE001
+                return None
+            if len(cache) > 200:
+                cache.clear()
+            cache[key] = (_time.monotonic(), counts)
+        from roster_vertical.facet_schema import VALUE_LABELS
+        sch = _facet_schema()
+        _meta = getattr(store, "last_counts_meta", None) or {}
+        return {"contract": c.to_dict(), "counts": counts, "coverage": {"pool": None, **({"counts_sampled": int(_meta["sample"])} if int(_meta.get("sample") or 1) > 1 else {})},
+                "labels": {"keys": {k.key: k.label for k in sch.for_kind(kind)}, "values": VALUE_LABELS,
+                           "types": {k.key: k.type.value for k in sch.for_kind(kind) if k.navigable},
+                           "order": [k.key for k in sch.for_kind(kind) if k.navigable]}}
+
+    async def _hydrate_people(rows: list[dict]) -> list[dict]:
+        """Evaluator person rows → the people-card shape the Talent surface renders (attributes, links, citation,
+        evidence packet, linked artifacts), in evaluator order, with the evaluator's facets / match / reasons
+        riding along. Without a people store the rows keep the evaluator shape plus the card's required keys."""
+        if not rows:
+            return []
+        from api.people_population import rows_to_people
+        cs = _claim_store_cached()
+        ids = [str(r.get("id") or r.get("entity_id") or "") for r in rows]
+        cards: dict[str, dict] = {}
+        if cs is not None:
+            try:
+                raw = await cs.people_by_ids(ids)
+                cards = {p["entity_id"]: p for p in rows_to_people(raw)}
+            except Exception:   # noqa: BLE001
+                cards = {}
+        out = []
+        for r, eid in zip(rows, ids):
+            card = cards.get(eid) or {"entity_id": eid, "name": r.get("name") or eid, "blurb": "", "attributes": [], "links": [], "citation": None, "evidence": {}}
+            card = {**card, "entity_id": eid, "facets": r.get("facets") or {}, "display": r.get("display") or {}, "provenance": r.get("provenance") or {},
+                    "match_pct": r.get("match_pct"), "reasons": r.get("reasons") or [], "score": r.get("score"),
+                    "fit": r.get("fit"), "fit_why": r.get("fit_why") or "", "found_by": r.get("found_by") or {}}
+            out.append(card)
+        if cs is not None and out:
+            try:
+                from api.artifacts import attach_artifacts
+                await attach_artifacts(cs, out)
+            except Exception:   # noqa: BLE001
+                pass
+        return out
+
+    @app.post("/search/evaluate")
+    async def search_evaluate(body: EvaluateIn) -> dict:
+        """Contract → rows + counts + coverage. Deterministic for a given index state (no model call).
+        People rows come back card-shaped (the Talent surface renders them as is)."""
+        out = await _run_contract(body.contract, str((body.contract or {}).get("kind") or "job"), depth=body.depth, relax=bool(body.relax))
+        if (body.contract or {}).get("kind") == "person":
+            out["rows"] = await _hydrate_people(out.get("rows") or [])
+        return out
+
+    @app.post("/jobs/group")
+    async def jobs_group(body: GroupIn) -> dict:
+        """AUTO grouping: the model segments THIS result set the way a job seeker would; code enforces the shape and
+        falls back to the free token split when no provider answers. Opt-in — the browser calls it only when the user
+        picks Auto, once per result set (docs/specs/result-grouping.md §4)."""
+        import time as _t
+        from roster_kernel.facets.grouping import enforce, token_groups
+        from roster_vertical.job_grouping import resegment_prompt, row_line, segment_prompt, tokens
+        rows = [r.model_dump() for r in (body.rows or [])]
+        n = len(rows)
+        if n < 6:
+            return {"groups": [], "leftovers": list(range(n)), "notes": ["too few rows to group"], "source": "none"}
+        for r in rows:                                    # the shape `tokens`/`row_line` expect
+            r["facets"] = {"specialty": r.get("specialty") or [], "skill": r.get("skill") or [], "role_family": r.get("role_family") or []}
+        t0 = _t.monotonic()
+        user = "\n".join(row_line(i, r) for i, r in enumerate(rows))[:12000]
+        llm = getattr(app.state, "intake_llm", None) or _llm_json
+        groups, leftovers, notes, source = [], list(range(n)), [], "fallback"
+        kind = "person" if body.kind == "person" else "job"
+        try:
+            raw = await asyncio.to_thread(llm, segment_prompt(kind=kind), user)
+            groups, leftovers, notes = enforce(raw.get("groups") or [], n)
+            source = "model"
+            dominant = next((x for x in notes if x.startswith("dominant")), "")
+            if dominant and groups:
+                # one bucket swallowed the set — ask once more to split THAT group (prod prototype: 49 of 78 in one)
+                raw2 = await asyncio.to_thread(llm, resegment_prompt(groups[0].name, len(groups[0].ids), n, kind=kind), user)
+                g2, l2, n2 = enforce(raw2.get("groups") or [], n)
+                if g2 and not any(x.startswith("dominant") for x in n2):
+                    groups, leftovers, notes = g2, l2, n2 + ["re-asked: the first answer had one dominant group"]
+                else:
+                    notes.append("re-ask did not improve on it")
+        except Exception as e:   # noqa: BLE001 — a dead provider must not take grouping down with it
+            notes.append(f"model unavailable ({str(e)[:60]}) — grouped by shared terms instead")
+        if not groups:
+            groups, leftovers = token_groups([tokens(r) for r in rows])
+            source = "fallback"
+        return {"groups": [{**g.to_dict(), "ids": [str(rows[i]["id"]) for i in g.ids]} for g in groups],
+                "leftovers": [str(rows[i]["id"]) for i in leftovers], "notes": notes[:6], "source": source,
+                "secs": round(_t.monotonic() - t0, 2)}
+
+    @app.post("/search/judge")
+    async def search_judge(body: JudgeIn) -> dict:
+        """The blind fit judge on its own (spec §12.5 / §12.10 — the paired eval grades both arms' union once, blind).
+        Rows are normalized server-side to the judge's fixed shape from a few allowed fields; ≤ 60 rows; one call."""
+        from roster_kernel.facets.contract_search import blind, resolve_blind_id
+        from roster_vertical.intake import judge_brief, judge_prompt, judge_row
+        kind = "person" if body.kind == "person" else "job"
+        rows = []
+        for r in (body.rows or [])[:60]:
+            if not isinstance(r, dict):
+                continue
+            rows.append({"id": str(r.get("id") or r.get("entity_id") or "")[:80], "title": str(r.get("title") or "")[:120], "company": str(r.get("company") or "")[:80],
+                         "location": str(r.get("location") or "")[:80], "blurb": str(r.get("blurb") or "")[:200],
+                         "facets": {str(k)[:32]: [str(x)[:40] for x in v][:6] for k, v in (r.get("facets") or {}).items() if isinstance(v, list)}})
+        rows = [r for r in rows if r["id"]]
+        if not rows:
+            return {"verdicts": {}, "graded": 0}
+        import hashlib as _h
+        items, mapping = blind(rows, seed=int(_h.sha1(body.brief.encode("utf-8")).hexdigest()[:8], 16))
+        user = "BRIEF\n" + judge_brief(kind, body.brief, body.contract) + "\n\nROWS:\n" + "\n".join(judge_row(kind, bid, r, r.get("blurb") or "") for bid, r in items)
+        fn = getattr(app.state, "intake_llm", None) or _judge_llm
+        if body.provider == "alt" and getattr(app.state, "intake_llm", None) is None:
+            from api.model_json import llm_json as _lj, providers as _prov
+            names = [p[0] for p in _prov() if p[0] != _judge_provider()]
+            alt = names[0] if names else _judge_provider()
+            fn = (lambda sy, us: _lj(sy, us, timeout=90, prefer=alt))
+        d = await asyncio.to_thread(fn, judge_prompt(kind), user)
+        verdicts = {}
+        for v in (d.get("verdicts") or []):
+            rid = resolve_blind_id(mapping, v.get("id")) if isinstance(v, dict) else None
+            if rid and str(v.get("fit") or "").lower() in ("yes", "partial", "no"):
+                verdicts[rid] = {"fit": str(v["fit"]).lower(), "why": str(v.get("why") or "")[:80]}
+        return {"verdicts": verdicts, "graded": len(verdicts)}
+
+    @app.post("/admin/facets/project-people")
+    async def admin_facets_project_people(x_admin_token: str = Header(default="")) -> dict:
+        """Bridge the people index's pre-schema facet rows into the schema (set-based SQL, no model call,
+        idempotent): the one vocabulary table in `roster_vertical.facet_legacy` plus `evidence` from linked
+        artifacts. Re-run after people ingest; a real extraction replaces these rows key by key."""
+        want = os.environ.get("ROSTER_ADMIN_TOKEN", "")
+        if want and x_admin_token != want:
+            raise HTTPException(status_code=401, detail="admin token required")
+        from roster_vertical.facet_legacy import ARTIFACT_EVIDENCE, legacy_person_pairs
+        from api.facet_store import project_legacy_people
+        store = _facet_store(); cs = _claim_store_cached()
+        if store is None or cs is None:
+            raise HTTPException(status_code=503, detail="index unavailable")
+        await store.ensure_schema()
+        pool = await cs._get_pool()
+        written = await project_legacy_people(pool, pairs=legacy_person_pairs(), artifact_map=ARTIFACT_EVIDENCE, schema_version=_facet_schema().version())
+        app.state._nav_counts = {}; app.state._facet_cov = {}
+        return {"written": written, "schema_version": _facet_schema().version()}
+
+    @app.post("/admin/facets/project-jobs")
+    async def admin_facets_project_jobs(limit: int = 5000, x_admin_token: str = Header(default="")) -> dict:
+        """Project existing job extraction records (rs_job.facets) + structural facets into facet rows.
+        Idempotent; no model calls; `facets_projected` marks the row with the schema version."""
+        want = os.environ.get("ROSTER_ADMIN_TOKEN", "")
+        if want and x_admin_token != want:
+            raise HTTPException(status_code=401, detail="admin token required")
+        from api.facet_store import job_entity_id, legacy_job_envelope, structural_job_facets
+        store = _facet_store()
+        cs = _claim_store_cached()
+        if store is None or cs is None:
+            raise HTTPException(status_code=503, detail="index unavailable")
+        schema = _facet_schema(); ver = schema.version()
+        await store.ensure_schema()            # the read-model columns exist before any query touches them
+        pool = await cs._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""SELECT id, company, skills, facets, COALESCE(posted_at, '') AS posted_at, updated_at FROM rs_job
+                                       WHERE closed_at IS NULL AND (facets_projected IS NULL OR facets_projected <> $2) ORDER BY updated_at DESC LIMIT $1""", int(limit), ver)
+        n = 0
+        import datetime as _dt
+        now = _dt.datetime.now(_dt.timezone.utc)
+        for r in rows:
+            fx = r["facets"]; fx = json.loads(fx) if isinstance(fx, str) else (fx or {})
+            env = fx if isinstance(fx, dict) and "facets" in fx else legacy_job_envelope(fx or {}, schema_version=ver)
+            age = (now - r["updated_at"]).total_seconds() / 86400 if r["updated_at"] else None
+            st = structural_job_facets({"company": r["company"], "skills": r["skills"]}, schema_version=ver, now_days=age)
+            env.setdefault("facets", {}).update(st["facets"])
+            await store.project("job", job_entity_id(r["id"]), env)
+            async with pool.acquire() as conn:
+                await conn.execute("UPDATE rs_job SET facets_projected = $2 WHERE id = $1", r["id"], ver)
+            n += 1
+        return {"projected": n, "schema_version": ver}
+
+    async def _rows_from_eval(kind: str, out: dict) -> list[dict]:
+        """Evaluator rows → the row shape the map surfaces render (jobs: the card fields; people: hydrated cards)."""
+        if kind == "jobs":
+            return [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display")},
+                     "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in out.get("rows") or []]
+        return await _hydrate_people(list(out.get("rows") or []))
+
+    @app.post("/maps/{map_id}/navigate")
+    async def map_navigate(map_id: str, body: MapNavigateIn, x_roster_token: str = Header(default="")) -> dict:
+        """NAVIGATE a saved map (spec §6): evaluate its contract — or the edited contract sent — against the
+        live index; rows + counts + coverage come back; the snapshot is untouched unless `save` (owner only),
+        which records a revision with the new contract and rows."""
+        from api.calibration import diff_rows
+        ms = _require_maps()
+        user = await _optional_user(x_roster_token)
+        m = await ms.get(map_id, owner_id=(user or {}).get("id"), share_token=(body.t or None))
+        if m is None:
+            raise HTTPException(status_code=404, detail="map not found")
+        base = m.get("contract")
+        if not base:
+            raise HTTPException(status_code=400, detail="this map was saved before contracts — search again and save it to navigate it")
+        cdict = dict(body.contract or base)
+        cdict["kind"] = base.get("kind") or ("job" if m.get("map_type") == "jobs" else "person")
+        out = await _evaluate_contract(cdict)
+        new_rows = await _rows_from_eval(m.get("map_type") or "jobs", out)
+        res = {"rows": new_rows, "counts": out["counts"], "coverage": out["coverage"], "contract": out["contract"], "labels": out.get("labels")}
+        res["group_options"] = _group_options(new_rows)          # a saved map navigates like a live search, menu included
+        if body.save:
+            if not m.get("is_owner"):
+                raise HTTPException(status_code=403, detail="only the owner can save a navigated view")
+            old = [r for r in (m.get("rows") or []) if isinstance(r, dict)]
+            delta = diff_rows(old, new_rows)
+            delta_rec = {**delta, "edits": [], "summary": f"Filters applied: {delta.get('n_added', 0)} new, {delta.get('n_removed', 0)} dropped.", "contract": out["contract"]}
+            rev = await ms.add_revision(map_id, owner_id=user["id"], reason="manual_filter_change", brief=m.get("brief") or "",
+                                        filters=(m.get("filters") or {}), coverage={**(m.get("coverage") or {}), "counts": out["counts"]},
+                                        rows=new_rows, delta=delta_rec, contract=out["contract"])
+            res["revision_id"] = rev
+        return res
+
+    async def _rerun_jobs_map(m: dict, owner_id: str, *, prefs_extra: dict, exclude_refs: list, country: str) -> tuple[list[dict], dict]:
+        """Re-run a JOB MAP's saved contract (the owner's résumé × the brief × fixed filters) → (rows, coverage).
+        Shared by revise (with feedback-derived prefs) and keep-fresh refresh (the last contract as is)."""
+        from api.calibration import row_ref
+        from api.people_population import apply_job_must, job_brief_contract, match_resume_jobs, years_to_levels
+        store = _claim_store_cached()
+        if store is None:
+            raise HTTPException(status_code=503, detail="the job index is unavailable right now — please retry")
+        rows = [r for r in (m.get("rows") or []) if isinstance(r, dict)]
+        rows_by_ref = {row_ref(r): r for r in rows}
+        cov = m.get("coverage") or {}
+        _acc = _accounts()
+        _parsed = ((await _acc.get_parse(owner_id)).get("profile") or {}) if _acc else {}
+        _cv = str(_parsed.get("_resume_text") or "")
+        lp = cov.get("linkedin_profile") or {}
+        _prof_text = " ".join(x for x in [lp.get("name") or "", lp.get("headline") or "", _cv] if x).strip()
+        gs = cov.get("geo_scope") or {}
+        prefs = {"limit": 60, "brief_text": (m.get("brief") or ""), "country": (country or "us"),
+                 "metro": (gs.get("metro") or ""), "state": (gs.get("state") or ""),
+                 "seniorities": sorted(years_to_levels(_cv)) if _cv else [], **(prefs_extra or {}), "exclude_refs": list(exclude_refs or [])}
+        res = await match_resume_jobs(store, {"_resume_text": _prof_text}, prefs)
+        new_rows = list(res.get("jobs") or [])
+        must = (cov.get("must") or {}).get("kinds") or []
+        if must:
+            new_rows, _ = await apply_job_must(store, new_rows, must)
+        for j in new_rows:                                  # saved summaries travel with the map
+            old = rows_by_ref.get(row_ref(j))
+            if old and old.get("summary"):
+                j["summary"] = old["summary"]
+        _lv = re.search(r"(?i)\b(intern|junior|entry[- ]level|new grad|mid|senior|staff|principal|lead|director|vp|head of)\b", m.get("brief") or "")
+        bc = job_brief_contract(question=m.get("brief") or "", job_must=must, scope=res.get("geo_scope"),
+                                profile_text=(_prof_text if _cv else ""), matched_on=("resume" if _cv else "description"),
+                                stated_seniority=(_lv.group(1).lower() if _lv else ""))
+        bc["assumptions"] = ["filters fixed by this revision — the brief's wording only ranks"] + [a for a in bc.get("assumptions") or []][:2]
+        return new_rows, {**cov, "geo_scope": res.get("geo_scope"), "brief_contract": bc, "note": res.get("note") or ""}
+
+    async def _rerun_talent_map(m: dict, contract: dict, *, country: str, tenant_id: str = "demo") -> tuple[list[dict], dict]:
+        """Re-run a TALENT MAP's fixed contract (no compile, no refinement) → (rows, coverage_basis)."""
+        store = _claim_store_cached()
+        if store is None:
+            raise HTTPException(status_code=503, detail="the people index is unavailable right now — please retry")
+        from api.people_population import answer_people_population
+        cov = m.get("coverage") or {}
+        gs = cov.get("geo_scope") or {}
+        geo_on = people_geo_scope_enabled()
+        res = await answer_people_population(
+            question=contract["question"], tenant_id=tenant_id, store=store, llm=build_llm(mode=resolve_mode()),
+            scope_country=((country or "us").strip().lower() if geo_on else ""),
+            fixed_facets=contract["refine_facets"], assume_people=True,
+            scope_metro=((gs.get("metro") or "").strip().lower() if geo_on else ""),
+            scope_state=((gs.get("state") or "").strip().lower() if geo_on else ""),
+            evidence_kinds=contract.get("evidence_kinds") or [], exclude_ids=contract.get("exclude_ids") or [],
+            exclude_companies=contract.get("exclude_companies") or [], avoid_terms=contract.get("avoid_terms") or [])
+        return [r for r in (res.get("people_rows") or []) if isinstance(r, dict)], (res.get("coverage_basis") or {})
+
+    def _last_contract(m: dict) -> dict:
+        """The contract the map last ran with: the newest revision's stored contract, else the saved state."""
+        for rev in reversed(m.get("revisions") or []):
+            c = (rev.get("delta") or {}).get("contract") or {}
+            if c:
+                return dict(c)
+        return {}
+
+    async def _index_moved_since(m: dict, since) -> bool:
+        """CHEAP change check before any recompute: did the index this map reads from move since `since`?"""
+        if since is None:
+            return True
+        store = _claim_store_cached()
+        if store is None:
+            return False
+        pool = await store._get_pool()
+        async with pool.acquire() as conn:
+            if (m.get("map_type") or "talent") == "jobs":
+                n = await conn.fetchval("SELECT count(*) FROM rs_job WHERE updated_at > $1 OR closed_at > $1", since)
+            else:
+                n = await conn.fetchval("SELECT count(*) FROM rs_entity WHERE retrieved_at > $1", since)
+        return int(n or 0) > 0
+
+    async def _refresh_map(map_id: str, owner_id: str) -> dict:
+        """KEEP FRESH: re-run the map's last contract against the current index; when rows changed, save a
+        'refresh' revision (code-written summary, no LLM phrasing) and notify the owner. Skipped for free
+        when the index has not moved since the last refresh."""
+        from api.calibration import diff_rows
+        ms = _require_maps()
+        m = await ms.get(map_id, owner_id=owner_id)
+        if m is None or not m.get("is_owner"):
+            return {"map_id": map_id, "skipped": "not found"}
+        if not await _index_moved_since(m, m.get("last_refresh_at")):
+            await ms.mark_checked(map_id, refreshed=False)
+            return {"map_id": map_id, "skipped": "index unchanged"}
+        rows = [r for r in (m.get("rows") or []) if isinstance(r, dict)]
+        cov = m.get("coverage") or {}
+        country = str(((cov.get("geo_scope") or {}).get("country")) or "us")
+        last = _last_contract(m)
+        is_jobs = (m.get("map_type") or "talent") == "jobs"
+        if m.get("contract"):                                    # the evaluator IS the refresh
+            _out = await _evaluate_contract(dict(m["contract"]))
+            new_rows = await _rows_from_eval(m.get("map_type") or "jobs", _out)
+            new_cov = {**cov, "counts": _out["counts"], "coverage": _out["coverage"]}
+            filters, brief, last = (m.get("filters") or {}), (m.get("brief") or ""), dict(m["contract"])
+        elif is_jobs:
+            new_rows, new_cov = await _rerun_jobs_map(m, owner_id, prefs_extra=last.get("prefs") or {}, exclude_refs=last.get("exclude_refs") or [], country=country)
+            filters = m.get("filters") or {}
+            brief = m.get("brief") or ""
+        elif True:
+            contract = {"question": m.get("brief") or "", "refine_facets": (m.get("filters") or {}),
+                        "evidence_kinds": list(((cov.get("evidence_filter") or {}).get("kinds")) or []),
+                        "exclude_ids": [], "exclude_companies": [], "avoid_terms": [], **{k: v for k, v in last.items() if k in ("question", "refine_facets", "evidence_kinds", "exclude_ids", "exclude_companies", "avoid_terms")}}
+            new_rows, new_cov = await _rerun_talent_map(m, contract, country=country)
+            filters = new_cov.get("query_facets") or contract["refine_facets"]
+            brief = contract["question"]
+        delta = diff_rows(rows, new_rows)
+        changed = bool(delta.get("n_added") or delta.get("n_removed"))
+        if not changed:
+            await ms.mark_checked(map_id, refreshed=True)
+            return {"map_id": map_id, "skipped": "no new or dropped rows", "n_moved": delta.get("n_moved", 0)}
+        noun = "roles" if is_jobs else "people"
+        summary = (f"Refreshed against the current index: {delta.get('n_added', 0)} new {noun}, "
+                   f"{delta.get('n_removed', 0)} dropped, {delta.get('n_moved', 0)} moved 10+ places.")
+        delta_rec = {**delta, "edits": [], "summary": summary, "contract": last, "refresh": True}
+        await ms.add_revision(map_id, owner_id=owner_id, reason="refresh", brief=brief, filters=filters,
+                              coverage=new_cov, rows=new_rows, delta=delta_rec)
+        await ms.mark_checked(map_id, refreshed=True)
+        acc = _accounts()
+        if acc is not None:
+            names = ", ".join(str(x.get("name") or x.get("title") or "") for x in (delta.get("added") or [])[:4] if isinstance(x, dict))
+            await acc.add_notification(owner_id, kind="map_refresh",
+                                       title=f"{delta.get('n_added', 0)} new {noun} in “{m.get('title') or 'your map'}”" if delta.get("n_added") else f"{delta.get('n_removed', 0)} {noun} dropped from “{m.get('title') or 'your map'}”",
+                                       body=(summary + (f" New: {names}." if names else "")), url=f"#m/{map_id}")
+        return {"map_id": map_id, "refreshed": True, "n_added": delta.get("n_added", 0), "n_removed": delta.get("n_removed", 0)}
+
+    async def _refresh_due_maps(limit: int = 10) -> list[dict]:
+        ms = _require_maps()
+        out = []
+        for d in await ms.due_maps(limit=limit):
+            try:
+                out.append(await _refresh_map(d["id"], d["owner_id"]))
+            except Exception as e:   # noqa: BLE001 — one map's failure never blocks the rest
+                out.append({"map_id": d["id"], "error": str(e)[:200]})
+                try:
+                    await ms.mark_checked(d["id"], refreshed=False)
+                except Exception:   # noqa: BLE001
+                    pass
+        return out
+
+    @app.post("/maps/{map_id}/cadence")
+    async def map_cadence(map_id: str, body: MapCadenceIn, x_roster_token: str = Header(default="")) -> dict:
+        """KEEP FRESH: the owner opts this map into a refresh cadence (off / daily / weekly)."""
+        from api.maps import CADENCES
         ms = _require_maps()
         _, user = await _require_user(x_roster_token)
-        ok = await ms.review(map_id, owner_id=user["id"], entity_id=body.entity_id,
-                             state=body.state, note=body.note)
-        if not ok:
-            raise HTTPException(status_code=400, detail="invalid review or not your map")
-        return {"ok": True}
+        every = body.every if body.every in CADENCES else "off"
+        if not await ms.set_cadence(map_id, owner_id=user["id"], every=every):
+            raise HTTPException(status_code=404, detail="map not found")
+        return {"ok": True, "every": every}
+
+    @app.post("/admin/maps/refresh-due")
+    async def admin_maps_refresh_due(x_admin_token: str = Header(default="")) -> dict:
+        """Run the keep-fresh pass now (the startup loop does this every 10 minutes)."""
+        want = os.environ.get("ROSTER_ADMIN_TOKEN", "")
+        if want and x_admin_token != want:
+            raise HTTPException(status_code=401, detail="admin token required")
+        return {"results": await _refresh_due_maps(limit=20)}
+
+    @app.post("/admin/people/refresh")
+    async def admin_people_refresh(body: PeopleRefreshIn, x_admin_token: str = Header(default="")) -> dict:
+        """ON-DEMAND people refresh (admin only; never automatic — owner's call): conditional GitHub
+        re-checks of the oldest profiles (or one map's people, or named logins) in a separate process.
+        Progress: GET /admin/people/refresh."""
+        want = os.environ.get("ROSTER_ADMIN_TOKEN", "")
+        if want and x_admin_token != want:
+            raise HTTPException(status_code=401, detail="admin token required")
+        if not os.environ.get("ROSTER_GITHUB_TOKEN"):
+            raise HTTPException(status_code=503, detail="ROSTER_GITHUB_TOKEN not set on this service")
+        import subprocess, sys as _sys, time as _time
+        run_id = f"run-{int(_time.time())}"
+        argv = [_sys.executable, "scripts/refresh_people.py", "--limit", str(body.limit), "--older-than-days", str(body.older_than_days), "--run-id", run_id]
+        if not body.dry:
+            argv.append("--live")
+        if body.logins:
+            argv += ["--logins", ",".join(l.strip() for l in body.logins if l.strip())[:5000]]
+        if body.map_id:
+            argv += ["--map", body.map_id[:64]]
+        try:
+            subprocess.Popen(argv, cwd="/app" if os.path.isdir("/app/scripts") else None, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True, env=os.environ.copy())
+        except Exception as e:   # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"could not start the refresh: {e}") from e
+        return {"run_id": run_id, "dry": body.dry, "status": "started"}
+
+    @app.get("/admin/people/refresh")
+    async def admin_people_refresh_status(x_admin_token: str = Header(default="")) -> dict:
+        want = os.environ.get("ROSTER_ADMIN_TOKEN", "")
+        if want and x_admin_token != want:
+            raise HTTPException(status_code=401, detail="admin token required")
+        store = _claim_store_cached()
+        if store is None:
+            return {"runs": []}
+        pool = await store._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("SELECT cursor_key, status, n_seen, n_written, error, updated_at FROM rs_ingest_checkpoint "
+                                    "WHERE source='people_refresh' ORDER BY updated_at DESC LIMIT 10")
+        return {"runs": [{"run_id": r["cursor_key"], "status": r["status"], "checked": r["n_seen"], "changed": r["n_written"],
+                          "stats": r["error"], "updated_at": str(r["updated_at"])} for r in rows]}
+
+    @app.get("/me/notifications")
+    async def me_notifications(unread: int = 0, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        items = await store.list_notifications(user["id"], unread_only=bool(unread))
+        return {"notifications": items, "unread": (items[0]["unread_total"] if items else 0)}
+
+    @app.post("/me/notifications/read")
+    async def me_notifications_read(body: NotificationsReadIn, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return {"marked": await store.mark_notifications_read(user["id"], ids=body.ids or None)}
+
+    @app.post("/maps/{map_id}/revise")
+    async def map_revise(map_id: str, body: MapReviseIn, x_roster_token: str = Header(default="")) -> dict:
+        """HIRING-MANAGER CALIBRATION (recruiter-workflows P2b): the owner turns the reviewers' tags into a
+        revised map. CODE maps tags → contract edits (never a model), the revised search runs, the diff
+        is computed in code, an LLM phrases two lines from that diff only, and the result is saved as a
+        new revision (reason `hiring_manager_feedback`). `preview` returns the edits without running."""
+        from api.calibration import diff_rows, feedback_to_contract, phrase_delta
+        ms = _require_maps()
+        _, user = await _require_user(x_roster_token)
+        m = await ms.get(map_id, owner_id=user["id"])
+        if m is None or not m.get("is_owner"):
+            raise HTTPException(status_code=404, detail="map not found")
+        if (m.get("map_type") or "talent") == "jobs":
+            # JOB MAP: taps on job cards → résumé-match preferences → the roles re-run → a new revision
+            from api.calibration import job_feedback_to_prefs, row_ref
+            rows = [r for r in (m.get("rows") or []) if isinstance(r, dict)]
+            rows_by_ref = {row_ref(r): r for r in rows}
+            feedback = [f for f in (m.get("feedback") or []) if (f.get("tags") or []) or f.get("state") in ("shortlist", "not relevant")]
+            if not feedback:
+                raise HTTPException(status_code=400, detail="no feedback yet — 👍 / 👎 a few roles first")
+            if m.get("contract"):
+                # CALIBRATION ON THE EVALUATOR (spec §6): tags edit the contract; the evaluator re-runs it
+                from roster_kernel.facets import Contract as _Contract
+                from api.facets_engine import tags_to_contract
+                _base = _Contract.from_dict(m["contract"])
+                _new, _log = tags_to_contract(_base, feedback, _facet_schema())
+                _excl = [str(x) for f in feedback if f.get("state") == "not relevant" for x in [f.get("entity_id")] if x]
+                if _excl:
+                    _new.exclude_ids = sorted(set(list(_new.exclude_ids) + _excl)); _log.append(f"drop {len(_excl)} marked not relevant")
+                contract = {"question": m.get("brief") or "", "edits": _log, "contract": _new.to_dict(), "n_feedback": len(feedback),
+                            "next_revision": len(m.get("revisions") or [])}
+                if body.preview:
+                    return {"preview": True, "contract": contract}
+                if not _log:
+                    raise HTTPException(status_code=400, detail="the feedback so far implies no change to the search")
+                _out = await _evaluate_contract(_new.to_dict())
+                new_rows = await _rows_from_eval("jobs", _out)
+                for j in new_rows:
+                    old = rows_by_ref.get(row_ref(j))
+                    if old and old.get("summary"):
+                        j["summary"] = old["summary"]
+                delta = diff_rows(rows, new_rows)
+                summary = await phrase_delta(build_llm(mode=resolve_mode()), delta, _log)
+                delta_rec = {**delta, "edits": _log, "summary": summary, "contract": _new.to_dict()}
+                rev = await ms.add_revision(map_id, owner_id=user["id"], reason="hiring_manager_feedback", brief=m.get("brief") or "",
+                                            filters=(m.get("filters") or {}), coverage={**(m.get("coverage") or {}), "counts": _out["counts"]},
+                                            rows=new_rows, delta=delta_rec, contract=_new.to_dict())
+                if rev is None:
+                    raise HTTPException(status_code=404, detail="map not found")
+                return {"revision_id": rev, "summary": summary, "delta": delta_rec, "rows": new_rows, "coverage": {**(m.get("coverage") or {}), "counts": _out["counts"]}}
+            cal = job_feedback_to_prefs(m.get("brief") or "", feedback, rows_by_ref)
+            cal["n_feedback"] = len(feedback)
+            cal["next_revision"] = len(m.get("revisions") or [])
+            contract = {"question": m.get("brief") or "", "edits": cal["edits"], "prefs": cal["prefs"], "exclude_refs": cal["exclude_refs"],
+                        "n_feedback": len(feedback), "next_revision": cal["next_revision"]}
+            if body.preview:
+                return {"preview": True, "contract": contract}
+            if not cal["edits"]:
+                raise HTTPException(status_code=400, detail="the feedback so far implies no change to the search")
+            new_rows, new_cov = await _rerun_jobs_map(m, user["id"], prefs_extra=cal["prefs"], exclude_refs=cal["exclude_refs"], country=(body.country or "us"))
+            delta = diff_rows(rows, new_rows)
+            summary = await phrase_delta(build_llm(mode=resolve_mode()), delta, cal["edits"])
+            delta_rec = {**delta, "edits": cal["edits"], "summary": summary, "contract": {"prefs": cal["prefs"], "exclude_refs": cal["exclude_refs"]}}
+            rev = await ms.add_revision(map_id, owner_id=user["id"], reason="hiring_manager_feedback", brief=m.get("brief") or "",
+                                        filters=(m.get("filters") or {}), coverage=new_cov, rows=new_rows, delta=delta_rec)
+            if rev is None:
+                raise HTTPException(status_code=404, detail="map not found")
+            return {"revision_id": rev, "summary": summary, "delta": delta_rec, "rows": new_rows, "coverage": new_cov}
+        rows = [r for r in (m.get("rows") or []) if isinstance(r, dict)]
+        rows_by_id = {str(r.get("entity_id") or ""): r for r in rows}
+        for eid, name in (m.get("row_names") or {}).items():      # reviewed people no longer on the map
+            rows_by_id.setdefault(eid, {"entity_id": eid, "name": name, "attributes": []})
+        feedback = [f for f in (m.get("feedback") or [])
+                    if (f.get("tags") or []) or f.get("state") in ("shortlist", "not relevant")]
+        if not feedback:
+            raise HTTPException(status_code=400, detail="no feedback yet — reviewers mark rows with tags or shortlist / not relevant first")
+        cov = m.get("coverage") or {}
+        if m.get("contract"):
+            # TALENT CALIBRATION ON THE EVALUATOR (spec §6): card tags edit the contract through each row's own
+            # facets (prefer / avoid / exclude — never a must); the evaluator re-runs it; rows re-hydrate.
+            from roster_kernel.facets import Contract as _Contract
+            from api.facets_engine import row_tags_to_contract
+            _new, _log = row_tags_to_contract(_Contract.from_dict(m["contract"]), feedback, rows_by_id, _facet_schema())
+            contract = {"question": m.get("brief") or "", "edits": _log, "contract": _new.to_dict(), "n_feedback": len(feedback),
+                        "next_revision": len(m.get("revisions") or [])}
+            if body.preview:
+                return {"preview": True, "contract": contract}
+            if not _log:
+                raise HTTPException(status_code=400, detail="the feedback so far implies no change to the search")
+            _out = await _evaluate_contract(_new.to_dict())
+            new_rows = await _rows_from_eval("talent", _out)
+            delta = diff_rows(rows, new_rows)
+            summary = await phrase_delta(build_llm(mode=resolve_mode()), delta, _log)
+            delta_rec = {**delta, "edits": _log, "summary": summary, "contract": _new.to_dict()}
+            new_cov = {**cov, "counts": _out["counts"]}
+            rev = await ms.add_revision(map_id, owner_id=user["id"], reason="hiring_manager_feedback", brief=m.get("brief") or "",
+                                        filters=(m.get("filters") or {}), coverage=new_cov, rows=new_rows, delta=delta_rec, contract=_new.to_dict())
+            if rev is None:
+                raise HTTPException(status_code=404, detail="map not found")
+            return {"revision_id": rev, "summary": summary, "delta": delta_rec, "rows": new_rows, "coverage_basis": new_cov, "brief": m.get("brief") or ""}
+        ev_kinds = list(((cov.get("evidence_filter") or {}).get("kinds")) or [])
+        contract = feedback_to_contract(m.get("brief") or "", m.get("filters") or {}, ev_kinds, feedback, rows_by_id)
+        contract["n_feedback"] = len(feedback)
+        contract["next_revision"] = len(m.get("revisions") or [])
+        if body.preview:
+            return {"preview": True, "contract": contract}
+        if not contract["edits"]:
+            raise HTTPException(status_code=400, detail="the feedback so far implies no change to the brief")
+        new_rows, new_cov = await _rerun_talent_map(m, contract, country=(body.country or "us"), tenant_id=body.tenant_id)
+        delta = diff_rows(rows, new_rows)
+        summary = await phrase_delta(build_llm(mode=resolve_mode()), delta, contract["edits"])
+        delta_rec = {**delta, "edits": contract["edits"], "summary": summary,
+                     "contract": {k: contract[k] for k in ("question", "refine_facets", "evidence_kinds", "exclude_ids",
+                                                           "exclude_companies", "avoid_terms")}}
+        rev = await ms.add_revision(map_id, owner_id=user["id"], reason="hiring_manager_feedback",
+                                    brief=contract["question"], filters=(new_cov.get("query_facets") or contract["refine_facets"]),
+                                    coverage=new_cov, rows=new_rows, delta=delta_rec)
+        if rev is None:
+            raise HTTPException(status_code=404, detail="map not found")
+        return {"revision_id": rev, "summary": summary, "delta": delta_rec, "rows": new_rows,
+                "coverage_basis": new_cov, "brief": contract["question"]}
 
     @app.get("/maps/{map_id}/export.csv")
     async def map_export_csv(map_id: str, t: str = "", x_roster_token: str = Header(default="")):
@@ -5621,6 +7275,254 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         await store.set_profile(user["id"], body.profile or {})
         return {"ok": True}
 
+    # ---- LinkedIn connections + the INTRO PATH on a job card ----
+    @app.post("/me/connections")
+    async def me_connections_upload(body: ResumeIn, x_roster_token: str = Header(default="")) -> dict:
+        """Upload the user's OWN LinkedIn connections export (Connections.csv from 'Get a copy of your
+        data'). Parsed in code; stored private to the account; replaces the previous upload."""
+        store, user = await _require_user(x_roster_token)
+        import base64
+        import csv
+        import io
+        try:
+            data = base64.b64decode(body.data_b64 or "", validate=True)
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid file encoding")
+        if not data or len(data) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="the connections file must be a CSV under 20 MB")
+        text = data.decode("utf-8-sig", "ignore")
+        # LinkedIn's export starts with a 'Notes:' preamble; the header row is the first line that names the columns
+        lines = text.splitlines()
+        start = next((i for i, ln in enumerate(lines) if "First Name" in ln and "Company" in ln), None)
+        if start is None:
+            raise HTTPException(status_code=400, detail="that doesn't look like LinkedIn's Connections.csv (no 'First Name … Company' header)")
+        rdr = csv.DictReader(io.StringIO("\n".join(lines[start:])))
+        rows = []
+        for r in rdr:
+            g = lambda k: str((r.get(k) or "")).strip()  # noqa: E731
+            rows.append({"first_name": g("First Name"), "last_name": g("Last Name"), "url": g("URL"), "company": g("Company"),
+                         "position": g("Position"), "connected_on": g("Connected On")})
+        n = await store.replace_connections(user["id"], rows)
+        return {"ok": True, **(await store.connections_summary(user["id"])), "parsed": len(rows), "kept": n}
+
+    @app.get("/me/connections")
+    async def me_connections(x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return await store.connections_summary(user["id"])
+
+    @app.delete("/me/connections")
+    async def me_connections_delete(x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        await store.delete_connections(user["id"])
+        return {"ok": True}
+
+    @app.get("/me/intro")
+    async def me_intro(company: str = "", title: str = "", department: str = "",
+                       x_roster_token: str = Header(default="")) -> dict:
+        """WHO CAN INTRO ME for a posting: (1) the user's own connections at the company (their export;
+        private), (2) likely hiring managers from Roster's PUBLIC index — people at the company whose
+        level/title reads as a manager, ranked by discipline match to the posting and evidence
+        strength, each with its evidence. Honest empty states; nothing is sent by Roster."""
+        store, user = await _require_user(x_roster_token)
+        co = (company or "").strip()
+        if not co:
+            raise HTTPException(status_code=400, detail="company required")
+        conns = await store.connections_at(user["id"], co)
+        summ = await store.connections_summary(user["id"])
+        cstore = _claim_store_cached()
+        mgrs = {"managers": [], "n_at_company": 0, "discipline": []}
+        if cstore is not None:
+            from api.people_population import hiring_managers_at
+            try:
+                mgrs = await asyncio.wait_for(hiring_managers_at(cstore, tenant_id="demo", company=co, title=title, department=department), 25)
+            except Exception:  # noqa: BLE001
+                pass
+        note = []
+        if not summ.get("count"):
+            note.append("No connections uploaded yet — add your LinkedIn export under Account to see who you know here.")
+        elif not conns:
+            note.append(f"None of your {summ['count']} connections list {co} as their current company.")
+        if not mgrs.get("managers"):
+            note.append(f"No likely hiring manager for this role found in public data at {co}"
+                        + (f" ({mgrs.get('n_at_company')} people indexed there)." if mgrs.get("n_at_company") else " (no one from this company is indexed yet)."))
+        return {"company": co, "connections": conns, "connections_total": summ.get("count", 0),
+                "managers": mgrs.get("managers") or [], "n_at_company": mgrs.get("n_at_company", 0),
+                "discipline": mgrs.get("discipline") or [], "note": " ".join(note)}
+
+    # ---- APPLICATION PLANS (definition-driven auto-apply): the server PLANS from the ATS's own form
+    # definition, the user REVIEWS and corrects, the Chrome extension EXECUTES in the user's browser,
+    # the user SUBMITS. No headless browser, no bookmarklet, no server-side submit.
+    async def _apply_profile(store, user_id: str) -> tuple[dict, str]:
+        prof = ((await store.get_profile(user_id)).get("profile") or {})
+        parsed = ((await store.get_parse(user_id)).get("profile") or {})
+        merged = {**{k: v for k, v in parsed.items() if isinstance(v, (str, int, float)) and v not in ("", None)}, **{k: v for k, v in prof.items() if v not in ("", None)}}
+        return merged, str(parsed.get("_resume_text") or "")
+
+    async def _draft_plan(plan: dict, profile: dict, resume_text: str) -> dict:
+        """The agent's best answer for every OPEN question (policy 'open' only — identity, legal and file
+        questions are structurally out of reach). Choice questions get one real option, validated in code."""
+        from api.apply_plan import apply_drafts, draftable
+        qs = draftable(plan)[:16]
+        if not qs:
+            return plan
+        try:
+            from pydantic import BaseModel as _BM
+
+            class _Drafts(_BM):
+                answers: list[str] = []
+            llm = build_llm(mode=resolve_mode())
+            lines = [f"{i + 1}. {q['label']}" + (f"  [choose exactly one: {' | '.join(q['options'][:30])}]" if q.get("options") else "  [free text, ≤ 90 words]")
+                     for i, q in enumerate(qs)]
+            comp = await llm.complete(
+                system=("You are completing a job application on a candidate's behalf, for their review. Answer EVERY question with the "
+                        "best answer the profile and résumé support. For a choice question return exactly one of the listed options, "
+                        "verbatim. For yes/no questions about the candidate's own circumstances pick the answer most consistent with the "
+                        "profile; if truly unknown, choose the option that keeps the candidate eligible and is safest to correct. For free "
+                        "text, write specifically from the résumé — never invent employers, dates, numbers or credentials. Return answers "
+                        "in the same order, one per question, empty only when nothing reasonable can be said."),
+                messages=[{"role": "user", "content": f"POSTING: {plan.get('title') or ''} at {plan.get('company') or ''}\n"
+                                                       + "PROFILE: " + json.dumps({k: v for k, v in profile.items() if k not in ("work_history", "education", "_resume_text")})[:2500]
+                                                       + "\n\nRÉSUMÉ:\n" + (resume_text or "")[:6000] + "\n\nQUESTIONS:\n" + "\n".join(lines)}],
+                response_format=_Drafts, max_tokens=1600, temperature=0.0)
+            ans = list(getattr(comp.parsed, "answers", []) or [])
+            drafts = {q["label"]: (a or "").strip() for q, a in zip(qs, ans) if (a or "").strip()}
+            return apply_drafts(plan, drafts)
+        except Exception:  # noqa: BLE001 — drafts are a convenience; the plan stands without them
+            return plan
+
+    async def _plan_for(store, user: dict, url: str, *, user_answers: dict | None = None, draft: bool = True) -> dict:
+        from api.apply_adapters import detect, fetch_form
+        from api.apply_plan import bind_plan
+        form = await fetch_form(url)
+        if not form:
+            ats = detect(url)
+            why = ("This portal requires creating an account and signing in — Roster never does that for you." if ats == "workday"
+                   else "Roster can read application forms hosted by Greenhouse, Lever and Ashby (including company career pages that embed them). "
+                        "This posting's form isn't one of those, so it can't be planned — open the link and apply there.")
+            return {"status": "needs_you", "reason": why, "plan": [], "form_url": url, "ats": ats}
+        profile, resume_text = await _apply_profile(store, user["id"])
+        bank = await store.answer_bank(user["id"])
+        plan = bind_plan(form, profile, bank, user_answers or {})
+        if draft:
+            plan = await _draft_plan(plan, profile, resume_text)
+        from api.apply_plan import summary
+        sm = summary(plan)
+        plan["status"] = "planned"
+        plan["summary"] = sm
+        return plan
+
+    @app.post("/me/applications")
+    async def me_application_plan(body: ApplicationIn, x_roster_token: str = Header(default="")) -> dict:
+        """PLAN an application: the ATS's own form definition → every question bound to an answer from
+        the Apply profile, the answer bank, or a constrained draft (policy-gated). Nothing touches the job
+        site; the user reviews, then the extension fills the live form in their browser."""
+        store, user = await _require_user(x_roster_token)
+        url = (body.job_url or "").strip()
+        if not url.startswith("http"):
+            raise HTTPException(status_code=400, detail="job_url required")
+        if not _url_is_public(url):
+            raise HTTPException(status_code=400, detail="that link isn't a public apply page")
+        profile, _ = await _apply_profile(store, user["id"])
+        if not (profile.get("email") and (profile.get("first_name") or profile.get("last_name"))):
+            raise HTTPException(status_code=400, detail="fill your Apply profile first (name + email) under Account → Apply profile")
+        from api.apply_adapters import detect
+        rec = await store.queue_application(user["id"], job_ref=body.job_ref or "", company=body.company or "", title=body.title or "", url=url, ats=detect(url))
+        plan = await _plan_for(store, user, url)
+        sm = plan.get("summary") or {}
+        await store.update_application(user["id"], rec["id"], status=plan.get("status") or "planned", reason=plan.get("reason") or "",
+                                       plan=plan.get("plan") or [], form_url=(plan.get("form_url") or url)[:1000],
+                                       filled=[{"label": p["label"], "value": p["answer"], "source": p["source"]} for p in plan.get("plan") or [] if p.get("answer")],
+                                       open_questions=[{"label": p["label"], "kind": p["kind"], "required": p["required"], "options": p.get("options") or [],
+                                                        "voluntary": p.get("policy") == "identity_sensitive", "profile_key": ""} for p in plan.get("plan") or [] if not p.get("answer") and p.get("policy") not in ("skip", "never")])
+        if plan.get("title") and not body.title:
+            pass
+        return {"id": rec["id"], "status": plan.get("status"), "reason": plan.get("reason") or "", "summary": sm, "form_url": plan.get("form_url") or url,
+                "ats": plan.get("ats"), "n_questions": len(plan.get("plan") or []), "blocking": sm.get("blocking") or []}
+
+    @app.get("/me/applications")
+    async def me_applications(x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return {"applications": await store.list_applications(user["id"])}
+
+    @app.get("/me/applications/{app_id}")
+    async def me_application(app_id: int, x_roster_token: str = Header(default="")) -> dict:
+        """The plan (for the review UI and the extension): every question with its answer, source, policy,
+        required flag and the selector the extension uses on the live form."""
+        store, user = await _require_user(x_roster_token)
+        d = await store.get_application(user["id"], app_id)
+        if not d:
+            raise HTTPException(status_code=404, detail="not found")
+        return d
+
+    @app.post("/me/applications/{app_id}/answers")
+    async def me_application_answers(app_id: int, body: ApplicationAnswersIn, x_roster_token: str = Header(default="")) -> dict:
+        """The user's corrections. Saved on the application, remembered in the answer bank, and the plan
+        re-bound so their answer stands (source 'your answer')."""
+        store, user = await _require_user(x_roster_token)
+        d = await store.get_application(user["id"], app_id)
+        if not d:
+            raise HTTPException(status_code=404, detail="not found")
+        answers = {str(k)[:300]: str(v)[:4000] for k, v in (body.answers or {}).items() if str(v).strip()}
+        merged = {**(d.get("answers") or {}), **answers}
+        remembered = await store.remember_answers(user["id"], answers)
+        plan = await _plan_for(store, user, d.get("url") or "", user_answers=merged, draft=False)
+        # keep the agent's earlier drafts where the user did not answer
+        prev = {p["label"]: p for p in (d.get("plan") or [])}
+        for p in plan.get("plan") or []:
+            if not p.get("answer") and prev.get(p["label"], {}).get("answer") and prev[p["label"]].get("source") == "agent draft":
+                p["answer"], p["source"], p["blocking"] = prev[p["label"]]["answer"], "agent draft", False
+        from api.apply_plan import summary
+        sm = summary(plan)
+        await store.update_application(user["id"], app_id, answers=merged, plan=plan.get("plan") or [],
+                                       filled=[{"label": p["label"], "value": p["answer"], "source": p["source"]} for p in plan.get("plan") or [] if p.get("answer")])
+        return {"ok": True, "remembered": remembered, "summary": sm}
+
+    @app.post("/me/applications/{app_id}/executed")
+    async def me_application_executed(app_id: int, body: ApplicationExecIn, x_roster_token: str = Header(default="")) -> dict:
+        """The EXTENSION's field-by-field report after filling the live form (what it set, what it could
+        not find). Status 'filled' — the user still submits."""
+        store, user = await _require_user(x_roster_token)
+        d = await store.get_application(user["id"], app_id)
+        if not d:
+            raise HTTPException(status_code=404, detail="not found")
+        rep = {"filled": [str(x)[:200] for x in (body.filled or [])][:200], "missing": [str(x)[:200] for x in (body.missing or [])][:100],
+               "note": str(body.note or "")[:500]}
+        await store.update_application(user["id"], app_id, status="filled", reason=("" if not rep["missing"] else f"{len(rep['missing'])} field(s) not found on the live form — check them before submitting"),
+                                       drafts={**(d.get("drafts") or {}), "_execution": rep})
+        return {"ok": True, **rep}
+
+    @app.post("/me/applications/{app_id}/mark-submitted")
+    async def me_application_mark_submitted(app_id: int, x_roster_token: str = Header(default="")) -> dict:
+        """The user submitted in their OWN browser (the extension observed it, or they clicked 'I submitted it')."""
+        store, user = await _require_user(x_roster_token)
+        from datetime import datetime, timezone
+        ok = await store.update_application(user["id"], app_id, status="submitted", reason="", submitted_at=datetime.now(timezone.utc), submitted_by="user")
+        if not ok:
+            raise HTTPException(status_code=404, detail="not found")
+        return {"id": app_id, "status": "submitted"}
+
+    @app.delete("/me/applications/{app_id}")
+    async def me_application_delete(app_id: int, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        return {"ok": await store.delete_application(user["id"], app_id)}
+
+    @app.get("/extension.zip")
+    async def extension_zip():
+        """The Roster Apply Chrome extension (unpacked-load): a zip of apps/extension built on request."""
+        import io as _io
+        import zipfile
+        from fastapi.responses import Response as _Resp
+        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "extension")
+        if not os.path.isdir(root):
+            raise HTTPException(status_code=404, detail="extension not bundled")
+        buf = _io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for dp, _dirs, files in os.walk(root):     # icons/ included
+                for fn in sorted(files):
+                    fp = os.path.join(dp, fn)
+                    z.write(fp, arcname="roster-apply/" + os.path.relpath(fp, root))
+        return _Resp(content=buf.getvalue(), media_type="application/zip", headers={"Content-Disposition": 'attachment; filename="roster-apply-extension.zip"'})
+
     @app.post("/me/resume")
     async def me_upload_resume(body: ResumeIn, x_roster_token: str = Header(default="")) -> dict:
         store, user = await _require_user(x_roster_token)
@@ -5699,6 +7601,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 brief = cached["brief"]
                 if brief.get("search_text"):
                     prefs["brief_text"] = brief["search_text"]
+                if brief.get("fields") or brief.get("field"):     # the model's read of the candidate's field(s)
+                    prefs["profile_fields"] = list(brief.get("fields") or []) + ([brief["field"]] if brief.get("field") else [])
         try:
             res = await match_resume_jobs(cstore, profile, prefs)
             if brief:

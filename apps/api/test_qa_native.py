@@ -460,7 +460,13 @@ def test_jobs_for_profile_matches_and_analyzes(monkeypatch):
     client = _client(monkeypatch, svc,
                      {"route": "jobs_for_profile", "subject_kind": "person", "confidence": "high"})
     client.app.state.claim_store = object()
+    # BIAS TO CARDS: a résumé → roles ask returns job CARDS + the interpreted brief (like the Jobs tab)
     r = client.post("/qa", json={"question": cv, "tenant_id": "demo"})
+    d = r.json()
+    assert d["jobs"] and d["jobs"][0]["title"] == "Staff Infra Engineer" and d["brief_contract"]["profile"]["skills"]
+    assert "matched to your résumé" in d["answer"] and not svc.calls
+    # an EXPLICIT ask for an assessment gets the written analysis over résumé + matches as documents
+    r = client.post("/qa", json={"question": "Analyze the fit: " + cv, "tenant_id": "demo"})
     assert r.json()["answer"] == "gems + ideal roles"
     docs = svc.calls[0].get("documents") or []
     assert any("job matches" in d["name"] for d in docs)
@@ -581,10 +587,12 @@ def test_primary_role_leads_the_ranking(monkeypatch):
                              output_tokens=5)
 
     def _person(eid, name, roles):
+        # every row carries the named company (the COMPANY INVARIANT drops rows that do not)
         return {"entity_id": eid, "name": name, "facets": [
             {"facet_key": "role", "facet_value_norm": r, "value_norm": r,
              "display_value": r.replace("_", " ").title(), "document_id": "d", "block_id": "b"}
-            for r in roles]}
+            for r in roles] + [{"facet_key": "company", "facet_value_norm": "google", "value_norm": "google",
+                                "display_value": "Google", "document_id": "d", "block_id": "b"}]}
 
     class _Store:
         async def people_index_stats(self, *, tenant_id):
@@ -1176,3 +1184,101 @@ def test_topic_terms_fall_back_to_non_canonical_role_words():
     assert topic_terms_for({"role": ["chip_design_engineer"], "country": ["us"]}, None) == ["chip design"]
     assert topic_terms_for({"role": ["software_engineer"], "skill": ["vector_search"]}, None) == ["vector search"]
     assert topic_terms_for({"role": ["ml_engineer"]}, ["given"]) == ["given"]          # the compiler's terms win
+
+
+def test_brief_contract_separates_must_from_prefer_and_ships_one_clarification():
+    from api.people_population import brief_contract_for
+    f = {"company": ["stripe"], "role": ["backend_engineer"], "country": ["us"]}
+    c = brief_contract_for("senior backend engineers at Stripe", f, hard_keys=["company", "country"], soft_keys=["role"],
+                           guard_added=["stripe"], semantic_first=False, scope={"label": "Bay Area", "metro": "bay_area"})
+    assert c["hard"] == {"company": ["stripe"], "country": ["us"]} and c["soft"] == {"role": ["backend engineer"]}
+    assert c["clarification"]["key"] == "seniority" and "senior" in c["assumptions"][0]
+    assert any("company kept as a filter" in a for a in c["assumptions"]) and c["scope"]["label"] == "Bay Area"
+    c2 = brief_contract_for("ML engineers", {"role": ["ml_engineer"]}, hard_keys=[], soft_keys=["role"], semantic_first=True,
+                            ev_kinds=["repo"], relaxed_from=["skill"])
+    assert c2["hard"] == {"evidence": ["repo"]} and c2["clarification"] is None
+    assert any("worldwide" in a for a in c2["assumptions"]) and any("relaxed" in a for a in c2["assumptions"])
+
+
+def test_topic_terms_from_question_strips_roles_and_named_entities():
+    from api.people_population import topic_terms_from_question
+    assert topic_terms_from_question("chip design engineers at Nvidia", {"company": ["nvidia"]}) == ["chip design"]
+    assert topic_terms_from_question("software engineers with vector search experience", {}) == ["vector search"]
+    assert topic_terms_from_question("senior engineers at Stripe", {"company": ["stripe"]}) == []
+
+
+def test_expand_topic_terms_adds_distinctive_words_only():
+    from api.people_population import expand_topic_terms
+    assert expand_topic_terms(["chip design"], "chip design engineers") == ["chip design", "chip"]
+    assert expand_topic_terms(["vector search", "vector database", "similarity search"], "engineers with vector search experience") == ["vector search", "vector", "vector database", "similarity search"]
+    assert expand_topic_terms(["data platform"], "data platform engineers") == ["data platform"]   # both words generic → phrase only
+    assert expand_topic_terms(["chip design"], "hardware people") == ["chip design"]                 # 'chip' not in the brief → no single word
+
+
+def test_fixed_facets_skip_the_compiler_and_apply_calibration(monkeypatch):
+    """P2b: a map revision passes a CODE-OWNED contract — no compile, no refinement parse (an LLM
+    call is a failure here), reviewer exclusions leave, demoted values sink to the back."""
+    from api.people_population import answer_people_population
+
+    class _LLM:
+        async def complete(self, **kw):
+            raise AssertionError("the compiler must not run under fixed_facets")
+
+    def _person(eid, name, sen):
+        return {"entity_id": eid, "name": name, "facets": [
+            {"facet_key": "role", "facet_value_norm": "ml_engineer", "value_norm": "ml_engineer",
+             "display_value": "ML Engineer", "document_id": "d", "block_id": "b"},
+            {"facet_key": "seniority", "facet_value_norm": sen, "value_norm": sen,
+             "display_value": sen.title(), "document_id": "d", "block_id": "b"},
+            {"facet_key": "company", "facet_value_norm": "stripe", "value_norm": "stripe",
+             "display_value": "Stripe", "document_id": "d", "block_id": "b"}]}
+
+    class _Store:
+        async def people_index_stats(self, *, tenant_id):
+            return {"persons_indexed": 9, "source_documents": 3, "facet_coverage": {}}
+
+        async def enumerate_by_facets(self, facets, *, tenant_id, cap):
+            assert "seniority" not in facets            # the reviewers softened it; the contract is final
+            return [_person("gh:mid", "Mid Person", "mid"), _person("gh:sr", "Senior Person", "senior"),
+                    _person("gh:gone", "Excluded Person", "senior")]
+
+    import asyncio
+    monkeypatch.delenv("ROSTER_SEMANTIC", raising=False)
+    monkeypatch.delenv("ROSTER_PEOPLE_SEMANTIC_FIRST", raising=False)
+    res = asyncio.get_event_loop().run_until_complete(answer_people_population(
+        question="senior ML engineers at Stripe — prefer ML engineer", tenant_id="demo", store=_Store(), llm=_LLM(),
+        fixed_facets={"role": ["ml_engineer"], "company": ["stripe"]},
+        exclude_ids=["gh:gone"], avoid_terms=["mid"]))
+    names = [p["name"] for p in res["people_rows"]]
+    assert names == ["Senior Person", "Mid Person"], names
+    assert res["coverage_basis"]["calibration"] == {"excluded": 1, "demoted": 1, "avoid_terms": ["mid"]}
+
+
+def test_fixed_facets_topic_ignores_the_prefer_tail_and_asks_nothing(monkeypatch):
+    from api.people_population import answer_people_population
+
+    class _LLM:
+        async def complete(self, **kw):
+            raise AssertionError("no compile under fixed_facets")
+
+    class _Store:
+        async def people_index_stats(self, *, tenant_id):
+            return {"persons_indexed": 9, "source_documents": 3, "facet_coverage": {}}
+
+        async def enumerate_by_facets(self, facets, *, tenant_id, cap):
+            return [{"entity_id": "gh:a", "name": "A", "facets": [
+                {"facet_key": "role", "facet_value_norm": "ml_engineer", "value_norm": "ml_engineer",
+                 "display_value": "ML Engineer", "document_id": "d", "block_id": "b"},
+                {"facet_key": "company", "facet_value_norm": "stripe", "value_norm": "stripe",
+                 "display_value": "Stripe", "document_id": "d", "block_id": "b"}]}]
+
+    import asyncio
+    monkeypatch.delenv("ROSTER_SEMANTIC", raising=False)
+    monkeypatch.delenv("ROSTER_PEOPLE_SEMANTIC_FIRST", raising=False)
+    res = asyncio.get_event_loop().run_until_complete(answer_people_population(
+        question="senior fraud-detection engineers at Stripe — prefer software engineer, pytorch",
+        tenant_id="demo", store=_Store(), llm=_LLM(), fixed_facets={"role": ["ml_engineer"], "company": ["stripe"]}))
+    bc = res["coverage_basis"]["brief_contract"]
+    assert not any("prefer" in t or "pytorch" in t for t in bc["topic"]), bc["topic"]
+    assert bc["clarification"] is None
+    assert bc["assumptions"] == [] and bc["revised"] is True

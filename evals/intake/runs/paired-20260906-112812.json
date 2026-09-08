@@ -1,0 +1,2246 @@
+{
+ "base": "https://roster-api-production-3405.up.railway.app",
+ "secs": 833,
+ "summary": {
+  "n": 16,
+  "prec10": {
+   "baseline": 0.138,
+   "merged": 0.245
+  },
+  "prec20": {
+   "baseline": 0.106,
+   "merged": 0.176
+  },
+  "missed": {
+   "baseline": 13,
+   "merged": 2
+  },
+  "gate": {
+   "merged_ge_baseline_share": 1.0,
+   "worse_by_over_0_10": [],
+   "merged_missed_total": 2,
+   "added_p90_secs": 15.3,
+   "pass": false
+  }
+ },
+ "results": [
+  {
+   "id": "seeker_terse_description",
+   "kind": "job",
+   "brief": "I'm looking for my next role. software. Python, Go, Kubernetes. new_york, bay_area",
+   "union": 31,
+   "graded": 31,
+   "rates": {
+    "yes": 4,
+    "partial": 9,
+    "no": 18
+   },
+   "baseline": {
+    "prec10": 0.12,
+    "prec20": 0.16,
+    "missed": 1,
+    "secs": 7.3,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.36,
+    "prec20": 0.34,
+    "missed": 0,
+    "secs": 14.1,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 3,
+      "prec10": 0.24
+     }
+    ],
+    "fits": 3,
+    "weak": false,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "617667",
+      "no",
+      "Senior Software Engineer"
+     ],
+     [
+      "167631",
+      "yes",
+      "Senior Software Engineer, Full-Stack"
+     ],
+     [
+      "106170",
+      "no",
+      "Software Engineer, Full-Stack"
+     ],
+     [
+      "615826",
+      "no",
+      "Java Developer With UI"
+     ],
+     [
+      "192635",
+      "no",
+      "Product Engineer, Applications Operation"
+     ],
+     [
+      "167630",
+      "no",
+      "Staff Software Engineer"
+     ],
+     [
+      "121179",
+      "no",
+      "Software Engineer III \u2014 Developer Portal"
+     ],
+     [
+      "91412",
+      "partial",
+      "Staff Software Engineer"
+     ],
+     [
+      "616914",
+      "no",
+      "Senior Software Developer"
+     ],
+     [
+      "134649",
+      "no",
+      "software engineer"
+     ]
+    ],
+    "merged": [
+     [
+      "115583",
+      "yes",
+      "Senior Software Engineer - Full Stack"
+     ],
+     [
+      "97233",
+      "yes",
+      "Software Engineer"
+     ],
+     [
+      "89410",
+      "partial",
+      "Staff Software Engineer"
+     ],
+     [
+      "617667",
+      "no",
+      "Senior Software Engineer"
+     ],
+     [
+      "167631",
+      "yes",
+      "Senior Software Engineer, Full-Stack"
+     ],
+     [
+      "167630",
+      "no",
+      "Staff Software Engineer"
+     ],
+     [
+      "91412",
+      "partial",
+      "Staff Software Engineer"
+     ],
+     [
+      "616914",
+      "no",
+      "Senior Software Developer"
+     ],
+     [
+      "167634",
+      "no",
+      "Senior Software Engineer, Infrastructure"
+     ],
+     [
+      "86076",
+      "partial",
+      "Software Engineer - Applied AI"
+     ]
+    ]
+   },
+   "lift10": 0.24,
+   "added_secs": 6.8
+  },
+  {
+   "id": "seeker_ambiguous_title_list",
+   "kind": "job",
+   "brief": "Founder CTO or VP / Director Engineering ML Infra, Distributed Systems. data / ML. Kubernetes, Ray, feature stores, LLM serving. San Francisco",
+   "union": 36,
+   "graded": 36,
+   "rates": {
+    "yes": 1,
+    "partial": 19,
+    "no": 16
+   },
+   "baseline": {
+    "prec10": 0.2,
+    "prec20": 0.24,
+    "missed": 1,
+    "secs": 2.9,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.4,
+    "prec20": 0.26,
+    "missed": 0,
+    "secs": 12.1,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 1,
+      "prec10": 0.12
+     }
+    ],
+    "fits": 1,
+    "weak": true,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "172418",
+      "no",
+      "Research Engineer, Infrastructure, Kerne"
+     ],
+     [
+      "172417",
+      "no",
+      "Research Engineer, Infrastructure, Train"
+     ],
+     [
+      "570217",
+      "no",
+      "Founding Engineer - Machine Learning"
+     ],
+     [
+      "172408",
+      "no",
+      "Research Engineer, Infrastructure, Numer"
+     ],
+     [
+      "172410",
+      "no",
+      "Research Engineer, Infrastructure, Infer"
+     ],
+     [
+      "79371",
+      "partial",
+      "Engineering Manager, Platform Infrastruc"
+     ],
+     [
+      "172425",
+      "partial",
+      "Engineering Manager"
+     ],
+     [
+      "111224",
+      "partial",
+      "Engineering Manager, Data Platform"
+     ],
+     [
+      "144725",
+      "partial",
+      "AI / ML Engineer - Known"
+     ],
+     [
+      "79366",
+      "partial",
+      "Machine Learning Engineer, Customer Engi"
+     ]
+    ],
+    "merged": [
+     [
+      "79371",
+      "partial",
+      "Engineering Manager, Platform Infrastruc"
+     ],
+     [
+      "79366",
+      "partial",
+      "Machine Learning Engineer, Customer Engi"
+     ],
+     [
+      "79360",
+      "partial",
+      "Distributed LLM Inference Engineer"
+     ],
+     [
+      "76118",
+      "partial",
+      "Staff ML Engineer, Frontier AI"
+     ],
+     [
+      "165525",
+      "partial",
+      "Software Engineer - ML Infrastructure"
+     ],
+     [
+      "79368",
+      "partial",
+      "Head of Customer Engineering"
+     ],
+     [
+      "4345",
+      "yes",
+      "Staff Software Engineer, Foundational Mo"
+     ],
+     [
+      "130639",
+      "partial",
+      "Tech Lead Manager, Inference"
+     ],
+     [
+      "130617",
+      "partial",
+      "Software Engineer - Data Infrastructure"
+     ],
+     [
+      "95883",
+      "no",
+      "Platform Engineer (Kubernetes)"
+     ]
+    ]
+   },
+   "lift10": 0.2,
+   "added_secs": 9.2
+  },
+  {
+   "id": "seeker_resume_on_file_fast",
+   "kind": "job",
+   "brief": "find me senior backend roles, remote or in the bay area. software. Go, Python, Kubernetes, Postgres, Kafka. San Francisco, CA",
+   "union": 35,
+   "graded": 35,
+   "rates": {
+    "yes": 6,
+    "partial": 17,
+    "no": 12
+   },
+   "baseline": {
+    "prec10": 0.48,
+    "prec20": 0.36,
+    "missed": 2,
+    "secs": 13.9,
+    "rows": 80
+   },
+   "merged": {
+    "prec10": 0.56,
+    "prec20": 0.38,
+    "missed": 1,
+    "secs": 6.1,
+    "rows": 80,
+    "recipes": [],
+    "fits": null,
+    "weak": null,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "160217",
+      "no",
+      "Senior Software Engineer, Back-End (Remo"
+     ],
+     [
+      "121729",
+      "partial",
+      "Senior Software Engineer, Backend"
+     ],
+     [
+      "154135",
+      "yes",
+      "Senior Backend Engineer"
+     ],
+     [
+      "126838",
+      "partial",
+      "Senior Backend Engineer, Data Platform"
+     ],
+     [
+      "158086",
+      "yes",
+      "Senior Software Engineer-Backend"
+     ],
+     [
+      "152292",
+      "partial",
+      "Staff Software Engineer (Backend)"
+     ],
+     [
+      "106439",
+      "partial",
+      "Principal Backend Software Engineer"
+     ],
+     [
+      "1453",
+      "partial",
+      "Senior Software Engineer, Backend"
+     ],
+     [
+      "138618",
+      "yes",
+      "Senior Backend Engineer"
+     ],
+     [
+      "96087",
+      "partial",
+      "Backend Engineer"
+     ]
+    ],
+    "merged": [
+     [
+      "152292",
+      "partial",
+      "Staff Software Engineer (Backend)"
+     ],
+     [
+      "106439",
+      "partial",
+      "Principal Backend Software Engineer"
+     ],
+     [
+      "138618",
+      "yes",
+      "Senior Backend Engineer"
+     ],
+     [
+      "87022",
+      "yes",
+      "Senior/Principal Software Engineer"
+     ],
+     [
+      "158086",
+      "yes",
+      "Senior Software Engineer-Backend"
+     ],
+     [
+      "161608",
+      "yes",
+      "Senior Backend Engineer"
+     ],
+     [
+      "128091",
+      "yes",
+      "Senior Backend Engineer, Managed Service"
+     ],
+     [
+      "158200",
+      "partial",
+      "Staff Software Engineer-Backend"
+     ],
+     [
+      "106426",
+      "no",
+      "Backend Software Engineer"
+     ],
+     [
+      "158099",
+      "partial",
+      "Senior Staff Software Engineer-Backend"
+     ]
+    ]
+   },
+   "lift10": 0.08,
+   "added_secs": -7.8
+  },
+  {
+   "id": "seeker_founder_in_residence_resume",
+   "kind": "job",
+   "brief": "looking for a hands-on engineering leadership role in ML infra. software. Kubernetes, Ray, feature stores, LLM serving, vector search. bay_area",
+   "union": 21,
+   "graded": 21,
+   "rates": {
+    "yes": 1,
+    "partial": 5,
+    "no": 15
+   },
+   "baseline": {
+    "prec10": 0.24,
+    "prec20": 0.14,
+    "missed": 0,
+    "secs": 7.8,
+    "rows": 80
+   },
+   "merged": {
+    "prec10": 0.24,
+    "prec20": 0.14,
+    "missed": 0,
+    "secs": 9.6,
+    "rows": 80,
+    "recipes": [],
+    "fits": null,
+    "weak": null,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "106164",
+      "partial",
+      "Software Engineering Lead, Machine Learn"
+     ],
+     [
+      "100467",
+      "no",
+      "Director, Site Reliability Engineering -"
+     ],
+     [
+      "422482",
+      "no",
+      "Engineering Manager, Infrastructure"
+     ],
+     [
+      "387228",
+      "partial",
+      "ML Infrastructure Engineer"
+     ],
+     [
+      "192955",
+      "partial",
+      "AI/ML Infrastructure Engineer"
+     ],
+     [
+      "391207",
+      "no",
+      "Director, Delivery (Engineering)"
+     ],
+     [
+      "597873",
+      "no",
+      "Member of Technical Staff - Inference"
+     ],
+     [
+      "158521",
+      "yes",
+      "Engineering Manager, Infrastructure"
+     ],
+     [
+      "134665",
+      "no",
+      "Director, AI Core Software"
+     ],
+     [
+      "144728",
+      "partial",
+      "Software Engineering Lead - FlowGen Labs"
+     ]
+    ],
+    "merged": [
+     [
+      "106164",
+      "partial",
+      "Software Engineering Lead, Machine Learn"
+     ],
+     [
+      "100467",
+      "no",
+      "Director, Site Reliability Engineering -"
+     ],
+     [
+      "422482",
+      "no",
+      "Engineering Manager, Infrastructure"
+     ],
+     [
+      "387228",
+      "partial",
+      "ML Infrastructure Engineer"
+     ],
+     [
+      "391207",
+      "no",
+      "Director, Delivery (Engineering)"
+     ],
+     [
+      "192955",
+      "partial",
+      "AI/ML Infrastructure Engineer"
+     ],
+     [
+      "597873",
+      "no",
+      "Member of Technical Staff - Inference"
+     ],
+     [
+      "158521",
+      "yes",
+      "Engineering Manager, Infrastructure"
+     ],
+     [
+      "134665",
+      "no",
+      "Director, AI Core Software"
+     ],
+     [
+      "144728",
+      "partial",
+      "Software Engineering Lead - FlowGen Labs"
+     ]
+    ]
+   },
+   "lift10": 0.0,
+   "added_secs": 1.8
+  },
+  {
+   "id": "seeker_search_now_early",
+   "kind": "job",
+   "brief": "I'm looking for my next role. Python and SQL. Chicago",
+   "union": 33,
+   "graded": 33,
+   "rates": {
+    "yes": 2,
+    "partial": 5,
+    "no": 26
+   },
+   "baseline": {
+    "prec10": 0.08,
+    "prec20": 0.06,
+    "missed": 2,
+    "secs": 2.3,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.28,
+    "prec20": 0.18,
+    "missed": 0,
+    "secs": 11.0,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 1628,
+      "evaluated": 60,
+      "head_fits": 2,
+      "prec10": 0.2
+     }
+    ],
+    "fits": 2,
+    "weak": true,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "331242",
+      "no",
+      "Machine Learning / Data Science Engineer"
+     ],
+     [
+      "71203",
+      "no",
+      "Machine Learning Engineering Manager, Pe"
+     ],
+     [
+      "627512",
+      "partial",
+      "SQL Developer"
+     ],
+     [
+      "116781",
+      "partial",
+      "Data Analyst, Data Ops"
+     ],
+     [
+      "121599",
+      "no",
+      "Machine Learning Researcher"
+     ],
+     [
+      "388108",
+      "no",
+      "Staff Applied Scientist"
+     ],
+     [
+      "430609",
+      "no",
+      "AI & Machine Learning Engineer"
+     ],
+     [
+      "121602",
+      "no",
+      "Machine Learning Research Intern - Summe"
+     ],
+     [
+      "623623",
+      "no",
+      "Senior Data Scientist \u2013 AI Engineer"
+     ],
+     [
+      "121556",
+      "no",
+      "Graduate Machine Learning Researcher - C"
+     ]
+    ],
+    "merged": [
+     [
+      "106534",
+      "yes",
+      "Data Scientist - Pricing & Profitability"
+     ],
+     [
+      "418186",
+      "yes",
+      "Lead Data Scientist (Hybrid)"
+     ],
+     [
+      "627512",
+      "partial",
+      "SQL Developer"
+     ],
+     [
+      "116781",
+      "partial",
+      "Data Analyst, Data Ops"
+     ],
+     [
+      "121599",
+      "no",
+      "Machine Learning Researcher"
+     ],
+     [
+      "121602",
+      "no",
+      "Machine Learning Research Intern - Summe"
+     ],
+     [
+      "121556",
+      "no",
+      "Graduate Machine Learning Researcher - C"
+     ],
+     [
+      "121666",
+      "partial",
+      "Software Engineer \u2013 AI Powered Engineeri"
+     ],
+     [
+      "327642",
+      "no",
+      "Software Engineer (Entry-Level) - Python"
+     ],
+     [
+      "327647",
+      "no",
+      "Software Engineer - Python, Business Ope"
+     ]
+    ]
+   },
+   "lift10": 0.2,
+   "added_secs": 8.7
+  },
+  {
+   "id": "hiring_pasted_full_jd",
+   "kind": "person",
+   "brief": "I'm hiring. Senior Backend Engineer, Payments. built payments or ledgering systems in production; 5+ years backend engineering; Go or Python; distributed system",
+   "union": 36,
+   "graded": 36,
+   "rates": {
+    "yes": 0,
+    "partial": 8,
+    "no": 28
+   },
+   "baseline": {
+    "prec10": 0.04,
+    "prec20": 0.04,
+    "missed": 0,
+    "secs": 14.0,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.28,
+    "prec20": 0.14,
+    "missed": 0,
+    "secs": 31.9,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 0,
+      "prec10": 0.12
+     }
+    ],
+    "fits": 0,
+    "weak": true,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "github:MashaZyryanova",
+      "no",
+      "MashaZyryanova"
+     ],
+     [
+      "github:Jacwutang",
+      "no",
+      "Jack"
+     ],
+     [
+      "github:donovanrost",
+      "no",
+      "donovanrost"
+     ],
+     [
+      "github:rwarner",
+      "no",
+      "Ryan Warner"
+     ],
+     [
+      "github:sway0422",
+      "no",
+      "Wei Si"
+     ],
+     [
+      "github:ARElton",
+      "no",
+      "ARElton"
+     ],
+     [
+      "github:snives",
+      "no",
+      "snives"
+     ],
+     [
+      "github:rcolwell359",
+      "partial",
+      "Ryan Colwell"
+     ],
+     [
+      "github:loloDawit",
+      "no",
+      "Dawit"
+     ],
+     [
+      "github:jengel3",
+      "no",
+      "Jake"
+     ]
+    ],
+    "merged": [
+     [
+      "github:Jacwutang",
+      "no",
+      "Jack"
+     ],
+     [
+      "github:rwarner",
+      "no",
+      "Ryan Warner"
+     ],
+     [
+      "github:rcolwell359",
+      "partial",
+      "Ryan Colwell"
+     ],
+     [
+      "github:andrew-wicker",
+      "no",
+      "Andrew"
+     ],
+     [
+      "github:cbishop-elsevier",
+      "partial",
+      "cbishop-elsevier"
+     ],
+     [
+      "github:ben-east",
+      "partial",
+      "Ben East"
+     ],
+     [
+      "github:AutumnInNewYork",
+      "partial",
+      "Autumn"
+     ],
+     [
+      "github:asbeane",
+      "partial",
+      "Andy Beane"
+     ],
+     [
+      "github:Phantim97",
+      "partial",
+      "Tim Coelho"
+     ],
+     [
+      "github:ErinLeonhart",
+      "partial",
+      "Erin"
+     ]
+    ]
+   },
+   "lift10": 0.24,
+   "added_secs": 17.9
+  },
+  {
+   "id": "hiring_thin_jd",
+   "kind": "person",
+   "brief": "I'm hiring. Backend engineer. built a ledger, knows Go. bay_area",
+   "union": 33,
+   "graded": 33,
+   "rates": {
+    "yes": 2,
+    "partial": 14,
+    "no": 17
+   },
+   "baseline": {
+    "prec10": 0.24,
+    "prec20": 0.16,
+    "missed": 1,
+    "secs": 2.8,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.44,
+    "prec20": 0.36,
+    "missed": 0,
+    "secs": 13.9,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 1,
+      "prec10": 0.24
+     }
+    ],
+    "fits": 1,
+    "weak": true,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "github:new-world-coder",
+      "yes",
+      "New World Coder"
+     ],
+     [
+      "github:rupamk",
+      "partial",
+      "Rupam Kundu"
+     ],
+     [
+      "github:criccomini",
+      "no",
+      "Chris"
+     ],
+     [
+      "github:mlamina",
+      "partial",
+      "Marco Lamina"
+     ],
+     [
+      "github:jaker",
+      "no",
+      "Jake Rozin"
+     ],
+     [
+      "github:ChillOrb",
+      "partial",
+      "RP"
+     ],
+     [
+      "github:dioptre",
+      "no",
+      "Andrew Grosser"
+     ],
+     [
+      "github:KevinLiLu",
+      "no",
+      "Kevin Lu"
+     ],
+     [
+      "github:matthalp",
+      "no",
+      "Matthew Halpern"
+     ],
+     [
+      "github:guberti",
+      "partial",
+      "Gavin Uberti"
+     ]
+    ],
+    "merged": [
+     [
+      "github:new-world-coder",
+      "yes",
+      "New World Coder"
+     ],
+     [
+      "github:rupamk",
+      "partial",
+      "Rupam Kundu"
+     ],
+     [
+      "github:mlamina",
+      "partial",
+      "Marco Lamina"
+     ],
+     [
+      "github:ChillOrb",
+      "partial",
+      "RP"
+     ],
+     [
+      "github:guberti",
+      "partial",
+      "Gavin Uberti"
+     ],
+     [
+      "github:ameya-pandilwar",
+      "partial",
+      "A\u1d0d\u1d07\u028f\u1d00 P\u1d00\u0274\u1d05\u026a\u029f\u1d21\u1d00\u0280"
+     ],
+     [
+      "github:rlenglet",
+      "partial",
+      "Romain Lenglet"
+     ],
+     [
+      "github:dvoiss",
+      "partial",
+      "David Voiss"
+     ],
+     [
+      "github:backjo",
+      "partial",
+      "Jonah Back"
+     ],
+     [
+      "github:ekeitho",
+      "partial",
+      "Keith Abdulla"
+     ]
+    ]
+   },
+   "lift10": 0.2,
+   "added_secs": 11.1
+  },
+  {
+   "id": "hiring_rich_opening_draft",
+   "kind": "person",
+   "brief": "I am looking to hire a CTO for my company (startup) to lead a 10-15 person engineering team. Building distributed cloud systems, ML infra, and streaming service",
+   "union": 40,
+   "graded": 40,
+   "rates": {
+    "yes": 2,
+    "partial": 5,
+    "no": 33
+   },
+   "baseline": {
+    "prec10": 0.08,
+    "prec20": 0.04,
+    "missed": 2,
+    "secs": 13.8,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.24,
+    "prec20": 0.14,
+    "missed": 0,
+    "secs": 35.5,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 2,
+      "prec10": 0.0
+     }
+    ],
+    "fits": 2,
+    "weak": true,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "theorg:paul-fan",
+      "partial",
+      "Paul Fan"
+     ],
+     [
+      "theorg:evan-ettinger",
+      "no",
+      "Evan Ettinger"
+     ],
+     [
+      "github:MaxPresman",
+      "no",
+      "Max Presman"
+     ],
+     [
+      "theorg:siva-subramanian",
+      "no",
+      "Siva Subramanian"
+     ],
+     [
+      "theorg:james-vendlinski",
+      "partial",
+      "James Vendlinski"
+     ],
+     [
+      "theorg:peter-porshnev",
+      "no",
+      "Peter Porshnev"
+     ],
+     [
+      "theorg:simon-pontin",
+      "no",
+      "Simon Pontin"
+     ],
+     [
+      "theorg:jon-ourt",
+      "no",
+      "Jon Ourt"
+     ],
+     [
+      "theorg:rohit-ranjan",
+      "no",
+      "Rohit Ranjan"
+     ],
+     [
+      "theorg:kevin-manzolini",
+      "no",
+      "Kevin Manzolini"
+     ]
+    ],
+    "merged": [
+     [
+      "theorg:blin-thierry",
+      "yes",
+      "Blin Thierry."
+     ],
+     [
+      "theorg:matt-tsien",
+      "yes",
+      "Matt Tsien"
+     ],
+     [
+      "github:postpostmodern",
+      "partial",
+      "Jason T Johnson"
+     ],
+     [
+      "theorg:tony-jebara",
+      "partial",
+      "Tony Jebara"
+     ],
+     [
+      "github:cjkoral",
+      "no",
+      "CJ Koral"
+     ],
+     [
+      "theorg:trisha-walsh",
+      "no",
+      "Trisha Walsh"
+     ],
+     [
+      "github:bmartinson",
+      "no",
+      "Brian Martinson"
+     ],
+     [
+      "github:pveller",
+      "no",
+      "Pavel Veller"
+     ],
+     [
+      "theorg:vivek-anandpara",
+      "no",
+      "Vivek Anandpara"
+     ],
+     [
+      "github:countspongebob",
+      "no",
+      "Bob Wise"
+     ]
+    ]
+   },
+   "lift10": 0.16,
+   "added_secs": 21.7
+  },
+  {
+   "id": "hiring_saved_jds",
+   "kind": "person",
+   "brief": "I'm hiring again. ML Platform Lead. Must have run ML infrastructure at scale.. Remote US",
+   "union": 37,
+   "graded": 37,
+   "rates": {
+    "yes": 0,
+    "partial": 4,
+    "no": 33
+   },
+   "baseline": {
+    "prec10": 0.04,
+    "prec20": 0.04,
+    "missed": 0,
+    "secs": 19.3,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.08,
+    "prec20": 0.08,
+    "missed": 0,
+    "secs": 32.5,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 1,
+      "prec10": 0.12
+     }
+    ],
+    "fits": 1,
+    "weak": true,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "github:kjchoi10",
+      "no",
+      "Kevin"
+     ],
+     [
+      "github:wlinInspire",
+      "partial",
+      "Wei Lin"
+     ],
+     [
+      "github:GrantPerkins",
+      "no",
+      "Grant Perkins"
+     ],
+     [
+      "github:leahjohannesen",
+      "no",
+      "Leah J"
+     ],
+     [
+      "github:leeshibley",
+      "no",
+      "Lee Shibley"
+     ],
+     [
+      "github:pyrotank41",
+      "no",
+      "Karan Singh Kochar"
+     ],
+     [
+      "github:diazdata",
+      "no",
+      "diazdata"
+     ],
+     [
+      "github:jtega149",
+      "no",
+      "Johnny"
+     ],
+     [
+      "github:patsul12",
+      "no",
+      "Patrick Sullivan"
+     ],
+     [
+      "github:leilin-research",
+      "no",
+      "Lei Lin"
+     ]
+    ],
+    "merged": [
+     [
+      "github:pyrotank41",
+      "no",
+      "Karan Singh Kochar"
+     ],
+     [
+      "github:wlinInspire",
+      "partial",
+      "Wei Lin"
+     ],
+     [
+      "github:H-Park",
+      "partial",
+      "Hunter Park"
+     ],
+     [
+      "github:bayshores",
+      "no",
+      "Sean Bijan Esla"
+     ],
+     [
+      "github:blindnote",
+      "no",
+      "blindnote"
+     ],
+     [
+      "github:GeorgeDittmar",
+      "no",
+      "George Dittmar"
+     ],
+     [
+      "github:cosmicBboy",
+      "no",
+      "Niels Bantilan"
+     ],
+     [
+      "github:jbischof",
+      "no",
+      "Jonathan Bischof"
+     ],
+     [
+      "github:Koheyo",
+      "no",
+      "Huaiyu Guo"
+     ],
+     [
+      "github:raj2014",
+      "no",
+      "Rajasekhar Jetty"
+     ]
+    ]
+   },
+   "lift10": 0.04,
+   "added_secs": 13.2
+  },
+  {
+   "id": "impossible_musts_diagnosed",
+   "kind": "job",
+   "brief": "I'm looking for my next role. software. Python, Go, Kubernetes. Acme",
+   "union": 0,
+   "graded": 0,
+   "rates": {
+    "yes": 0,
+    "partial": 0,
+    "no": 0
+   },
+   "baseline": {
+    "prec10": 0.0,
+    "prec20": 0.0,
+    "missed": 0,
+    "secs": 1.7,
+    "rows": 0
+   },
+   "merged": {
+    "prec10": 0.0,
+    "prec20": 0.0,
+    "missed": 0,
+    "secs": 2.6,
+    "rows": 0,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 0,
+      "evaluated": 0,
+      "head_fits": 0,
+      "prec10": 0.0
+     }
+    ],
+    "fits": 0,
+    "weak": false,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [],
+    "merged": []
+   },
+   "lift10": 0.0,
+   "added_secs": 0.9
+  },
+  {
+   "id": "hiring_multi_select_musts",
+   "kind": "person",
+   "brief": "I'm hiring. Staff platform engineer. Go. Full time, hybrid",
+   "union": 35,
+   "graded": 35,
+   "rates": {
+    "yes": 1,
+    "partial": 3,
+    "no": 31
+   },
+   "baseline": {
+    "prec10": 0.04,
+    "prec20": 0.02,
+    "missed": 1,
+    "secs": 4.5,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.12,
+    "prec20": 0.1,
+    "missed": 0,
+    "secs": 18.3,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 0,
+      "prec10": 0.12
+     }
+    ],
+    "fits": 0,
+    "weak": true,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "github:ichekrygin",
+      "no",
+      "Illya Chekrygin"
+     ],
+     [
+      "github:ryanaoleary",
+      "no",
+      "Ryan O'Leary"
+     ],
+     [
+      "github:loloDawit",
+      "no",
+      "Dawit"
+     ],
+     [
+      "github:nickdepinet",
+      "partial",
+      "nickdepinet"
+     ],
+     [
+      "github:shvbsle",
+      "no",
+      "Shiv Bhosale"
+     ],
+     [
+      "github:cleer73",
+      "no",
+      "Jake Lee"
+     ],
+     [
+      "github:dhei",
+      "no",
+      "Di Hei"
+     ],
+     [
+      "github:doomcatLee",
+      "no",
+      "Alex Lee"
+     ],
+     [
+      "github:rjtsdl",
+      "no",
+      "Jingtao Ren"
+     ],
+     [
+      "github:mohsin-sq",
+      "no",
+      "mohsin-sq"
+     ]
+    ],
+    "merged": [
+     [
+      "github:nickdepinet",
+      "partial",
+      "nickdepinet"
+     ],
+     [
+      "github:shvbsle",
+      "no",
+      "Shiv Bhosale"
+     ],
+     [
+      "github:cleer73",
+      "no",
+      "Jake Lee"
+     ],
+     [
+      "github:leakingtapan",
+      "no",
+      "Cheng Pan"
+     ],
+     [
+      "github:mattlandis",
+      "no",
+      "Matthew Landis"
+     ],
+     [
+      "github:ben-east",
+      "no",
+      "Ben East"
+     ],
+     [
+      "github:caoyuan0816",
+      "no",
+      "Yuan Cao"
+     ],
+     [
+      "github:chaochn47",
+      "no",
+      "Chao"
+     ],
+     [
+      "github:ksubrmnn",
+      "partial",
+      "Kalya Subramanian"
+     ],
+     [
+      "github:riain0",
+      "partial",
+      "Riain Condon"
+     ]
+    ]
+   },
+   "lift10": 0.08,
+   "added_secs": 13.8
+  },
+  {
+   "id": "seeker_decline_everything",
+   "kind": "job",
+   "brief": "I'm looking for my next role. B2B SaaS. Austin",
+   "union": 37,
+   "graded": 37,
+   "rates": {
+    "yes": 4,
+    "partial": 0,
+    "no": 33
+   },
+   "baseline": {
+    "prec10": 0.24,
+    "prec20": 0.12,
+    "missed": 1,
+    "secs": 2.5,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.24,
+    "prec20": 0.16,
+    "missed": 0,
+    "secs": 12.9,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 3,
+      "prec10": 0.24
+     }
+    ],
+    "fits": 3,
+    "weak": false,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "190231",
+      "no",
+      "Senior Product Manager"
+     ],
+     [
+      "148211",
+      "no",
+      "Senior Product Owner - Corporate and Fin"
+     ],
+     [
+      "327423",
+      "no",
+      "Product Manager, National Research Found"
+     ],
+     [
+      "3098",
+      "yes",
+      "Senior Product Manager, Post Sales"
+     ],
+     [
+      "151494",
+      "no",
+      "Senior Product Owner - Sales Application"
+     ],
+     [
+      "167761",
+      "yes",
+      "Principal Product Manager"
+     ],
+     [
+      "293615",
+      "yes",
+      "Senior Product Manager, Post Sales"
+     ],
+     [
+      "621506",
+      "no",
+      "Senior Product Manager"
+     ],
+     [
+      "87021",
+      "no",
+      "Senior/Principal Product Manager"
+     ],
+     [
+      "173146",
+      "no",
+      "Senior Product Manager"
+     ]
+    ],
+    "merged": [
+     [
+      "3098",
+      "yes",
+      "Senior Product Manager, Post Sales"
+     ],
+     [
+      "293615",
+      "yes",
+      "Senior Product Manager, Post Sales"
+     ],
+     [
+      "167761",
+      "yes",
+      "Principal Product Manager"
+     ],
+     [
+      "96487",
+      "no",
+      "Senior Product Manager"
+     ],
+     [
+      "90663",
+      "no",
+      "Senior Manager, Product Marketing"
+     ],
+     [
+      "81545",
+      "no",
+      "Director, Platform Engineering (Product "
+     ],
+     [
+      "138102",
+      "no",
+      "Senior Product Manager, Salesforce"
+     ],
+     [
+      "154131",
+      "no",
+      "Senior Product Manager, Funnels/Workflow"
+     ],
+     [
+      "126677",
+      "no",
+      "Product Marketing - m/f/d"
+     ],
+     [
+      "336287",
+      "no",
+      "Lead Product Marketing Manager"
+     ]
+    ]
+   },
+   "lift10": 0.0,
+   "added_secs": 10.4
+  },
+  {
+   "id": "hiring_place_or_mode",
+   "kind": "person",
+   "brief": "I'm hiring. Senior Backend Engineer, Payments. built a ledger or payments system in production; Go or Python; 5+ years. Remote US or Seattle",
+   "union": 36,
+   "graded": 36,
+   "rates": {
+    "yes": 0,
+    "partial": 5,
+    "no": 31
+   },
+   "baseline": {
+    "prec10": 0.04,
+    "prec20": 0.04,
+    "missed": 0,
+    "secs": 3.0,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.08,
+    "prec20": 0.1,
+    "missed": 0,
+    "secs": 14.3,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 1,
+      "prec10": 0.08
+     }
+    ],
+    "fits": 1,
+    "weak": true,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "github:nathanielboucher",
+      "no",
+      "nathanielboucher"
+     ],
+     [
+      "github:loloDawit",
+      "no",
+      "Dawit"
+     ],
+     [
+      "github:jingchaodev",
+      "no",
+      "chao"
+     ],
+     [
+      "github:D4N14L",
+      "no",
+      "Daniel"
+     ],
+     [
+      "github:jeffreybazinet",
+      "no",
+      "Jeff Bazinet"
+     ],
+     [
+      "github:arielrodrigor",
+      "no",
+      "Ariel"
+     ],
+     [
+      "github:IlIllII",
+      "partial",
+      "IlIllII"
+     ],
+     [
+      "github:wufan-home",
+      "no",
+      "Fan Wu"
+     ],
+     [
+      "github:shiywang",
+      "no",
+      "shiywang"
+     ],
+     [
+      "github:mohsin-sq",
+      "no",
+      "mohsin-sq"
+     ]
+    ],
+    "merged": [
+     [
+      "github:python-net-dev",
+      "partial",
+      "Leon W"
+     ],
+     [
+      "github:IlIllII",
+      "partial",
+      "IlIllII"
+     ],
+     [
+      "github:wufan-home",
+      "no",
+      "Fan Wu"
+     ],
+     [
+      "github:ben-east",
+      "no",
+      "Ben East"
+     ],
+     [
+      "github:rwarner",
+      "no",
+      "Ryan Warner"
+     ],
+     [
+      "github:rcolwell359",
+      "no",
+      "Ryan Colwell"
+     ],
+     [
+      "github:mbarany",
+      "no",
+      "Michael Barany"
+     ],
+     [
+      "github:taylorsophia",
+      "no",
+      "Taylor Sophia"
+     ],
+     [
+      "github:Phantim97",
+      "no",
+      "Tim Coelho"
+     ],
+     [
+      "github:link-yle",
+      "no",
+      "Kyle Lin"
+     ]
+    ]
+   },
+   "lift10": 0.04,
+   "added_secs": 11.3
+  },
+  {
+   "id": "hiring_field_vs_specialty",
+   "kind": "person",
+   "brief": "I'm hiring. Senior Engineering Manager, Marketing Engineering (CRM). 8+ years engineering, 3+ managing. Remote US",
+   "union": 35,
+   "graded": 35,
+   "rates": {
+    "yes": 0,
+    "partial": 1,
+    "no": 34
+   },
+   "baseline": {
+    "prec10": 0.0,
+    "prec20": 0.02,
+    "missed": 0,
+    "secs": 21.8,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.04,
+    "prec20": 0.02,
+    "missed": 0,
+    "secs": 34.0,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 5,
+      "prec10": 0.16
+     }
+    ],
+    "fits": 5,
+    "weak": false,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "github:rogercotrina",
+      "no",
+      "Roger Cotrina"
+     ],
+     [
+      "theorg:ross-galbraith",
+      "no",
+      "Ross Galbraith"
+     ],
+     [
+      "github:ccoenraets",
+      "no",
+      "Christophe Coenraets"
+     ],
+     [
+      "github:Eutheran",
+      "no",
+      "Eric"
+     ],
+     [
+      "theorg:aniket-nale",
+      "no",
+      "Aniket Nale"
+     ],
+     [
+      "theorg:suresh-chilumuri",
+      "no",
+      "Suresh Chilumuri"
+     ],
+     [
+      "theorg:lakshmanan-m",
+      "no",
+      "Lakshmanan M"
+     ],
+     [
+      "github:farazkamal",
+      "no",
+      "Faraz Kamal"
+     ],
+     [
+      "theorg:narasingha-padhi",
+      "no",
+      "Narasingha Padhi"
+     ],
+     [
+      "theorg:brian-ryall",
+      "no",
+      "Brian Ryall"
+     ]
+    ],
+    "merged": [
+     [
+      "github:farazkamal",
+      "no",
+      "Faraz Kamal"
+     ],
+     [
+      "github:chrispine",
+      "partial",
+      "Chris Pine"
+     ],
+     [
+      "github:kmekala",
+      "no",
+      "kalyan Mekala"
+     ],
+     [
+      "github:danielrussellLA",
+      "no",
+      "Daniel Russell"
+     ],
+     [
+      "github:alevan",
+      "no",
+      "Allen LeVan"
+     ],
+     [
+      "github:rogercotrina",
+      "no",
+      "Roger Cotrina"
+     ],
+     [
+      "github:Eutheran",
+      "no",
+      "Eric"
+     ],
+     [
+      "theorg:yishan-li",
+      "no",
+      "Yishan Li"
+     ],
+     [
+      "theorg:vinay-kelkar",
+      "no",
+      "Vinay Kelkar"
+     ],
+     [
+      "theorg:sean-d",
+      "no",
+      "Sean D."
+     ]
+    ]
+   },
+   "lift10": 0.04,
+   "added_secs": 12.2
+  },
+  {
+   "id": "hiring_decisive_rare_must",
+   "kind": "person",
+   "brief": "I'm hiring. Compiler Engineer. shipped compiler work in production. Remote US or Bay Area",
+   "union": 30,
+   "graded": 30,
+   "rates": {
+    "yes": 4,
+    "partial": 8,
+    "no": 18
+   },
+   "baseline": {
+    "prec10": 0.24,
+    "prec20": 0.2,
+    "missed": 2,
+    "secs": 21.1,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.32,
+    "prec20": 0.28,
+    "missed": 1,
+    "secs": 36.4,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 0,
+      "prec10": 0.2
+     }
+    ],
+    "fits": 0,
+    "weak": true,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "github:LaurentInSeattle",
+      "no",
+      "Laurent"
+     ],
+     [
+      "github:Maple-aurora",
+      "partial",
+      "Lauriane Sawaynrofr"
+     ],
+     [
+      "github:trentxintong",
+      "yes",
+      "Xin Tong"
+     ],
+     [
+      "github:SPY",
+      "partial",
+      "Ilya Rezvov"
+     ],
+     [
+      "github:wangyipei01",
+      "no",
+      "wangyipei01"
+     ],
+     [
+      "github:ashermancinelli",
+      "yes",
+      "Asher Mancinelli"
+     ],
+     [
+      "github:maxcountryman",
+      "no",
+      "Max Countryman"
+     ],
+     [
+      "github:cocomittens",
+      "no",
+      "Corrie"
+     ],
+     [
+      "github:Felixlam-2014",
+      "no",
+      "Savion Steubernzbhf"
+     ],
+     [
+      "github:monopolly",
+      "no",
+      "Fullstack Engineer"
+     ]
+    ],
+    "merged": [
+     [
+      "github:LaurentInSeattle",
+      "no",
+      "Laurent"
+     ],
+     [
+      "github:Maple-aurora",
+      "partial",
+      "Lauriane Sawaynrofr"
+     ],
+     [
+      "github:trentxintong",
+      "yes",
+      "Xin Tong"
+     ],
+     [
+      "github:SPY",
+      "partial",
+      "Ilya Rezvov"
+     ],
+     [
+      "github:Felixlam-2014",
+      "no",
+      "Savion Steubernzbhf"
+     ],
+     [
+      "github:Justinvinecinder-2019",
+      "partial",
+      "Fermin Swifthx"
+     ],
+     [
+      "github:htyu",
+      "partial",
+      "Hongtao Yu"
+     ],
+     [
+      "github:PeimingLiu",
+      "partial",
+      "Peiming Liu"
+     ],
+     [
+      "github:mattgodbolt",
+      "no",
+      "Matt Godbolt"
+     ],
+     [
+      "github:Tracy-r-tate5348",
+      "partial",
+      "Itzel Gulgowskicmede"
+     ]
+    ]
+   },
+   "lift10": 0.08,
+   "added_secs": 15.3
+  },
+  {
+   "id": "hiring_two_metros_stated",
+   "kind": "person",
+   "brief": "I'm hiring. Staff platform engineer. Go. Hybrid in Seattle or New York",
+   "union": 34,
+   "graded": 34,
+   "rates": {
+    "yes": 0,
+    "partial": 7,
+    "no": 27
+   },
+   "baseline": {
+    "prec10": 0.12,
+    "prec20": 0.06,
+    "missed": 0,
+    "secs": 4.7,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.24,
+    "prec20": 0.14,
+    "missed": 0,
+    "secs": 16.3,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 5,
+      "prec10": 0.32
+     }
+    ],
+    "fits": 5,
+    "weak": false,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "github:ichekrygin",
+      "partial",
+      "Illya Chekrygin"
+     ],
+     [
+      "github:rshsmi",
+      "no",
+      "Arash Sami"
+     ],
+     [
+      "github:ms-livi",
+      "no",
+      "Mikhail Sliusarev"
+     ],
+     [
+      "github:maxiplux",
+      "no",
+      "Juan Francisco Mosquera"
+     ],
+     [
+      "github:nickdepinet",
+      "partial",
+      "nickdepinet"
+     ],
+     [
+      "github:MysterioO",
+      "no",
+      "MysterioO"
+     ],
+     [
+      "github:ryanaoleary",
+      "partial",
+      "Ryan O'Leary"
+     ],
+     [
+      "github:StummeJ",
+      "no",
+      "Jamie Stumme"
+     ],
+     [
+      "github:matthewbrahms",
+      "no",
+      "Matthew Brahms"
+     ],
+     [
+      "github:BillyRyanShelton",
+      "no",
+      "BillyRyanShelton"
+     ]
+    ],
+    "merged": [
+     [
+      "github:ichekrygin",
+      "partial",
+      "Illya Chekrygin"
+     ],
+     [
+      "github:nickdepinet",
+      "partial",
+      "nickdepinet"
+     ],
+     [
+      "github:ryanaoleary",
+      "partial",
+      "Ryan O'Leary"
+     ],
+     [
+      "github:loloDawit",
+      "no",
+      "Dawit"
+     ],
+     [
+      "github:shvbsle",
+      "partial",
+      "Shiv Bhosale"
+     ],
+     [
+      "github:maxiplux",
+      "no",
+      "Juan Francisco Mosquera"
+     ],
+     [
+      "github:matthewbrahms",
+      "no",
+      "Matthew Brahms"
+     ],
+     [
+      "github:renan-alm",
+      "partial",
+      "Renan Alm"
+     ],
+     [
+      "github:Carnoustie",
+      "partial",
+      "Oscar Spolander"
+     ],
+     [
+      "github:gpdenny",
+      "no",
+      "Gareth Denny"
+     ]
+    ]
+   },
+   "lift10": 0.12,
+   "added_secs": 11.6
+  }
+ ]
+}

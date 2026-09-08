@@ -1,0 +1,4151 @@
+{
+ "base": "https://roster-api-production-3405.up.railway.app",
+ "secs": 88,
+ "summary": {
+  "n": 2,
+  "prec10": {
+   "baseline": 0.22,
+   "merged": 0.33
+  },
+  "prec20": {
+   "baseline": 0.155,
+   "merged": 0.315
+  },
+  "missed": {
+   "baseline": 3,
+   "merged": 0
+  },
+  "gate": {
+   "merged_ge_baseline_share": 1.0,
+   "worse_by_over_0_10": [],
+   "merged_missed_total": 0,
+   "added_p90_secs": 7.0,
+   "pass": false
+  }
+ },
+ "results": [
+  {
+   "id": "seeker_terse_description",
+   "kind": "job",
+   "brief": "I'm looking for my next role. software. Python, Go, Kubernetes. new_york, bay_area",
+   "union": 32,
+   "graded": 32,
+   "rates": {
+    "yes": 8,
+    "partial": 9,
+    "no": 15
+   },
+   "baseline": {
+    "prec10": 0.32,
+    "prec20": 0.2,
+    "missed": 3,
+    "secs": 3.7,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.48,
+    "prec20": 0.5,
+    "missed": 0,
+    "secs": 17.1,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 2,
+      "prec10": 0.32
+     },
+     {
+      "name": "default",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 2,
+      "prec10": 0.2
+     }
+    ],
+    "fits": 2,
+    "weak": true,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "616915",
+      "no",
+      "Application Developer",
+      "Level is unknown.",
+      null,
+      null
+     ],
+     [
+      "167631",
+      "yes",
+      "Senior Software Engineer, Full-Stack",
+      "Matches all requirements and preferences.",
+      null,
+      null
+     ],
+     [
+      "617667",
+      "yes",
+      "Senior Software Engineer",
+      "Matches all requirements and preferences.",
+      null,
+      null
+     ],
+     [
+      "134585",
+      "no",
+      "Application developer",
+      "Different role family: Application Developer.",
+      null,
+      null
+     ],
+     [
+      "615826",
+      "no",
+      "Java Developer With UI",
+      "Different role family: Java Developer.",
+      null,
+      null
+     ],
+     [
+      "167630",
+      "yes",
+      "Staff Software Engineer",
+      "Matches all requirements and preferences.",
+      null,
+      null
+     ],
+     [
+      "121179",
+      "no",
+      "Software Engineer III \u2014 Developer Portal",
+      "Different role family: Java Developer.",
+      null,
+      null
+     ],
+     [
+      "134586",
+      "no",
+      "Application Developer",
+      "Different role family: Application Developer.",
+      null,
+      null
+     ],
+     [
+      "91412",
+      "yes",
+      "Staff Software Engineer",
+      "Matches all requirements and preferences.",
+      null,
+      null
+     ],
+     [
+      "616914",
+      "no",
+      "Senior Software Developer",
+      "Lacks preferred skills: Go, Kubernetes.",
+      null,
+      null
+     ]
+    ],
+    "merged": [
+     [
+      "115583",
+      "yes",
+      "Senior Software Engineer - Full Stack",
+      "Matches all requirements and preferences.",
+      "yes",
+      "Matches all requirements and preferences"
+     ],
+     [
+      "90859",
+      "partial",
+      "Software Engineer (Senior)",
+      "Lacks preferred skill: Go.",
+      "yes",
+      "Matches all requirements and preferences"
+     ],
+     [
+      "617667",
+      "yes",
+      "Senior Software Engineer",
+      "Matches all requirements and preferences.",
+      "partial",
+      "Missing preferred skills: Go, Kubernetes"
+     ],
+     [
+      "167631",
+      "yes",
+      "Senior Software Engineer, Full-Stack",
+      "Matches all requirements and preferences.",
+      "partial",
+      "Missing preferred skills: Python"
+     ],
+     [
+      "167630",
+      "yes",
+      "Staff Software Engineer",
+      "Matches all requirements and preferences.",
+      "partial",
+      "Missing preferred skills: Python"
+     ],
+     [
+      "91412",
+      "yes",
+      "Staff Software Engineer",
+      "Matches all requirements and preferences.",
+      "partial",
+      "Missing preferred skills: Python, Kubernetes"
+     ],
+     [
+      "616914",
+      "no",
+      "Senior Software Developer",
+      "Lacks preferred skills: Go, Kubernetes.",
+      "partial",
+      "Missing preferred skills: Go, Kubernetes"
+     ],
+     [
+      "167634",
+      "no",
+      "Senior Software Engineer, Infrastructure",
+      "Lacks preferred skills: Go, Kubernetes.",
+      "partial",
+      "Missing preferred skills: Go, Kubernetes, Python"
+     ],
+     [
+      "167623",
+      "no",
+      "Senior Software Engineer, Motion Plannin",
+      "Lacks preferred skills: Go, Kubernetes.",
+      "partial",
+      "Missing preferred skills: Go, Kubernetes, Python"
+     ],
+     [
+      "97233",
+      "partial",
+      "Software Engineer",
+      "Level is unknown.",
+      "partial",
+      "Missing preferred skills: Kubernetes"
+     ]
+    ]
+   },
+   "brief_full": "I'm looking for my next role. software. Python, Go, Kubernetes. new_york, bay_area",
+   "contract": {
+    "must": {
+     "field": [
+      "software"
+     ],
+     "metro": [
+      "bay_area",
+      "new_york"
+     ]
+    },
+    "prefer": {
+     "company_type": [
+      "other"
+     ],
+     "level": [
+      "senior",
+      "staff_plus"
+     ],
+     "role_family": [
+      "software engineer"
+     ],
+     "skill": [
+      "go",
+      "kubernetes",
+      "python"
+     ]
+    },
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    }
+   },
+   "verdicts": {
+    "617667": {
+     "fit": "yes",
+     "why": "Matches all requirements and preferences."
+    },
+    "158200": {
+     "fit": "yes",
+     "why": "Matches all requirements and preferences."
+    },
+    "153941": {
+     "fit": "partial",
+     "why": "Lacks preferred skills: Go, Kubernetes."
+    },
+    "90859": {
+     "fit": "partial",
+     "why": "Lacks preferred skill: Go."
+    },
+    "616915": {
+     "fit": "no",
+     "why": "Level is unknown."
+    },
+    "607246": {
+     "fit": "partial",
+     "why": "Lacks preferred skills: Go, Kubernetes."
+    },
+    "616914": {
+     "fit": "no",
+     "why": "Lacks preferred skills: Go, Kubernetes."
+    },
+    "97233": {
+     "fit": "partial",
+     "why": "Level is unknown."
+    },
+    "616727": {
+     "fit": "no",
+     "why": "Different role family: Java Developer."
+    },
+    "125183": {
+     "fit": "partial",
+     "why": "Level is unknown."
+    },
+    "167630": {
+     "fit": "yes",
+     "why": "Matches all requirements and preferences."
+    },
+    "417277": {
+     "fit": "partial",
+     "why": "Lacks preferred skills: Go, Kubernetes."
+    },
+    "615327": {
+     "fit": "no",
+     "why": "Different role family: Java Developer."
+    },
+    "134649": {
+     "fit": "no",
+     "why": "Different role family: Application Developer."
+    },
+    "134586": {
+     "fit": "no",
+     "why": "Different role family: Application Developer."
+    },
+    "629363": {
+     "fit": "no",
+     "why": "Different role family: Android Developer."
+    },
+    "167623": {
+     "fit": "no",
+     "why": "Lacks preferred skills: Go, Kubernetes."
+    },
+    "167634": {
+     "fit": "no",
+     "why": "Lacks preferred skills: Go, Kubernetes."
+    },
+    "121179": {
+     "fit": "no",
+     "why": "Different role family: Java Developer."
+    },
+    "158199": {
+     "fit": "yes",
+     "why": "Matches all requirements and preferences."
+    },
+    "91412": {
+     "fit": "yes",
+     "why": "Matches all requirements and preferences."
+    },
+    "130256": {
+     "fit": "partial",
+     "why": "Lacks preferred skill: Go."
+    },
+    "158201": {
+     "fit": "yes",
+     "why": "Matches all requirements and preferences."
+    },
+    "629319": {
+     "fit": "no",
+     "why": "Different role family: Android Developer."
+    },
+    "167631": {
+     "fit": "yes",
+     "why": "Matches all requirements and preferences."
+    },
+    "145585": {
+     "fit": "partial",
+     "why": "Lacks preferred skills: Go, Kubernetes."
+    },
+    "122807": {
+     "fit": "no",
+     "why": "Different role family: Software Engineer."
+    },
+    "618870": {
+     "fit": "no",
+     "why": "Different role family: Java Developer."
+    },
+    "115583": {
+     "fit": "yes",
+     "why": "Matches all requirements and preferences."
+    },
+    "615826": {
+     "fit": "no",
+     "why": "Different role family: Java Developer."
+    },
+    "87018": {
+     "fit": "partial",
+     "why": "Lacks preferred skill: Python."
+    },
+    "134585": {
+     "fit": "no",
+     "why": "Different role family: Application Developer."
+    }
+   },
+   "union_rows": [
+    {
+     "id": "616915",
+     "title": "Application Developer",
+     "company": "city_of_new_york",
+     "location": "New York City, us",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "city_of_new_york"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "application developer"
+      ],
+      "skill": [
+       "application development"
+      ],
+      "specialty": [
+       "application development"
+      ],
+      "state": [
+       "ny"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "167631",
+     "title": "Senior Software Engineer, Full-Stack",
+     "company": "standard_bots",
+     "location": "New York City, NY",
+     "blurb": null,
+     "facets": {
+      "comp": [
+       "150k_200k"
+      ],
+      "company": [
+       "standard_bots"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "senior"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "c++",
+       "docker",
+       "kubernetes",
+       "node",
+       "python",
+       "react",
+       "typescript"
+      ],
+      "specialty": [
+       "full-stack"
+      ],
+      "state": [
+       "ny"
+      ],
+      "work_mode": [
+       "onsite"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "617667",
+     "title": "Senior Software Engineer",
+     "company": "city_of_new_york",
+     "location": "New York City, us",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "city_of_new_york"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "senior"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "software engineering"
+      ],
+      "specialty": [
+       "software engineering"
+      ],
+      "state": [
+       "ny"
+      ],
+      "work_mode": [
+       "onsite"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "134585",
+     "title": "Application developer",
+     "company": "merge_api_integration_sandbox",
+     "location": "new york",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "merge_api_integration_sandbox"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "application developer"
+      ],
+      "skill": [
+       "angular",
+       "aws",
+       "c#",
+       "docker",
+       "java",
+       "javascript",
+       "kubernetes",
+       ".net",
+       "node",
+       "python",
+       "react",
+       "vue"
+      ],
+      "specialty": [
+       "full-stack development"
+      ],
+      "state": [
+       "ny"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "615826",
+     "title": "Java Developer With UI",
+     "company": "sonsoft_inc",
+     "location": "New York, us",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "sonsoft_inc"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "developer"
+      ],
+      "skill": [
+       "java",
+       "ui"
+      ],
+      "specialty": [
+       "java",
+       "ui"
+      ],
+      "state": [
+       "ny"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "167630",
+     "title": "Staff Software Engineer",
+     "company": "standard_bots",
+     "location": "New York City, NY",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "standard_bots"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "staff_plus"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "staff software engineer"
+      ],
+      "skill": [
+       "c++",
+       "kubernetes",
+       "llm",
+       "python",
+       "react",
+       "security"
+      ],
+      "specialty": [
+       "ai",
+       "robotics"
+      ],
+      "state": [
+       "ny"
+      ],
+      "work_mode": [
+       "hybrid"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "121179",
+     "title": "Software Engineer III \u2014 Developer Portal",
+     "company": "id_me",
+     "location": "Mountain View, California, United States",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "id_me"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "mid"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "java",
+       "next.js",
+       "node",
+       "rails",
+       "react",
+       "rest",
+       "ruby",
+       "spring",
+       "sql",
+       "typescript"
+      ],
+      "specialty": [
+       "developer portal"
+      ],
+      "state": [
+       "ca"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "134586",
+     "title": "Application Developer",
+     "company": "merge_api_integration_sandbox",
+     "location": "Newyork",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "merge_api_integration_sandbox"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "application developer"
+      ],
+      "skill": [
+       "angular",
+       "aws",
+       "c#",
+       "docker",
+       "java",
+       "javascript",
+       "kubernetes",
+       ".net",
+       "node",
+       "python",
+       "react",
+       "vue"
+      ],
+      "specialty": [
+       "application development",
+       "full-stack development"
+      ],
+      "state": [
+       "ny"
+      ],
+      "work_mode": [
+       "onsite"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "91412",
+     "title": "Staff Software Engineer",
+     "company": "caredx_inc",
+     "location": "Brisbane, CA",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "caredx_inc"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "staff_plus"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "c#",
+       "devops",
+       "go",
+       "java",
+       "javascript",
+       "python",
+       "rest",
+       "sql"
+      ],
+      "state": [
+       "ca"
+      ],
+      "work_mode": [
+       "remote"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "public"
+      ],
+      "company_stage": [
+       "public"
+      ]
+     }
+    },
+    {
+     "id": "616914",
+     "title": "Senior Software Developer",
+     "company": "city_of_new_york",
+     "location": "New York City, us",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "city_of_new_york"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "senior"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software developer"
+      ],
+      "skill": [
+       "software development"
+      ],
+      "specialty": [
+       "software development"
+      ],
+      "state": [
+       "ny"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "167634",
+     "title": "Senior Software Engineer, Infrastructure & Developer Tooling",
+     "company": "standard_bots",
+     "location": "New York City, NY",
+     "blurb": null,
+     "facets": {
+      "comp": [
+       "150k_200k"
+      ],
+      "company": [
+       "standard_bots"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "senior"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "aws",
+       "azure",
+       "ci/cd",
+       "distributed systems",
+       "docker",
+       "gcp",
+       "kubernetes",
+       "postgres",
+       "python",
+       "react",
+       "terraform",
+       "typescript"
+      ],
+      "specialty": [
+       "developer tooling",
+       "infrastructure"
+      ],
+      "state": [
+       "ny"
+      ],
+      "work_mode": [
+       "hybrid"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "115583",
+     "title": "Senior Software Engineer - Full Stack",
+     "company": "grow_therapy",
+     "location": "New York City",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "grow_therapy"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "senior"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "go",
+       "python"
+      ],
+      "specialty": [
+       "full stack engineering"
+      ],
+      "state": [
+       "ny"
+      ],
+      "work_mode": [
+       "onsite"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "616727",
+     "title": "Java J2EE Engineer",
+     "company": "sonsoft_inc",
+     "location": "Sunnyvale, us",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "sonsoft_inc"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "j2ee",
+       "java"
+      ],
+      "specialty": [
+       "j2ee",
+       "java"
+      ],
+      "state": [
+       "ca"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "618870",
+     "title": "Java Developer",
+     "company": "esolvit_inc",
+     "location": "New York, us",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "esolvit_inc"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "java developer"
+      ],
+      "skill": [
+       "java"
+      ],
+      "specialty": [
+       "java development"
+      ],
+      "state": [
+       "ny"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "122807",
+     "title": "Software Engineer, Full Stack",
+     "company": "instalily_ai",
+     "location": "New York, New York, United States, San Francisco, California, United States",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "instalily_ai"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "metro": [
+       "bay_area",
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "aws",
+       "azure",
+       "ci/cd",
+       "fastapi",
+       "gcp",
+       "llm",
+       "next.js",
+       "python",
+       "react",
+       "typescript"
+      ],
+      "specialty": [
+       "full stack"
+      ],
+      "state": [
+       "ca",
+       "ny"
+      ],
+      "work_mode": [
+       "onsite"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "615327",
+     "title": "Java Developer (GC--USC)",
+     "company": "sonsoft_inc",
+     "location": "Jersey City, us",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "sonsoft_inc"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "java developer"
+      ],
+      "skill": [
+       "java"
+      ],
+      "specialty": [
+       "java"
+      ],
+      "state": [
+       "nj"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "629319",
+     "title": "Android Developer",
+     "company": "hcl_america_inc",
+     "location": "Mountain View, us",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "hcl_america_inc"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "android developer"
+      ],
+      "skill": [
+       "android"
+      ],
+      "state": [
+       "ca"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "629363",
+     "title": "Android Application Developer",
+     "company": "top_slate_consulting",
+     "location": "Parsippany-Troy Hills, us",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "top_slate_consulting"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "android developer"
+      ],
+      "skill": [
+       "android"
+      ],
+      "specialty": [
+       "android"
+      ],
+      "state": [
+       "nj"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "134649",
+     "title": "software engineer",
+     "company": "merge_api_integration_sandbox",
+     "location": "Newyork",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "merge_api_integration_sandbox"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "angular",
+       "c#",
+       "docker",
+       "go",
+       "java",
+       "javascript",
+       "kubernetes",
+       ".net",
+       "node",
+       "python",
+       "react",
+       "vue"
+      ],
+      "specialty": [
+       "software engineering"
+      ],
+      "state": [
+       "ny"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "167623",
+     "title": "Senior Software Engineer, Motion Planning",
+     "company": "standard_bots",
+     "location": "New York City, NY",
+     "blurb": null,
+     "facets": {
+      "comp": [
+       "200k_300k"
+      ],
+      "company": [
+       "standard_bots"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "senior"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "c++",
+       "docker",
+       "node",
+       "python"
+      ],
+      "specialty": [
+       "motion planning"
+      ],
+      "state": [
+       "ny"
+      ],
+      "work_mode": [
+       "onsite"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "90859",
+     "title": "Software Engineer (Senior)",
+     "company": "candid_health",
+     "location": "New York City",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "candid_health"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "senior"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "docker",
+       "kubernetes",
+       "postgresql",
+       "python",
+       "react",
+       "terraform",
+       "typescript"
+      ],
+      "specialty": [
+       "software engineering"
+      ],
+      "state": [
+       "ny"
+      ],
+      "work_mode": [
+       "onsite"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "startup"
+      ]
+     }
+    },
+    {
+     "id": "97233",
+     "title": "Software Engineer",
+     "company": "codes_health",
+     "location": "New York",
+     "blurb": null,
+     "facets": {
+      "comp": [
+       "200k_300k"
+      ],
+      "company": [
+       "codes_health"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "fastapi",
+       "go",
+       "python",
+       "react",
+       "typescript"
+      ],
+      "specialty": [
+       "ai",
+       "software engineering"
+      ],
+      "state": [
+       "ny"
+      ],
+      "work_mode": [
+       "onsite"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "startup"
+      ]
+     }
+    },
+    {
+     "id": "153941",
+     "title": "Senior Software Engineer",
+     "company": "repurpose_global",
+     "location": "New York",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "repurpose_global"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "senior"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "aws",
+       "docker",
+       "graphql",
+       "javascript",
+       "kubernetes",
+       "node",
+       "react",
+       "rest",
+       "sql",
+       "terraform",
+       "typescript",
+       "vue"
+      ],
+      "specialty": [
+       "cloud",
+       "software engineering"
+      ],
+      "work_mode": [
+       "onsite"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "158201",
+     "title": "Staff Software Engineer-iOS",
+     "company": "scout_motors",
+     "location": "Fremont, California, United States",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "scout_motors"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "staff_plus"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "ci/cd",
+       "go",
+       "ios",
+       "swift"
+      ],
+      "specialty": [
+       "ios development"
+      ],
+      "state": [
+       "ca"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "158200",
+     "title": "Staff Software Engineer-Backend",
+     "company": "scout_motors",
+     "location": "Fremont, California, United States",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "scout_motors"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "staff_plus"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "aws",
+       "azure",
+       "go",
+       "java",
+       "mongodb",
+       "mysql",
+       "node",
+       "postgresql",
+       "python",
+       "redis"
+      ],
+      "specialty": [
+       "backend"
+      ],
+      "state": [
+       "ca"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "125183",
+     "title": "Software Engineer",
+     "company": "justworks",
+     "location": "New York, New York",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "justworks"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "aws",
+       "docker",
+       "go",
+       "golang",
+       "java",
+       "javascript",
+       "kubernetes",
+       "mysql",
+       "node",
+       "python",
+       "ruby",
+       "terraform"
+      ],
+      "state": [
+       "ny"
+      ],
+      "work_mode": [
+       "onsite"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "417277",
+     "title": "Senior / Staff Software Engineer \u2014 Platform",
+     "company": "snorkel_ai",
+     "location": "New York City, NY (Hybrid); San Francisco, CA (Hybrid)",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "snorkel_ai"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "senior"
+      ],
+      "metro": [
+       "new_york",
+       "san_francisco"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "airflow",
+       "aws",
+       "ci/cd",
+       "dbt",
+       "distributed systems",
+       "observability",
+       "python",
+       "rest",
+       "terraform"
+      ],
+      "specialty": [
+       "platform engineering"
+      ],
+      "state": [
+       "ca",
+       "ny"
+      ],
+      "work_mode": [
+       "hybrid"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "607246",
+     "title": "Lead Software Developer",
+     "company": "jobs_for_humanity",
+     "location": "New York, us",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "jobs_for_humanity"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "senior"
+      ],
+      "metro": [
+       "new_york"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "lead software developer"
+      ],
+      "specialty": [
+       "software development"
+      ],
+      "state": [
+       "ny"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "87018",
+     "title": "Senior Software Engineer \u2014 WPT Home (Full-Stack)",
+     "company": "bellota_labs",
+     "location": "Redwood City, CA",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "bellota_labs"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "senior"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "c#",
+       "go",
+       "kafka",
+       "kubernetes",
+       "observability"
+      ],
+      "specialty": [
+       "full-stack development",
+       "game development"
+      ],
+      "state": [
+       "ca"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "130256",
+     "title": "Senior Software Engineer (CA)",
+     "company": "lta_research",
+     "location": "Sunnyvale, California",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "lta_research"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "senior"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "c#",
+       "c++",
+       "python"
+      ],
+      "specialty": [
+       "software engineering"
+      ],
+      "state": [
+       "ca"
+      ],
+      "work_mode": [
+       "onsite"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "158199",
+     "title": "Staff Software Engineer-Android",
+     "company": "scout_motors",
+     "location": "Fremont, California, United States",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "scout_motors"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "staff_plus"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "android",
+       "ci/cd",
+       "go",
+       "graphql",
+       "java",
+       "kotlin",
+       "security"
+      ],
+      "specialty": [
+       "android development"
+      ],
+      "state": [
+       "ca"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "145585",
+     "title": "Sr. Software Engineer, Clinical Software",
+     "company": "personalis_inc",
+     "location": "Fremont, CA",
+     "blurb": null,
+     "facets": {
+      "company": [
+       "personalis_inc"
+      ],
+      "country": [
+       "us"
+      ],
+      "employment_type": [
+       "full_time"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "senior"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "posted": [
+       "week"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "skill": [
+       "angular",
+       "aws",
+       "docker",
+       "java",
+       "javascript",
+       "mysql",
+       "nosql",
+       "postgresql",
+       "python",
+       "react",
+       "rest",
+       "vue"
+      ],
+      "specialty": [
+       "clinical software"
+      ],
+      "state": [
+       "ca"
+      ],
+      "work_mode": [
+       "hybrid"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "public"
+      ],
+      "company_stage": [
+       "public"
+      ]
+     }
+    }
+   ],
+   "lift10": 0.16,
+   "added_secs": 13.4
+  },
+  {
+   "id": "hiring_thin_jd",
+   "kind": "person",
+   "brief": "I'm hiring. Backend engineer. built a ledger, knows Go. bay_area",
+   "union": 31,
+   "graded": 31,
+   "rates": {
+    "yes": 1,
+    "partial": 5,
+    "no": 25
+   },
+   "baseline": {
+    "prec10": 0.12,
+    "prec20": 0.11,
+    "missed": 0,
+    "secs": 2.6,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.18,
+    "prec20": 0.13,
+    "missed": 0,
+    "secs": 9.6,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 5,
+      "prec10": 0.4
+     }
+    ],
+    "fits": 5,
+    "weak": false,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "github:new-world-coder",
+      "partial",
+      "New World Coder",
+      "level unknown, not senior",
+      null,
+      ""
+     ],
+     [
+      "github:sahilchug",
+      "no",
+      "sahil",
+      "level unknown, not senior",
+      null,
+      ""
+     ],
+     [
+      "github:paulvalderama",
+      "no",
+      "Engineer in Bay Area",
+      "level mid, not senior",
+      null,
+      ""
+     ],
+     [
+      "github:Simret101",
+      "partial",
+      "Simret Belete",
+      "level mid, not senior",
+      null,
+      ""
+     ],
+     [
+      "github:jmtoung",
+      "no",
+      "Jonathan Toung",
+      "level mid, not senior",
+      null,
+      ""
+     ],
+     [
+      "github:ajponte",
+      "no",
+      "Alan Ponte",
+      "level mid, not senior",
+      null,
+      ""
+     ],
+     [
+      "github:cshaxu",
+      "partial",
+      "Neko",
+      "level unknown, not senior",
+      null,
+      ""
+     ],
+     [
+      "github:tinder-jhlee",
+      "no",
+      "Jaehoon Lee",
+      "level junior, not senior",
+      null,
+      ""
+     ],
+     [
+      "github:bohutang",
+      "no",
+      "Bohu",
+      "level unknown, not senior",
+      null,
+      ""
+     ],
+     [
+      "github:mezzode",
+      "no",
+      "ash",
+      "level unknown, not senior",
+      null,
+      ""
+     ]
+    ],
+    "merged": [
+     [
+      "github:new-world-coder",
+      "partial",
+      "New World Coder",
+      "level unknown, not senior",
+      "yes",
+      "matches all requirements"
+     ],
+     [
+      "github:sahilchug",
+      "no",
+      "sahil",
+      "level unknown, not senior",
+      "yes",
+      "matches all requirements"
+     ],
+     [
+      "github:Simret101",
+      "partial",
+      "Simret Belete",
+      "level mid, not senior",
+      "yes",
+      "matches all requirements"
+     ],
+     [
+      "github:ajponte",
+      "no",
+      "Alan Ponte",
+      "level mid, not senior",
+      "yes",
+      "matches all requirements"
+     ],
+     [
+      "github:kindjamestvl",
+      "yes",
+      "James Kind",
+      "senior backend engineer, bay area",
+      "yes",
+      "matches all requirements"
+     ],
+     [
+      "github:jmtoung",
+      "no",
+      "Jonathan Toung",
+      "level mid, not senior",
+      "partial",
+      "level mid"
+     ],
+     [
+      "github:davidrabinowitz",
+      "no",
+      "David Rabinowitz",
+      "level mid, not senior",
+      "partial",
+      "level mid"
+     ],
+     [
+      "github:priyapande",
+      "no",
+      "Priya Pande",
+      "level mid, not senior",
+      "partial",
+      "level mid"
+     ],
+     [
+      "github:daivikpurani",
+      "no",
+      "Daivik Purani",
+      "level mid, not senior",
+      "partial",
+      "level mid"
+     ],
+     [
+      "github:jwang1902",
+      "no",
+      "Claire Wang",
+      "level unknown, not senior",
+      "partial",
+      "level unknown"
+     ]
+    ]
+   },
+   "brief_full": "I'm hiring. Backend engineer. built a ledger, knows Go. bay_area",
+   "contract": {
+    "must": {
+     "metro": [
+      "bay_area"
+     ]
+    },
+    "prefer": {
+     "company_type": [
+      "other"
+     ],
+     "field": [
+      "software"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "role_family": [
+      "backend engineer"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    }
+   },
+   "verdicts": {
+    "github:ajponte": {
+     "fit": "no",
+     "why": "level mid, not senior"
+    },
+    "github:ariya": {
+     "fit": "no",
+     "why": "level unknown, not senior"
+    },
+    "github:cocomittens": {
+     "fit": "no",
+     "why": "level unknown, not senior"
+    },
+    "github:ChillOrb": {
+     "fit": "no",
+     "why": "level unknown, not senior"
+    },
+    "github:mezzode": {
+     "fit": "no",
+     "why": "level unknown, not senior"
+    },
+    "github:paulofranklins2": {
+     "fit": "no",
+     "why": "level mid, not senior"
+    },
+    "github:ericklarac": {
+     "fit": "no",
+     "why": "level unknown, not senior"
+    },
+    "github:jmtoung": {
+     "fit": "no",
+     "why": "level mid, not senior"
+    },
+    "github:priyapande": {
+     "fit": "no",
+     "why": "level mid, not senior"
+    },
+    "github:pandian4github": {
+     "fit": "partial",
+     "why": "level mid, not senior"
+    },
+    "github:criccomini": {
+     "fit": "no",
+     "why": "level unknown, not senior"
+    },
+    "github:cshaxu": {
+     "fit": "partial",
+     "why": "level unknown, not senior"
+    },
+    "github:new-world-coder": {
+     "fit": "partial",
+     "why": "level unknown, not senior"
+    },
+    "github:davidrabinowitz": {
+     "fit": "no",
+     "why": "level mid, not senior"
+    },
+    "github:kindjamestvl": {
+     "fit": "yes",
+     "why": "senior backend engineer, bay area"
+    },
+    "github:djatnieks": {
+     "fit": "no",
+     "why": "level mid, not senior"
+    },
+    "github:stantoncbradley": {
+     "fit": "no",
+     "why": "level senior, but not backend"
+    },
+    "github:bl3ck": {
+     "fit": "no",
+     "why": "level mid, not senior"
+    },
+    "github:bohutang": {
+     "fit": "no",
+     "why": "level unknown, not senior"
+    },
+    "github:tinder-jhlee": {
+     "fit": "no",
+     "why": "level junior, not senior"
+    },
+    "github:paulvalderama": {
+     "fit": "no",
+     "why": "level mid, not senior"
+    },
+    "github:jaker": {
+     "fit": "no",
+     "why": "level unknown, not senior"
+    },
+    "github:wangyipei01": {
+     "fit": "no",
+     "why": "level unknown, not senior"
+    },
+    "github:shiwen1209": {
+     "fit": "partial",
+     "why": "level mid, not senior"
+    },
+    "github:Simret101": {
+     "fit": "partial",
+     "why": "level mid, not senior"
+    },
+    "github:ariasadeghi530": {
+     "fit": "no",
+     "why": "level mid, not senior"
+    },
+    "github:sahilchug": {
+     "fit": "no",
+     "why": "level unknown, not senior"
+    },
+    "github:jwang1902": {
+     "fit": "no",
+     "why": "level unknown, not senior"
+    },
+    "github:raethira": {
+     "fit": "no",
+     "why": "level mid, not senior"
+    },
+    "github:Mylittleswift": {
+     "fit": "no",
+     "why": "not backend engineer"
+    },
+    "github:daivikpurani": {
+     "fit": "no",
+     "why": "level mid, not senior"
+    }
+   },
+   "union_rows": [
+    {
+     "id": "github:new-world-coder",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Senior Backend Engineer at kaleidospark \u2014 Building RiskLine \u2014 open-source AI Act risk classification engine (Go). \r\n\r\nBackend/cloud engineer: Go \u00b7 Python \u00b7 Java/S \u2014 Focus: engineering \u00b7 Skills: go, python, java \u00b7 bay area",
+     "facets": {
+      "company": [
+       "kaleidospark"
+      ],
+      "country": [
+       "us"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "link_linkedin": [
+       "https://www.linkedin.com/in/northstarcoach/"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "backend_engineer"
+      ],
+      "role_family": [
+       "backend engineer"
+      ],
+      "seniority": [
+       "senior"
+      ],
+      "skill": [
+       "go",
+       "java",
+       "python"
+      ],
+      "specialty": [
+       "backend",
+       "cloud",
+       "risk classification"
+      ],
+      "state": [
+       "ca"
+      ],
+      "title": [
+       "senior"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "github:sahilchug",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Backend Engineer \u2014 backend engineer with keen interest in databases and distributed systems \u2014 Focus: engineering \u00b7 Skills: databases, distributed systems \u00b7 bay area",
+     "facets": {
+      "country": [
+       "us"
+      ],
+      "evidence": [
+       "repos"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "link_github": [
+       "https://github.com/sahilchug"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "backend_engineer"
+      ],
+      "role_family": [
+       "backend engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "skill": [
+       "databases",
+       "distributed systems"
+      ],
+      "specialty": [
+       "databases",
+       "distributed systems"
+      ],
+      "state": [
+       "ca"
+      ],
+      "title": [
+       "backend engineer with keen interest in databases and distributed systems",
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ]
+     }
+    },
+    {
+     "id": "github:paulvalderama",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer \u2014 Full-Stack Software Engineer building Javascript applications with React/Redux/Vue front end and scalable Node/Express b \u2014 Focus: Frontend, engineering \u00b7 Skills: javascript, html \u00b7 bay area",
+     "facets": {
+      "country": [
+       "us"
+      ],
+      "evidence": [
+       "repos"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "mid"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "skill": [
+       "html",
+       "javascript"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ]
+     }
+    },
+    {
+     "id": "github:Simret101",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer at A2SV | Africa to Silicon Valley \u2014 Software Engineer | Backend Developer \u2014 Focus: Backend, engineering \u00b7 Skills: go, python, javascript, php, html \u00b7 bay area",
+     "facets": {
+      "company": [
+       "a2sv_africa_to_silicon_valley"
+      ],
+      "country": [
+       "us"
+      ],
+      "evidence": [
+       "repos"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "mid"
+      ],
+      "linkedin_headline": [
+       "back end developer eskalate"
+      ],
+      "link_linkedin": [
+       "https://www.linkedin.com/in/simret-belete-430ba6288/"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "skill": [
+       "go",
+       "html",
+       "javascript",
+       "php",
+       "python"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "github:jmtoung",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer \u2014 Focus: Backend, engineering \u00b7 Skills: javascript, html, typescript, perl, r, python \u00b7 bay area",
+     "facets": {
+      "country": [
+       "us"
+      ],
+      "evidence": [
+       "repos"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "mid"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "skill": [
+       "html",
+       "javascript",
+       "perl",
+       "python",
+       "r",
+       "typescript"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ]
+     }
+    },
+    {
+     "id": "github:ajponte",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer \u2014 Backend/infrastructure software engineer.\r\nPrimary language/frameworks are Python/Flask and Java/Spring \u2014 Focus: Backend, engineering \u00b7 Skills: python, javascript, go, typescript, shell \u00b7 bay area",
+     "facets": {
+      "country": [
+       "us"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "mid"
+      ],
+      "link_email": [
+       "mailto:alanjponte@gmail.com"
+      ],
+      "link_linkedin": [
+       "https://www.linkedin.com/in/alan-jason-ponte/"
+      ],
+      "link_x": [
+       "https://x.com/alanjponte"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "skill": [
+       "go",
+       "javascript",
+       "python",
+       "shell",
+       "typescript"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ]
+     }
+    },
+    {
+     "id": "github:cshaxu",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Senior Software Engineer \u2014 Build apps, systems and frameworks. \u2014 Focus: engineering \u00b7 bay area",
+     "facets": {
+      "country": [
+       "us"
+      ],
+      "evidence": [
+       "repos"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "seniority": [
+       "senior"
+      ],
+      "state": [
+       "ca"
+      ],
+      "title": [
+       "senior"
+      ],
+      "work_type": [
+       "ic"
+      ]
+     }
+    },
+    {
+     "id": "github:tinder-jhlee",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer at Tinder \u2014 Junior Backend Engineer from great company. \r\nI love coding. \u2014 Focus: Backend, engineering \u00b7 Skills: html \u00b7 bay area",
+     "facets": {
+      "company": [
+       "tinder"
+      ],
+      "country": [
+       "us"
+      ],
+      "evidence": [
+       "repos"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "junior"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "seniority": [
+       "junior"
+      ],
+      "skill": [
+       "html"
+      ],
+      "title": [
+       "junior"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "github:bohutang",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer at databendlabs \u2014 Creator @databendlabs/databend \u2014 Focus: engineering \u00b7 bay area",
+     "facets": {
+      "company": [
+       "databendlabs"
+      ],
+      "country": [
+       "us"
+      ],
+      "evidence": [
+       "repos"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "link_linkedin": [
+       "https://www.linkedin.com/in/bohutang/"
+      ],
+      "link_x": [
+       "https://x.com/bohutang"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "sector": [
+       "data_infra"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "state": [
+       "ca"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "github:mezzode",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer \u2014 Software Enginseer | Fan of types and well organised codebases. \u2014 Focus: engineering \u00b7 Skills: types, codebases \u00b7 bay area",
+     "facets": {
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "link_mastodon": [
+       "https://hachyderm.io/@mezzode"
+      ],
+      "link_website": [
+       "https://mezzode.dev"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "sector": [
+       "ai_ml2"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "skill": [
+       "codebases",
+       "types"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ]
+     }
+    },
+    {
+     "id": "github:jaker",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer \u2014 Focus: engineering \u00b7 bay area",
+     "facets": {
+      "country": [
+       "us"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "link_website": [
+       "https://jake.ro"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ]
+     }
+    },
+    {
+     "id": "github:wangyipei01",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer at google \u2014 Focus: engineering \u00b7 bay area",
+     "facets": {
+      "company": [
+       "google"
+      ],
+      "country": [
+       "us"
+      ],
+      "evidence": [
+       "repos"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "link_email": [
+       "wangyipei01@gmail.com"
+      ],
+      "link_github": [
+       "https://github.com/wangyipei01"
+      ],
+      "link_linkedin": [
+       "https://www.linkedin.com/in/yipei-wang-3b4b4a21/"
+      ],
+      "link_website": [
+       "https://www.linkedin.com/in/yipei-wang-3b4b4a21/"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "state": [
+       "ca"
+      ],
+      "title": [
+       "mid",
+       "software engineer"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "fortune500"
+      ]
+     }
+    },
+    {
+     "id": "github:Mylittleswift",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Mobile Engineer \u2014 Focus: engineering \u00b7 Skills: mobile \u00b7 bay area",
+     "facets": {
+      "country": [
+       "us"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "link_website": [
+       "https://mylittleswift.github.io"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "mobile_engineer"
+      ],
+      "role_family": [
+       "mobile engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "skill": [
+       "mobile"
+      ],
+      "specialty": [
+       "mobile"
+      ],
+      "state": [
+       "ca"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ]
+     }
+    },
+    {
+     "id": "github:cocomittens",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer \u2014 Cool software engineer/cat \u2014 Focus: engineering \u00b7 bay area",
+     "facets": {
+      "country": [
+       "us"
+      ],
+      "evidence": [
+       "repos"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "link_linkedin": [
+       "https://www.linkedin.com/in/corriestoddard/"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "state": [
+       "ca"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ]
+     }
+    },
+    {
+     "id": "github:davidrabinowitz",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer at Google \u2014 Software Engineer at Google Cloud \u2014 Focus: Backend, engineering \u00b7 Skills: java \u00b7 Sunnyvale, Ca",
+     "facets": {
+      "company": [
+       "google"
+      ],
+      "country": [
+       "us"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "mid"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "skill": [
+       "java"
+      ],
+      "title": [
+       "software engineer at google cloud"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "fortune500"
+      ]
+     }
+    },
+    {
+     "id": "github:priyapande",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer at Google \u2014 Software Developer. Learning as I go. \u2014 Focus: Backend, engineering \u00b7 Skills: python, java, javascript, css \u00b7 Bay Area",
+     "facets": {
+      "company": [
+       "google"
+      ],
+      "country": [
+       "us"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "mid"
+      ],
+      "link_email": [
+       "mailto:priyapande07@gmail.com"
+      ],
+      "link_linkedin": [
+       "https://www.linkedin.com/in/priyapande07/"
+      ],
+      "link_x": [
+       "https://twitter.com/priyapande17",
+       "https://x.com/priyapande17"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "skill": [
+       "css",
+       "java",
+       "javascript",
+       "python"
+      ],
+      "title": [
+       "software developer. learning as i go."
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "fortune500"
+      ]
+     }
+    },
+    {
+     "id": "github:criccomini",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer \u2014 Focus: engineering \u00b7 bay area",
+     "facets": {
+      "evidence": [
+       "blog_posts",
+       "repos"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "link_website": [
+       "https://cnr.sh"
+      ],
+      "link_x": [
+       "https://x.com/criccomini"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "sector": [
+       "data_infra"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "specialty": [
+       "database"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ]
+     }
+    },
+    {
+     "id": "github:ariya",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer \u2014 Focus: engineering \u00b7 bay area",
+     "facets": {
+      "evidence": [
+       "blog_posts"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "link_website": [
+       "https://ariya.io"
+      ],
+      "link_x": [
+       "https://x.com/ariyahidayat"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "specialty": [
+       "backend",
+       "open-source"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ]
+     }
+    },
+    {
+     "id": "github:daivikpurani",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer \u2014 Backend Software Engineer,\r\nSDE-2 @ MediBuddy,\r\nMSCS @ SFSU,\r\nBE in CS @ BITS Pilani \u2014 Focus: Backend, engineering \u00b7 Skills: python, java, javascript, cpp, swift, grading system \u00b7 bay area",
+     "facets": {
+      "country": [
+       "us"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "mid"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "skill": [
+       "cpp",
+       "database",
+       "grading_system",
+       "java",
+       "javascript",
+       "machine_learning",
+       "python",
+       "swift"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ]
+     }
+    },
+    {
+     "id": "github:kindjamestvl",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "senior Backend Engineer at truvalue labs \u2014 Focus: engineering \u00b7 bay area",
+     "facets": {
+      "company": [
+       "truvalue labs"
+      ],
+      "country": [
+       "us"
+      ],
+      "evidence": [
+       "repos"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "senior"
+      ],
+      "link_github": [
+       "https://github.com/kindjamestvl"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "backend_engineer",
+       "software_engineer"
+      ],
+      "role_family": [
+       "backend engineer"
+      ],
+      "seniority": [
+       "senior"
+      ],
+      "state": [
+       "ca"
+      ],
+      "title": [
+       "senior",
+       "senior backend engineer"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "github:jwang1902",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer \u2014 Focus: engineering \u00b7 bay area",
+     "facets": {
+      "country": [
+       "us"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "specialty": [
+       "backend"
+      ],
+      "state": [
+       "ca"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ]
+     }
+    },
+    {
+     "id": "github:ericklarac",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer \u2014 Focus: engineering \u00b7 bay area",
+     "facets": {
+      "country": [
+       "us"
+      ],
+      "evidence": [
+       "repos"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "link_linkedin": [
+       "https://www.linkedin.com/in/ericklarac"
+      ],
+      "link_website": [
+       "https://scholar.google.co.uk/citations?user=s53recyaaaaj&hl=en"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "specialty": [
+       "backend"
+      ],
+      "state": [
+       "ca"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ]
+     }
+    },
+    {
+     "id": "github:ChillOrb",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer \u2014 Focus: engineering \u00b7 Skills: backend \u00b7 bay area",
+     "facets": {
+      "country": [
+       "us"
+      ],
+      "evidence": [
+       "repos"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "link_linkedin": [
+       "https://www.linkedin.com/in/parashar1/"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "role_family": [
+       "software engineer"
+      ],
+      "sector": [
+       "observability"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "skill": [
+       "backend"
+      ],
+      "specialty": [
+       "backend"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ]
+     }
+    },
+    {
+     "id": "github:raethira",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer at University of Southern California (USC) \u2014 Software Engineer at Amazon \u2014 Focus: Backend, engineering \u00b7 Skills: python, java, html, javascript, tsql, cpp \u00b7 bay area",
+     "facets": {
+      "company": [
+       "of_southern_california_usc"
+      ],
+      "country": [
+       "us"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "mid"
+      ],
+      "link_email": [
+       "mailto:rahul.ethiraj@gmail.com"
+      ],
+      "link_website": [
+       "https://raethira.github.io"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "skill": [
+       "cpp",
+       "html",
+       "java",
+       "javascript",
+       "python",
+       "tsql"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "github:bl3ck",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer at aionics-io \u2014 Focus: Backend, engineering \u00b7 Skills: php, html, python, typescript, javascript, css \u00b7 bay area",
+     "facets": {
+      "company": [
+       "aionics-io"
+      ],
+      "country": [
+       "us"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "mid"
+      ],
+      "link_email": [
+       "mailto:eugenbleck@gmail.com"
+      ],
+      "link_linkedin": [
+       "https://www.linkedin.com/in/eugen-bleck"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "skill": [
+       "ai",
+       "css",
+       "html",
+       "javascript",
+       "php",
+       "python",
+       "shell",
+       "typescript"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "other"
+      ]
+     }
+    },
+    {
+     "id": "github:ariasadeghi530",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer at Intuit \u2014 Backend Software Engineer 2 @ Intuit \u2014 Focus: Backend, engineering \u00b7 Skills: javascript, html, java, css \u00b7 bay area",
+     "facets": {
+      "company": [
+       "intuit"
+      ],
+      "country": [
+       "us"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "mid"
+      ],
+      "link_website": [
+       "http://www.ariasadeghi.com/"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "skill": [
+       "css",
+       "html",
+       "java",
+       "javascript"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "fortune500"
+      ]
+     }
+    },
+    {
+     "id": "github:pandian4github",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer at rubrikinc \u2014 Software Engineer at Rubrik \u2014 Focus: Backend, engineering \u00b7 Skills: java, php, python, c, go, javascript \u00b7 bay area",
+     "facets": {
+      "company": [
+       "rubrikinc"
+      ],
+      "country": [
+       "us"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "mid"
+      ],
+      "link_email": [
+       "mailto:pandian4mail@gmail.com"
+      ],
+      "link_linkedin": [
+       "https://www.linkedin.com/in/pandianraju/"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "skill": [
+       "c",
+       "cpp",
+       "go",
+       "java",
+       "javascript",
+       "matlab",
+       "php",
+       "python"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "public"
+      ],
+      "company_stage": [
+       "public"
+      ]
+     }
+    },
+    {
+     "id": "github:paulofranklins2",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer \u2014 Computer Scientist, Software Engineer, and Electrical Engineer. Full-time Backend Software Engineer and an enthusiast of \u2014 Focus: Backend, engineering \u00b7 Skills: java \u00b7 bay area",
+     "facets": {
+      "country": [
+       "us"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "mid"
+      ],
+      "link_linkedin": [
+       "https://www.linkedin.com/in/paulofranklins/"
+      ],
+      "link_website": [
+       "https://pcunha.pages.dev/"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "skill": [
+       "java"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ]
+     }
+    },
+    {
+     "id": "github:shiwen1209",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer \u2014 I'm a backend engineer at Arize AI \u2014 Focus: Backend, engineering \u00b7 Skills: javascript, css, ruby \u00b7 bay area",
+     "facets": {
+      "country": [
+       "us"
+      ],
+      "evidence": [
+       "repos"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "mid"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "skill": [
+       "css",
+       "javascript",
+       "ruby"
+      ],
+      "title": [
+       "mid"
+      ],
+      "work_type": [
+       "ic"
+      ]
+     }
+    },
+    {
+     "id": "github:stantoncbradley",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Senior Software Engineer at Uber \u2014 Seasoned software engineer with broad range of experience including web, backend, and mobile development \u2014 Focus: Backend, engineering \u00b7 Skills: javascript, typescript, html, css, objc \u00b7 bay area",
+     "facets": {
+      "company": [
+       "uber"
+      ],
+      "country": [
+       "us"
+      ],
+      "evidence": [
+       "repos"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "senior"
+      ],
+      "link_email": [
+       "mailto:stantoncbradley@gmail.com"
+      ],
+      "link_website": [
+       "https://bradlabs.co"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "seniority": [
+       "senior"
+      ],
+      "skill": [
+       "css",
+       "html",
+       "javascript",
+       "objc",
+       "typescript"
+      ],
+      "title": [
+       "senior"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "fortune500"
+      ]
+     }
+    },
+    {
+     "id": "github:djatnieks",
+     "title": null,
+     "company": null,
+     "location": null,
+     "blurb": "Software Engineer at Ibm \u2014 Focus: Backend, engineering \u00b7 Silicon Valley",
+     "facets": {
+      "company": [
+       "ibm"
+      ],
+      "country": [
+       "us"
+      ],
+      "field": [
+       "software"
+      ],
+      "function": [
+       "engineering"
+      ],
+      "level": [
+       "mid"
+      ],
+      "link_email": [
+       "mailto:dan.jatnieks@ibm.com"
+      ],
+      "link_linkedin": [
+       "https://www.linkedin.com/in/danjatnieks/"
+      ],
+      "metro": [
+       "bay_area"
+      ],
+      "role": [
+       "software_engineer"
+      ],
+      "seniority": [
+       "mid"
+      ],
+      "title": [
+       "java developer"
+      ],
+      "work_type": [
+       "ic"
+      ],
+      "company_type": [
+       "fortune500"
+      ]
+     }
+    }
+   ],
+   "lift10": 0.06,
+   "added_secs": 7.0
+  }
+ ]
+}

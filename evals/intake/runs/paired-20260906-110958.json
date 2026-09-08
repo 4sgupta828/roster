@@ -1,0 +1,320 @@
+{
+ "base": "https://roster-api-production-3405.up.railway.app",
+ "secs": 61,
+ "summary": {
+  "n": 2,
+  "prec10": {
+   "baseline": 0.0,
+   "merged": 0.0
+  },
+  "prec20": {
+   "baseline": 0.0,
+   "merged": 0.0
+  },
+  "missed": {
+   "baseline": 0,
+   "merged": 0
+  },
+  "gate": {
+   "merged_ge_baseline_share": 1.0,
+   "worse_by_over_0_10": [],
+   "merged_missed_total": 0,
+   "added_p90_secs": 6.8,
+   "pass": false
+  }
+ },
+ "results": [
+  {
+   "id": "seeker_terse_description",
+   "kind": "job",
+   "brief": "I'm looking for my next role. software. Python, Go, Kubernetes. new_york, bay_area",
+   "union": 21,
+   "graded": 0,
+   "rates": {
+    "yes": 0,
+    "partial": 0,
+    "no": 0
+   },
+   "baseline": {
+    "prec10": 0.0,
+    "prec20": 0.0,
+    "missed": 0,
+    "secs": 3.3,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.0,
+    "prec20": 0.0,
+    "missed": 0,
+    "secs": 10.1,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 0,
+      "prec10": 0.0
+     }
+    ],
+    "fits": 0,
+    "weak": true,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "112756",
+      null,
+      "Forward Deployed Engineer"
+     ],
+     [
+      "192635",
+      null,
+      "Product Engineer, Applications Operation"
+     ],
+     [
+      "97233",
+      null,
+      "Software Engineer"
+     ],
+     [
+      "86759",
+      null,
+      "Forward Deployed Engineer"
+     ],
+     [
+      "101732",
+      null,
+      "Senior Software Engineer"
+     ],
+     [
+      "91412",
+      null,
+      "Staff Software Engineer"
+     ],
+     [
+      "292209",
+      null,
+      "Staff Software Engineer"
+     ],
+     [
+      "617667",
+      null,
+      "Senior Software Engineer"
+     ],
+     [
+      "121179",
+      null,
+      "Software Engineer III \u2014 Developer Portal"
+     ],
+     [
+      "172426",
+      null,
+      "IT Engineer"
+     ]
+    ],
+    "merged": [
+     [
+      "112756",
+      null,
+      "Forward Deployed Engineer"
+     ],
+     [
+      "192635",
+      null,
+      "Product Engineer, Applications Operation"
+     ],
+     [
+      "97233",
+      null,
+      "Software Engineer"
+     ],
+     [
+      "101732",
+      null,
+      "Senior Software Engineer"
+     ],
+     [
+      "86759",
+      null,
+      "Forward Deployed Engineer"
+     ],
+     [
+      "292209",
+      null,
+      "Staff Software Engineer"
+     ],
+     [
+      "121179",
+      null,
+      "Software Engineer III \u2014 Developer Portal"
+     ],
+     [
+      "91412",
+      null,
+      "Staff Software Engineer"
+     ],
+     [
+      "617667",
+      null,
+      "Senior Software Engineer"
+     ],
+     [
+      "101750",
+      null,
+      "Senior Staff Software Engineer"
+     ]
+    ]
+   },
+   "lift10": 0.0,
+   "added_secs": 6.8
+  },
+  {
+   "id": "hiring_field_vs_specialty",
+   "kind": "person",
+   "brief": "I'm hiring. Senior Engineering Manager, Marketing Engineering (CRM). 8+ years engineering, 3+ managing. Remote US",
+   "union": 20,
+   "graded": 0,
+   "rates": {
+    "yes": 0,
+    "partial": 0,
+    "no": 0
+   },
+   "baseline": {
+    "prec10": 0.0,
+    "prec20": 0.0,
+    "missed": 0,
+    "secs": 2.6,
+    "rows": 60
+   },
+   "merged": {
+    "prec10": 0.0,
+    "prec20": 0.0,
+    "missed": 0,
+    "secs": 10.1,
+    "rows": 60,
+    "recipes": [
+     {
+      "name": "strict",
+      "pool": 2001,
+      "evaluated": 60,
+      "head_fits": 0,
+      "prec10": 0.0
+     }
+    ],
+    "fits": 0,
+    "weak": true,
+    "judge_error": null
+   },
+   "top": {
+    "baseline": [
+     [
+      "github:rogercotrina",
+      null,
+      "Roger Cotrina"
+     ],
+     [
+      "theorg:ross-galbraith",
+      null,
+      "Ross Galbraith"
+     ],
+     [
+      "github:ccoenraets",
+      null,
+      "Christophe Coenraets"
+     ],
+     [
+      "github:Eutheran",
+      null,
+      "Eric"
+     ],
+     [
+      "theorg:aniket-nale",
+      null,
+      "Aniket Nale"
+     ],
+     [
+      "theorg:suresh-chilumuri",
+      null,
+      "Suresh Chilumuri"
+     ],
+     [
+      "theorg:brian-ryall",
+      null,
+      "Brian Ryall"
+     ],
+     [
+      "theorg:andrew-cooper",
+      null,
+      "Andrew Cooper"
+     ],
+     [
+      "theorg:tameem-anwar",
+      null,
+      "Tameem Anwar"
+     ],
+     [
+      "theorg:gary-huang",
+      null,
+      "Gary Huang"
+     ]
+    ],
+    "merged": [
+     [
+      "github:rogercotrina",
+      null,
+      "Roger Cotrina"
+     ],
+     [
+      "theorg:ross-galbraith",
+      null,
+      "Ross Galbraith"
+     ],
+     [
+      "github:ccoenraets",
+      null,
+      "Christophe Coenraets"
+     ],
+     [
+      "github:Eutheran",
+      null,
+      "Eric"
+     ],
+     [
+      "theorg:aniket-nale",
+      null,
+      "Aniket Nale"
+     ],
+     [
+      "theorg:suresh-chilumuri",
+      null,
+      "Suresh Chilumuri"
+     ],
+     [
+      "theorg:brian-ryall",
+      null,
+      "Brian Ryall"
+     ],
+     [
+      "theorg:andrew-cooper",
+      null,
+      "Andrew Cooper"
+     ],
+     [
+      "theorg:tameem-anwar",
+      null,
+      "Tameem Anwar"
+     ],
+     [
+      "theorg:gary-huang",
+      null,
+      "Gary Huang"
+     ]
+    ]
+   },
+   "lift10": 0.0,
+   "added_secs": 7.5
+  }
+ ]
+}

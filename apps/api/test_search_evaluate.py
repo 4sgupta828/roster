@@ -1,0 +1,247 @@
+"""/search/evaluate and /search/compile over the kernel's in-memory reference store (no DB, no model)."""
+from __future__ import annotations
+
+from fastapi.testclient import TestClient
+from roster_kernel.facets import UNKNOWN, InMemoryFacetStore
+from roster_vertical.facet_schema import FACET_SCHEMA
+
+from api.app import create_app
+
+ROWS = [
+    {"id": "j1", "kind": "job", "sim": 0.62, "company": "acme", "title": "Founding CTO", "url": "https://a/1", "source": "ashby",
+     "facets": {"level": ["leadership"], "field": ["software"], "function": ["executive"], "work_type": ["founder"], "company": ["acme"], "company_type": ["startup"], "work_mode": ["remote"]}},
+    {"id": "j2", "kind": "job", "sim": 0.60, "company": "sonar", "title": "Field CTO", "url": "https://a/2", "source": "lever",
+     "facets": {"level": ["leadership"], "field": ["sales"], "function": ["sales"], "work_type": ["ic"], "company": ["sonar"], "work_mode": ["remote"]}},
+    {"id": "j3", "kind": "job", "sim": 0.58, "company": "endurance", "title": "Director of Turbomachinery", "url": "https://a/3", "source": "ashby",
+     "facets": {"level": ["leadership"], "field": ["mechanical_civil_electrical"], "function": ["engineering"], "work_type": ["executive"], "company": ["endurance"], "comp": ["200k_300k"]}, "numeric": {"comp": 250000.0}},
+    {"id": "j4", "kind": "job", "sim": 0.57, "company": "sierra", "title": "Software Engineer", "url": "https://a/4", "source": "ashby",
+     "facets": {"field": ["software"], "function": ["engineering"], "work_type": ["ic"], "company": ["sierra"], "work_mode": ["hybrid"]}},
+]
+
+
+def _client():
+    app = create_app()
+    app.state.facet_store = InMemoryFacetStore(ROWS, FACET_SCHEMA)
+    return TestClient(app)
+
+
+def test_evaluate_returns_rows_counts_and_coverage_and_honours_musts():
+    c = _client()
+    r = c.post("/search/evaluate", json={"contract": {"kind": "job", "text": "founder cto", "must": {"level": ["leadership"]},
+                                                      "avoid": {"field": ["sales", "mechanical_civil_electrical"]}, "prefer": {"company_type": ["startup"]}}})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert [x["id"] for x in d["rows"]] == ["j1", "j2", "j3"]                          # j4 (unknown level) excluded by the must
+    assert d["rows"][0]["reasons"] and "startup" in " ".join(d["rows"][0]["reasons"])
+    assert d["counts"]["field"] == {"software": 1, "sales": 1, "mechanical_civil_electrical": 1}
+    assert d["counts"]["work_mode"] == {"remote": 2, UNKNOWN: 1} and d["counts"]["comp"] == {"200k_300k": 1, UNKNOWN: 2}
+    assert d["coverage"]["pool"] == 3 and d["contract"]["must"] == {"level": ["leadership"]}
+
+
+def test_evaluate_rejects_an_illegal_contract_with_a_clear_message():
+    c = _client()
+    r = c.post("/search/evaluate", json={"contract": {"kind": "job", "must": {"level": ["principal"]}}})
+    assert r.status_code == 400 and "principal" in r.json()["detail"]
+
+
+def test_rank_by_comp_puts_unknown_last_and_numeric_must_uses_the_number():
+    c = _client()
+    d = c.post("/search/evaluate", json={"contract": {"kind": "job", "text": "engineer", "rank_by": "comp"}}).json()
+    assert d["rows"][0]["id"] == "j3"
+    d2 = c.post("/search/evaluate", json={"contract": {"kind": "job", "text": "engineer", "must": {"comp": {"min": 200000}}}}).json()
+    assert [x["id"] for x in d2["rows"]] == ["j3"]
+
+
+def test_compile_endpoint_uses_the_model_and_validates(monkeypatch):
+    import api.app as appmod
+    app = create_app()
+    app.state.facet_store = InMemoryFacetStore(ROWS, FACET_SCHEMA)
+    # the engine's model call is injected through the app's _llm_json; patch the module-level fallback path via monkeypatching urllib
+    import api.facets_engine as eng
+    monkeypatch.setattr(eng, "compile_contract", lambda kind, text, schema, llm, **kw: eng.Contract(kind=kind, text=text, must={"level": ["leadership"]}, limit=kw.get("limit", 60)))
+    c = TestClient(app)
+    r = c.post("/search/compile", json={"kind": "job", "text": "founder cto"})
+    assert r.status_code == 200 and r.json()["contract"]["must"] == {"level": ["leadership"]}
+    r2 = c.post("/search/compile", json={"kind": "job", "text": "founder cto"})            # cached → same contract
+    assert r2.json() == r.json()
+
+
+PEOPLE = [
+    {"id": "p1", "kind": "person", "sim": 0.70, "name": "Ada", "facets": {"level": ["leadership"], "work_type": ["executive"], "field": ["software"], "metro": ["bay_area"], "country": ["us"]}},
+    {"id": "p2", "kind": "person", "sim": 0.66, "name": "Grace", "facets": {"level": ["senior"], "work_type": ["ic"], "field": ["software"], "metro": ["nyc"], "country": ["us"]}},
+    {"id": "p3", "kind": "person", "sim": 0.55, "name": "Linus", "facets": {"level": ["leadership"], "work_type": ["founder"], "field": ["software"], "country": ["fi"]}},
+]
+
+
+def test_people_evaluate_returns_card_shaped_rows_the_talent_surface_renders():
+    """kind=person rows come back in the people-card shape (entity_id, name, attributes, links) with the
+    evaluator's facets / match / reasons riding along — even with no people store to hydrate from."""
+    app = create_app()
+    app.state.facet_store = InMemoryFacetStore(ROWS + PEOPLE, FACET_SCHEMA)
+    c = TestClient(app)
+    r = c.post("/search/evaluate", json={"contract": {"kind": "person", "text": "cto", "must": {"level": ["leadership"]}, "prefer": {"country": ["us"]}}})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert [x["entity_id"] for x in d["rows"]] == ["p1", "p3"]
+    row = d["rows"][0]
+    assert row["name"] == "Ada" and row["match_pct"] and row["facets"]["level"] == ["leadership"]
+    assert isinstance(row.get("attributes"), list) and isinstance(row.get("links"), list)
+    assert d["counts"]["level"] == {"leadership": 2} and d["counts"]["work_type"] == {"executive": 1, "founder": 1}
+    assert d["labels"]["order"][0] == "field" and "years" in d["labels"]["keys"]
+    assert d["labels"]["keys"]["evidence"] == "Public evidence"
+
+
+def test_legacy_people_projection_endpoint_needs_the_admin_token(monkeypatch):
+    monkeypatch.setenv("ROSTER_ADMIN_TOKEN", "secret")
+    c = _client()
+    assert c.post("/admin/facets/project-people").status_code == 401
+
+
+def test_a_merged_contract_runs_the_ladder_grades_the_head_blind_and_keeps_the_rail_on_the_ratified_contract():
+    """Spec guided-intake §12 step 2 through the endpoint: merge.mode = merged → recipes fused, one judge call,
+    rows carry fit / found_by, counts stay the ratified contract's, the options ride back on the contract."""
+    app = create_app()
+    app.state.facet_store = InMemoryFacetStore(ROWS, FACET_SCHEMA)
+    calls = []
+    def fake_llm(system, user):
+        calls.append(user)
+        assert "WORDS: founder cto" in user and "REQUIRED: level: leadership" in user and "strict" not in user
+        out = []
+        for line in user.split("ROWS:", 1)[1].strip().splitlines():
+            bid = line.split("]")[0].strip("[")
+            out.append({"id": bid, "fit": "yes" if "Founding CTO" in line else ("no" if "Turbomachinery" in line else "partial"), "why": "read"})
+        return {"verdicts": out}
+    app.state.intake_llm = fake_llm
+    c = TestClient(app)
+    body = {"contract": {"kind": "job", "text": "founder cto", "must": {"level": ["leadership"], "skill": ["rust"]}, "user_keys": ["level"],
+                         "merge": {"mode": "merged", "off": []}}}
+    r = c.post("/search/evaluate", json=body)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    m = d["merge"]
+    assert [x["name"] for x in m["recipes"]][0] == "strict" and "relaxed:skill" in m["ladder"] and len(calls) == __import__("roster_vertical.intake", fromlist=["JUDGE_BATCHES"]).JUDGE_BATCHES   # the head is graded in concurrent batches
+    assert d["rows"][0]["id"] == "j1" and d["rows"][0]["fit"] == "yes" and d["rows"][-1]["fit"] == "no" and d["rows"][-1]["id"] == "j3"
+    assert d["contract"]["merge"] == {"mode": "merged", "off": []} and d["contract"]["user_keys"] == ["level"]
+    # switching a recipe off leaves it out of the merge but on the ladder
+    r2 = c.post("/search/evaluate", json={"contract": {**body["contract"], "merge": {"mode": "merged", "off": ["relaxed:skill"]}}})
+    m2 = r2.json()["merge"]
+    assert m2["off"] == ["relaxed:skill"] and all(x["name"] != "relaxed:skill" for x in m2["recipes"])
+
+
+def test_the_judge_endpoint_grades_normalized_rows_blind():
+    app = create_app()
+    seen = {}
+    def fake_llm(system, user):
+        seen["user"] = user
+        return {"verdicts": [{"id": bid, "fit": "yes", "why": "ok"} for bid in ("r1", "r2")] + [{"id": "r9", "fit": "yes"}]}
+    app.state.intake_llm = fake_llm
+    c = TestClient(app)
+    r = c.post("/search/judge", json={"kind": "person", "brief": "hire a cto", "rows": [{"entity_id": "p1", "blurb": "CTO at Acme — words", "facets": {"level": ["leadership"]}},
+                                                                                        {"id": "p2", "blurb": "Engineer", "facets": {"skill": ["go"]}, "name": "Someone"}]})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["graded"] == 2 and set(d["verdicts"]) == {"p1", "p2"} and d["verdicts"]["p1"]["fit"] == "yes"
+    assert "Someone" not in seen["user"] and "level leadership" in seen["user"]                      # names never reach the judge
+
+
+def test_ensure_schema_takes_no_lock_when_the_database_is_already_migrated():
+    """2026-09-07: a long analytical SELECT plus these no-op `ALTER TABLE … ADD COLUMN IF NOT EXISTS` statements stalled
+    the whole product — a queued ACCESS EXCLUSIVE lock blocks every later reader. A catalog check comes first."""
+    import asyncio
+
+    from api.facet_store import FacetSQLStore
+    from roster_vertical.facet_schema import FACET_SCHEMA
+    ran: list[str] = []
+
+    class Conn:
+        async def fetch(self, sql, *a):
+            if "information_schema.columns" in sql:
+                return [{"table_name": t, "column_name": c} for t, c in FacetSQLStore._DDL_COLUMNS]
+            return [{"indexname": i} for i in FacetSQLStore._DDL_INDEXES]
+        async def execute(self, sql, *a):
+            ran.append(sql)
+
+    class Pool:
+        def acquire(self):
+            class _Cm:
+                async def __aenter__(_s): return Conn()
+                async def __aexit__(_s, *a): return False
+            return _Cm()
+
+    async def getter(): return Pool()
+    store = FacetSQLStore(getter, FACET_SCHEMA)
+    asyncio.new_event_loop().run_until_complete(store.ensure_schema())
+    assert ran == [] and store._ready                       # nothing missing → no DDL, no lock
+
+
+def test_one_aggregator_cannot_fill_the_page_with_the_same_posting():
+    """jobgether reposts other companies' roles — 4.5k open postings, the largest single 'employer' in the corpus — and
+    returned the same title ten times in a row (prod, 2026-09-07)."""
+    from api.app import thin_repeats
+    rows = ([{"company": "jobgether", "title": "Backend Engineer, Core APIs", "id": i} for i in range(9)]
+            + [{"company": "acme", "title": "Backend Engineer", "id": 100}]
+            + [{"company": "Jobgether", "title": "backend engineer, core apis", "id": 200}])      # same, differently cased
+    out = thin_repeats(rows)
+    assert [r["id"] for r in out] == [0, 1, 100] and thin_repeats(rows, per_title=1)[0]["id"] == 0
+    assert thin_repeats([]) == [] and len(thin_repeats([{"company": "", "title": ""}] * 5)) == 5   # unnamed rows are never merged
+
+
+def test_auto_grouping_segments_the_set_enforces_the_shape_and_survives_a_dead_provider():
+    """docs/specs/result-grouping.md §4 — the model segments, code keeps single membership and a bounded shape, and a
+    provider outage falls back to the free token split rather than losing the feature."""
+    from api.app import create_app
+    rows = ([{"id": f"j{i}", "title": "Infrastructure Engineer", "skill": ["kubernetes"], "specialty": ["platform"]} for i in range(4)]
+            + [{"id": f"j{i}", "title": "ML Engineer", "skill": ["pytorch"], "specialty": ["applied ml"]} for i in range(4, 8)])
+    app = create_app()
+    calls = []
+
+    def fake(system, user):
+        calls.append(user)
+        assert "stripe" not in user                                   # the model never sees the employer
+        return {"groups": [{"name": "Infrastructure", "why": "platform work", "ids": [0, 1, 2, 3, 99]},
+                           {"name": "Applied ML", "ids": [3, 4, 5, 6]},        # 3 already taken → single membership
+                           {"name": "Solo", "ids": [7]}]}              # below min size → leftover
+    app.state.intake_llm = fake
+    c = TestClient(app)
+    d = c.post("/jobs/group", json={"rows": rows, "question": "engineer jobs"}).json()
+    assert d["source"] == "model" and [g["name"] for g in d["groups"]] == ["Infrastructure", "Applied ML"]
+    assert d["groups"][0]["ids"] == ["j0", "j1", "j2", "j3"] and d["groups"][1]["ids"] == ["j4", "j5", "j6"]
+    assert d["leftovers"] == ["j7"] and any("out-of-range" in n for n in d["notes"]) and len(calls) == 1
+
+    def dead(system, user):
+        raise RuntimeError("no model answered")
+    app.state.intake_llm = dead
+    d2 = c.post("/jobs/group", json={"rows": rows}).json()
+    assert d2["source"] == "fallback" and d2["groups"] and any("model unavailable" in n for n in d2["notes"])
+    assert sum(len(g["ids"]) for g in d2["groups"]) + len(d2["leftovers"]) == len(rows)
+    # too few rows is not an error, just nothing to group
+    assert c.post("/jobs/group", json={"rows": rows[:3]}).json()["source"] == "none"
+
+
+def test_the_group_menu_only_offers_dimensions_that_organise_these_rows():
+    """A grouping that would produce one giant bucket or a junk drawer is not offered at all."""
+    import os
+    os.environ["ROSTER_FACET_EVALUATOR"] = "1"
+    app = create_app()
+    app.state.facet_store = InMemoryFacetStore(ROWS, FACET_SCHEMA)
+    # reach the closure through a request: three companies, one level everywhere, half the rows without a work mode
+    rows = ([{"company": "acme", "title": "A", "location": "New York", "facets": {"level": ["senior"], "work_mode": ["remote"], "company_industry": ["fintech"]}}] * 7
+            + [{"company": "beta", "title": "B", "location": "Boston", "facets": {"level": ["senior"], "company_industry": ["healthtech"]}}] * 7
+            + [{"company": "gamma", "title": "C", "location": "Austin", "facets": {"level": ["senior"], "company_industry": ["gaming"]}}] * 6)
+    from roster_kernel.facets.grouping import eligible
+    assert eligible([r["company"] for r in rows]).ok                                   # 3 balanced companies → offered
+    assert not eligible([(r["facets"].get("level") or [""])[0] for r in rows]).ok      # one level everywhere → hidden
+    assert not eligible([(r["facets"].get("work_mode") or [""])[0] for r in rows]).ok  # 65 % not stated → hidden
+    assert eligible([(r["facets"].get("company_industry") or [""])[0] for r in rows]).ok
+
+
+def test_every_jobs_path_carries_its_grouping_menu():
+    """Regression (2026-09-07): the menu was attached at ONE return site, so the résumé path — the one a signed-in
+    seeker takes — lost grouping entirely, including the four dimensions that had always worked."""
+    import inspect
+
+    from api import app as appmod
+    src = inspect.getsource(appmod.create_app)
+    # the route wraps the implementation and fills the menu in for whatever path produced the answer
+    assert 'out["group_options"] = _group_options(out.get("jobs") or [])' in src
+    assert src.index("async def _jobs_impl") > src.index('@app.post("/jobs")')

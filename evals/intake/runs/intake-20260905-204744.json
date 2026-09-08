@@ -1,0 +1,79 @@
+{
+ "base": "https://roster-api-production-3405.up.railway.app",
+ "secs": 9,
+ "results": [
+  {
+   "id": "hiring_multi_select_musts",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:comp",
+    "key:company_type"
+   ],
+   "secs": 8.9,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "present",
+    "source": "described",
+    "chars": 113
+   },
+   "contract": {
+    "angles": [
+     "site reliability engineer",
+     "infrastructure engineer",
+     "devops engineer"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "staff_plus",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "field": [
+      "software"
+     ],
+     "metro": [
+      "new_york",
+      "seattle"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "prefer": {
+     "company_type": [
+      "other"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "role_family": [
+      "platform engineer"
+     ],
+     "skill": [
+      "go"
+     ],
+     "specialty": [
+      "kubernetes",
+      "observability"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm hiring. Staff platform engineer. Kubernetes, observability, Go. Hybrid in Seattle or New York"
+   },
+   "pool": 3183,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  }
+ ]
+}

@@ -219,6 +219,14 @@ def _facet_rows(fac: dict, profile: dict) -> list[tuple[str, str, str]]:
     return rows
 
 
+def _accepted_versions() -> list[str]:
+    """Stamps whose extractions are still valid: the current schema plus the compatible predecessors
+    (`roster_vertical.facet_schema`). Adding a VIA key changes the hash without invalidating a single
+    extracted row — without this, one such change would re-read the whole corpus."""
+    from roster_vertical.facet_schema import COMPATIBLE_EXTRACTION_VERSIONS, FACET_SCHEMA
+    return [FACET_SCHEMA.version(), *COMPATIBLE_EXTRACTION_VERSIONS]
+
+
 async def ensure_checkpoint(conn) -> None:
     await conn.execute(
         """CREATE TABLE IF NOT EXISTS rs_ingest_checkpoint (
@@ -260,6 +268,68 @@ async def upsert_person(conn, profile: dict, fac: dict, vec: str | None) -> None
                ON CONFLICT (entity_id) DO UPDATE SET embedding=EXCLUDED.embedding""", eid, vec)
 
 
+def _llm_json(system: str, user: str) -> dict:
+    """One strict-JSON model call (DeepSeek first, OpenAI on a provider error, cooldown after 402 / 401 —
+    `api.model_json`, shared with the API so a dead provider is handled in one place)."""
+    from api.model_json import llm_json
+    return llm_json(system, user, timeout=120)
+
+
+async def backfill_person_facets(conn, limit: int, *, live: bool, batch_size: int = 20) -> dict:
+    """SCHEMA-DRIVEN person facets (docs/specs/facet-contract-evaluator.md §3, step 4): the model reads the
+    profile text with the vocabulary supplied; the envelope lands on rs_entity.facet_env; rows are projected
+    into the facet read model. Priority: people on saved maps first, then newest. The old-vocabulary rows (role /
+    seniority / function …) stay for the old engine; the BRIDGED rows (provenance `legacy`, facet_legacy.py) are
+    replaced by this extraction in full."""
+    from roster_vertical.facet_schema import FACET_SCHEMA
+    from api.facets_engine import extract_envelopes
+    from api.facet_store import FacetSQLStore
+    ver = FACET_SCHEMA.version()
+    await conn.execute("ALTER TABLE rs_entity ADD COLUMN IF NOT EXISTS facet_env jsonb")
+    rows = await conn.fetch("""SELECT e.entity_id, e.name, e.facets, e.retrieved_at,
+                                      (SELECT string_agg(f.facet_key || ': ' || f.display_value, '; ') FROM roster_entity_facet f
+                                        WHERE f.entity_id = e.entity_id AND f.facet_key IN ('title','company','metro','country','role','function','skill')) AS legacy,   -- never the old extractor's 'seniority' (its 'mid' was a default, and the model echoed it)
+                                      EXISTS (SELECT 1 FROM rs_map m, jsonb_array_elements(m.rows) r WHERE r->>'entity_id' = e.entity_id) AS on_map
+                               FROM rs_entity e WHERE e.kind = 'person' AND e.status = 'active'
+                                 AND (e.facet_env IS NULL OR NOT (e.facet_env->>'schema_version' = ANY($2::text[])))
+                               ORDER BY on_map DESC, e.retrieved_at DESC NULLS LAST LIMIT $1""", int(limit), _accepted_versions())
+    st = {"rows": len(rows), "written": 0, "calls": 0, "failed_batches": 0, "schema_version": ver}
+    if not live:
+        return st
+
+    class _One:
+        def acquire(self):
+            class _Cm:
+                async def __aenter__(_s): return conn
+                async def __aexit__(_s, *a): return False
+            return _Cm()
+
+    async def _getter():
+        return _One()
+    store = FacetSQLStore(_getter, FACET_SCHEMA); store._ready = True
+    for i in range(0, len(rows), batch_size):
+        chunk = [dict(r) for r in rows[i:i + batch_size]]
+        items = []
+        for r in chunk:
+            snap = r["facets"]; snap = json.loads(snap) if isinstance(snap, str) else (snap or {})
+            items.append({"name": r["name"] or "", "text": " | ".join(x for x in [str(snap.get("bio") or ""), "company: " + str(snap.get("company") or ""),
+                                                                                    "location: " + str(snap.get("location") or ""), str(r["legacy"] or "")] if x)[:1500]})
+        envs = extract_envelopes("person", items, FACET_SCHEMA, _llm_json, provenance="profile"); st["calls"] += 1
+        if not envs:
+            st["failed_batches"] += 1; continue
+        for r, env in zip(chunk, envs):
+            async with conn.transaction():
+                await conn.execute("UPDATE rs_entity SET facet_env = $2::jsonb WHERE entity_id = $1", r["entity_id"], json.dumps(env))
+                await store.project("person", r["entity_id"], env)
+                # the real extraction supersedes the WHOLE legacy bridge for this person: a key the model left
+                # unknown stays unknown (spec §2.1), never the bridged guess. Derived rows (evidence) stay.
+                await conn.execute("DELETE FROM roster_entity_facet WHERE entity_id = $1 AND provenance = 'legacy'", r["entity_id"])
+            st["written"] += 1
+        if (i // batch_size) % 20 == 19:
+            print(f"  person facets: {st['written']}/{len(rows)}", flush=True)
+    return st
+
+
 async def backfill_embeddings(conn, limit: int) -> tuple[int, int]:
     """Embed people who have NO rs_person_vec row (embed failed at ingest, or never ran) so they become
     visible to semantic search. Blurb is rebuilt from stored facets — no GitHub/LLM calls, embeddings
@@ -299,6 +369,10 @@ async def main() -> None:
     ap.add_argument("--limit", type=int, default=0, help="max PEOPLE to process this run (0 = all in the windows)")
     ap.add_argument("--per-window", type=int, default=1000, help="max logins pulled per search window (cap 1000)")
     ap.add_argument("--refresh", action="store_true")
+    ap.add_argument("--facets", type=int, default=0,
+                    help="FACETS mode (spec step 4, GATED spend): give up to N people without schema facets their model facets "
+                         "(field / function / specialty / level / work_type / skills / years / place) from the profile text, "
+                         "and project them into the facet read model; ~20 people per call")
     ap.add_argument("--backfill", type=int, default=0,
                     help="embed N people who have no vector yet (no GitHub/LLM; embeddings only) and exit")
     args = ap.parse_args()
@@ -311,6 +385,15 @@ async def main() -> None:
 
     import asyncpg
     # BACKFILL mode: embeddings only, no GitHub — safe to run without a token.
+    if args.facets:
+        conn = await asyncpg.connect(dsn)
+        try:
+            await ensure_checkpoint(conn)
+            st = await backfill_person_facets(conn, args.facets, live=live)
+        finally:
+            await conn.close()
+        print(f"person facets: {st}{' (dry — nothing written)' if not live else ''} (~${st.get('calls', 0) * 0.0006:.3f} model calls)")
+        return
     if args.backfill:
         conn = await asyncpg.connect(dsn)
         try:

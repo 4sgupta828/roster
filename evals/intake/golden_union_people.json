@@ -1,0 +1,860 @@
+{
+ "scenario": "hiring_field_vs_specialty",
+ "kind": "person",
+ "brief": "I'm hiring. Senior Engineering Manager, Marketing Engineering (CRM). 8+ years engineering, 3+ managing. Remote US",
+ "contract": {
+  "must": {
+   "country": [
+    "us"
+   ]
+  },
+  "prefer": {
+   "field": [
+    "software"
+   ],
+   "function": [
+    "engineering"
+   ],
+   "work_type": [
+    "manager"
+   ]
+  },
+  "center": {
+   "key": "level",
+   "value": "senior",
+   "span": 1
+  }
+ },
+ "confirmed": false,
+ "agreement_baseline": null,
+ "note": "PROPOSED labels come from the eval judge; a person confirms or edits `label` per row, then sets confirmed=true. Add adversarial rows by hand (wrong company, wrong level, adjacent specialty, stale role, keyword-only) with label 'no'.",
+ "rows": [
+  {
+   "id": "github:rogercotrina",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "Engineering Manager Engineering Leader \u2014 Software engineering leader \u2014 Focus: engineering \u00b7 austin",
+   "facets": {
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "leadership"
+    ],
+    "link_website": [
+     "https://rogercotrina.com"
+    ],
+    "link_x": [
+     "https://x.com/rogercotrinaj"
+    ],
+    "metro": [
+     "austin"
+    ],
+    "role": [
+     "engineering_leader"
+    ],
+    "role_family": [
+     "engineering leader"
+    ],
+    "seniority": [
+     "engineering_manager"
+    ],
+    "specialty": [
+     "software engineering leadership"
+    ],
+    "state": [
+     "tx"
+    ],
+    "title": [
+     "engineering_manager"
+    ],
+    "work_type": [
+     "manager"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "location not in US"
+  },
+  {
+   "id": "github:ccoenraets",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "software_engineer at salesforce.com \u2014 Focus: engineering \u00b7 boston",
+   "facets": {
+    "company": [
+     "salesforce.com"
+    ],
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "link_email": [
+     "ccoenraets@gmail.com"
+    ],
+    "link_github": [
+     "https://github.com/ccoenraets"
+    ],
+    "link_website": [
+     "http://coenraets.org"
+    ],
+    "metro": [
+     "boston"
+    ],
+    "role": [
+     "software_engineer"
+    ],
+    "role_family": [
+     "software engineer"
+    ],
+    "title": [
+     "christophe coenraets"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "ic role, not manager"
+  },
+  {
+   "id": "github:Eutheran",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "At cint \u2014 Focus: engineering \u00b7 new york",
+   "facets": {
+    "company": [
+     "cint"
+    ],
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "leadership"
+    ],
+    "link_email": [
+     "kreitere@gmail.com"
+    ],
+    "link_github": [
+     "https://github.com/eutheran"
+    ],
+    "link_website": [
+     "https://linkedin.com/in/eric-kreiter"
+    ],
+    "link_x": [
+     "eric_kreiter"
+    ],
+    "metro": [
+     "new_york"
+    ],
+    "role_family": [
+     "engineering manager"
+    ],
+    "state": [
+     "ny"
+    ],
+    "title": [
+     "engineering manager"
+    ],
+    "work_type": [
+     "manager"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "location not in US"
+  },
+  {
+   "id": "theorg:aniket-nale",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "At Eaton \u2014 Focus: Engineering",
+   "facets": {
+    "company": [
+     "eaton"
+    ],
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "mid"
+    ],
+    "seniority": [
+     "mid"
+    ],
+    "title": [
+     "lead engineer"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "level not senior"
+  },
+  {
+   "id": "theorg:suresh-chilumuri",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "At Aptiv \u2014 Focus: Engineering",
+   "facets": {
+    "company": [
+     "aptiv"
+    ],
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "mid"
+    ],
+    "seniority": [
+     "mid"
+    ],
+    "title": [
+     "senior technical lead"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "level not senior"
+  },
+  {
+   "id": "theorg:lakshmanan-m",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "At Dell \u2014 Senior Principal Engineer \u2014 Focus: Engineering",
+   "facets": {
+    "company": [
+     "dell"
+    ],
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "mid"
+    ],
+    "seniority": [
+     "mid"
+    ],
+    "title": [
+     "senior principal engineer"
+    ],
+    "company_type": [
+     "fortune500"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "level not senior"
+  },
+  {
+   "id": "github:farazkamal",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "Engineering Manager Engineering Lead at microsoft \u2014 Senior Software Engineering Lead \u2014 Focus: engineering \u00b7 seattle",
+   "facets": {
+    "company": [
+     "microsoft"
+    ],
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "senior"
+    ],
+    "link_website": [
+     "https://www.jstoolset.com"
+    ],
+    "metro": [
+     "seattle"
+    ],
+    "role": [
+     "engineering_lead"
+    ],
+    "role_family": [
+     "engineering lead"
+    ],
+    "seniority": [
+     "engineering_manager"
+    ],
+    "state": [
+     "wa"
+    ],
+    "title": [
+     "engineering_manager"
+    ],
+    "work_type": [
+     "manager"
+    ],
+    "company_type": [
+     "fortune500"
+    ]
+   },
+   "label": "yes",
+   "proposed_why": "meets all requirements"
+  },
+  {
+   "id": "theorg:narasingha-padhi",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "At Target \u2014 Focus: Engineering",
+   "facets": {
+    "company": [
+     "target"
+    ],
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "mid"
+    ],
+    "seniority": [
+     "mid"
+    ],
+    "title": [
+     "lead engineer"
+    ],
+    "company_type": [
+     "fortune500"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "level not senior"
+  },
+  {
+   "id": "theorg:brian-ryall",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "At leidos \u2014 Focus: engineering",
+   "facets": {
+    "company": [
+     "leidos"
+    ],
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "senior"
+    ],
+    "role_family": [
+     "software engineer"
+    ],
+    "seniority": [
+     "mid"
+    ],
+    "title": [
+     "senior software engineer"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "ic role, not manager"
+  },
+  {
+   "id": "theorg:andrew-cooper",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "At Genesys \u2014 Team Lead / Senior Software Engineer \u2014 Focus: Engineering",
+   "facets": {
+    "company": [
+     "genesys"
+    ],
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "mid"
+    ],
+    "seniority": [
+     "mid"
+    ],
+    "title": [
+     "team lead / senior software engineer"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "level not senior"
+  },
+  {
+   "id": "theorg:tameem-anwar",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "At Confluent \u2014 Senior Engineering Manager \u2014 Focus: Engineering",
+   "facets": {
+    "company": [
+     "confluent"
+    ],
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "mid"
+    ],
+    "seniority": [
+     "mid"
+    ],
+    "title": [
+     "senior engineering manager"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "yes",
+   "proposed_why": "meets all requirements"
+  },
+  {
+   "id": "theorg:gary-huang",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "At Systems Control \u2014 Senior Substation Engineering Lead \u2014 Focus: Engineering",
+   "facets": {
+    "company": [
+     "systems_control"
+    ],
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "mid"
+    ],
+    "seniority": [
+     "mid"
+    ],
+    "title": [
+     "senior substation engineering lead"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "level not senior"
+  },
+  {
+   "id": "theorg:corey-runsat",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "At Systems Control \u2014 Focus: Engineering",
+   "facets": {
+    "company": [
+     "systems_control"
+    ],
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "mid"
+    ],
+    "seniority": [
+     "mid"
+    ],
+    "title": [
+     "engineering group lead"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "level not senior"
+  },
+  {
+   "id": "github:chrispine",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "Engineering Manager engineering_manager \u2014 Author of Learn to Program, Sr Engineering Manager \u2014 Focus: engineering \u00b7 Skills: ruby, programming, teaching \u00b7 portland",
+   "facets": {
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "senior"
+    ],
+    "linkedin_headline": [
+     "sr engineering manager"
+    ],
+    "link_email": [
+     "chris@pine.fm"
+    ],
+    "link_github": [
+     "https://github.com/chrispine"
+    ],
+    "link_linkedin": [
+     "https://www.linkedin.com/in/chris-pine-4b188272"
+    ],
+    "metro": [
+     "portland"
+    ],
+    "role": [
+     "engineering_manager"
+    ],
+    "role_family": [
+     "engineering manager"
+    ],
+    "seniority": [
+     "engineering_manager",
+     "senior"
+    ],
+    "skill": [
+     "programming",
+     "ruby",
+     "teaching"
+    ],
+    "title": [
+     "author of learn to program, sr engineering manager",
+     "engineering_manager"
+    ],
+    "work_type": [
+     "manager"
+    ]
+   },
+   "label": "partial",
+   "proposed_why": "location not specified"
+  },
+  {
+   "id": "theorg:junru-feng",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "At Salesforce \u2014 Focus: Engineering",
+   "facets": {
+    "company": [
+     "salesforce"
+    ],
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "mid"
+    ],
+    "seniority": [
+     "mid"
+    ],
+    "title": [
+     "lead software engineer"
+    ],
+    "company_type": [
+     "fortune500"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "level not senior"
+  },
+  {
+   "id": "theorg:rainie-li",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "At Pinterest \u2014 Senior Engineering Manager \u2014 Focus: Engineering",
+   "facets": {
+    "company": [
+     "pinterest"
+    ],
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "mid"
+    ],
+    "seniority": [
+     "mid"
+    ],
+    "title": [
+     "senior engineering manager"
+    ],
+    "company_type": [
+     "fortune500"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "level not senior"
+  },
+  {
+   "id": "theorg:bhagyesh-b",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "At Early Warning \u2014 Team Lead, Software Engineering \u2014 Focus: Engineering",
+   "facets": {
+    "company": [
+     "early_warning"
+    ],
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "mid"
+    ],
+    "seniority": [
+     "mid"
+    ],
+    "title": [
+     "team lead, software engineering"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "level not senior"
+  },
+  {
+   "id": "github:kmekala",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "Engineering Manager Test Architect \u2014 Senior Engineering Manager/Test Architect \u2014 Focus: engineering \u00b7 boston",
+   "facets": {
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "senior"
+    ],
+    "link_linkedin": [
+     "https://www.linkedin.com/in/kalyanmekala"
+    ],
+    "metro": [
+     "boston"
+    ],
+    "role": [
+     "test_architect"
+    ],
+    "role_family": [
+     "test architect"
+    ],
+    "seniority": [
+     "engineering_manager"
+    ],
+    "specialty": [
+     "infrastructure"
+    ],
+    "title": [
+     "engineering_manager"
+    ],
+    "work_type": [
+     "manager"
+    ]
+   },
+   "label": "yes",
+   "proposed_why": "meets all requirements"
+  },
+  {
+   "id": "theorg:camil-jreige",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "Senior Manager at mathworks \u2014 Senior Manager, Software Engineering in Test \u2014 Focus: engineering",
+   "facets": {
+    "company": [
+     "mathworks"
+    ],
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "senior"
+    ],
+    "role_family": [
+     "senior manager, software engineering in test"
+    ],
+    "seniority": [
+     "senior_manager"
+    ],
+    "title": [
+     "senior manager, software engineering in test"
+    ],
+    "work_type": [
+     "manager"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "partial",
+   "proposed_why": "location not specified"
+  },
+  {
+   "id": "theorg:steven-pan",
+   "title": null,
+   "company": null,
+   "location": null,
+   "blurb": "At prudential financial \u2014 Focus: engineering",
+   "facets": {
+    "company": [
+     "prudential financial"
+    ],
+    "country": [
+     "us"
+    ],
+    "field": [
+     "software"
+    ],
+    "function": [
+     "engineering"
+    ],
+    "level": [
+     "senior"
+    ],
+    "role_family": [
+     "software engineer"
+    ],
+    "seniority": [
+     "mid"
+    ],
+    "title": [
+     "senior software engineer"
+    ],
+    "work_type": [
+     "ic"
+    ],
+    "company_type": [
+     "other"
+    ]
+   },
+   "label": "no",
+   "proposed_why": "ic role, not manager"
+  }
+ ]
+}

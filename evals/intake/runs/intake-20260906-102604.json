@@ -1,0 +1,141 @@
+{
+ "base": "https://roster-api-production-3405.up.railway.app",
+ "secs": 23,
+ "results": [
+  {
+   "id": "seeker_ambiguous_title_list",
+   "ok": true,
+   "failures": [],
+   "notes": [],
+   "asked": [
+    "item:comp",
+    "key:metro"
+   ],
+   "secs": 9.2,
+   "direction": "job",
+   "artifact": {
+    "kind": "profile",
+    "status": "present",
+    "source": "described",
+    "chars": 159
+   },
+   "contract": {
+    "angles": [
+     "ml infrastructure lead",
+     "head of machine learning infrastructure",
+     "ml infrastructure manager",
+     "director of ml infrastructure"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "leadership",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "metro": [
+      "new_york"
+     ]
+    },
+    "prefer": {
+     "field": [
+      "data_ml"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "level": [
+      "leadership"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "Founder CTO or VP / Director Engineering ML Infra, Distributed Systems. data / ML. Kubernetes, Ray, feature stores, LLM serving. San Francisco"
+   },
+   "pool": 10235,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  },
+  {
+   "id": "hiring_place_or_mode",
+   "ok": false,
+   "failures": [
+    "no 'place_or_mode' note on the ready card (['readings'])"
+   ],
+   "notes": [],
+   "asked": [
+    "item:level",
+    "item:responsibilities",
+    "key:company_type"
+   ],
+   "secs": 13.6,
+   "direction": "candidate",
+   "artifact": {
+    "kind": "jd",
+    "status": "present",
+    "source": "pasted",
+    "chars": 210
+   },
+   "contract": {
+    "angles": [
+     "senior software engineer, payments",
+     "senior backend developer, payments",
+     "senior engineer, payments systems"
+    ],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "country": [
+      "us"
+     ],
+     "field": [
+      "software"
+     ]
+    },
+    "prefer": {
+     "company_type": [
+      "other"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "role_family": [
+      "backend engineer"
+     ],
+     "specialty": [
+      "ledger systems",
+      "payments"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm hiring. Senior Backend Engineer, Payments. built a ledger or payments system in production; Go or Python; 5+ years. Remote US or Seattle"
+   },
+   "pool": 52610,
+   "handoff_rows": 60,
+   "draft_title": null,
+   "draft_peers": []
+  }
+ ]
+}

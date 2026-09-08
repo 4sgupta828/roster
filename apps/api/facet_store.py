@@ -1,0 +1,494 @@
+"""The Postgres facet STORE adapter (docs/specs/facet-contract-evaluator.md §1, §2.2, §5) — implements the
+kernel's FacetStore protocol over the facet read model (`roster_entity_facet`, now for every entity kind) and
+the entity tables (`rs_job`, `rs_entity` + `rs_person_vec`). Musts are applied IN SQL on every leg; counts are a
+GROUP BY over the must-filtered slice; `project` is the ONLY writer of facet rows from an extraction envelope.
+
+Semantics are the kernel's (`matches_must` / `count_rows`); the parity test runs both over the same data."""
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from roster_kernel.facets import UNKNOWN, FacetSchema, FacetType
+
+_DDL = (
+    "ALTER TABLE roster_entity_facet ADD COLUMN IF NOT EXISTS entity_kind text NOT NULL DEFAULT 'person'",
+    "ALTER TABLE roster_entity_facet ADD COLUMN IF NOT EXISTS provenance text NOT NULL DEFAULT ''",
+    "ALTER TABLE roster_entity_facet ADD COLUMN IF NOT EXISTS schema_version text NOT NULL DEFAULT ''",
+    "ALTER TABLE roster_entity_facet ADD COLUMN IF NOT EXISTS numeric_value double precision",
+    "CREATE INDEX IF NOT EXISTS ix_roster_facet_kind_kv ON roster_entity_facet (tenant_id, entity_kind, facet_key, facet_value_norm)",
+    "CREATE INDEX IF NOT EXISTS ix_roster_facet_entity ON roster_entity_facet (entity_id, facet_key)",
+    "ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS facets_projected text",
+    # the must clauses correlate on ('job:' || j.id::text); without this expression index Postgres nested-loops
+    # every open job against the facet rows (prod 2026-09-05: 72M row comparisons, 30 s per counts call)
+    "CREATE INDEX IF NOT EXISTS ix_rs_job_facet_eid ON rs_job ((('job:' || id::text)))",
+)
+
+_JOB_COLS = "j.id, j.company, j.title, j.location, j.department, j.url, j.source, j.skills, j.posted_at, j.updated_at"
+
+
+_CTRL = __import__("re").compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _clean(v) -> str:
+    return _CTRL.sub("", str(v if v is not None else ""))
+
+
+def job_entity_id(job_id: int | str) -> str:
+    return f"job:{job_id}"
+
+
+def company_entity_id(slug: str) -> str:
+    return f"company:{(slug or '').strip().lower().replace(' ', '_')}"
+
+
+def via_target_key(key: str, via: str) -> str:
+    """Convention: a via-key `company_type` reads the related company's `type`; `company_stage` → `stage`."""
+    return key[len(via) + 1:] if key.startswith(via + "_") else key
+
+
+def closed_vocab_pairs(schema: FacetSchema, kind: str) -> tuple[list[str], list[str], list[str]]:
+    """(open_keys, closed_keys, closed_values) for the kind's navigable own keys: a closed key (categorical /
+    ordinal vocabulary, numeric bands) only ever counts or attaches values the schema names — rows an older
+    vocabulary wrote under the same key name are invisible to the read model, never a chip."""
+    open_keys, ck, cv = [], [], []
+    for k in schema.for_kind(kind):
+        if k.via:
+            continue
+        vals = tuple(k.values) if k.values else tuple(b[0] for b in k.bands) if k.bands else ()
+        if vals:
+            for v in vals:
+                ck.append(k.key); cv.append(v)
+        else:
+            open_keys.append(k.key)
+    return open_keys, ck, cv
+
+
+class FacetSQLStore:
+    def __init__(self, pool_getter, schema: FacetSchema, *, tenant_id: str = "demo", embed=None, baseline=None):
+        self._pool_getter = pool_getter
+        self.schema = schema
+        self.tenant = tenant_id
+        self._embed = embed              # text → pgvector literal (app-supplied; None → no semantic leg)
+        self._baseline = baseline        # async (qvec) → float | None  (noise floor)
+        self._ready = False
+
+    async def _conn(self):
+        return await self._pool_getter()
+
+    # every column / index the DDL creates, so a started-up database is recognised without touching a lock
+    _DDL_COLUMNS = (("roster_entity_facet", "entity_kind"), ("roster_entity_facet", "provenance"),
+                    ("roster_entity_facet", "schema_version"), ("roster_entity_facet", "numeric_value"),
+                    ("rs_job", "facets_projected"))
+    _DDL_INDEXES = ("ix_roster_facet_kind_kv", "ix_roster_facet_entity", "ix_rs_job_facet_eid")
+
+    async def ensure_schema(self) -> None:
+        """Idempotent DDL — but only when something is actually missing. `ALTER TABLE … ADD COLUMN IF NOT EXISTS` still
+        takes an ACCESS EXCLUSIVE lock, and a queued exclusive lock blocks every later reader of that table: on
+        2026-09-07 one long analytical SELECT plus these no-op ALTERs stalled the whole product. A catalog check first
+        costs one cheap query and takes no lock at all."""
+        if self._ready:
+            return
+        pool = await self._conn()
+        async with pool.acquire() as conn:
+            have_cols = {(r["table_name"], r["column_name"]) for r in await conn.fetch(
+                "SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ANY($1::text[])",
+                sorted({t for t, _ in self._DDL_COLUMNS}))}
+            have_idx = {r["indexname"] for r in await conn.fetch(
+                "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1::text[])", list(self._DDL_INDEXES))}
+            if all(c in have_cols for c in self._DDL_COLUMNS) and all(i in have_idx for i in self._DDL_INDEXES):
+                self._ready = True
+                return
+            for ddl in _DDL:
+                await conn.execute(ddl)
+        self._ready = True
+
+    # ---------------- musts → SQL ----------------
+    def _must_sql(self, ent: str, must: dict, args: list) -> list[str]:
+        """One EXISTS per must key over the facet rows of entity `ent` (a SQL expression yielding the
+        entity_id). Within a key OR (= ANY), across keys AND (one clause each). Unknown never matches
+        because a missing row cannot satisfy EXISTS. Via keys go through the company relation."""
+        clauses = []
+        for key, want in (must or {}).items():
+            k = self.schema.key(key)
+            if k is None:
+                clauses.append("FALSE"); continue
+            args.append(self.tenant); ti = len(args)
+            if k.via:
+                tkey = via_target_key(key, k.via)
+                args.append(k.via); vi = len(args)
+                args.append(tkey); tk = len(args)
+                args.append([str(x) for x in (want or [])] if not isinstance(want, dict) else []); vv = len(args)
+                clauses.append(f"""EXISTS (SELECT 1 FROM roster_entity_facet r JOIN roster_entity_facet c
+                                    ON c.tenant_id = r.tenant_id AND c.entity_kind = 'company' AND c.entity_id = 'company:' || r.facet_value_norm AND c.facet_key = ${tk}
+                                  WHERE r.tenant_id = ${ti} AND r.entity_id = {ent} AND r.facet_key = ${vi} AND c.facet_value_norm = ANY(${vv}))""")
+                continue
+            args.append(key); ki = len(args)
+            if isinstance(want, dict):
+                lo, hi = want.get("min"), want.get("max")
+                conds = []
+                if lo is not None:
+                    args.append(float(lo)); conds.append(f"f.numeric_value >= ${len(args)}")
+                if hi is not None:
+                    args.append(float(hi)); conds.append(f"f.numeric_value <= ${len(args)}")
+                extra = (" AND " + " AND ".join(conds)) if conds else ""
+                clauses.append(f"EXISTS (SELECT 1 FROM roster_entity_facet f WHERE f.tenant_id = ${ti} AND f.entity_id = {ent} AND f.facet_key = ${ki} AND f.numeric_value IS NOT NULL{extra})")
+                continue
+            vals = [str(x) for x in (want or []) if str(x) and str(x) != UNKNOWN]
+            if not vals:
+                continue
+            args.append(vals); vi = len(args)
+            if k.type is FacetType.hierarchical:
+                pats = [v + "%" for v in vals] + list(vals)
+                args[-1] = pats
+                clauses.append(f"EXISTS (SELECT 1 FROM roster_entity_facet f WHERE f.tenant_id = ${ti} AND f.entity_id = {ent} AND f.facet_key = ${ki} AND f.facet_value_norm LIKE ANY(${vi}))")
+            else:
+                clauses.append(f"EXISTS (SELECT 1 FROM roster_entity_facet f WHERE f.tenant_id = ${ti} AND f.entity_id = {ent} AND f.facet_key = ${ki} AND f.facet_value_norm = ANY(${vi}))")
+        return clauses
+
+    # ---------------- rows ----------------
+    async def _attach_facets(self, conn, kind: str, rows: list[dict]) -> list[dict]:
+        ids = [r["_eid"] for r in rows]
+        if not ids:
+            return rows
+        fr = await conn.fetch("SELECT entity_id, facet_key, facet_value_norm, display_value, numeric_value, provenance FROM roster_entity_facet "
+                              "WHERE tenant_id = $1 AND entity_id = ANY($2::text[])", self.tenant, ids)
+        by: dict[str, dict] = {eid: {"facets": {}, "numeric": {}, "display": {}, "provenance": {}} for eid in ids}
+        _ok, _ck, _cv = closed_vocab_pairs(self.schema, kind)
+        _closed: dict[str, set] = {}
+        for k_, v_ in zip(_ck, _cv):
+            _closed.setdefault(k_, set()).add(v_)
+        for f in fr:
+            if f["facet_key"] in _closed and f["facet_value_norm"] not in _closed[f["facet_key"]]:
+                continue                                     # an older vocabulary's value under a schema key name
+            d = by[f["entity_id"]]
+            d["facets"].setdefault(f["facet_key"], []).append(f["facet_value_norm"])
+            if f["numeric_value"] is not None:
+                d["numeric"][f["facet_key"]] = float(f["numeric_value"])
+            if f["display_value"]:
+                d["display"].setdefault(f["facet_key"], f["display_value"])
+            if f["provenance"]:
+                d["provenance"].setdefault(f["facet_key"], f["provenance"])
+        # via keys: the company's own facets, read through the entity's company slug
+        via_keys = [k for k in self.schema.for_kind(kind) if k.via]
+        if via_keys:
+            slugs = sorted({v for eid in ids for v in by[eid]["facets"].get("company", [])})
+            if slugs:
+                cr = await conn.fetch("SELECT entity_id, facet_key, facet_value_norm FROM roster_entity_facet WHERE tenant_id = $1 AND entity_kind = 'company' AND entity_id = ANY($2::text[])",
+                                      self.tenant, [company_entity_id(s) for s in slugs])
+                cf: dict[str, dict] = {}
+                for c in cr:
+                    cf.setdefault(c["entity_id"], {}).setdefault(c["facet_key"], []).append(c["facet_value_norm"])
+                for eid in ids:
+                    for k in via_keys:
+                        tkey = via_target_key(k.key, k.via)
+                        vals = [v for s in by[eid]["facets"].get(k.via, []) for v in cf.get(company_entity_id(s), {}).get(tkey, [])]
+                        if vals:
+                            by[eid]["facets"][k.key] = sorted(set(vals))
+        for r in rows:
+            r.update(by[r["_eid"]])
+        return rows
+
+    def _job_row(self, r) -> dict:
+        return {"id": r["id"], "_eid": job_entity_id(r["id"]), "kind": "job", "company": r["company"], "title": r["title"], "location": r["location"],
+                "department": r["department"], "url": r["url"], "source": r["source"], "skills": list(r["skills"] or []),
+                "posted_at": r["posted_at"], "updated_at": (r["updated_at"].isoformat() if r["updated_at"] else None), "sim": (float(r["sim"]) if "sim" in r.keys() and r["sim"] is not None else None)}
+
+    def _person_row(self, r) -> dict:
+        return {"id": r["entity_id"], "_eid": r["entity_id"], "entity_id": r["entity_id"], "kind": "person", "name": r["name"],
+                "sim": (float(r["sim"]) if "sim" in r.keys() and r["sim"] is not None else None)}
+
+    async def enumerate(self, kind: str, must: dict, *, cap: int = 400) -> list[dict]:
+        await self.ensure_schema()
+        pool = await self._conn()
+        args: list = []
+        async with pool.acquire() as conn:
+            if kind == "job":
+                cl = self._must_sql("('job:' || j.id::text)", must, args)
+                args.append(int(cap))
+                rows = await conn.fetch(f"SELECT {_JOB_COLS} FROM rs_job j WHERE j.closed_at IS NULL" + "".join(" AND " + c for c in cl)
+                                        + f" ORDER BY j.updated_at DESC LIMIT ${len(args)}", *args)
+                out = [self._job_row(r) for r in rows]
+            else:
+                cl = self._must_sql("e.entity_id", must, args)
+                args.append(int(cap))
+                rows = await conn.fetch("SELECT e.entity_id, e.name FROM rs_entity e WHERE e.kind = 'person' AND e.status = 'active'" + "".join(" AND " + c for c in cl)
+                                        + f" ORDER BY e.entity_id LIMIT ${len(args)}", *args)
+                out = [self._person_row(r) for r in rows]
+            return await self._attach_facets(conn, kind, out)
+
+    async def semantic(self, kind: str, text: str, must: dict, *, cap: int = 400) -> list[dict]:
+        if self._embed is None:
+            return []
+        qv = self._embed(text)
+        if not qv:
+            return []
+        await self.ensure_schema()
+        pool = await self._conn()
+        args: list = [qv]
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await self._vector_session(conn, filtered=bool(must))
+                if kind == "job":
+                    cl = self._must_sql("('job:' || j.id::text)", must, args)
+                    where = "j.embedding IS NOT NULL AND j.closed_at IS NULL" + "".join(" AND " + c for c in cl)
+                    small = await self._slice_is_small(conn, "SELECT 1 FROM rs_job j WHERE j.embedding IS NOT NULL AND j.closed_at IS NULL", "('job:' || j.id::text)", must) if must else False
+                    args.append(int(cap))
+                    if small:
+                        # a SELECTIVE must + the HNSW ordered scan degrades into a long walk (prod 2026-09-05: 33 s for a
+                        # 22-row slice) — enumerate the slice first, then EXACT distances over it
+                        rows = await conn.fetch(f"WITH s AS MATERIALIZED (SELECT j.id FROM rs_job j WHERE {where}) "
+                                                f"SELECT {_JOB_COLS}, 1 - (j.embedding <=> $1::vector) AS sim FROM s JOIN rs_job j ON j.id = s.id "
+                                                f"ORDER BY (j.embedding <=> $1::vector) LIMIT ${len(args)}", *args)
+                    else:
+                        rows = await conn.fetch(f"SELECT {_JOB_COLS}, 1 - (j.embedding <=> $1::vector) AS sim FROM rs_job j WHERE {where}"
+                                                + f" ORDER BY j.embedding <=> $1::vector LIMIT ${len(args)}", *args)
+                    out = [self._job_row(r) for r in rows]
+                else:
+                    cl = self._must_sql("e.entity_id", must, args)
+                    where = "e.kind = 'person' AND e.status = 'active'" + "".join(" AND " + c for c in cl)
+                    small = await self._slice_is_small(conn, "SELECT 1 FROM rs_entity e WHERE e.kind = 'person' AND e.status = 'active'", "e.entity_id", must) if must else False
+                    args.append(int(cap))
+                    if small:
+                        rows = await conn.fetch(f"WITH s AS MATERIALIZED (SELECT e.entity_id, e.name FROM rs_entity e WHERE {where}) "
+                                                "SELECT s.entity_id, s.name, 1 - (v.embedding <=> $1::vector) AS sim FROM s JOIN rs_person_vec v ON v.entity_id = s.entity_id "
+                                                f"ORDER BY (v.embedding <=> $1::vector) LIMIT ${len(args)}", *args)
+                    else:
+                        rows = await conn.fetch("SELECT e.entity_id, e.name, 1 - (v.embedding <=> $1::vector) AS sim FROM rs_person_vec v JOIN rs_entity e ON e.entity_id = v.entity_id "
+                                                f"WHERE {where}" + f" ORDER BY v.embedding <=> $1::vector LIMIT ${len(args)}", *args)
+                    out = [self._person_row(r) for r in rows]
+            return await self._attach_facets(conn, kind, out)
+
+    SMALL_SLICE = 2000
+
+    async def slice_size(self, kind: str, must: dict, *, cap: int = 2000) -> int:
+        """A LIMIT-bounded size of the must-slice (≤ cap means exact; cap + 1 means "at least that many") — the
+        cheap probe contract search fans out over (tens of ms with the per-key index; spec §12.4)."""
+        await self.ensure_schema()
+        pool = await self._conn()
+        pargs: list = []
+        if kind == "job":
+            cl = self._must_sql("('job:' || j.id::text)", must, pargs)
+            base = "SELECT 1 FROM rs_job j WHERE j.closed_at IS NULL"
+        else:
+            cl = self._must_sql("e.entity_id", must, pargs)
+            base = "SELECT 1 FROM rs_entity e WHERE e.kind = 'person' AND e.status = 'active'"
+        pargs.append(int(cap) + 1)
+        async with pool.acquire() as conn:
+            n = await conn.fetchval(f"SELECT count(*) FROM ({base}" + "".join(" AND " + c for c in cl) + f" LIMIT ${len(pargs)}) x", *pargs)
+        return int(n or 0)
+
+    async def _vector_session(self, conn, *, filtered: bool) -> None:
+        """HNSW settings for this transaction. A FILTERED scan (musts) uses pgvector's iterative scan so the index
+        keeps walking until enough rows pass the filter (prod 2026-09-05: a `country=us` must returned 28 of 360
+        nearest because only 28 of the first 200 candidates were US). The GUCs exist once the extension library
+        is loaded, so a vector expression runs first; unsupported settings are skipped."""
+        try:
+            await conn.execute("SELECT '[1]'::vector")
+            await conn.execute("SET LOCAL hnsw.ef_search = 200" if not filtered else "SET LOCAL hnsw.ef_search = 400")
+            if filtered:
+                await conn.execute("SET LOCAL hnsw.iterative_scan = relaxed_order")
+                await conn.execute("SET LOCAL hnsw.max_scan_tuples = 40000")
+        except Exception:   # noqa: BLE001 — older pgvector: plain scan
+            pass
+
+    async def _slice_is_small(self, conn, base_sql: str, ent: str, must: dict) -> bool:
+        """Cheap probe with its own parameters: does the must-slice hold at most SMALL_SLICE rows? (LIMIT-bounded,
+        so never a full count.)"""
+        pargs: list = []
+        cl = self._must_sql(ent, must, pargs)
+        pargs.append(int(self.SMALL_SLICE) + 1)
+        n = await conn.fetchval(f"SELECT count(*) FROM ({base_sql}" + "".join(" AND " + c for c in cl) + f" LIMIT ${len(pargs)}) x", *pargs)
+        return int(n or 0) <= self.SMALL_SLICE
+
+    # ---------------- counts ----------------
+    COUNTS_TTL, COUNTS_EXACT_MAX, COUNTS_SAMPLE_TARGET = 600.0, 40_000, 30_000
+
+    async def counts(self, kind: str, must: dict, schema: FacetSchema, *, depth: dict | None = None) -> dict:
+        """Counts per navigable key over the must-slice. The slice is materialized ONCE (temp table); a slice above
+        COUNTS_EXACT_MAX entities is counted on a deterministic hash SAMPLE and scaled (prod 2026-09-05: the exact
+        count over 278k US people took 12 s per call — three re-materializations of the slice and a DISTINCT over
+        2.3M facet rows). `last_counts_meta` says whether the numbers are sampled; results are cached per
+        (kind, must) for COUNTS_TTL seconds."""
+        import json as _json, time as _time
+        cache = self.__dict__.setdefault("_counts_cache", {})
+        ckey = (kind, _json.dumps(must or {}, sort_keys=True))
+        hit = cache.get(ckey)
+        if hit and _time.monotonic() - hit[0] < self.COUNTS_TTL:
+            self.last_counts_meta = dict(hit[2])
+            return _json.loads(_json.dumps(hit[1]))
+        await self.ensure_schema()
+        pool = await self._conn()
+        args: list = []
+        ent = "('job:' || j.id::text)" if kind == "job" else "e.entity_id"
+        cl = self._must_sql(ent, must, args)
+        if kind == "job":
+            slice_sql = "SELECT ('job:' || j.id::text) AS entity_id FROM rs_job j WHERE j.closed_at IS NULL" + "".join(" AND " + c for c in cl)
+        else:
+            slice_sql = "SELECT e.entity_id FROM rs_entity e WHERE e.kind = 'person' AND e.status = 'active'" + "".join(" AND " + c for c in cl)
+        nav = [k for k in schema.for_kind(kind) if k.navigable]
+        _open, _ck, _cv = closed_vocab_pairs(schema, kind)
+        nav_keys = {x.key for x in nav}
+        open_keys = [k for k in _open if k in nav_keys]
+        closed_keys = [k for k in _ck if k in nav_keys]
+        closed_vals = [v for k, v in zip(_ck, _cv) if k in nav_keys]
+        _legal_pairs = set(zip(closed_keys, closed_vals))
+        _closed_keys = set(closed_keys)
+        legal = "(f.facet_key = ANY($1) OR (f.facet_key = ANY($2) AND f.facet_value_norm = ANY($3)))"
+        largs = [open_keys, closed_keys, closed_vals]
+        out: dict = {}
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(f"CREATE TEMP TABLE _facet_slice ON COMMIT DROP AS {slice_sql}", *args)
+                total = int(await conn.fetchval("SELECT count(*) FROM _facet_slice") or 0)
+                factor = 1
+                if total > self.COUNTS_EXACT_MAX:
+                    factor = max(2, round(total / self.COUNTS_SAMPLE_TARGET))
+                    await conn.execute("DELETE FROM _facet_slice WHERE (abs(hashtext(entity_id)) % $1) <> 0", factor)
+                await conn.execute("ANALYZE _facet_slice")
+                rows = await conn.fetch(f"""SELECT f.facet_key, f.facet_value_norm AS v, count(*) AS n
+                                            FROM _facet_slice s JOIN roster_entity_facet f ON f.entity_id = s.entity_id
+                                            WHERE {legal} GROUP BY 1, 2""", *largs)
+                have = await conn.fetch(f"""SELECT f.facet_key, count(DISTINCT f.entity_id) AS n
+                                            FROM _facet_slice s JOIN roster_entity_facet f ON f.entity_id = s.entity_id
+                                            WHERE {legal} GROUP BY 1""", *largs)
+                have_n = {r["facet_key"]: int(r["n"]) * factor for r in have}
+                for k in nav:
+                    if k.via:
+                        tkey = via_target_key(k.key, k.via)
+                        vr = await conn.fetch("""SELECT c.facet_value_norm AS v, count(DISTINCT f.entity_id) AS n
+                                                 FROM _facet_slice s JOIN roster_entity_facet f ON f.entity_id = s.entity_id
+                                                 JOIN roster_entity_facet c ON c.tenant_id = f.tenant_id AND c.entity_kind = 'company'
+                                                      AND c.entity_id = 'company:' || f.facet_value_norm AND c.facet_key = $1
+                                                 WHERE f.facet_key = $2 GROUP BY 1""", tkey, k.via)
+                        d = {r["v"]: int(r["n"]) * factor for r in vr}
+                        known = sum(d.values())
+                        if total - known > 0:
+                            d[UNKNOWN] = total - known
+                        out[k.key] = d
+                        continue
+                    d = {r["v"]: int(r["n"]) * factor for r in rows if r["facet_key"] == k.key and (k.key not in _closed_keys or (k.key, r["v"]) in _legal_pairs)}
+                    if k.type is FacetType.set:
+                        d = dict(sorted(d.items(), key=lambda kv: -kv[1])[: k.top_n])
+                    else:
+                        unknown = total - have_n.get(k.key, 0)
+                        if unknown > 0:
+                            d[UNKNOWN] = unknown
+                    out[k.key] = d
+        self.last_counts_meta = {"total": total, "sample": factor}
+        if len(cache) > 300:
+            cache.clear()
+        cache[ckey] = (_time.monotonic(), _json.loads(_json.dumps(out)), dict(self.last_counts_meta))
+        return out
+
+    async def noise_floor(self, kind: str, text: str) -> float | None:
+        if self._embed is None or self._baseline is None:
+            return None
+        qv = self._embed(text)
+        return await self._baseline(qv, kind) if qv else None
+
+    # ---------------- projection (the only writer) ----------------
+    async def project(self, kind: str, entity_id: str, envelope: dict, *, replace_keys: list[str] | None = None) -> int:
+        """Envelope → facet rows for one entity (idempotent: the envelope's keys are replaced, other keys
+        are left alone). Numeric keys store the band as the value and the number in `numeric_value`.
+        Returns rows written."""
+        await self.ensure_schema()
+        facets = (envelope or {}).get("facets") or {}
+        version = str((envelope or {}).get("schema_version") or "")
+        keys = list(replace_keys or facets.keys())
+        rows = []
+        for key, items in facets.items():
+            k = self.schema.key(key)
+            if k is None:
+                continue
+            for it in (items or []):
+                if not isinstance(it, dict):
+                    it = {"value": it}
+                num = it.get("number")
+                if k.type is FacetType.numeric:
+                    band = self.schema.band_of(key, num) if num is not None else (self.schema.validate_value(key, it.get("value")) or UNKNOWN)
+                    if band == UNKNOWN and num is None:
+                        continue
+                    val = band
+                else:
+                    val = self.schema.validate_value(key, it.get("value"))
+                    if val is None:
+                        continue
+                rows.append((self.tenant, entity_id, kind, key, val, _clean(it.get("display"))[:300], float(it.get("confidence") or 0.0),
+                             str(it.get("provenance") or "")[:40], version, (float(num) if num is not None else None)))
+        pool = await self._conn()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                if keys:
+                    await conn.execute("DELETE FROM roster_entity_facet WHERE tenant_id = $1 AND entity_id = $2 AND facet_key = ANY($3::text[])", self.tenant, entity_id, keys)
+                for r in rows:
+                    await conn.execute("""INSERT INTO roster_entity_facet (tenant_id, entity_id, entity_kind, facet_key, facet_value_norm, display_value, confidence, provenance, schema_version, numeric_value)
+                                          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                                          ON CONFLICT (tenant_id, entity_id, facet_key, facet_value_norm) DO UPDATE SET
+                                            entity_kind = EXCLUDED.entity_kind, display_value = EXCLUDED.display_value, confidence = EXCLUDED.confidence,
+                                            provenance = EXCLUDED.provenance, schema_version = EXCLUDED.schema_version, numeric_value = EXCLUDED.numeric_value""", *r)
+        return len(rows)
+
+
+def legacy_job_envelope(flat: dict, *, schema_version: str, provenance: str = "posting") -> dict:
+    """The 2026-09-05 extraction record {field, level, role_family} → the spec envelope shape."""
+    flat = flat or {}
+    facets: dict[str, list] = {}
+    if flat.get("field"):
+        facets["field"] = [{"value": flat["field"], "confidence": 0.6, "provenance": provenance}]
+    if flat.get("level") and flat["level"] != UNKNOWN:
+        facets["level"] = [{"value": flat["level"], "confidence": 0.6, "provenance": provenance}]
+    if flat.get("role_family"):
+        facets["role_family"] = [{"value": flat["role_family"], "confidence": 0.6, "provenance": provenance}]
+    return {"schema_version": schema_version, "facets": facets}
+
+
+def structural_job_facets(job: dict, *, schema_version: str, now_days: float | None = None) -> dict:
+    """Facets that come from the row itself, not from the model: the company slug, the skills the body
+    named, and the posting age (derived, provenance 'ats_field')."""
+    facets: dict[str, list] = {}
+    co = str(job.get("company") or "").strip().lower().replace(" ", "_")
+    if co:
+        facets["company"] = [{"value": co, "display": str(job.get("company") or ""), "confidence": 1.0, "provenance": "ats_field"}]
+    sk = [str(s) for s in (job.get("skills") or []) if str(s).strip()]
+    if sk:
+        facets["skill"] = [{"value": s, "confidence": 0.8, "provenance": "posting"} for s in sk[:12]]
+    if now_days is not None:
+        facets["posted"] = [{"number": float(now_days), "display": f"{int(now_days)} days ago", "confidence": 1.0, "provenance": "ats_field"}]
+    return {"schema_version": schema_version, "facets": facets}
+
+
+async def project_legacy_people(pool, *, pairs: list[tuple[str, str, str, str]], artifact_map: dict[str, str],
+                                schema_version: str, tenant_id: str = "demo") -> dict:
+    """SET-BASED projection of the people index's pre-schema rows into schema rows (spec §8 step 4 bridge —
+    no model call). For each (legacy_key, legacy_value → schema_key, schema_value) pair the matching rows
+    gain a schema row with provenance `legacy`; an entity that already holds a NON-legacy row for that key
+    (a real extraction) is left alone. The `evidence` key is derived from `rs_person_artifact` (provenance
+    `artifact`). Idempotent (ON CONFLICT DO NOTHING); returns rows written per schema key."""
+    out: dict[str, int] = {}
+    by_key: dict[str, list[tuple[str, str, str]]] = {}
+    for ok, ov, nk, nv in pairs:
+        by_key.setdefault(nk, []).append((ok, ov, nv))
+    async with pool.acquire() as conn:
+        for nk, items in by_key.items():
+            res = await conn.execute("""
+                INSERT INTO roster_entity_facet (tenant_id, entity_id, entity_kind, facet_key, facet_value_norm, display_value, confidence, provenance, schema_version, numeric_value)
+                SELECT DISTINCT f.tenant_id, f.entity_id, 'person', $2, m.nv, '', 0.5, 'legacy', $3, NULL::double precision
+                FROM roster_entity_facet f
+                JOIN unnest($4::text[], $5::text[], $6::text[]) AS m(ok, ov, nv) ON m.ok = f.facet_key AND m.ov = f.facet_value_norm
+                WHERE f.tenant_id = $1 AND f.entity_kind = 'person'
+                  AND NOT EXISTS (SELECT 1 FROM roster_entity_facet x WHERE x.tenant_id = f.tenant_id AND x.entity_id = f.entity_id
+                                  AND x.facet_key = $2 AND x.provenance <> 'legacy' AND x.schema_version <> '')
+                ON CONFLICT (tenant_id, entity_id, facet_key, facet_value_norm) DO NOTHING""",
+                tenant_id, nk, schema_version, [i[0] for i in items], [i[1] for i in items], [i[2] for i in items])
+            out[nk] = out.get(nk, 0) + int(str(res).split()[-1] or 0)
+        if artifact_map:
+            res = await conn.execute("""
+                INSERT INTO roster_entity_facet (tenant_id, entity_id, entity_kind, facet_key, facet_value_norm, display_value, confidence, provenance, schema_version, numeric_value)
+                SELECT DISTINCT $1::text, a.entity_id, 'person', 'evidence', m.nv, '', 1.0, 'artifact', $2::text, NULL::double precision
+                FROM rs_person_artifact a JOIN unnest($3::text[], $4::text[]) AS m(ok, nv) ON m.ok = a.kind
+                JOIN rs_entity e ON e.entity_id = a.entity_id AND e.kind = 'person'
+                ON CONFLICT (tenant_id, entity_id, facet_key, facet_value_norm) DO NOTHING""",
+                tenant_id, schema_version, list(artifact_map.keys()), list(artifact_map.values()))
+            out["evidence"] = int(str(res).split()[-1] or 0)
+    return out

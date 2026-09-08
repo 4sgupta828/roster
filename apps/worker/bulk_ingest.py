@@ -62,8 +62,76 @@ def _run_chunk(argv: list[str]) -> None:
         print(f"[bulk] chunk failed {argv}: {e}", flush=True)
 
 
+def _body_backfill_loop(body_boards: int, pause: int) -> None:
+    """POSTING BODIES in their OWN loop. Serialized inside the main cycle they landed ~150 boards every
+    few HOURS (the people / artifacts / sweep legs dominate a cycle); here a chunk runs back to back.
+    Same kill switch; the live jobs leg never clears a board's body_done marker, so the two never redo
+    each other's work."""
+    while True:
+        try:
+            stopped = asyncio.run(_is_stopped())
+        except Exception:   # noqa: BLE001
+            stopped = False
+        if not stopped:   # --live: without it the script is a DRY run (the serial leg ran dry for a day)
+            _run_chunk(["scripts/ingest_jobs.py", "--live", "--bodies", str(body_boards)])
+        time.sleep(pause)
+
+
+def _jobs_refresh_loop(boards: int, pause: int) -> None:
+    """POSTING FRESHNESS in its own loop: re-check due ATS boards conditionally (ETag → 304 when nothing
+    changed, so an unchanged board costs one tiny request), insert + embed new postings, close vanished
+    ones. Adaptive per-board cadence lives in the checkpoint row; this loop just drains what is due."""
+    while True:
+        try:
+            stopped = asyncio.run(_is_stopped())
+        except Exception:   # noqa: BLE001
+            stopped = False
+        if not stopped:
+            _run_chunk(["scripts/ingest_jobs.py", "--live", "--refresh-boards", str(boards)])
+        time.sleep(pause)
+
+
+def _job_facets_loop(rows: int, pause: int) -> None:
+    """JOB FACETS (the model owns meaning): postings without field / level / role family get them, newest
+    first, `rows` per pass. Spend ≈ $0.02 per 1k postings — the knob ROSTER_BULK_JOB_FACETS is the gate."""
+    while True:
+        try:
+            stopped = asyncio.run(_is_stopped())
+        except Exception:   # noqa: BLE001
+            stopped = False
+        if not stopped:
+            _run_chunk(["scripts/ingest_jobs.py", "--live", "--facets", str(rows)])
+        time.sleep(pause)
+
+
 def run_bulk_ingest_loop() -> None:
     people_on = os.environ.get("ROSTER_BULK_INGEST_PEOPLE", "").lower() in ("1", "true", "yes")
+    import threading
+    body_boards = int(os.environ.get("ROSTER_BULK_BODY_BACKFILL", "0") or 0)
+    if body_boards:
+        threading.Thread(target=_body_backfill_loop, args=(body_boards, 30), daemon=True, name="body-backfill").start()
+        print(f"[bulk] body backfill thread started — {body_boards} boards per chunk, back to back", flush=True)
+    facet_rows = int(os.environ.get("ROSTER_BULK_JOB_FACETS", "0") or 0)   # opt-in: model facets per pass (spend)
+    if facet_rows:
+        threading.Thread(target=_job_facets_loop, args=(facet_rows, 60), daemon=True, name="job-facets").start()
+        print(f"[bulk] job facets thread started — {facet_rows} postings per pass", flush=True)
+    people_facets = int(os.environ.get("ROSTER_BULK_PEOPLE_FACETS", "0") or 0)   # GATED spend (spec step 4): model facets for people
+    if people_facets:
+        def _people_facets_loop(rows: int, pause: int) -> None:
+            while True:
+                try:
+                    stopped = asyncio.run(_is_stopped())
+                except Exception:   # noqa: BLE001
+                    stopped = False
+                if not stopped:
+                    _run_chunk(["scripts/ingest_people.py", "--live", "--facets", str(rows)])
+                time.sleep(pause)
+        threading.Thread(target=_people_facets_loop, args=(people_facets, 60), daemon=True, name="people-facets").start()
+        print(f"[bulk] people facets thread started — {people_facets} people per pass", flush=True)
+    refresh_boards = int(os.environ.get("ROSTER_BULK_REFRESH_BOARDS", "0") or 0)   # opt-in knob (validated on prod first)
+    if refresh_boards:
+        threading.Thread(target=_jobs_refresh_loop, args=(refresh_boards, 120), daemon=True, name="jobs-refresh").start()
+        print(f"[bulk] jobs refresh thread started — {refresh_boards} due boards per pass", flush=True)
     jobs_chunk = int(os.environ.get("ROSTER_BULK_JOBS_CHUNK", "0") or 0)
     people_chunk = int(os.environ.get("ROSTER_BULK_PEOPLE_CHUNK", "500") or 500)
     # public-artifact linking (papers/repos/orgs by identity key): people per source per cycle; 0 = off
@@ -96,6 +164,7 @@ def run_bulk_ingest_loop() -> None:
         # self-heal: jobs written without a vector (embed hiccups during big sweeps) are invisible to
         # résumé matching — give them their embedding (~$0.0004 / 1k jobs)
         _run_chunk(["scripts/ingest_jobs.py", "--backfill", str(embed_backfill)])
+        # (posting BODIES run in their own thread — see _body_backfill_loop)
         if people_on:
             _run_chunk(["scripts/ingest_people.py", "--live", "--limit", str(people_chunk),
                         "--per-window", str(per_window)])

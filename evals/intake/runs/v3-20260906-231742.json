@@ -1,0 +1,1135 @@
+{
+ "base": "https://roster-api-production-3405.up.railway.app",
+ "results": [
+  {
+   "id": "v3_seeker_no_resume",
+   "ok": false,
+   "failures": [
+    "brief does not know 'metro' (known: ['career_arc', 'direction', 'level', 'posture', 'role_family', 'skills', 'work_mode', 'work_type'])"
+   ],
+   "user_turns": 4,
+   "calls": 5,
+   "secs": [
+    30.7,
+    33.0,
+    50.9,
+    34.6
+   ],
+   "total_secs": 149.3,
+   "questions": [
+    [
+     "fork",
+     "field",
+     "Which lane should I anchor on first for this search: software/engineering, operations, sales, or another field?",
+     [
+      "Software / engineering",
+      "Operations",
+      "Sales"
+     ]
+    ],
+    [
+     "fork",
+     "posture",
+     "Defaulting to a senior IC backend search from your current title, are you targeting a lateral senior role, a step-up to staff, or also open to engineering manager roles?",
+     [
+      "Lateral senior IC",
+      "Step-up to staff IC",
+      "Also open to EM"
+     ]
+    ],
+    [
+     "fork",
+     "work_mode",
+     "Defaulting to NYC hybrid/onsite because it keeps the strongest real pool for this search, should I keep it there or switch to remote?",
+     [
+      "NYC hybrid/onsite",
+      "Remote",
+      "NYC hybrid only"
+     ]
+    ]
+   ],
+   "says": [
+    "The current search is too broad\u2014the preview is mostly talent-network placeholders instead of real target roles. The first fork is your lane, because domain/function changes the pool more than anything else right now.",
+    "You\u2019ve now anchored this well: senior backend, Go, Kubernetes, billing-platform work, and New York. The main fork left is target band, because lateral senior IC, staff IC, and EM searches pull meaningfully different roles.",
+    "The pool is still very broad for senior Go/Kubernetes backend roles anchored to New York. The biggest remaining fork is work mode, because NYC hybrid/onsite and remote searches surface very different jobs.",
+    "Searching senior backend engineer roles in New York, hybrid or onsite, at the senior IC level with Go and Kubernetes, ranked toward billing/platform work. I\u2019m assuming broad company-type openness and standard full-time roles unless you tell me otherwise."
+   ],
+   "notes": [
+    [
+     "dropped center level=None",
+     "dropped center level=None",
+     "dropped center level=None",
+     "dropped center level=None",
+     "preview: off: the search is unconstrained, so the top results are generic talent-network postings rather than",
+     "gaps: field=high, metro=high, posture=high"
+    ],
+    [
+     "preview: off: the current preview is still mostly generic talent-network postings because the search was not ",
+     "gaps: posture=high, work_mode=high, employment_type=low, company_type=low"
+    ],
+    [
+     "preview: off: the pool is still far too broad, and work mode will split senior backend results much more than",
+     "gaps: work_mode=high, company_type=low, employment_type=low"
+    ],
+    [
+     "preview: good",
+     "gaps: company_type=low, comp=low, employment_type=low"
+    ]
+   ],
+   "brief": [
+    {
+     "key": "direction",
+     "label": "Looking or hiring",
+     "value": "job",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "I'm looking for my next role"
+    },
+    {
+     "key": "posture",
+     "label": "Step up, lateral or switch",
+     "value": "lateral",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Lateral senior IC"
+    },
+    {
+     "key": "search_posture",
+     "label": "Active, passive or exploring",
+     "value": "active",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "I'm looking for my next role"
+    },
+    {
+     "key": "career_arc",
+     "label": "Career arc",
+     "value": "senior backend engineer at acme for 5 years",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Senior backend engineer at Acme for 5 years"
+    },
+    {
+     "key": "positioning",
+     "label": "Story to lead with",
+     "value": "senior backend engineer with go, kubernetes, and billing-platform ownership",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "Go and Kubernetes, built our billing platform"
+    },
+    {
+     "key": "role_family",
+     "label": "Role",
+     "value": "backend engineer",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Senior backend engineer"
+    },
+    {
+     "key": "field",
+     "label": "Domain",
+     "value": "software",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "Senior backend engineer"
+    },
+    {
+     "key": "function",
+     "label": "Function",
+     "value": "engineering",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "Senior backend engineer"
+    },
+    {
+     "key": "specialties",
+     "label": "Specialties",
+     "value": [
+      "billing",
+      "platform"
+     ],
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "built our billing platform"
+    },
+    {
+     "key": "skills",
+     "label": "Skills that matter",
+     "value": [
+      "go",
+      "kubernetes"
+     ],
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Go and Kubernetes"
+    },
+    {
+     "key": "level",
+     "label": "Level",
+     "value": "senior",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Lateral senior IC"
+    },
+    {
+     "key": "work_type",
+     "label": "IC or manager",
+     "value": "ic",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Lateral senior IC"
+    },
+    {
+     "key": "metro",
+     "label": "Place",
+     "value": "new_york",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "In New York"
+    },
+    {
+     "key": "work_mode",
+     "label": "Work mode",
+     "value": [
+      "hybrid",
+      "onsite"
+     ],
+     "source": "stated",
+     "source_label": "you said",
+     "span": "NYC hybrid/onsite"
+    }
+   ],
+   "contract": {
+    "angles": [],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "metro": [
+      "new_york"
+     ],
+     "work_mode": [
+      "hybrid",
+      "onsite"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "prefer": {
+     "employment_type": [
+      "full_time"
+     ],
+     "field": [
+      "software"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "level": [
+      "senior"
+     ],
+     "metro": [
+      "new_york"
+     ],
+     "role_family": [
+      "backend engineer"
+     ],
+     "skill": [
+      "go",
+      "kubernetes"
+     ],
+     "specialty": [
+      "billing",
+      "platform"
+     ],
+     "work_mode": [
+      "hybrid",
+      "onsite"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm looking for my next role. backend engineer. billing, platform. go, kubernetes. new_york",
+    "user_keys": [
+     "level",
+     "metro",
+     "role_family",
+     "skill",
+     "work_mode",
+     "work_type"
+    ],
+    "notes": [
+     {
+      "rule": "readings",
+      "readings": [
+       {
+        "rule": "cooccurrence",
+        "value_key": "specialty",
+        "value": "billing",
+        "field": "finance",
+        "share": 0.47,
+        "lift": 6.61,
+        "support": 78,
+        "home": false,
+        "model_share": 0.241
+       },
+       {
+        "rule": "cooccurrence",
+        "value_key": "specialty",
+        "value": "platform",
+        "field": "software",
+        "share": 0.89,
+        "lift": 4.6,
+        "support": 316,
+        "home": true,
+        "model_share": 0.89
+       },
+       {
+        "rule": "cooccurrence",
+        "value_key": "skill",
+        "value": "go",
+        "field": "software",
+        "share": 0.361,
+        "lift": 1.86,
+        "support": 7536,
+        "home": false,
+        "model_share": 0.361
+       }
+      ]
+     }
+    ],
+    "place_or_mode": true
+   },
+   "throwaway": ""
+  },
+  {
+   "id": "v3_seeker_resume_on_file",
+   "ok": true,
+   "failures": [],
+   "user_turns": 3,
+   "calls": 4,
+   "secs": [
+    44.7,
+    36.9,
+    37.9
+   ],
+   "total_secs": 119.5,
+   "questions": [
+    [
+     "fork",
+     "posture",
+     "Defaulting to a lateral/step-up leadership search, should I keep you in people leadership or also include staff+ IC roles?",
+     [
+      "Stay in leadership (default)",
+      "Also include staff+ IC"
+     ]
+    ],
+    [
+     "fork",
+     "title_flexibility",
+     "Defaulting to a broad leadership band because that's where most Bay Area ML infra postings sit\u2014should I include Sr EM/EM titles, or keep this to Director/Head only?",
+     []
+    ]
+   ],
+   "says": [
+    "The preview is skewing to IC infra/platform jobs, while your background reads as ML infrastructure leadership. The main fork is whether to keep you in people leadership or also include staff+ IC, because that changes titles, level, and most of the pool.",
+    "The preview is still landing on generic compute/SRE engineering-manager roles, which says the key fork now is title band rather than skills. This matters because accepting Sr EM/EM titles keeps a much broader ML platform leadership pool, while Director/Head-only will sharply narrow and improve fit.",
+    "Leadership-only ML infrastructure/platform search, broadened across EM/Sr EM/Director/Head, centered on training and serving platforms with Kubernetes/Ray, and open to either Bay Area local or remote roles. I'm assuming no company-type constraint and using broad title flexibility to avoid generic infra/SRE matches."
+   ],
+   "notes": [
+    [
+     "reader claims without a span in the text dropped: function, company_type (a resume cannot state it), employment_type (a resume cannot state it)",
+     "preview: off: the preview is dominated by IC infrastructure/platform titles rather than ML infrastructure lea",
+     "gaps: posture=high, work_mode=high, company_type=low, comp=low",
+     "kept the known 'field' over an inference",
+     "kept the known 'level' over an inference",
+     "kept the known 'work_type' over an inference",
+     "kept the known 'metro' over an inference"
+    ],
+    [
+     "preview: off: top results skew to generic compute/SRE/platform leadership rather than clear ML infrastructure",
+     "gaps: title_flexibility=high, work_mode=low, company_type=low",
+     "kept the known 'field' over an inference",
+     "kept the known 'level' over an inference",
+     "kept the known 'work_type' over an inference",
+     "fork on 'title_flexibility' kept as free text: fewer than two options survive the index"
+    ],
+    [
+     "preview: off: top results are generic compute/SRE engineering-manager roles, not clearly ML training/serving ",
+     "gaps: company_type=low, comp=low",
+     "kept the known 'posture' over an inference",
+     "kept the known 'field' over an inference",
+     "kept the known 'level' over an inference",
+     "kept the known 'work_type' over an inference"
+    ]
+   ],
+   "brief": [
+    {
+     "key": "direction",
+     "label": "Looking or hiring",
+     "value": "job",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "I'm looking for my next role"
+    },
+    {
+     "key": "posture",
+     "label": "Step up, lateral or switch",
+     "value": "lateral_or_step_up_manager",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Stay in leadership (default)"
+    },
+    {
+     "key": "search_posture",
+     "label": "Active, passive or exploring",
+     "value": "active",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "I'm looking for my next role"
+    },
+    {
+     "key": "career_arc",
+     "label": "Career arc",
+     "value": "ml infrastructure leader in fintech with people-management scope",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "Head of ML Infrastructure at Fintech Co; lead a 12-person team"
+    },
+    {
+     "key": "positioning",
+     "label": "Story to lead with",
+     "value": "ml infrastructure leadership for training and serving platforms",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "Head of ML Infrastructure; training and serving platforms; Kubernetes, Ray, feature stores"
+    },
+    {
+     "key": "title_flexibility",
+     "label": "Title flexibility",
+     "value": "open to a broad leadership title band; consultant to optimize",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Open on that \u2014 you decide."
+    },
+    {
+     "key": "role_family",
+     "label": "Role",
+     "value": "head of ml infrastructure",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Head of ML Infrastructure at Fintech Co"
+    },
+    {
+     "key": "field",
+     "label": "Domain",
+     "value": "software",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "ML Infrastructure"
+    },
+    {
+     "key": "function",
+     "label": "Function",
+     "value": "engineering",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "Head of ML Infrastructure"
+    },
+    {
+     "key": "specialties",
+     "label": "Specialties",
+     "value": [
+      "training and serving platforms"
+     ],
+     "source": "stated",
+     "source_label": "you said",
+     "span": "training and serving platforms"
+    },
+    {
+     "key": "skills",
+     "label": "Skills that matter",
+     "value": [
+      "kubernetes",
+      "ray",
+      "feature stores"
+     ],
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Kubernetes, Ray, feature stores"
+    },
+    {
+     "key": "level",
+     "label": "Level",
+     "value": "leadership",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "Head of ML Infrastructure"
+    },
+    {
+     "key": "work_type",
+     "label": "IC or manager",
+     "value": "manager",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "lead a 12-person team"
+    },
+    {
+     "key": "metro",
+     "label": "Place",
+     "value": "bay_area",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "San Francisco, CA"
+    },
+    {
+     "key": "work_mode",
+     "label": "Work mode",
+     "value": "remote acceptable; bay area local roles also acceptable",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Remote or the city is fine."
+    }
+   ],
+   "contract": {
+    "angles": [],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "leadership",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "field": [
+      "software"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "metro": [
+      "bay_area"
+     ],
+     "work_type": [
+      "manager"
+     ]
+    },
+    "prefer": {
+     "field": [
+      "software"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "level": [
+      "leadership"
+     ],
+     "metro": [
+      "bay_area"
+     ],
+     "role_family": [
+      "director ml platform",
+      "director of ml infrastructure",
+      "director of ml platform",
+      "engineering manager",
+      "engineering manager machine learning platform",
+      "engineering manager, machine learning platform",
+      "head of ml infrastructure",
+      "head of ml platform",
+      "machine learning platform",
+      "ml infrastructure",
+      "ml platform",
+      "senior engineering manager ml infrastructure",
+      "senior engineering manager, machine learning platform"
+     ],
+     "skill": [
+      "feature stores",
+      "kubernetes",
+      "ray"
+     ],
+     "specialty": [
+      "feature stores",
+      "ml infrastructure",
+      "model serving",
+      "serving platforms",
+      "training and serving platforms",
+      "training platforms"
+     ],
+     "work_mode": [
+      "hybrid",
+      "onsite",
+      "remote"
+     ],
+     "work_type": [
+      "manager"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm looking for my next role. head of ml infrastructure. training and serving platforms. kubernetes, ray, feature stores. bay_area",
+    "user_keys": [
+     "function",
+     "metro",
+     "role_family",
+     "skill",
+     "specialty",
+     "work_mode",
+     "work_type"
+    ],
+    "notes": [],
+    "place_or_mode": true
+   },
+   "throwaway": "intake-eval-1788761581765@roster.test"
+  },
+  {
+   "id": "v3_hiring_no_jd",
+   "ok": false,
+   "failures": [
+    "direction None != 'candidate'",
+    "not ready after 6 user turns (stage 'question')",
+    "brief does not know 'mission' (known: ['direction'])",
+    "brief does not know 'role_family' (known: ['direction'])",
+    "brief does not know 'level' (known: ['direction'])"
+   ],
+   "user_turns": 6,
+   "calls": 1,
+   "secs": [
+    22.7,
+    0.1,
+    0.1,
+    31.2,
+    0.1,
+    30.9
+   ],
+   "total_secs": 85.2,
+   "questions": [
+    [
+     "fork",
+     "mission",
+     "What will this person own, and what fails in the next 6 months if you don\u2019t make the hire?",
+     []
+    ],
+    [
+     "fork",
+     "direction",
+     "Are you looking for a role for yourself, or hiring for your team?",
+     [
+      "Looking for a role",
+      "Hiring"
+     ]
+    ],
+    [
+     "fork",
+     "direction",
+     "Are you looking for a role for yourself, or hiring for your team?",
+     [
+      "Looking for a role",
+      "Hiring"
+     ]
+    ],
+    [
+     "fork",
+     "direction",
+     "Are you looking for a role for yourself, or hiring for your team?",
+     [
+      "Looking for a role",
+      "Hiring"
+     ]
+    ],
+    [
+     "fork",
+     "posture",
+     "Are you aiming for a lateral move, a step up, or a switch into something adjacent?",
+     [
+      "Lateral",
+      "Step up",
+      "Switch"
+     ]
+    ]
+   ],
+   "says": [
+    "The preview is broad and noisy because we only know that you're hiring, not what outcome this person will own. That mission is the fork that determines the right talent market before we talk title or skills.",
+    "Before anything else:",
+    "Before anything else:",
+    "You switched to the seeker side, so I\u2019d restart on senior backend IC roles in payments/ledger, remote US, targeting $180\u2013230k with Go or Python. I\u2019m assuming full-time software engineering roles and that senior-not-staff is a hard cap.",
+    "Before anything else:",
+    "The preview is effectively random because we don\u2019t yet have a target calibrated on the seeker side. First fork: most searches convert fastest as a lateral move, but if you want a step up or a switch I\u2019ll search at a different level."
+   ],
+   "notes": [
+    [
+     "dropped center level=None",
+     "preview: off: only signal is 'I'm hiring,' so the pool is generic and the top results are untargeted.",
+     "gaps: mission=high, metro=high, work_mode=high, work_type=high, level=high"
+    ],
+    [],
+    [],
+    [
+     "dropped brief field 'country'",
+     "dropped comp='180000-230000': not in the index vocabulary",
+     "dropped evidence='built ledger or payments system in production': not in the index vocabulary",
+     "preview: off: the preview is still on the earlier hiring-side thread and not a seeker search for senior backe",
+     "gaps: company_type=low, authorization=low"
+    ],
+    [],
+    [
+     "dropped evidence='same-level move': not in the index vocabulary",
+     "dropped evidence='scope increase': not in the index vocabulary",
+     "dropped evidence='adjacent transfer': not in the index vocabulary",
+     "preview: off: the search has no target role/domain/location constraints, so the results are effectively rando",
+     "gaps: posture=high, role_family=high, field=high, metro=high, work_mode=high"
+    ]
+   ],
+   "brief": [
+    {
+     "key": "direction",
+     "label": "Looking or hiring",
+     "value": "job seeker",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "DIRECTION: job"
+    },
+    {
+     "key": "search_posture",
+     "label": "Active, passive or exploring",
+     "value": "active",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "Looking for a role"
+    }
+   ],
+   "contract": {},
+   "throwaway": ""
+  },
+  {
+   "id": "v3_ambiguous_titles",
+   "ok": true,
+   "failures": [],
+   "user_turns": 3,
+   "calls": 2,
+   "secs": [
+    1.1,
+    43.9,
+    1.9
+   ],
+   "total_secs": 46.9,
+   "questions": [
+    [
+     "fork",
+     "direction",
+     "Are you looking for a role for yourself, or hiring for your team?",
+     [
+      "Looking for a role",
+      "Hiring"
+     ]
+    ]
+   ],
+   "says": [
+    "Before anything else:",
+    "Your titles span two distinct markets\u2014founder/CTO startup roles and hired VP/Director Engineering roles\u2014and the current preview is all noise. Picking that track changes the work type, company stage, and where the roles are even posted.",
+    "I have enough to search; here is what I'm assuming."
+   ],
+   "notes": [
+    [],
+    [
+     "preview: off: the preview is dominated by unrelated energy-storage technician and business-development roles,",
+     "gaps: work_type=high, work_mode=high, company_stage=low"
+    ],
+    []
+   ],
+   "brief": [
+    {
+     "key": "direction",
+     "label": "Looking or hiring",
+     "value": "job",
+     "source": "asked",
+     "source_label": "you said",
+     "span": ""
+    },
+    {
+     "key": "search_posture",
+     "label": "Active, passive or exploring",
+     "value": "active",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "Looking for a role"
+    },
+    {
+     "key": "title_flexibility",
+     "label": "Title flexibility",
+     "value": "open to founder cto and vp/director engineering titles",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Founder CTO or VP / Director Engineering"
+    },
+    {
+     "key": "role_family",
+     "label": "Role",
+     "value": [
+      "cto",
+      "vp engineering",
+      "director engineering"
+     ],
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Founder CTO or VP / Director Engineering"
+    },
+    {
+     "key": "field",
+     "label": "Domain",
+     "value": "software",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "ML Infra, Distributed Systems"
+    },
+    {
+     "key": "function",
+     "label": "Function",
+     "value": "engineering",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "VP / Director Engineering ML Infra, Distributed Systems"
+    },
+    {
+     "key": "specialties",
+     "label": "Specialties",
+     "value": [
+      "ml infra",
+      "distributed systems"
+     ],
+     "source": "stated",
+     "source_label": "you said",
+     "span": "ML Infra, Distributed Systems"
+    },
+    {
+     "key": "level",
+     "label": "Level",
+     "value": "leadership",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "Founder CTO or VP / Director Engineering"
+    },
+    {
+     "key": "work_type",
+     "label": "IC or manager",
+     "value": [
+      "executive",
+      "manager",
+      "founder"
+     ],
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "Founder CTO or VP / Director Engineering"
+    }
+   ],
+   "contract": {
+    "angles": [],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "leadership",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {},
+    "prefer": {
+     "field": [
+      "software"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "role_family": [
+      "cto",
+      "director engineering",
+      "vp engineering"
+     ],
+     "specialty": [
+      "distributed systems",
+      "ml infra"
+     ],
+     "work_type": [
+      "executive",
+      "founder",
+      "manager"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "cto, vp engineering, director engineering. ml infra, distributed systems",
+    "user_keys": [
+     "role_family",
+     "specialty"
+    ],
+    "notes": [
+     {
+      "rule": "readings",
+      "readings": [
+       {
+        "rule": "cooccurrence",
+        "value_key": "specialty",
+        "value": "distributed systems",
+        "field": "software",
+        "share": 0.901,
+        "lift": 4.66,
+        "support": 320,
+        "home": true,
+        "model_share": 0.901
+       }
+      ]
+     }
+    ],
+    "place_or_mode": false
+   },
+   "throwaway": ""
+  },
+  {
+   "id": "v3_owner_jobs_for_profile",
+   "ok": true,
+   "failures": [],
+   "user_turns": 1,
+   "calls": 2,
+   "secs": [
+    14.3
+   ],
+   "total_secs": 14.3,
+   "questions": [],
+   "says": [
+    "The skill fit is clear, but the preview is broad and drifting senior because we don't yet have a location or remote constraint. That fork will change the pool more than anything else right now."
+   ],
+   "notes": [
+    [
+     "question on unknown field 'metro/work_mode' dropped",
+     "fork without a question \u2192 infer",
+     "preview: off: top results skew senior and mixed-stack, which suggests the missing place/mode filter is wideni",
+     "gaps: metro/work_mode=high, employment_type=low"
+    ]
+   ],
+   "brief": [
+    {
+     "key": "direction",
+     "label": "Looking or hiring",
+     "value": "job",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "jobs for mid level software engineer"
+    },
+    {
+     "key": "search_posture",
+     "label": "Active, passive or exploring",
+     "value": "active",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "jobs for"
+    },
+    {
+     "key": "role_family",
+     "label": "Role",
+     "value": "software engineer",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "mid level software engineer"
+    },
+    {
+     "key": "field",
+     "label": "Domain",
+     "value": "software",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "software engineer"
+    },
+    {
+     "key": "function",
+     "label": "Function",
+     "value": "engineering",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "software engineer"
+    },
+    {
+     "key": "specialties",
+     "label": "Specialties",
+     "value": "large-scale systems",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "building large scale systems"
+    },
+    {
+     "key": "skills",
+     "label": "Skills that matter",
+     "value": "java, kubernetes, aws",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "using java ecosystems and has experience in k8 and aws tools"
+    },
+    {
+     "key": "level",
+     "label": "Level",
+     "value": "mid",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "mid level"
+    },
+    {
+     "key": "work_type",
+     "label": "IC or manager",
+     "value": "ic",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "software engineer"
+    }
+   ],
+   "contract": {
+    "angles": [],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "mid",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {},
+    "prefer": {
+     "field": [
+      "software"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "level": [
+      "mid"
+     ],
+     "role_family": [
+      "software engineer"
+     ],
+     "skill": [
+      "aws",
+      "java",
+      "java, kubernetes, aws",
+      "kubernetes"
+     ],
+     "specialty": [
+      "large-scale systems"
+     ],
+     "work_type": [
+      "ic"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {},
+    "text": "jobs for mid level software engineer skilled in building large scale systems using java ecosystems and has experience in k8 and aws tools.. large-scale systems. java, kubernetes, aws",
+    "user_keys": [
+     "level",
+     "role_family",
+     "skill",
+     "specialty"
+    ],
+    "notes": [
+     {
+      "rule": "readings",
+      "readings": [
+       {
+        "rule": "cooccurrence",
+        "value_key": "skill",
+        "value": "aws",
+        "field": "software",
+        "share": 0.71,
+        "lift": 3.67,
+        "support": 6833,
+        "home": true,
+        "model_share": 0.71
+       },
+       {
+        "rule": "cooccurrence",
+        "value_key": "skill",
+        "value": "java",
+        "field": "software",
+        "share": 0.857,
+        "lift": 4.43,
+        "support": 4414,
+        "home": true,
+        "model_share": 0.857
+       }
+      ]
+     }
+    ],
+    "place_or_mode": false
+   },
+   "throwaway": ""
+  },
+  {
+   "id": "v3_start_over",
+   "ok": true,
+   "failures": [],
+   "user_turns": 2,
+   "calls": 2,
+   "secs": [
+    14.4,
+    0.1
+   ],
+   "total_secs": 14.6,
+   "questions": [
+    [
+     "fork",
+     "mission",
+     "What will this person own, and what specifically fails in the next 6 months if you don\u2019t hire them?",
+     []
+    ],
+    [
+     "fork",
+     "direction",
+     "Are you looking for a role for yourself, or hiring for your team?",
+     [
+      "Looking for a role",
+      "Hiring"
+     ]
+    ]
+   ],
+   "says": [
+    "The current pool is too broad and off\u2014160 profiles with a 42% best match because we don't yet know what this person will own. The mission is the fork that will set the role, skills, and level.",
+    "Before anything else:"
+   ],
+   "notes": [
+    [
+     "dropped brief field 'jd_status'",
+     "preview: off: no mission or role signal yet, so the pool is generic and low-match.",
+     "gaps: mission=high, metro=high, work_mode=high, must_have_done=high, comp=low"
+    ],
+    []
+   ],
+   "brief": [
+    {
+     "key": "direction",
+     "label": "Looking or hiring",
+     "value": "hiring for a candidate search",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "I'm hiring"
+    }
+   ],
+   "contract": {},
+   "throwaway": ""
+  }
+ ]
+}

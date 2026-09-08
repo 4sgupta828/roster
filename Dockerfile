@@ -27,6 +27,7 @@ RUN pip install --no-cache-dir Pillow PyMuPDF numpy boto3
 # API role never loads it.
 RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu docling
 
+
 # Install the kernel (serve + postgres extras) and the TECH vertical.
 COPY packages packages
 COPY apps apps

@@ -37,6 +37,14 @@ import hashlib
 import json
 import logging
 import re
+
+
+def _title_term_rx(term: str) -> str:
+    """Title-term RETRIEVAL regex (string retrieval, not meaning): a SHORT token (cto, vp, ml, qa) must
+    stand as a whole word ('%cto%' once pulled 150 'director' titles and no CTO); a longer term keeps
+    prefix matching so 'engineer' still finds 'engineers' / 'engineering'."""
+    t = re.escape(str(term).strip().lower())
+    return r"(^|[^a-z0-9])" + t + (r"([^a-z0-9]|$)" if len(term.strip()) <= 4 else "")
 from datetime import date
 from typing import Any, Sequence
 
@@ -334,6 +342,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS rs_job_company_title_location_source_key ON rs
 CREATE INDEX IF NOT EXISTS idx_rs_job_company   ON rs_job (company);
 CREATE INDEX IF NOT EXISTS idx_rs_job_titlenorm ON rs_job (title_norm);
 CREATE INDEX IF NOT EXISTS idx_job_vec ON rs_job USING hnsw (embedding vector_cosine_ops);
+-- POSTING BODIES (2026-09-04, panel root cause: titles-only embeddings): the description text the ATS
+-- API returns with the board (Greenhouse / Ashby / Lever), capped; `skills` = lexicon hits over the
+-- body (code-owned); rows embed title + company + body excerpt once a body is known.
+ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS body text;
+ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS skills text[];
+ALTER TABLE rs_job ADD COLUMN IF NOT EXISTS body_at timestamptz;
 
 CREATE TABLE IF NOT EXISTS rs_person_vec (
     entity_id text PRIMARY KEY,
@@ -350,6 +364,7 @@ CREATE TABLE IF NOT EXISTS rs_ingest_checkpoint (
     updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (source, cursor_key)
 );
+ALTER TABLE rs_ingest_checkpoint ADD COLUMN IF NOT EXISTS error text;   -- fetch failure / 'body_done: n' marker
 """
 
 # Whitelisted numeric counters finish_run() may update (guards the dynamic SET).
@@ -1604,7 +1619,9 @@ class ClaimGraphStore:
         for t in (terms or [])[:4]:
             t = str(t).strip().lower()
             if t:
-                conds.append(f"title_norm ILIKE ${i}"); args.append(f"%{t}%"); i += 1
+                # WHOLE-WORD title match: '%cto%' once pulled 150 'director' titles and no CTO (2026-09-05)
+                conds.append(f"title_norm ~* ${i}"); args.append(_title_term_rx(t)); i += 1
+        conds.append("closed_at IS NULL")     # a posting its board no longer lists is out of search
         where = (" WHERE " + " AND ".join(conds)) if conds else ""
         # updated_at rides as a date STRING so rows stay JSON-serializable everywhere (sessions,
         # /jobs, Q&A) — the freshness disclosure ("postings as of …") depends on it.
@@ -1622,11 +1639,12 @@ class ClaimGraphStore:
         """Jobs at a SET of companies keyed by the alphanumeric-only company key (the same key the
         F500 / startup sets use), optionally narrowed by title terms. Newest first."""
         pool = await self._get_pool()
-        conds, args, i = ["regexp_replace(lower(company),'[^a-z0-9]','','g') = ANY($1)"], [list(norm_companies)], 2
+        conds, args, i = ["regexp_replace(lower(company),'[^a-z0-9]','','g') = ANY($1)", "closed_at IS NULL"], [list(norm_companies)], 2
         for t in (terms or [])[:4]:
             t = str(t).strip().lower()
             if t:
-                conds.append(f"title_norm ILIKE ${i}"); args.append(f"%{t}%"); i += 1
+                # WHOLE-WORD title match: '%cto%' once pulled 150 'director' titles and no CTO (2026-09-05)
+                conds.append(f"title_norm ~* ${i}"); args.append(_title_term_rx(t)); i += 1
         sql = (f"SELECT id,company,title,location,department,url,source,to_char(updated_at,'YYYY-MM-DD') AS updated_at "
                f"FROM rs_job WHERE {' AND '.join(conds)} ORDER BY updated_at DESC LIMIT {int(cap)}")
         try:
@@ -1863,7 +1881,7 @@ class ClaimGraphStore:
     async def semantic_jobs(self, qvec: str, *, company=None, cap: int = 80) -> list[dict]:
         """Rank jobs by cosine similarity to the query embedding (optionally within a company set)."""
         pool = await self._get_pool()
-        conds, args, i = ["embedding IS NOT NULL"], [], 1
+        conds, args, i = ["embedding IS NOT NULL", "closed_at IS NULL"], [], 1
         if company:
             conds.append(f"lower(replace(company,' ','_')) = ANY(${i})"); args.append([str(c).lower().replace(' ', '_') for c in company]); i += 1
         args.append(qvec); qi = i; i += 1
@@ -1885,14 +1903,14 @@ class ClaimGraphStore:
         if not location_regex:
             return []
         pool = await self._get_pool()
-        conds, args = ["location ~* $1"], [location_regex]
+        conds, args = ["location ~* $1", "closed_at IS NULL"], [location_regex]
         for t in (terms or [])[:6]:
             t = str(t).strip().lower()
             if t:
-                args.append("%" + t + "%"); conds.append(f"title_norm ILIKE ${len(args)}")
+                args.append(_title_term_rx(t)); conds.append(f"title_norm ~* ${len(args)}")
         if qvec:
             args.append(qvec)
-            sql = (f"SELECT id, company, title, location, department, url, source, "
+            sql = (f"SELECT id, company, title, location, department, url, source, skills, facets, left(body, 900) AS body_head, "
                    f"1 - (embedding <=> ${len(args)}::vector) AS sim FROM rs_job "
                    f"WHERE embedding IS NOT NULL AND {' AND '.join(conds)} "
                    f"ORDER BY embedding <=> ${len(args)}::vector LIMIT {int(cap)}")
@@ -1908,13 +1926,29 @@ class ClaimGraphStore:
             return []
         return [dict(r) for r in rows]
 
+    async def similarity_baseline(self, qvec: str, *, sample: int = 300) -> float | None:
+        """This query's NOISE FLOOR: the p90 similarity over a random sample of open postings — what an
+        unrelated posting can reach. One cheap sampled scan; None when the table is too small."""
+        pool = await self._get_pool()
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT 1 - (embedding <=> $1::vector) AS s FROM rs_job TABLESAMPLE SYSTEM (1) "
+                    "WHERE embedding IS NOT NULL AND closed_at IS NULL LIMIT $2", qvec, int(sample))
+        except Exception:
+            return None
+        sims = sorted(float(r["s"]) for r in rows if r["s"] is not None)
+        if len(sims) < 30:
+            return None
+        return sims[int(0.9 * (len(sims) - 1))]
+
     async def match_jobs_scored(self, qvec: str, *, cap: int = 400) -> list[dict]:
         """Top `cap` jobs by cosine similarity to the résumé embedding, WITH the similarity score and
         id, so the caller can re-rank by user preferences (location/seniority/company-type/…)."""
         pool = await self._get_pool()
-        sql = ("SELECT id, company, title, location, department, url, source, "
+        sql = ("SELECT id, company, title, location, department, url, source, skills, facets, left(body, 900) AS body_head, "
                "1 - (embedding <=> $1::vector) AS sim "
-               "FROM rs_job WHERE embedding IS NOT NULL ORDER BY embedding <=> $1::vector LIMIT $2")
+               "FROM rs_job WHERE embedding IS NOT NULL AND closed_at IS NULL ORDER BY embedding <=> $1::vector LIMIT $2")
         try:
             async with pool.acquire() as conn:
                 async with conn.transaction():
@@ -2024,7 +2058,8 @@ class ClaimGraphStore:
         for t in (filters.get("terms") or [])[:4]:
             t = str(t).strip().lower()
             if t:
-                conds.append(f"title_norm ILIKE ${i}"); args.append(f"%{t}%"); i += 1
+                # WHOLE-WORD title match: '%cto%' once pulled 150 'director' titles and no CTO (2026-09-05)
+                conds.append(f"title_norm ~* ${i}"); args.append(_title_term_rx(t)); i += 1
         args.append(top_n); li = i
         sql = (f"SELECT {val_expr} AS value, max({group_by}) AS display, count(*) AS n FROM rs_job "
                f"WHERE {' AND '.join(conds)} GROUP BY {val_expr} ORDER BY n DESC LIMIT ${li}")

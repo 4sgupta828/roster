@@ -12,9 +12,13 @@ DS = os.environ.get("DEEPSEEK_API_KEY", "")
 # flat fields (drive the Apply-Profile form + ATS autofill)
 FLAT = ["first_name", "last_name", "email", "phone", "city", "region", "country", "linkedin",
         "github", "portfolio_website", "current_title", "current_company", "years_experience",
-        "highest_degree", "school", "field_of_study", "grad_year"]
+        "highest_degree", "school", "field_of_study", "grad_year", "field", "level"]
 # structured fields (the FULL, rigorous mapping — every role & school, plus skills)
-STRUCT = ["work_history", "education", "skills", "summary"]
+STRUCT = ["work_history", "education", "skills", "summary", "fields"]
+# the vocabulary the model chooses from for field / level (shared with the job index — api.people_population)
+FIELDS = ("software", "data_ml", "hardware", "product", "design", "clinical_pharma", "finance", "sales", "marketing",
+          "legal", "people_hr", "operations", "mechanical_civil_electrical", "research", "other")
+LEVELS = ("intern", "junior", "mid", "senior", "staff_plus", "leadership")
 
 
 def extract_text_docling(data: bytes, name: str) -> str:
@@ -47,7 +51,10 @@ def llm_fields(text: str) -> dict:
         "(EVERY role, most-recent first; end='Present' if current; description = 1-2 line summary of impact),\n"
         "  education:    [ {school, degree, field, start, end} ]  (EVERY entry),\n"
         "  skills:       [ ... ]  (all technical skills/tools/languages),\n"
-        "  summary:      one-sentence professional summary.\n"
+        "  summary:      one-sentence professional summary,\n"
+        f"  field:        the candidate's field, EXACTLY ONE of [{' | '.join(FIELDS)}],\n"
+        "  fields:       [ ... ] every field they credibly fit from that same list, primary first,\n"
+        f"  level:        EXACTLY ONE of [{' | '.join(LEVELS)}] (founder / CTO / VP / head-of = leadership).\n"
         "RULES: be exhaustive — do NOT skip older roles; preserve dates verbatim (e.g. 'Jan 2021'); "
         "infer years_experience from earliest job start to the present; no invented facts; no commentary.\n\n"
         "RÉSUMÉ:\n" + text[:24000])
