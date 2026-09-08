@@ -139,3 +139,12 @@ def test_the_whole_voices_corpus_is_sealed_off_from_the_research_path():
     f = PractitionerEssayConnector._facets({"title": "On screening", "link": "https://x.test/p"},
                                            "Hung Lee", "recruiter", "hiring_team", "Recruiting Brainfood")
     assert f["voices"] == "1" and f["audience"] == "hiring_team" and f["voice_role"] == "recruiter"
+
+
+def test_feed_prose_reaches_the_corpus_as_prose_not_as_entities():
+    """A card, a snippet and a summary all show the block's text. A feed that ships entity-encoded
+    prose — several double-encode it — put "the team&#x2019;s mind" in front of the reader."""
+    from roster_vertical.expert_feed_doc import _strip_html
+    assert _strip_html("the team&#x2019;s mind") == "the team’s mind"
+    assert _strip_html("A &amp;#x2019; B") == "A ’ B"          # double-encoded, as some feeds send
+    assert _strip_html("<p>plain <b>text</b></p>") == "plain text"

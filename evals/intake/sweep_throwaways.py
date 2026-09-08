@@ -7,7 +7,7 @@ import os, asyncio, asyncpg
 PAT = ("intake-eval-%@roster.test", "briefs-smoke-%@roster.test", "rail-smoke-%@roster.test", "nudge-smoke-%@roster.test",
        "railcheck-%@roster.test")
 TABLES = ['roster_answer_bank', 'roster_application', 'roster_brief', 'roster_bucket', 'roster_candidate_profile', 'roster_connection',
-          'roster_feedback', 'roster_notification', 'roster_outreach', 'roster_saved_search', 'roster_user_pref', 'roster_user_token']
+          'roster_feedback', 'roster_notification', 'roster_outreach', 'roster_saved_search', 'roster_user_pref', 'roster_user_token', 'vo_favorite']
 async def main():
     cx = await asyncpg.connect(os.environ["ROSTER_CORPUS_DSN"])
     ids = [r["id"] for r in await cx.fetch("select id from roster_user where email like any($1::text[])", list(PAT))]

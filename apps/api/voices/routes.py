@@ -14,8 +14,10 @@ import os
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
+from . import favorites
 from .ingest import VOICE_CONNECTORS, ingest_voices, mark_boilerplate
 from .search import AUDIENCES, build_query, dedupe, moment, terms, tsqueries
+from .summarize import cached, store, summarize
 
 
 def voices_enabled() -> bool:
@@ -30,6 +32,17 @@ class SearchIn(BaseModel):
     limit: int = 30
     days: int = 0                  # browse window: 7, 30, 90 … 0 means no window
     order: str = "recent"          # recent | watched
+
+
+class SummaryIn(BaseModel):
+    id: str                        # "<document_id>::<block_id>" as a moment card carries it
+    refresh: bool = False          # re-read it: an extractive summary written during a model outage
+    #                                is cached, and without this the outage's result outlives it
+
+
+class FavoriteIn(BaseModel):
+    moment: dict = {}              # the card as rendered, so a kept item survives the feed rolling
+    note: str = ""
 
 
 class JobIn(BaseModel):
@@ -47,8 +60,18 @@ def _window(days: int) -> str:
 
 
 def build_router(pool_of, *, manifest=None, pg_source_of=None, tenant_id: str = "default",
-                 admin_token: str = "") -> APIRouter:
+                 admin_token: str = "", llm_json=None, user_of=None) -> APIRouter:
     router = APIRouter()
+
+    async def _user(token: str) -> str:
+        """The signed-in account id, or "" — a kept list follows the ACCOUNT, never the browser."""
+        if user_of is None or not token:
+            return ""
+        try:
+            u = await user_of(token)
+        except Exception:      # noqa: BLE001 — a broken session must not break a search
+            return ""
+        return str((u or {}).get("id") or "") if isinstance(u, dict) else ""
 
     async def _rows(sql: str, params: list) -> list[dict]:
         pool = await pool_of()
@@ -64,7 +87,7 @@ def build_router(pool_of, *, manifest=None, pg_source_of=None, tenant_id: str = 
         return [shape(r) for r in out]
 
     @router.post("/voices/search")
-    async def voices_search(body: SearchIn) -> dict:
+    async def voices_search(body: SearchIn, x_roster_token: str = Header(default="")) -> dict:
         """Moments matching the question. Keyword-ranked, so it works with no embedding provider."""
         if not voices_enabled():
             raise HTTPException(status_code=404, detail="voices mode is not enabled")
@@ -104,6 +127,13 @@ def build_router(pool_of, *, manifest=None, pg_source_of=None, tenant_id: str = 
             since, widened = "", True
             rows = await _fetch()
         moments = dedupe([moment(r) for r in rows], limit=want, per_document=1 if browse else 2)
+        uid = await _user(x_roster_token)
+        if uid:
+            pool = await pool_of()
+            async with pool.acquire() as conn:
+                kept = set(await favorites.ids(conn, uid))
+            for m in moments:
+                m["saved"] = m["id"] in kept
         return {
             "moments": moments,
             "counts": {"total": len(moments),
@@ -135,6 +165,73 @@ def build_router(pool_of, *, manifest=None, pg_source_of=None, tenant_id: str = 
             "bars": {**reg.BARS, "on_topic": reg.ON_TOPIC_BAR},
             "rejected": [{"label": lbl, "why": why} for lbl, why in reg.REJECTED],
         }
+
+    @router.post("/voices/summary")
+    async def voices_summary(body: SummaryIn) -> dict:
+        """What one piece says, read once and stored. Lazy by design: nothing is summarised until a
+        reader opens that card, so spend follows attention rather than corpus size."""
+        if not voices_enabled():
+            raise HTTPException(status_code=404, detail="voices mode is not enabled")
+        doc = str(body.id or "").split("::", 1)[0]
+        if not doc:
+            raise HTTPException(status_code=400, detail="a moment id is required")
+        pool = await pool_of()
+        async with pool.acquire() as conn:
+            hit = None if body.refresh else await cached(conn, doc)
+            if hit:
+                return {**hit, "cached": True}
+            rows = await conn.fetch(
+                "SELECT text, document_title, source_key, facets FROM rs_block "
+                "WHERE document_id = $1 ORDER BY block_id LIMIT 400", doc)
+            if not rows:
+                raise HTTPException(status_code=404, detail="that piece is not in the corpus")
+            facets = rows[0]["facets"]
+            if isinstance(facets, str):
+                facets = json.loads(facets)
+            facets = facets or {}
+            is_chapter = str(facets.get("source_kind") or "") == "chapter_pointer"
+            text = "\n".join(str(r["text"] or "") for r in rows)
+            out = await summarize(title=str(rows[0]["document_title"] or ""),
+                                  author=str(facets.get("author") or facets.get("writer")
+                                             or facets.get("publication") or ""),
+                                  text=text, is_chapter=is_chapter,
+                                  llm_json=(None if is_chapter else llm_json))
+            await store(conn, doc, out)
+        return {**out, "cached": False}
+
+    @router.get("/voices/favorites")
+    async def voices_favorites(x_roster_token: str = Header(default="")) -> dict:
+        if not voices_enabled():
+            raise HTTPException(status_code=404, detail="voices mode is not enabled")
+        uid = await _user(x_roster_token)
+        if not uid:
+            raise HTTPException(status_code=401, detail="sign in to keep moments")
+        pool = await pool_of()
+        async with pool.acquire() as conn:
+            return {"moments": await favorites.listing(conn, uid)}
+
+    @router.post("/voices/favorites")
+    async def voices_favorite_add(body: FavoriteIn, x_roster_token: str = Header(default="")) -> dict:
+        if not voices_enabled():
+            raise HTTPException(status_code=404, detail="voices mode is not enabled")
+        uid = await _user(x_roster_token)
+        if not uid:
+            raise HTTPException(status_code=401, detail="sign in to keep moments")
+        pool = await pool_of()
+        async with pool.acquire() as conn:
+            return await favorites.add(conn, uid, body.moment or {}, body.note or "")
+
+    @router.delete("/voices/favorites/{moment_id:path}")
+    async def voices_favorite_del(moment_id: str, x_roster_token: str = Header(default="")) -> dict:
+        if not voices_enabled():
+            raise HTTPException(status_code=404, detail="voices mode is not enabled")
+        uid = await _user(x_roster_token)
+        if not uid:
+            raise HTTPException(status_code=401, detail="sign in to keep moments")
+        pool = await pool_of()
+        async with pool.acquire() as conn:
+            await favorites.remove(conn, uid, moment_id)
+        return {"ok": True}
 
     @router.post("/admin/voices/jobs")
     async def voices_job(body: JobIn, x_admin_token: str = Header(default="")) -> dict:

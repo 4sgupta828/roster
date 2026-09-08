@@ -233,3 +233,54 @@ model calls:
 `POST /admin/voices/jobs` with `X-Admin-Token`: `{"kind":"ingest"}` (re-fetch every feed; safe to
 re-run, blocks key on a hash of their text) and `{"kind":"mark_boilerplate"}`. Both are free. Run
 ingest on a cadence to keep the YouTube leg growing.
+
+---
+
+## 6. The surface (2026-09-08, later) — a reading feed, not a result list
+
+The first cut rendered moments as chat turns. That was wrong for this material: a corpus of takes is
+something you BROWSE, and a thread of answers is something you read once. Voices now owns a surface.
+
+**What a card is.** Artwork · kind · show · date · ⏱ offset · view count, then the moment itself, then
+who said it **and what they are** — a role badge (`recruiter`, `career coach`, `engineer`,
+`eng manager`, `vendor`), because a vendor's take on their own product and a working recruiter's take
+are not the same evidence and the reader must be able to weigh them. Then three actions and the
+register line.
+
+**Play where the reader is.** ▶ Play here embeds the video at its second (`youtube-nocookie`) or plays
+the audio enclosure from the same offset; the link beside it still sends the traffic to the publisher.
+This is the affordance a pointer corpus lives on — a marker saying "listen from 20:30" with no way to
+listen is worse than no card.
+
+**☰ What it says** reads the whole piece on demand: 3–6 points, up to 2 verbatim quotes, and the
+author's own paragraphs grouped under model-written headings — the model ORGANISES, it never supplies
+prose, so a section cannot contain a sentence the author did not write. `verify()` drops any point
+asserting a figure the piece never states. Lazy and cached per document, so spend follows attention:
+one call, ~2.6 s, ≈ $0.001, and free forever after. With no model available the same panel is filled
+extractively from the piece's own sentences and the card says so.
+
+**One-tap starts.** The empty state of a small curated corpus should be a destination, not a blank
+box, and the shelves change with the audience — a job seeker sees *Fake résumé claims · Beating the
+screen · System design prep · Behavioural interviews · Negotiating an offer · Referrals*; a hiring
+team sees *Fake candidates · AI in the interview · Structured interviews · Take-home vs live ·
+Sourcing · Debriefs*.
+
+**ⓘ Sources** shows every source with the numbers that admitted it and the rejections with their
+reasons. A reader weighing advice is entitled to know whose advice, and why it is here at all.
+
+**★ Keep** stores a moment against the ACCOUNT with a snapshot of the card, so a kept item still
+renders after the feed has rolled past it.
+
+Also: browse windows (week / month / quarter / all time) and a "most watched" order that uses
+YouTube's own number and never turns it into a ranking of ours.
+
+### Fixed in this pass
+- The surface started **927 px** below the fold behind the shell's nav and account banner; entering the
+  mode now brings it to the top.
+- "Open at 0:00" for a chapter that opens its piece — now "Watch ↗" / "Listen ↗".
+- **HTML entities were reaching the corpus as text** ("the team&#x2019;s mind") — feeds ship
+  entity-encoded prose and several double-encode it. Unescaped twice at the doc builder; 0 entity
+  blocks in prod after a re-ingest.
+- The summary's model call passed `timeout` positionally against a keyword-only parameter, so every
+  summary silently fell back to extractive and cached that outage for three days. `refresh: true`
+  now exists precisely so an outage's result cannot outlive it.
