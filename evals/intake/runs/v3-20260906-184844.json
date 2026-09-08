@@ -1,0 +1,721 @@
+{
+ "base": "https://roster-api-production-3405.up.railway.app",
+ "results": [
+  {
+   "id": "v3_seeker_no_resume",
+   "ok": true,
+   "failures": [],
+   "user_turns": 4,
+   "calls": 5,
+   "secs": [
+    216.4,
+    3.4,
+    3.3,
+    2.2
+   ],
+   "total_secs": 225.3,
+   "questions": [
+    [
+     "fork",
+     "role_family",
+     "What specific role are you targeting?",
+     [
+      "Software Engineer",
+      "Sales Manager",
+      "Operations Manager"
+     ]
+    ],
+    [
+     "confirm",
+     "comp",
+     "What is your target compensation range for this role?",
+     [
+      "$150k-$200k",
+      "$200k-$250k",
+      "$250k+"
+     ]
+    ],
+    [
+     "confirm",
+     "level",
+     "What level are you targeting for your next role?",
+     [
+      "Senior",
+      "Staff"
+     ]
+    ]
+   ],
+   "says": [
+    "To refine your search, let's clarify your role family and level. What specific role are you targeting, and what level do you see yourself at?",
+    "Your target role is a Senior Backend Engineer, and you're based in New York. Let's confirm your compensation expectations next.",
+    "Your target compensation is confirmed at $150k-$200k. Now, let's finalize your level for the search; are you looking for a senior role or considering a step up to staff level?",
+    "You're looking for a Senior Backend Engineer role in New York with a target compensation of $150k-$200k. I will now search for opportunities that match these criteria."
+   ],
+   "brief": [
+    {
+     "key": "direction",
+     "label": "Looking or hiring",
+     "value": "job",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "I'm looking for my next role"
+    },
+    {
+     "key": "role_family",
+     "label": "Role",
+     "value": "backend engineer",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Senior backend engineer"
+    },
+    {
+     "key": "level",
+     "label": "Level",
+     "value": "senior",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Senior"
+    },
+    {
+     "key": "metro",
+     "label": "Place",
+     "value": "new_york",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "In New York."
+    },
+    {
+     "key": "comp",
+     "label": "Compensation",
+     "value": "150000-200000",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "$150k-$200k"
+    }
+   ],
+   "contract": {
+    "angles": [],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "level": [
+      "senior"
+     ],
+     "metro": [
+      "new_york"
+     ]
+    },
+    "prefer": {
+     "role_family": [
+      "backend engineer"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm looking for my next role. backend engineer. new_york",
+    "user_keys": [
+     "comp",
+     "level",
+     "metro",
+     "role_family"
+    ],
+    "notes": [],
+    "place_or_mode": false
+   },
+   "throwaway": ""
+  },
+  {
+   "id": "v3_seeker_resume_on_file",
+   "ok": false,
+   "failures": [
+    "first question on None, expected one of ['posture', 'level', 'work_type', 'title_flexibility', 'metro', 'work_mode']"
+   ],
+   "user_turns": 1,
+   "calls": 2,
+   "secs": [
+    14.7
+   ],
+   "total_secs": 14.7,
+   "questions": [],
+   "says": [
+    "We are set to search for a staff-plus engineering manager role in software, focusing on ML infrastructure, in the Bay Area with a hybrid work mode. I will target competitive compensation in the range of $200k\u2013300k."
+   ],
+   "brief": [
+    {
+     "key": "direction",
+     "label": "Looking or hiring",
+     "value": "job",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "I'm looking for my next role"
+    },
+    {
+     "key": "posture",
+     "label": "Step up, lateral or switch",
+     "value": "Step up",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "Head of ML Infrastructure at Fintech Co"
+    },
+    {
+     "key": "search_posture",
+     "label": "Active, passive or exploring",
+     "value": "Active",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "search posture"
+    },
+    {
+     "key": "positioning",
+     "label": "Story to lead with",
+     "value": "Leading ML infrastructure in fintech",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "lead a 12-person team building training and serving platforms"
+    },
+    {
+     "key": "title_flexibility",
+     "label": "Title flexibility",
+     "value": "Flexible",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "title flexibility"
+    },
+    {
+     "key": "stage_appetite",
+     "label": "Company stage appetite",
+     "value": "Series A and beyond",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "company stage appetite"
+    },
+    {
+     "key": "avoid_domains",
+     "label": "Domains to avoid",
+     "value": "None specified",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "domains to avoid"
+    },
+    {
+     "key": "risk",
+     "label": "Risk tolerance",
+     "value": "Moderate",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "risk tolerance"
+    },
+    {
+     "key": "authorization",
+     "label": "Work authorization",
+     "value": "US Citizen",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "work authorization"
+    },
+    {
+     "key": "confidentiality",
+     "label": "Confidential search",
+     "value": "Confidential search",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "confidential search"
+    },
+    {
+     "key": "role_family",
+     "label": "Role",
+     "value": "Engineering",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "role"
+    },
+    {
+     "key": "field",
+     "label": "Domain",
+     "value": "software",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "domain"
+    },
+    {
+     "key": "function",
+     "label": "Function",
+     "value": "engineering",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "function"
+    },
+    {
+     "key": "specialties",
+     "label": "Specialties",
+     "value": "ML infrastructure, Kubernetes, distributed systems",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "specialties"
+    },
+    {
+     "key": "skills",
+     "label": "Skills that matter",
+     "value": "Kubernetes, Ray, feature stores",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "building training and serving platforms"
+    },
+    {
+     "key": "level",
+     "label": "Level",
+     "value": "staff_plus",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "Head of ML Infrastructure"
+    },
+    {
+     "key": "work_type",
+     "label": "IC or manager",
+     "value": "manager",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "work type"
+    },
+    {
+     "key": "metro",
+     "label": "Place",
+     "value": "bay_area",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "San Francisco, CA"
+    },
+    {
+     "key": "work_mode",
+     "label": "Work mode",
+     "value": "hybrid",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "work mode"
+    },
+    {
+     "key": "timezone",
+     "label": "Timezone / commute",
+     "value": "PST",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "timezone"
+    },
+    {
+     "key": "comp",
+     "label": "Compensation",
+     "value": "Competitive",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "compensation"
+    },
+    {
+     "key": "comp_flexibility",
+     "label": "Comp flexibility",
+     "value": "Flexible",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "comp flexibility"
+    },
+    {
+     "key": "company_type",
+     "label": "Company type",
+     "value": "startup",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "company type"
+    },
+    {
+     "key": "employment_type",
+     "label": "Employment type",
+     "value": "full_time",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "employment type"
+    },
+    {
+     "key": "timing",
+     "label": "Timing",
+     "value": "Immediate",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "timing"
+    },
+    {
+     "key": "deal_breakers",
+     "label": "Deal-breakers",
+     "value": "None specified",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "deal-breakers"
+    }
+   ],
+   "contract": {
+    "angles": [],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "staff_plus",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "employment_type": [
+      "full_time"
+     ],
+     "field": [
+      "software"
+     ],
+     "work_mode": [
+      "hybrid"
+     ]
+    },
+    "prefer": {
+     "company_type": [
+      "startup"
+     ],
+     "function": [
+      "engineering"
+     ],
+     "metro": [
+      "bay_area"
+     ],
+     "role_family": [
+      "engineering"
+     ],
+     "skill": [
+      "kubernetes, ray, feature stores"
+     ],
+     "specialty": [
+      "ml infrastructure, kubernetes, distributed systems"
+     ],
+     "work_type": [
+      "manager"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {},
+    "text": "I'm looking for my next role. Engineering. ML infrastructure, Kubernetes, distributed systems. Kubernetes, Ray, feature stores. bay_area",
+    "user_keys": [],
+    "notes": [
+     {
+      "rule": "place_or_mode",
+      "key": "metro",
+      "values": [
+       "bay_area"
+      ],
+      "why": "the brief names the place as an alternative to remote / hybrid",
+      "action": "must \u2192 prefer"
+     }
+    ],
+    "place_or_mode": true
+   },
+   "throwaway": "intake-eval-1788745679724@roster.test"
+  },
+  {
+   "id": "v3_hiring_no_jd",
+   "ok": false,
+   "failures": [
+    "must should not carry 'metro': {'metro': ['san_francisco']}"
+   ],
+   "user_turns": 4,
+   "calls": 5,
+   "secs": [
+    2.0,
+    2.4,
+    2.6,
+    7.3
+   ],
+   "total_secs": 14.3,
+   "questions": [
+    [
+     "confirm",
+     "mission",
+     "What will this person own, and what fails if they are not hired?",
+     []
+    ],
+    [
+     "infer",
+     "role_family",
+     "What specific title or role family are you envisioning for this backend engineer?",
+     [
+      "Backend Engineer",
+      "Senior Backend Engineer",
+      "Staff Backend Engineer"
+     ]
+    ],
+    [
+     "confirm",
+     "metro",
+     "Which metro area are you targeting for this remote role?",
+     [
+      "San Francisco",
+      "New York",
+      "Austin"
+     ]
+    ]
+   ],
+   "says": [
+    "What will this person own, and what fails if they are not hired?",
+    "The mission is to own the ledger and money movement for the payments team, crucial for launching in Q1. This indicates a strong urgency for the role.",
+    "The role family is confirmed as backend engineer, and the level is senior. The compensation range is set at $180-230k, with a remote work mode in the US.",
+    "We are set to search for a senior backend engineer for the payments team, focusing on ledger and money movement, with a compensation range of $180-230k, remote in the US, specifically targeting candidates in the San Francisco area."
+   ],
+   "brief": [
+    {
+     "key": "direction",
+     "label": "Looking or hiring",
+     "value": "candidate",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "I'm hiring"
+    },
+    {
+     "key": "mission",
+     "label": "What this person owns",
+     "value": "A backend engineer for our payments team. They'd own the ledger and money movement end to end; if we don't hire, we can't launch in Q1.",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "A backend engineer for our payments team. They'd own the ledger and money movement end to end; if we don't hire, we can't launch in Q1."
+    },
+    {
+     "key": "role_family",
+     "label": "Role",
+     "value": "backend engineer",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Must have built a ledger or payments system in production; Go or Python. Senior, not staff."
+    },
+    {
+     "key": "level",
+     "label": "Level",
+     "value": "senior",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Senior, not staff."
+    },
+    {
+     "key": "metro",
+     "label": "Place",
+     "value": "san_francisco",
+     "source": "asked",
+     "source_label": "you said",
+     "span": ""
+    },
+    {
+     "key": "work_mode",
+     "label": "Work mode",
+     "value": "remote",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Remote US."
+    },
+    {
+     "key": "comp",
+     "label": "Compensation",
+     "value": "$180-230k",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "$180-230k."
+    }
+   ],
+   "contract": {
+    "angles": [],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {
+     "metro": [
+      "san_francisco"
+     ]
+    },
+    "prefer": {
+     "role_family": [
+      "backend engineer"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm hiring. backend engineer. A backend engineer for our payments team. They'd own the ledger and money movement end to end; if we don't hire, we can'. san_francisco",
+    "user_keys": [
+     "level",
+     "metro",
+     "role_family"
+    ],
+    "notes": [],
+    "place_or_mode": true
+   },
+   "throwaway": ""
+  },
+  {
+   "id": "v3_ambiguous_titles",
+   "ok": true,
+   "failures": [],
+   "user_turns": 5,
+   "calls": 5,
+   "secs": [
+    0.9,
+    2.1,
+    5.1,
+    2.4,
+    1.2
+   ],
+   "total_secs": 11.7,
+   "questions": [
+    [
+     "fork",
+     "direction",
+     "Are you looking for a role or hiring for your team?",
+     [
+      "Looking for a role",
+      "Hiring"
+     ]
+    ],
+    [
+     "confirm",
+     "level",
+     "What specific level are you targeting within the leadership roles?",
+     [
+      "CTO",
+      "VP of Engineering",
+      "Director of Engineering"
+     ]
+    ],
+    [
+     "fork",
+     "metro",
+     "What is your preferred metro area for the role?",
+     []
+    ]
+   ],
+   "says": [
+    "Before anything else:",
+    "Your target role is a Founder CTO or VP/Director of Engineering focused on ML Infrastructure and Distributed Systems. Let's clarify your preferred level for this search.",
+    "To refine your search, we need to determine your preferred metro area for the role. Which location do you prefer for your next position?",
+    "Since you're open to both remote and city options, I'll consider remote as the primary mode for your search. This will broaden your opportunities significantly.",
+    "I have enough to search; here is what I'm assuming."
+   ],
+   "brief": [
+    {
+     "key": "direction",
+     "label": "Looking or hiring",
+     "value": "job",
+     "source": "asked",
+     "source_label": "you said",
+     "span": ""
+    },
+    {
+     "key": "role_family",
+     "label": "Role",
+     "value": "CTO or VP/Director of Engineering",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Founder CTO or VP / Director Engineering ML Infra, Distributed Systems"
+    },
+    {
+     "key": "level",
+     "label": "Level",
+     "value": [
+      "leadership",
+      "leadership",
+      "leadership"
+     ],
+     "source": "asked",
+     "source_label": "you said",
+     "span": ""
+    },
+    {
+     "key": "metro",
+     "label": "Place",
+     "value": "remote",
+     "source": "inferred",
+     "source_label": "inferred \u2014 confirm?",
+     "span": "Open on that \u2014 you decide. Remote or the city is fine."
+    }
+   ],
+   "contract": {
+    "angles": [],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "leadership",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "level": [
+      "leadership"
+     ],
+     "work_mode": [
+      "remote"
+     ]
+    },
+    "prefer": {
+     "role_family": [
+      "cto or vp/director of engineering"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "CTO or VP/Director of Engineering. remote",
+    "user_keys": [
+     "level",
+     "role_family"
+    ],
+    "notes": [],
+    "place_or_mode": false
+   },
+   "throwaway": ""
+  },
+  {
+   "id": "v3_start_over",
+   "ok": true,
+   "failures": [],
+   "user_turns": 2,
+   "calls": 0,
+   "secs": [
+    2.5,
+    0.9
+   ],
+   "total_secs": 3.4,
+   "questions": [
+    [
+     "confirm",
+     "mission",
+     "What will this person own and what fails if they are not hired?",
+     []
+    ]
+   ],
+   "says": [
+    "To proceed, I need to understand the mission for this role \u2014 what will this person own and what fails if they are not hired?",
+    "Let's start fresh. Please share what role you are looking for and any specific details about your mission and expectations."
+   ],
+   "brief": [],
+   "contract": {},
+   "throwaway": ""
+  }
+ ]
+}

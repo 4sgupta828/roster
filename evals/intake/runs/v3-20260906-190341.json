@@ -1,0 +1,595 @@
+{
+ "base": "https://roster-api-production-3405.up.railway.app",
+ "results": [
+  {
+   "id": "v3_seeker_no_resume",
+   "ok": true,
+   "failures": [],
+   "user_turns": 4,
+   "calls": 5,
+   "secs": [
+    4.1,
+    2.6,
+    2.8,
+    1.6
+   ],
+   "total_secs": 11.0,
+   "questions": [
+    [
+     "fork",
+     "posture",
+     "What is your desired posture for this next role?",
+     [
+      "Step up",
+      "Lateral",
+      "Switch"
+     ]
+    ],
+    [
+     "infer",
+     "posture",
+     "What is your desired posture for this next role?",
+     [
+      "Step up",
+      "Lateral",
+      "Switch"
+     ]
+    ],
+    [
+     "confirm",
+     "level",
+     "What level are you aiming for in your next role?",
+     [
+      "senior",
+      "staff_plus"
+     ]
+    ]
+   ],
+   "says": [
+    "To refine your search, let's clarify your posture: are you looking to step up, lateral in a better environment, or switch fields? This will help us target the right opportunities.",
+    "Your experience suggests a strong background in backend engineering, particularly with Go and Kubernetes. Let's confirm your posture: are you looking to step up, lateral in a better environment, or switch fields?",
+    "Great, you're looking to step up in your career. Let's determine the level you're targeting for your next role, which will help us refine the search further.",
+    "I will search for senior backend engineer roles in New York that align with your goal to step up in your career. I'm assuming you're focused on opportunities that leverage your skills in Go and Kubernetes."
+   ],
+   "notes": [
+    [],
+    [],
+    [],
+    []
+   ],
+   "brief": [
+    {
+     "key": "direction",
+     "label": "Looking or hiring",
+     "value": "job",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "I'm looking for my next role"
+    },
+    {
+     "key": "posture",
+     "label": "Step up, lateral or switch",
+     "value": "step up",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Step up"
+    },
+    {
+     "key": "role_family",
+     "label": "Role",
+     "value": "backend engineer",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Senior backend engineer at Acme for 5 years"
+    },
+    {
+     "key": "skills",
+     "label": "Skills that matter",
+     "value": "Go and Kubernetes",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Go and Kubernetes"
+    },
+    {
+     "key": "level",
+     "label": "Level",
+     "value": "senior",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "senior"
+    },
+    {
+     "key": "metro",
+     "label": "Place",
+     "value": "new_york",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "In New York."
+    }
+   ],
+   "contract": {
+    "angles": [],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "level": [
+      "senior",
+      "staff_plus"
+     ],
+     "metro": [
+      "new_york"
+     ]
+    },
+    "prefer": {
+     "role_family": [
+      "backend engineer"
+     ],
+     "skill": [
+      "go and kubernetes"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm looking for my next role. backend engineer. Go and Kubernetes. new_york",
+    "user_keys": [
+     "level",
+     "metro",
+     "role_family",
+     "skill"
+    ],
+    "notes": [],
+    "place_or_mode": false
+   },
+   "throwaway": ""
+  },
+  {
+   "id": "v3_seeker_resume_on_file",
+   "ok": true,
+   "failures": [],
+   "user_turns": 2,
+   "calls": 3,
+   "secs": [
+    7.8,
+    1.4
+   ],
+   "total_secs": 9.2,
+   "questions": [
+    [
+     "fork",
+     "posture",
+     "What is your desired posture for this job search?",
+     [
+      "Step up",
+      "Lateral",
+      "Switch"
+     ]
+    ]
+   ],
+   "says": [
+    "To refine your search, let's clarify your posture: are you looking to step up, lateral in a better environment, or switch fields? This will help target the right opportunities for you.",
+    "I will search for leadership roles in data ML engineering, focusing on opportunities that allow you to step up in the Bay Area. I'm assuming you're targeting a compensation range of $200k\u2013300k based on market data."
+   ],
+   "notes": [
+    [
+     "reader claims without a span in the text dropped: title_flexibility (a resume cannot state it)",
+     "dropped level='executive': not in the index vocabulary"
+    ],
+    []
+   ],
+   "brief": [
+    {
+     "key": "direction",
+     "label": "Looking or hiring",
+     "value": "job",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "I'm looking for my next role"
+    },
+    {
+     "key": "posture",
+     "label": "Step up, lateral or switch",
+     "value": "step up",
+     "source": "asked",
+     "source_label": "you said",
+     "span": ""
+    },
+    {
+     "key": "role_family",
+     "label": "Role",
+     "value": "leadership",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "Head of ML Infrastructure at Fintech Co"
+    },
+    {
+     "key": "field",
+     "label": "Domain",
+     "value": "data_ml",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "building training and serving platforms"
+    },
+    {
+     "key": "function",
+     "label": "Function",
+     "value": "engineering",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "lead a 12-person team"
+    },
+    {
+     "key": "skills",
+     "label": "Skills that matter",
+     "value": "Kubernetes, Ray, feature stores",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "building training and serving platforms (Kubernetes, Ray, feature stores)"
+    },
+    {
+     "key": "level",
+     "label": "Level",
+     "value": "leadership",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "Head of ML Infrastructure at Fintech Co"
+    },
+    {
+     "key": "work_type",
+     "label": "IC or manager",
+     "value": "manager",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "lead a 12-person team"
+    },
+    {
+     "key": "metro",
+     "label": "Place",
+     "value": "bay_area",
+     "source": "document",
+     "source_label": "from your document",
+     "span": "San Francisco, CA"
+    }
+   ],
+   "contract": {
+    "angles": [],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "leadership",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "field": [
+      "data_ml"
+     ],
+     "metro": [
+      "bay_area"
+     ]
+    },
+    "prefer": {
+     "function": [
+      "engineering"
+     ],
+     "role_family": [
+      "leadership"
+     ],
+     "skill": [
+      "kubernetes, ray, feature stores"
+     ],
+     "work_type": [
+      "manager"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm looking for my next role. leadership. Kubernetes, Ray, feature stores. bay_area",
+    "user_keys": [],
+    "notes": [],
+    "place_or_mode": false
+   },
+   "throwaway": "intake-eval-1788746591253@roster.test"
+  },
+  {
+   "id": "v3_hiring_no_jd",
+   "ok": true,
+   "failures": [],
+   "user_turns": 3,
+   "calls": 4,
+   "secs": [
+    2.3,
+    2.1,
+    1.8
+   ],
+   "total_secs": 6.2,
+   "questions": [
+    [
+     "confirm",
+     "mission",
+     "What will this person own and what fails if they are not hired?",
+     []
+    ],
+    [
+     "infer",
+     "role_family",
+     "What specific title or role family are you envisioning for this backend engineer?",
+     [
+      "Backend Engineer",
+      "Senior Backend Engineer",
+      "Staff Backend Engineer"
+     ]
+    ]
+   ],
+   "says": [
+    "What is the mission for this role? Specifically, what will this person own and what fails if they are not hired?",
+    "The mission is to own the ledger and money movement for the payments team, crucial for launching in Q1. This indicates a strong need for a backend engineer.",
+    "The role family is backend engineer, level is senior, and the work mode is remote US. This aligns with the mission of owning the ledger and money movement for the payments team."
+   ],
+   "notes": [
+    [],
+    [
+     "dropped field='role_family': not in the index vocabulary",
+     "dropped unknown key 'value'",
+     "dropped field='role_family': not in the index vocabulary",
+     "dropped unknown key 'value'",
+     "dropped field='role_family': not in the index vocabulary",
+     "dropped unknown key 'value'"
+    ],
+    [
+     "confirm without a question \u2192 infer"
+    ]
+   ],
+   "brief": [
+    {
+     "key": "direction",
+     "label": "Looking or hiring",
+     "value": "candidate",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "I'm hiring"
+    },
+    {
+     "key": "mission",
+     "label": "What this person owns",
+     "value": "own the ledger and money movement for the payments team, crucial for launching in Q1",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "A backend engineer for our payments team. They'd own the ledger and money movement end to end; if we don't hire, we can't launch in Q1."
+    },
+    {
+     "key": "role_family",
+     "label": "Role",
+     "value": "backend engineer",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "backend engineer for our payments team"
+    },
+    {
+     "key": "level",
+     "label": "Level",
+     "value": "senior",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Senior, not staff."
+    },
+    {
+     "key": "work_mode",
+     "label": "Work mode",
+     "value": "remote",
+     "source": "stated",
+     "source_label": "you said",
+     "span": "Remote US."
+    }
+   ],
+   "contract": {
+    "angles": [],
+    "avoid": {},
+    "center": {
+     "key": "level",
+     "value": "senior",
+     "span": 1
+    },
+    "exclude_ids": [],
+    "kind": "person",
+    "limit": 60,
+    "must": {},
+    "prefer": {
+     "role_family": [
+      "backend engineer"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "I'm hiring. backend engineer. own the ledger and money movement for the payments team, crucial for launching in Q1",
+    "user_keys": [
+     "level",
+     "role_family"
+    ],
+    "notes": [],
+    "place_or_mode": false
+   },
+   "throwaway": ""
+  },
+  {
+   "id": "v3_ambiguous_titles",
+   "ok": true,
+   "failures": [],
+   "user_turns": 4,
+   "calls": 4,
+   "secs": [
+    1.0,
+    2.0,
+    2.5,
+    5.7
+   ],
+   "total_secs": 11.1,
+   "questions": [
+    [
+     "fork",
+     "direction",
+     "Are you looking for a role or are you hiring for your team?",
+     [
+      "Looking for a role",
+      "Hiring"
+     ]
+    ],
+    [
+     "confirm",
+     "level",
+     "What level are you targeting for your next role: VP, Director, or another?",
+     [
+      "VP",
+      "Director",
+      "Other"
+     ]
+    ],
+    [
+     "fork",
+     "metro",
+     "What is your preferred work location?",
+     [
+      "Remote",
+      "New York",
+      "San Francisco"
+     ]
+    ]
+   ],
+   "says": [
+    "Before anything else:",
+    "Your posture is to step up into a Founder CTO or VP/Director Engineering role focused on ML Infrastructure and Distributed Systems. Let's clarify your level and metro preferences to refine the search.",
+    "To refine your search, let's clarify your preferred work location. Are you open to remote roles, or do you have a specific metro area in mind?",
+    "I will search for remote VP-level roles in CTO or VP/Director Engineering focused on ML Infrastructure and Distributed Systems. This assumes you are stepping up in your career."
+   ],
+   "notes": [
+    [],
+    [
+     "dropped level='VP': not in the index vocabulary",
+     "dropped level='Director': not in the index vocabulary",
+     "dropped level='Other': not in the index vocabulary"
+    ],
+    [],
+    []
+   ],
+   "brief": [
+    {
+     "key": "direction",
+     "label": "Looking or hiring",
+     "value": "job",
+     "source": "asked",
+     "source_label": "you said",
+     "span": ""
+    },
+    {
+     "key": "posture",
+     "label": "Step up, lateral or switch",
+     "value": "step up",
+     "source": "stated",
+     "source_label": "you said",
+     "span": ""
+    },
+    {
+     "key": "role_family",
+     "label": "Role",
+     "value": "CTO or VP/Director Engineering",
+     "source": "stated",
+     "source_label": "you said",
+     "span": ""
+    },
+    {
+     "key": "level",
+     "label": "Level",
+     "value": "VP",
+     "source": "asked",
+     "source_label": "you said",
+     "span": ""
+    },
+    {
+     "key": "metro",
+     "label": "Place",
+     "value": "remote",
+     "source": "asked",
+     "source_label": "you said",
+     "span": ""
+    }
+   ],
+   "contract": {
+    "angles": [],
+    "avoid": {},
+    "center": null,
+    "exclude_ids": [],
+    "kind": "job",
+    "limit": 60,
+    "must": {
+     "work_mode": [
+      "remote"
+     ]
+    },
+    "prefer": {
+     "role_family": [
+      "cto or vp/director engineering"
+     ]
+    },
+    "rank_by": "match",
+    "scope": {
+     "country": "us"
+    },
+    "text": "CTO or VP/Director Engineering. remote",
+    "user_keys": [
+     "level",
+     "metro",
+     "role_family",
+     "work_mode"
+    ],
+    "notes": [],
+    "place_or_mode": false
+   },
+   "throwaway": ""
+  },
+  {
+   "id": "v3_start_over",
+   "ok": true,
+   "failures": [],
+   "user_turns": 2,
+   "calls": 0,
+   "secs": [
+    2.2,
+    0.8
+   ],
+   "total_secs": 3.1,
+   "questions": [
+    [
+     "confirm",
+     "mission",
+     "What will this person own and what fails if they are not hired?",
+     []
+    ]
+   ],
+   "says": [
+    "To proceed, I need to understand the mission for this role \u2014 what will this person own and what fails if they are not hired?",
+    "Let's start over. Please share what role you are looking for and any specific details about your mission and expectations."
+   ],
+   "notes": [
+    [],
+    []
+   ],
+   "brief": [],
+   "contract": {},
+   "throwaway": ""
+  }
+ ]
+}
