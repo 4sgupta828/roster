@@ -51,8 +51,17 @@ So a small-batch, measured, option-costed, pool-aware question loop **exists and
 off one contract to one search, and **nothing ever feeds the RETURNED RESULT ROWS back into a next
 question.** The loop is pre-search. The ask is for it to continue after the results.
 
-**The answer to "compose or build" is therefore: extend, do not invent.** Anything else rebuilds
-`leverage`, `eligible`, `token_groups` and `_probe_options` under new names.
+**The answer to "compose or build" is: share the PRIMITIVES, not the PLANNER.** *(Corrected after the
+Codex pass, which pushed back on the first draft's "extend guided v3 past READY".)* v3's per-turn step
+is an **LLM planner call** (`apps/api/consultant.py:460-620`). This loop fires on every search turn and
+must cost nothing, so hanging it off that planner would put a model call on every jobs query — against
+both the cost requirement and the fact that `/search/evaluate` is deliberately model-free. So:
+
+- **Guided v3 stays what it is** — an explicitly opted-into pre-search consultant.
+- **The post-results loop is a separate, model-free path** that reuses `leverage`, `token_groups` /
+  `/jobs/group`, `_probe_options`' costing idea, and `_run_contract` — and no planner.
+
+Anything else either rebuilds those primitives under new names or puts an LLM in the hot path.
 
 ## 2. What genuinely does not exist
 
@@ -83,7 +92,18 @@ question.** The loop is pre-search. The ask is for it to continue after the resu
    group headers only expand and collapse (`index.html:8836-8838`) — tapping a group does not narrow
    the search. The only fork-with-options UI in the product is the intake's question chips, in a
    different tab, before the search.
-5. **No person grouping vocabulary.** `GROUP_DIMENSIONS` (`roster_vertical/job_grouping.py:12-20`) is
+5. **`/search/evaluate` is not the jobs backend — and the rail already suffers for it.** The `/jobs`
+   evaluator branch adds employer hydration (`_with_employer`, `app.py:3200`), `jobs_stats`,
+   `_save_job_session`, `job_brief_contract` and `_group_options` (`:3209`) *after* `_run_contract`.
+   `/search/evaluate` (`:6855-6862`) calls `_run_contract` and returns. Two consequences, both live
+   today on the rail's Apply, which posts to that endpoint:
+   - it returns **no `group_options`**, and the FE guards with `if(out.group_options)`
+     (`index.html:8808`) — so after an Apply the grouping menu still describes the **previous** rows;
+   - job rows come back **without employer enrichment**, because `_with_employer` never ran.
+   (Saved maps escape this: `/maps/{id}/navigate` does add `group_options`, `app.py:7024-7028`.)
+   The loop must therefore run through a jobs-aware evaluate — a mode on `/jobs` — not raw
+   `/search/evaluate`. Fixing the rail is the same fix.
+6. **No person grouping vocabulary.** `GROUP_DIMENSIONS` (`roster_vertical/job_grouping.py:12-20`) is
    the only dimension table in the repo, and it is applied to person rows as-is (`app.py:4366`); the
    legacy people path returns no `group_options` at all.
 
@@ -119,6 +139,13 @@ Two sources, one ranked menu:
 - **`token_groups(row_tokens)`** — the emergent clusters `leverage` structurally cannot see, because
   they are not schema keys: *"these are mostly agency reposts"*, *"half of these are Series-A"*,
   *"there's a cluster of infra roles and a cluster of ML roles"*.
+
+**Both sources are whitelisted to the vertical's curated axes** (`GROUP_DIMENSIONS`,
+`roster_vertical/job_grouping.py:12-20`), not to any key with high spread. `leverage` will happily
+return whichever schema key splits the pool, including ones the UI cannot explain and no job seeker
+thinks in. The vertical decides what may be *offered*; the kernel decides what *splits*. And the
+emergent half should reuse `/jobs/group`'s existing tokens + `enforce` + `token_groups` fallback
+(`app.py:6864-6905`) rather than growing a parallel cluster concept beside it.
 
 Rank both into one list of 3. `leverage` yields `spread ∈ [0,1]`; `eligible`/`token_groups` yield
 `balance × known` — comparable in shape but not calibrated to each other. **Normalise to a common
@@ -160,7 +187,7 @@ Two consequences:
 | Signal | Where it already comes from | Reading |
 |---|---|---|
 | `ambiguity[]` non-empty | spec 1's decoder | the query itself was unclear → steer |
-| `coverage.weak`, `best_match` low | `evaluate.py:207-224` | nothing matched well → steer |
+| `coverage.weak`, `best_match` low | `evaluate.py:207-224` | **weak evidence — use with care.** A low `best_match` usually means the index has nothing good, not that the intent was misread. Steering on it alone offers chips for a coverage gap and blames the reader for it. Pair it with an ambiguity or diagnosis signal, or say the honest thing instead. |
 | flat `match_pct` across the page | per-row, `calibrated_pct` | no row stands out → steer |
 | `coverage.diagnosis` present | `evaluate.py:215-221` | a must is collapsing the slice → steer |
 | thin `pool` | `coverage.pool` | too few rows to split → **do not** steer, widen instead |
@@ -182,8 +209,13 @@ unknowns kill a dimension, `max_largest 0.60` means seven of ten sharing a level
 dimensions need three repeating companies inside ten rows. Most dimensions would be judged ineligible
 and the menu would go empty exactly when it is needed.
 
-But `limit` and `cap` are already independent (`evaluate.py:71`: `cap = max(limit × 4, 160)`), and
-`counts` are slice-wide, not page-wide (`evaluate.py:203-210`). So: **evaluate wide, show ten.**
+**The answer to the owner's open question — does the 10-row batch REPLACE the 80 or sit above it — is
+that it sits above it.** `limit` and `cap` are already independent (`evaluate.py:71`:
+`cap = max(limit × 4, 160)`) and `counts` are slice-wide, not page-wide (`evaluate.py:203-210`), so
+nothing is gained by shrinking `contract.limit`: the retrieval work is the same, while the pool that
+`token_groups` and `_group_options` read shrinks to something tiny and unrepresentative. Keep
+`limit ≈ 80`, compute counts, directions and groupings over that pool, and **render ten**. So:
+**evaluate wide, show ten.**
 Directions come from `counts` via `leverage` (slice-wide, unaffected) and from `token_groups` over the
 evaluated pool rather than the ten shown rows. "Expand" then means paging the contract we already ran —
 not a new search — which is already client-side at 20/page (`index.html:11093`).
@@ -218,6 +250,7 @@ so they keep working unchanged.
 
 | # | Ships | Flag | Proves it |
 |---|---|---|---|
+| 0a | **A jobs-aware evaluate (§2.5)** — a mode on `/jobs` that takes a contract and returns the full jobs payload; the rail's Apply moves onto it | — | after an Apply the grouping menu describes the CURRENT rows and job rows keep their employer |
 | 0 | **Fix the refinement path (§2.2)** — make the evaluator branch read `refine_query`/`refine_facets` instead of recompiling from scratch, and stop a people refinement from falling out of the evaluator | — | a second turn keeps the first turn's contract; today it does not |
 | 1 | Return `directions[]` on the search response — `leverage` ∪ `token_groups`, ranked, top 3, each costed by slice as `_probe_options` already does | `ROSTER_DIRECTIONS` | the menu is non-empty and no direction leads to zero rows |
 | 2 | Render them as ignorable chips under the gate (§3.3); a click stages a contract edit and re-runs — the rail's Apply path, reused | `ROSTER_DIRECTIONS` | a precise query shows no chips; `remote` / `austin` do |
@@ -253,7 +286,10 @@ Two levers already exist and make the loop nearly free:
 
 1. **Cache the query embedding on the text.** A direction changes `must`/`avoid`, never `text` — so
    every turn after the first re-embeds a string it has already embedded. One cache keyed on
-   `(kind, text)` collapses 2–7 calls per turn to zero.
+   `(kind, text)` collapses 2–7 calls per turn to zero. **Note where it has to live:** the embedding is
+   taken inside `facet_store.semantic` via `self._embed(text)` on *every* leg
+   (`apps/api/facet_store.py:220-244`), so this is a change to the store/embed layer, not a memo at the
+   API boundary — the Codex pass was right to call the first draft hand-wavy here.
 2. **`depth={"counts": False}`** (`evaluate.py:60-65`) on intermediate turns, as `_preview` already does.
 
 Half of this is already true: a direction click goes through `/search/evaluate`, which is documented
@@ -292,6 +328,8 @@ first.
 - **No blocking "does this look right?" modal.** §3.3 and §9.
 - **No LLM in the direction selector.** `leverage` and `token_groups` are deterministic, free and
   already written. A model is justified only to put a *name* on an emergent cluster, capped and cached.
+- **No LLM planner in the loop.** Guided v3's planner is one model call per turn; this loop runs on
+  every search turn. They share primitives and nothing else.
 - **No new state store.** The intakes are stateless on the server; the loop stays that way.
 - **No fixed question order.** That is precisely what made v2 "a form" in the owner's words. Order is
   whatever splits *this* pool.
@@ -318,9 +356,22 @@ first.
 
 ## 10. Panel record
 
-- **Codex (gpt-5-pro)** — RUNNING at the time of writing; its section will be appended. Worth recording
-  separately: on `gpt-5-pro` a repo-grounded design review takes **40+ minutes**. That is fine for a
-  panel and unusable for anything interactive.
+- **Codex (gpt-5.1)** — the pass that reshaped this spec. It (a) rejected "extend guided v3 past
+  READY" on the ground that v3's per-turn step is an LLM planner call while this loop must be free,
+  giving §1's corrected "share the primitives, not the planner"; (b) found that `/search/evaluate` is
+  not the jobs backend, which turned out to be a **live defect on the rail** as well as a design
+  constraint (§2.5); (c) insisted directions be whitelisted to the vertical's curated
+  `GROUP_DIMENSIONS` rather than any high-spread key, and aligned with the existing `/jobs/group`
+  primitive instead of a parallel one; (d) answered the owner's open batch question with code —
+  keep `limit ≈ 80`, render ten (§3.5); (e) corrected the first draft's `weak`/`best_match` gate,
+  pointing out a low `best_match` usually means the index has nothing good rather than that intent was
+  misread — steering on it blames the reader for a coverage gap; and (f) called the caching story
+  hand-wavy, correctly: the embedding is taken inside the store, per leg. Its named risk is the one
+  this spec is most exposed to: *"the loop will feel like v2 all over again — just with nicer
+  primitives."*
+- **A note on the model.** This review was first attempted on `gpt-5-pro`, which spent **40+ minutes**
+  reading the repo without producing output and was cancelled. Re-run on `gpt-5.1` it returned a
+  sharper result in about two minutes. For panel work, `gpt-5.1` is the setting.
 
 - **Gemini 3 Pro** — independently reached "compose, do not build", named Hick's Law for the choice of
   three, and got the two things that matter most right: directions must be **ignorable chips, never a
