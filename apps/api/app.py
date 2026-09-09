@@ -3241,8 +3241,14 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 _lex_plan = _lexicon_plan("job", body.question or "")
                 _lex_notes = _apply_lexicon(_c, _lex_plan)
                 _lex_ambig = _ambiguity(_lex_plan)
-                _moved = downgrade_uncovered_musts(_c, await _facet_coverage("job"))
-                _c, _ia_notes = await _index_aware(_c, kind="job", user_keys=set(k for k in ("work_mode", "company_type", "level") if body.job_must), place_or_mode=bool(_ex.get("place_or_mode")))
+                # KEYS THE READER NAMED THEMSELVES are exempt from the coverage demotion — the rail's
+                # toggles, and now a query that IS a facet value. Without this the lexicon promotes
+                # `remote` to a must, the guard demotes it because work_mode is known on 38 % of jobs,
+                # and the reader gets the same unfiltered page they typed one word to escape.
+                _user_keys = set(_lex_plan.must) if (_lex_plan and _lex_plan.covered) else set()
+                _user_keys |= {k for k in ("work_mode", "company_type", "level") if body.job_must}
+                _moved = downgrade_uncovered_musts(_c, await _facet_coverage("job"), user_keys=_user_keys)
+                _c, _ia_notes = await _index_aware(_c, kind="job", user_keys=_user_keys, place_or_mode=bool(_ex.get("place_or_mode")))
                 # LAST, once every demotion has run: only now is it known whether anything narrows
                 _lex_notes = list(_lex_notes or []) + _settle_text(_c, _lex_plan)
                 _ia_notes = list(_lex_notes or []) + list(_carried or []) + list(_ia_notes or [])
@@ -4343,7 +4349,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     # extractor-shaped prompt, and one bare word states nothing to it.
                     _p_lex = _lexicon_plan("person", _q)
                     _p_lex_notes = _apply_lexicon(_c, _p_lex)
-                    downgrade_uncovered_musts(_c, await _facet_coverage("person"))
+                    _p_user_keys = set(_p_lex.must) if (_p_lex and _p_lex.covered) else set()
+                    downgrade_uncovered_musts(_c, await _facet_coverage("person"), user_keys=_p_user_keys)
                     _p2 = _ptm.monotonic()
                     _c, _ia_notes = await _index_aware(_c, kind="person", place_or_mode=bool(_ex.get("place_or_mode")))
                     _p_lex_notes = list(_p_lex_notes or []) + _settle_text(_c, _p_lex)
