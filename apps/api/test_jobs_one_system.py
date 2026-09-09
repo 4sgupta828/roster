@@ -463,70 +463,87 @@ def test_the_scope_is_never_inherited_from_a_previous_turn(monkeypatch):
     assert d["contract"]["must"].get("country") == ["us"]
 
 
-# ---------------------------------------------------------------- directions (spec: intent-convergence-loop §3)
+# -------------------------------------- the intent debugger (spec: intent-convergence-loop §3, rev 2)
+#
+# It replaced a row of facet chips. The owner's verdict on those was exact: "I can do the same from
+# existing chips — what am I getting more?" Nothing: a chip filters what came back, which the rail
+# already does key by key with counts. Narrowing belongs to the rail; this asks whether the QUESTION
+# was understood, which is a reading and not a count.
 
-def test_a_search_already_narrowed_to_a_handful_is_offered_no_directions(monkeypatch):
-    """The anti-nagging protection, in its right place. It is no longer keyed on match quality — a
-    cleanly-matched pool of hundreds is exactly what a reader narrows down — but on whether there is
-    anything left to split. A reader who has reached a handful has converged."""
+def _stub_intent(monkeypatch, payload):
+    """Pin the debugger's model call. It goes through the same `llm_json` as the compiler, so the stub
+    answers whichever of the two is asking by looking at the system prompt."""
+    def _route(system, user, **kw):
+        return dict(payload) if "recruiting consultant" in (system or "").lower() else {}
+    monkeypatch.setattr("api.model_json.llm_json", _route)
+
+
+READINGS = {
+    "understanding": ["infrastructure, not developer tooling", "staff level"],
+    "noticed": "Two thirds of these are at big platform vendors.",
+    "believed": "Right now I'm showing infrastructure and reliability roles.",
+    "question": "Do you mean the teams that run the infrastructure, or the ones building internal tooling?",
+    "readings": [
+        {"label": "Infrastructure platform", "says": "Kubernetes, cloud and reliability work.",
+         "text": "kubernetes cloud reliability infrastructure", "prefer": {"field": ["software"]}},
+        {"label": "Developer tooling", "says": "Internal build systems, CI and developer experience.",
+         "text": "developer experience build systems CI"},
+    ],
+    "ask": "Or tell me the stack you want to be in.",
+}
+
+
+def test_a_short_query_gets_readings_in_prose_not_chips(monkeypatch):
     monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
     monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
-    monkeypatch.setattr("api.model_json.llm_json",
-                        lambda s, u, **kw: {"must": {"work_mode": ["remote"], "level": ["staff_plus"],
-                                                     "metro": ["austin"]}})
-    few = [dict(r, id=f"few{i}") for i, r in enumerate(LEX_ROWS[:14])]      # a handful, already narrowed
-    app = create_app()
-    app.state.facet_store = InMemoryFacetStore(few, FACET_SCHEMA)
-    app.state.claim_store = _FakeClaimStore(); app.state._co_sites = None
-    app.state._facet_cov = {"job": (1e18, {"work_mode": 0.95, "level": 0.95, "metro": 0.95})}
-    d = TestClient(app).post("/jobs", json={"tenant_id": "demo",
-                                            "question": "remote staff roles in austin"}).json()
-    assert (d.get("coverage") or {}).get("pool", 999) < 25, "the fixture should be a handful"
-    assert (d.get("directions") or {}).get("offer") == [], d.get("directions")
+    _stub_intent(monkeypatch, READINGS)
+    d = _jobs(_lex_client(), question="platform engineer").json()
+    ic = d.get("intent_check") or {}
+    assert ic.get("believed", "").startswith("Right now"), ic
+    assert ic.get("understanding") == ["infrastructure, not developer tooling", "staff level"]
+    assert ic.get("noticed"), "an analyst says what the results are made of"
+    assert ic.get("question")
+    assert [r["label"] for r in ic.get("readings") or []] == ["Infrastructure platform", "Developer tooling"]
+    assert ic["readings"][0]["text"], "a reading carries the search it would run"
+    assert ic.get("ask")
+    assert "directions" not in d, "the chip surface is gone"
 
 
-def _weak_client():
-    """Rows nothing matches well — the case the loop exists for. `calibrated_pct` reads similarity
-    against a 0.40 floor, so a slice down here scores near zero and `coverage.weak` is set."""
-    rows = [dict(r, sim=0.41) for r in LEX_ROWS]
-    app = create_app()
-    app.state.facet_store = InMemoryFacetStore(rows, FACET_SCHEMA)
-    app.state.claim_store = _FakeClaimStore()
-    app.state._co_sites = None
-    return TestClient(app)
-
-
-def test_a_weakly_matched_search_is_offered_a_few_ways_to_steer(monkeypatch):
-    """Nothing matched strongly, the pool is wide: this is what the loop is for."""
+def test_a_long_specific_query_is_not_interrupted(monkeypatch):
+    """Every ask costs a model call and a reader's attention. A specific question that matched well is
+    left alone — and the call is never made."""
     monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
     monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
-    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
-    d = _jobs(_weak_client(), question="something vague and unmatched").json()
-    offer = (d.get("directions") or {}).get("offer") or []
-    assert 0 < len(offer) <= 3, d.get("directions")
-    assert len({o["key"] for o in offer if o["key"]}) == len([o for o in offer if o["key"]])
-    for o in offer:
-        assert o["hits"] > 0, "a direction that leads nowhere is not a choice"
-        assert o["section"] in ("must", "avoid", "center")
+    calls = []
+
+    def _count(system, user, **kw):
+        calls.append(system)
+        return dict(READINGS) if "recruiting consultant" in (system or "").lower() else {}
+
+    monkeypatch.setattr("api.model_json.llm_json", _count)
+    q = "staff backend engineer at stripe working on payments infrastructure in new york"
+    d = _jobs(_lex_client(), question=q).json()
+    assert (d.get("intent_check") or {}).get("readings") == []
+    assert not any("recruiting consultant" in (c or "").lower() for c in calls), "no call for a specific query"
 
 
-def test_directions_are_off_by_default(monkeypatch):
+def test_a_reading_that_names_an_illegal_value_is_cleaned_not_shown(monkeypatch):
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
+    _stub_intent(monkeypatch, {**READINGS, "readings": [
+        {"label": "Infra", "says": "x", "text": "kubernetes", "prefer": {"level": ["wizard"], "nope": ["y"]}}]})
+    d = _jobs(_lex_client(), question="platform engineer").json()
+    r = (d.get("intent_check") or {})["readings"][0]
+    assert r["prefer"] == {}, "an invented value never reaches a search"
+    assert r["text"] == "kubernetes"
+
+
+def test_the_debugger_is_off_by_default(monkeypatch):
     monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
     monkeypatch.delenv("ROSTER_DIRECTIONS", raising=False)
-    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
-    d = _jobs(_weak_client(), question="something vague and unmatched").json()
-    assert "directions" not in d
-
-
-def test_a_direction_never_repeats_a_filter_the_search_already_applies(monkeypatch):
-    """Offering "remote" to a search that is already remote-only is not a direction."""
-    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
-    monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
-    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
-    d = _jobs(_weak_client(), question="vague", job_must=["remote"]).json()
-    offer = (d.get("directions") or {}).get("offer") or []
-    assert offer, "this search is weak enough to steer"
-    assert all(o["key"] != "work_mode" for o in offer)
+    _stub_intent(monkeypatch, READINGS)
+    d = _jobs(_lex_client(), question="platform engineer").json()
+    assert "intent_check" not in d
 
 
 def test_a_pasted_job_link_is_read_as_a_profile_not_embedded_as_a_url(monkeypatch):
@@ -675,3 +692,45 @@ def test_a_disagreement_still_leaves_the_model_in_charge(monkeypatch):
     c = _jobs(_lex_client(), question="remote").json()["contract"]
     assert c["prefer"].get("work_mode") == ["hybrid"], c
     assert "work_mode" not in (c["must"] or {})
+
+
+def test_the_debugger_is_given_what_the_conversation_already_settled(monkeypatch):
+    """A consultant who forgets the last exchange asks the same question twice — and worse, re-offers a
+    reading the reader already turned down. The turns so far ride with the request, and what was
+    ESTABLISHED carries forward cumulatively rather than being rebuilt each turn."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
+    seen = {}
+
+    def _route(system, user, **kw):
+        if "recruiting consultant" in (system or "").lower():
+            seen["user"] = user
+            return dict(READINGS)
+        return {}
+
+    monkeypatch.setattr("api.model_json.llm_json", _route)
+    _jobs(_lex_client(), question="platform engineer", intent_history=[
+        {"asked": "platform", "offered": ["Infra", "DevEx"], "chose": "Infra",
+         "understood": ["infrastructure, not tooling"]},
+        {"asked": "infrastructure", "told": "I care about reliability at scale"},
+    ])
+    msg = seen.get("user") or ""
+    assert "THE CONVERSATION SO FAR" in msg
+    assert "they chose: Infra" in msg
+    assert 'they said: "I care about reliability at scale"' in msg
+    assert "established: infrastructure, not tooling" in msg
+
+
+def test_a_converged_conversation_keeps_its_notes_and_stops_asking(monkeypatch):
+    """Converging is success, not failure. With nothing left to ask, the turn still carries what was
+    established and what the results show — it just stops putting questions."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
+    _stub_intent(monkeypatch, {"understanding": ["staff infra, reliability at scale, remote"],
+                               "noticed": "These are all platform teams at infrastructure vendors.",
+                               "believed": "Right now I'm showing staff infrastructure roles.",
+                               "question": "", "readings": []})
+    d = _jobs(_lex_client(), question="platform engineer").json()
+    ic = d.get("intent_check") or {}
+    assert ic.get("readings") == [] and ic.get("understanding"), ic
+    assert ic.get("noticed")

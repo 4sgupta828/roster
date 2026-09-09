@@ -864,23 +864,35 @@
   .frail-apply .idgo{width:auto;padding:.4rem .9rem;min-height:36px;}
   .frail-apply .histbtn{min-height:36px;}
   .frail.busy{opacity:.6;pointer-events:none;}
-  /* DIRECTIONS: offered, never asked. Quiet enough to ignore, distinct from the must/prefer/avoid rail
-     chips beneath them — these change what the search IS, the rail changes how it is filtered. */
-  .dirs{display:flex;flex-direction:column;gap:.35rem;padding:.5rem .6rem;margin-bottom:.5rem;
-        border:1px dashed var(--hair);border-radius:10px;background:var(--panel2);}
-  .dirs-h{display:flex;flex-wrap:wrap;gap:.4rem;align-items:baseline;font-size:.76rem;color:var(--muted);}
-  .dirs-h b{color:var(--ink);font-size:.8rem;}
-  .dirs-row{display:flex;flex-wrap:wrap;gap:.35rem;}
-  .dirchip{font:inherit;font-size:.76rem;cursor:pointer;min-height:36px;padding:.25rem .7rem;
-           border-radius:999px;border:1px solid var(--hair);background:var(--panel);color:var(--ink);}
-  .dirchip:hover{border-color:var(--gold);background:rgba(var(--gold-rgb),.08);}
-  .dirchip.drop{color:var(--muted);}
-  .dirchip.drop:hover{border-color:var(--gap);color:var(--ink);}
-  .dirchip-n{color:var(--muted);font-size:.7rem;margin-left:.15rem;}
+  /* THE INTENT DEBUGGER. It sits above the rail and must not look like the rail: the rail filters what
+     came back, this asks whether the question was understood. Prose first, then the readings as full
+     lines — not pills — because each one is a sentence you choose between, not a value you toggle. */
+  .intent{border:1px solid var(--gold);border-left-width:3px;border-radius:10px;padding:.6rem .75rem;
+          margin-bottom:.6rem;background:rgba(var(--gold-rgb),.05);}
+  .intent-known{display:flex;flex-wrap:wrap;gap:.3rem;align-items:baseline;font-size:.72rem;
+                color:var(--muted);margin-bottom:.35rem;}
+  .intent-known span{text-transform:uppercase;letter-spacing:.05em;font-size:.62rem;}
+  .intent-known b{font-weight:600;color:var(--ink);background:var(--panel);border:1px solid var(--hair);
+                  border-radius:999px;padding:.1rem .5rem;font-size:.72rem;}
+  .intent-noticed{font-size:.82rem;color:var(--ink);margin-bottom:.3rem;line-height:1.4;}
+  .intent-believed{font-size:.8rem;color:var(--muted);margin-bottom:.25rem;}
+  .intent-q{display:flex;gap:.5rem;align-items:baseline;font-size:.88rem;font-weight:600;color:var(--ink);
+            margin-bottom:.5rem;}
+  .intent-readings{display:flex;flex-direction:column;gap:.35rem;}
+  .reading{display:flex;flex-direction:column;gap:.1rem;text-align:left;font:inherit;cursor:pointer;
+           padding:.45rem .6rem;border:1px solid var(--hair);border-radius:8px;background:var(--panel);
+           color:var(--ink);min-height:44px;}
+  .reading:hover{border-color:var(--gold);background:rgba(var(--gold-rgb),.09);}
+  .reading b{font-size:.84rem;}
+  .reading span{font-size:.78rem;color:var(--muted);line-height:1.35;}
+  .intent-ask{display:flex;gap:.4rem;margin-top:.5rem;}
+  .intent-ask input{flex:1;min-width:0;font:inherit;font-size:.8rem;min-height:38px;padding:.3rem .6rem;
+                    border:1px solid var(--hair);border-radius:8px;background:var(--panel);color:var(--ink);}
+  .intent-ask input:focus{border-color:var(--gold);outline:none;}
   .dirback{font:inherit;font-size:.72rem;cursor:pointer;margin-left:auto;border:0;background:none;
            color:var(--muted);text-decoration:underline;min-height:36px;}
   .dirback:hover{color:var(--ink);}
-  @media (max-width:560px){ .dirchip{min-height:40px;} .dirback{min-height:40px;} }
+  @media (max-width:560px){ .intent-ask input{min-height:44px;} .intent-ask button{min-height:44px;} }
   .fpill{font-size:.7rem;padding:.15rem .5rem;border-radius:999px;background:rgba(var(--gold-rgb),.10);color:var(--gold-strong);border:1px solid var(--gold);}
   .fpill button{font:inherit;border:0;background:transparent;color:inherit;cursor:pointer;margin-left:.2rem;}
   @media (max-width:560px){ .frail-k{min-width:64px;font-size:.6rem;} .fchip{font-size:.7rem;} }
@@ -2726,6 +2738,12 @@ function levelSelect(){
 // JOB_MUST chips. OFF by default and always visible when on: the résumé used to shape every signed-in
 // seeker's search invisibly, with no control to turn it off, and that is what this replaces.
 window.JOBS_PRIOR = null;                     // the contract the last jobs turn ran (see runJobs)
+// THE DEBUGGER'S MEMORY. Each turn: what was asked, what it offered, which reading was taken, and
+// anything said in the reader's own words. Without it the debugger re-asks a question already
+// answered — and the reader has to keep explaining themselves to something that isn't listening.
+window.JOBS_INTENT_HISTORY = [];
+window.JOBS_INTENT_PENDING = null;            // the choice made since the last search, folded in below
+window.JOBS_INTENT_BACK = [];                 // the queries behind us, so a reading can be undone
 let USE_RESUME = false;                       // OFF by default: a plain search stays plain
 try{ USE_RESUME = localStorage.getItem("roster_use_resume") === "1"; }catch(e){}
 // Do we HAVE a résumé to search with? null = not asked yet. Turning the switch on without one used to
@@ -3070,6 +3088,7 @@ async function runJobs(question, opts){
         // contract the last turn actually ran is what a follow-up refines. A brand-new search clears
         // the thread, so this is empty exactly when it should be.
         prior_contract: (JOBS_PRIOR || undefined),
+        intent_history: (JOBS_INTENT_HISTORY.length ? JOBS_INTENT_HISTORY.slice(-6) : undefined),
         ...geoPayload(),   // the top-right scope applies to jobs too
         job_must: JOB_MUST.size ? [...JOB_MUST] : undefined,   // the pre-search "must have" toggles
         use_resume: USE_RESUME || undefined,                   // 🎯 shape this search with the résumé on file
@@ -3090,11 +3109,21 @@ async function runJobs(question, opts){
     if(!d.redirect_to_qa && d.query) JOBS_CTX = d.query;
     if(d.session_id && !THREAD.session_id) THREAD.session_id = d.session_id;   // the shareable link, like people
     JOBS_PRIOR = d.contract || null;             // what THIS turn ran, for the next one to refine
+    // one entry per turn: the question asked, what was offered in reply, and how the reader answered
+    // (a reading they picked, or words they typed) — assembled here so the next turn can build on it
+    {
+      const ic = d.intent_check || {}; const p = JOBS_INTENT_PENDING || {};
+      JOBS_INTENT_HISTORY.push({asked: question || "", offered: (ic.readings || []).map(r => r.label),
+                                chose: p.chose || "", told: p.told || "",
+                                understood: ic.understanding || []});   // cumulative, not per-turn
+      if(JOBS_INTENT_HISTORY.length > 8) JOBS_INTENT_HISTORY.shift();
+      JOBS_INTENT_PENDING = null;
+    }
     THREAD.turns.push({question, kind: "jobs", jobs: d.jobs||[], query: d.query||{},
                        contract: d.contract||null, counts: d.counts||null, coverage: d.coverage||null, labels: d.labels||null,   // the evaluator's rail
                        relaxed: d.relaxed||[], merge: d.merge||null,                                       // smart relaxing notes; merged-search recipes
                        group_options: d.group_options||[],
-                       directions: d.directions||null,   // the few ways this search could go next                                                  // which groupings organise THESE rows (server-computed)
+                       intent_check: d.intent_check||null,   // what the search believes, and other readings                                                  // which groupings organise THESE rows (server-computed)
                        stats: d.stats||{}, semantic: d.semantic, geo_scope: d.geo_scope||null,
                        related_jobs: d.related_jobs||[], company_indexed: d.company_indexed,
                        agentic: !!d.agentic, intent: d.intent||"", query_angles: d.query_angles||[],
@@ -7354,7 +7383,7 @@ function newConversation(){
   THREAD = {session_id:null, turns:[]};
   MODE_VIEWS = {}; TAB_THREADS = {};   // "＋ New search" wipes every tab's remembered result/thread
   window.ACTIVE_MAP = null;            // …and leaves any saved-map view
-  PEOPLE_CTX = null; JOBS_CTX = null; JOBS_PRIOR = null; PENDING_PERSON = null; PENDING_CTX = ""; EVIDENCE_KINDS = new Set(); JOB_MUST = new Set(); LEVEL = ""; LEVEL_SPAN = 1; renderEvFilters();  // …and both tabs' refinement conversations start fresh
+  PEOPLE_CTX = null; JOBS_CTX = null; JOBS_PRIOR = null; JOBS_INTENT_HISTORY = []; JOBS_INTENT_PENDING = null; JOBS_INTENT_BACK = []; PENDING_PERSON = null; PENDING_CTX = ""; EVIDENCE_KINDS = new Set(); JOB_MUST = new Set(); LEVEL = ""; LEVEL_SPAN = 1; renderEvFilters();  // …and both tabs' refinement conversations start fresh
   GUIDED_REFINED = false;
   // Guided intake state goes too — whichever tab is showing (a stale intake must never greet the next visit)
   INTAKE = {state: null, busy: false, last: null, ready: null};
@@ -8714,40 +8743,65 @@ function markEngaged(){
     if(d && !d._engaged){ d._engaged = true; if(typeof rerenderRail === "function") rerenderRail(d._jpid); }
   }catch(e){}
 }
-function directionsMarkup(d){
-  if(d._engaged) return "";               // they are reading results, not looking for a different search
-  const dir = d.directions || {};
-  // a cluster has no facet key, so "not this" has nothing to hang an `avoid` on — those are dropped
-  // here rather than shown as a chip that cannot do what it says
-  const offer = (dir.offer || []).filter(o => o.key || o.section !== "avoid");
-  const back = (d._backStack || []).length;
-  if(!offer.length && !back) return "";
-  const chip = (o, i) => `<button type="button" class="dirchip${o.section === "avoid" ? " drop" : ""}" data-jpid="${esc(d._jpid)}" data-di="${i}" title="${esc(o.why || "")} — tap to steer the search this way">${o.section === "avoid" ? "▼ " : ""}${esc(o.label)} <span class="dirchip-n">${o.hits}</span></button>`;
-  const undo = back ? `<button type="button" class="dirback" data-jpid="${esc(d._jpid)}" title="Undo the last narrowing">↩ back</button>` : "";
-  return `<div class="dirs"><div class="dirs-h"><b>Narrow it</b> <span class="tgt-q-hint">${esc(dir.why || "")} — or ignore these and keep scrolling</span>${undo}</div>
-    <div class="dirs-row">${offer.map(chip).join("")}</div></div>`;
+// ===== THE INTENT DEBUGGER =====
+// This replaced a row of facet chips. The verdict on those was exact: "I can do the same from existing
+// chips — what am I getting more?" Nothing. A chip filters what came back, which the rail already does
+// key by key with counts. Narrowing belongs to the rail. This asks something the rail cannot: did we
+// understand the QUESTION — and if not, here are other ways to read the same words, in prose.
+function intentMarkup(d){
+  if(d._engaged) return "";                       // they are reading results, not looking for a rewrite
+  const ic = d.intent_check || {}; const rs = ic.readings || [];
+  // A converged conversation still has something to show — what it established and what it noticed —
+  // even with no question left to ask. Only a genuinely empty turn renders nothing.
+  if(!rs.length && !(ic.understanding || []).length && !ic.noticed) return "";
+  const back = (window.JOBS_INTENT_BACK || []).length
+    ? `<button type="button" class="dirback" title="Back to what you asked before">↩ back</button>` : "";
+  const reading = (r, i) => `<button type="button" class="reading" data-jpid="${esc(d._jpid)}" data-ri="${i}">
+      <b>${esc(r.label)}</b><span>${esc(r.says || "")}</span></button>`;
+  const est = (ic.understanding || []).filter(Boolean);
+  return `<div class="intent">
+    ${est.length ? `<div class="intent-known"><span>What I've got so far</span>${est.map(u => `<b>${esc(u)}</b>`).join("")}</div>` : ""}
+    ${ic.noticed ? `<div class="intent-noticed">${esc(ic.noticed)}</div>` : ""}
+    ${ic.believed ? `<div class="intent-believed">${esc(ic.believed)}</div>` : ""}
+    ${ic.question ? `<div class="intent-q">${esc(ic.question)}${back}</div>` : (back ? `<div class="intent-q">${back}</div>` : "")}
+    <div class="intent-readings">${rs.map(reading).join("")}</div>
+    ${ic.ask ? `<form class="intent-ask" data-jpid="${esc(d._jpid)}">
+        <input type="text" name="more" placeholder="${esc(ic.ask)}" aria-label="${esc(ic.ask)}"/>
+        <button type="submit" class="histbtn">Tell it</button></form>` : ""}
+  </div>`;
 }
-// Picking one is an ordinary contract edit re-run through the same endpoint the rail's Apply uses —
-// no new search path, and the previous contract is kept so going back is a pop, not a recompile.
-async function takeDirection(jpid, idx){
+// Picking a reading RE-ASKS the question — a new search with that reading's own words — rather than
+// narrowing the last one. That is the difference from a chip, and it is why the text is replaced
+// rather than appended to.
+async function takeReading(jpid, idx){
   const d = facetRenderOf(jpid); if(!d) return;
-  const o = ((d.directions || {}).offer || [])[idx]; if(!o) return;
-  const contract = JSON.parse(JSON.stringify(d.contract || {}));
-  if(o.key){
-    const bag = o.section === "avoid" ? (contract.avoid = contract.avoid || {}) : (contract.must = contract.must || {});
-    bag[o.key] = [...new Set([...(Array.isArray(bag[o.key]) ? bag[o.key] : []), ...(o.values || [])])];
-  }else{
-    // an emergent cluster names no facet key, so it steers the WORDS — which is what produced it
-    contract.text = ((contract.text || "") + " " + ((o.values || [])[0] || "")).trim();
-  }
-  // the turn before, kept for a one-tap back: a pop and a re-run, never a recompile
-  d._backStack = (d._backStack || []).concat([JSON.parse(JSON.stringify(d.contract || {}))]);
-  await facetReevaluate(jpid, contract, false);
+  const r = ((d.intent_check || {}).readings || [])[idx]; if(!r) return;
+  // A READING IS A NEW QUESTION, so it runs as a new SEARCH — not as an edit of the last one. That is
+  // what makes it different from a chip, and it is also what keeps the conversation going: a fresh
+  // search carries the history and comes back with the next question, where a contract re-run through
+  // /search/evaluate would have returned rows and nothing to say.
+  JOBS_INTENT_PENDING = {chose: r.label};
+  JOBS_INTENT_BACK = (JOBS_INTENT_BACK || []).concat([CURRENT_Q || ""]);
+  // the reading's own facets ride along as the previous contract, which the carry-forward folds in
+  JOBS_PRIOR = {kind: "job", must: {...(r.must || {})}, prefer: {...(r.prefer || {})}};
+  const q = r.text || r.label;
+  const qi = document.getElementById("q"); if(qi) qi.value = q;
+  askQuestion(q, {});
 }
-async function undoDirection(jpid){
-  const d = facetRenderOf(jpid); if(!d || !(d._backStack || []).length) return;
-  const prev = d._backStack.pop();
-  await facetReevaluate(jpid, prev, false);
+async function undoDirection(){
+  const prev = (JOBS_INTENT_BACK || []).pop();
+  if(prev === undefined) return;
+  const qi = document.getElementById("q"); if(qi) qi.value = prev;
+  askQuestion(prev, {});
+}
+// Answering in their own words is a fresh search that KEEPS what was typed before — the reader is
+// adding to the question, not replacing it.
+function tellItMore(jpid, more){
+  if(!(more || "").trim()) return;
+  JOBS_INTENT_PENDING = {told: more.trim()};      // their own words — the strongest signal in the loop
+  const q = [(CURRENT_Q || ""), more.trim()].filter(Boolean).join(" — ");
+  const qi = document.getElementById("q"); if(qi) qi.value = q;
+  askQuestion(q, {});
 }
 function relaxedMarkup(d){
   const notes = (d.relaxed || []).filter(n => n.rule === "relaxed"); if(!notes.length) return "";
@@ -8848,7 +8902,7 @@ function facetRailMarkup(d){
       <button type="button" class="idgo frail-go" data-jpid="${esc(d._jpid)}">Apply</button><button type="button" class="histbtn frail-reset" data-jpid="${esc(d._jpid)}">Reset</button></div>`
     : `<div class="frail-apply">${d._applied && d._delta ? `<span class="frail-done">Applied ✓ — ${d._delta.after} shown${d._delta.added ? ` · <b>${d._delta.added} new</b>` : ""}${d._delta.removed ? ` · ${d._delta.removed} dropped` : ""}${!d._delta.added && !d._delta.removed ? " · same rows, order may differ" : ""}${(d._delta.prevPool != null && d._delta.pool != null && d._delta.prevPool !== d._delta.pool) ? ` · pool ${d._delta.prevPool} → ${d._delta.pool}` : ""}</span> ${d._delta.added && !d._newFirst ? (() => { const rowsNow = Array.isArray(d.people_rows) ? d.people_rows : (d.jobs||[]); const per = 20, pg = Array.isArray(d.people_rows) ? (d._page||0) : (d._jpage||0); const onPage = rowsNow.slice(pg*per, pg*per+per).filter(r => r._new).length; return `${onPage ? ` <span class="frail-note">${onPage} of them on this page (corner flag)</span>` : ` <span class="frail-note">none of them on this page</span>`} <button type="button" class="histbtn frail-shownew" data-jpid="${esc(d._jpid)}">Show the ${d._delta.added} new first</button>`; })() : ""}` : "Tap chips to stage changes, then apply once. "}${saveBtn}</div>`;
   const empty = (cov.diagnosis && !facetPending(d)) ? diagnosisMarkup({...cov.diagnosis, best_match: cov.best_match}, d._jpid, L) : "";
-  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}">${degradedMarkup(d)}${directionsMarkup(d)}${relaxedMarkup(d)}${mergeMarkup(d)}<div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : (cov.slice != null ? `· ${Number(cov.slice).toLocaleString()} match these filters` : "")}${stale ? ` <span class="frail-note" title="The pool is empty, so these counts are from the last result that had rows — change a filter and apply">· chips from the last result</span>` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${whereRowMarkup(d)}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
+  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}">${degradedMarkup(d)}${intentMarkup(d)}${relaxedMarkup(d)}${mergeMarkup(d)}<div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : (cov.slice != null ? `· ${Number(cov.slice).toLocaleString()} match these filters` : "")}${stale ? ` <span class="frail-note" title="The pool is empty, so these counts are from the last result that had rows — change a filter and apply">· chips from the last result</span>` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${whereRowMarkup(d)}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
 }
 // EMPTY RESULT → which must is doing it (leave-one-out from the evaluator), with one-tap Drop (staged)
 function diagnosisMarkup(diag, jpid, L){
@@ -9649,6 +9703,10 @@ document.addEventListener("click", (e) => {
   if(sv){ e.preventDefault(); saveSearchProfile(); return; }
   const rs = e.target.closest && e.target.closest("#spfReset");
   if(rs){ e.preventDefault(); resetSearchProfile(); return; }
+});
+document.addEventListener("submit", (e) => {
+  const f = e.target.closest && e.target.closest(".intent-ask");
+  if(f){ e.preventDefault(); const i = f.querySelector("input"); tellItMore(f.dataset.jpid, i ? i.value : ""); }
 });
 document.addEventListener("keydown", (e) => {
   const add = e.target.closest && e.target.closest(".spf-add");
@@ -11055,10 +11113,13 @@ document.addEventListener("click", e => {
   if(jpg){ e.preventDefault(); if(!jpg.disabled) gotoJobsPage(jpg.dataset.jpid, parseInt(jpg.dataset.page||"0",10)); return; }
   const rr = e.target.closest && e.target.closest(".ppl-rerank");
   if(rr){ e.preventDefault(); rerankShown(rr.dataset.pid); return; }
-  const dc = e.target.closest && e.target.closest(".dirchip");
-  if(dc){ e.preventDefault(); takeDirection(dc.dataset.jpid, parseInt(dc.dataset.di || "0", 10)); return; }
+  const ia = e.target.closest && e.target.closest(".intent-ask");
+  if(ia && e.target.closest("button")){ e.preventDefault();
+    const inp = ia.querySelector("input"); tellItMore(ia.dataset.jpid, inp ? inp.value : ""); return; }
+  const rd = e.target.closest && e.target.closest(".reading");
+  if(rd){ e.preventDefault(); takeReading(rd.dataset.jpid, parseInt(rd.dataset.ri || "0", 10)); return; }
   const db = e.target.closest && e.target.closest(".dirback");
-  if(db){ e.preventDefault(); undoDirection(db.dataset.jpid); return; }
+  if(db){ e.preventDefault(); undoDirection(); return; }
   const ur = e.target.closest && e.target.closest("#useresumechip");
   if(ur){ e.preventDefault(); toggleUseResume(); return; }        // a switch, not a must-have — caught first
   const ef = e.target.closest && e.target.closest("#evfilters .ev-filter");

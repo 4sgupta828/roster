@@ -679,11 +679,14 @@ def jd_url_search_enabled() -> bool:
 
 
 def directions_enabled() -> bool:
-    """Flag (default OFF, Rule 20) via ROSTER_DIRECTIONS: a search that could usefully go several ways
-    returns `directions` — at most three, drawn from the counts over its own slice and from the clusters
-    inside its own rows, each carrying the effect it would have on the contract and the size of the slice
-    it would leave. Deterministic: no model call. Silence is the default; see `worth_steering`.
-    OFF → the response is byte-identical to today."""
+    """Flag (default OFF, Rule 20) via ROSTER_DIRECTIONS: the INTENT DEBUGGER. When a search is unsure it
+    has understood the question, the response carries `intent` — what the search currently believes, two
+    or three genuinely different READINGS of the same words in prose, and an invitation to answer in
+    the reader's own words. Costs one model call, only when `worth_asking` says so, cached per query.
+
+    It replaced a row of facet chips, which duplicated the rail: a chip filters what came back, which
+    the rail already does key by key with counts. Narrowing belongs to the rail; this asks whether the
+    question was understood at all. OFF → the response is byte-identical to today."""
     return os.environ.get("ROSTER_DIRECTIONS", "").lower() in ("1", "true", "yes")
 
 
@@ -1107,6 +1110,10 @@ class ResearchIn(BaseModel):
     #                                       SEARCH surfaces (never prose answers); Q&A owns questions
     refine_facets: dict | None = None     # People-tab CONVERSATION: the previous turn's accumulated facet
     #                                       filter — the new utterance refines/narrows it (None = fresh)
+    intent_history: list | None = None    # THE CONVERSATION THE DEBUGGER IS HAVING: per turn, what was
+    #                                       asked, which readings were offered, which was chosen, and
+    #                                       anything said in the reader's own words. Without it the
+    #                                       debugger re-asks a question already answered.
     prior_contract: dict | None = None    # THE TURN BEFORE. A jobs follow-up used to recompile from
     #                                       scratch: `refine_query` is read only in the legacy branch
     #                                       (app.py, after the evaluator has already returned), so with
@@ -3289,7 +3296,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     "labels": _out.get("labels"), "merge": _out.get("merge"), "relaxed": _out.get("relaxed") or [], "timings": _out.get("timings") or {},
                     "group_options": _group_options(_rows),
                     **({"ambiguity": _lex_ambig} if _lex_ambig else {}),
-                    **({"directions": _dirs} if (_dirs := _directions("job", _out, _rows, ambiguous=bool(_lex_ambig))) else {}),
+                    # `intent_check`, not `intent`: the agentic path already returns `intent` as a
+                    # sentence from its query plan, and two different shapes under one key is how a
+                    # surface starts rendering whichever happened to be written last.
+                    **({"intent_check": _ic} if (_ic := await _intent_check("job", body.question or "", _c, _out, _rows, ambiguous=bool(_lex_ambig), history=body.intent_history)) else {}),
                     "note": f"evaluator — {_out['coverage'].get('pool', 0)} candidates" + (" · ranked by filters only (semantic ranking is unavailable right now)" if (_out.get("coverage") or {}).get("degraded") else "")}
         # AGENTIC mode (flag): LLM expands the query into multiple angles → multi-leg retrieval → rerank
         if agentic_jobs_enabled():
@@ -6481,40 +6491,52 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         cache[kind] = (_time.monotonic(), cov); app.state._facet_cov = cache
         return cov
 
-    def _directions(kind: str, out: dict, rows: list, *, ambiguous: bool = False) -> dict | None:
-        """The few ways this search could usefully go next — or nothing, which is the common answer.
+    async def _intent_check(kind: str, query: str, c, out: dict, rows: list, *, ambiguous: bool = False,
+                            history: list | None = None):
+        """THE INTENT DEBUGGER — does the search understand what was asked, and if not, what else could
+        the words mean?
 
-        Costs no model call: `counts` are already computed for the rail, and the emergent clusters come
-        from the same free token split `/jobs/group` falls back to."""
+        This replaces the facet chips that used to live here. The owner's verdict on those was exact:
+        "I can do the same from existing chips — what am I getting more?" Nothing. A chip filters what
+        came back, which is what the rail already does key by key with counts. The thing the rail cannot
+        do is ask whether the QUESTION was understood, because that is a reading, not a count, and two
+        readings of the same words retrieve different jobs.
+
+        So this costs one model call, and only when the search is genuinely unsure (`worth_asking`):
+        a short query, one the lexicon read two ways, or a result set nothing matched well. Cached on
+        the query and the contract that ran, so re-asking the same thing is free."""
         if not directions_enabled():
             return None
         try:
-            from roster_kernel.facets.directions import (cluster_directions, facet_directions,
-                                                         rank_directions, worth_steering)
-            ok, why = worth_steering(out.get("coverage") or {}, ambiguous=ambiguous)
+            from roster_kernel.facets.intent_check import evidence, parse, worth_asking
+            ok, why = worth_asking(query, out.get("coverage") or {}, ambiguous=ambiguous)
             if not ok:
-                return {"offer": [], "why": why}
-            c = out.get("contract") or {}
-            spoken = set(c.get("must") or {}) | set(c.get("avoid") or {})
-            cands = facet_directions(out.get("counts") or {}, _facet_schema(), kind,
-                                     exclude=spoken | {"country"}, labels=out.get("labels") or {})
-            if kind == "job" and rows:
-                from roster_kernel.facets.grouping import token_groups
-                from roster_vertical.job_grouping import tokens
-                # `token_groups` takes a LIST of token sets (ids are row positions) and returns
-                # (groups, leftovers) — the same free split /jobs/group falls back to.
-                gs, _left = token_groups([tokens(r) for r in rows])
-                cands += cluster_directions(gs, len(rows))
-            offer = rank_directions(cands, top=3)
-            return {"offer": [{"key": d.key, "label": d.label, "values": d.values, "section": d.section,
-                               "hits": d.hits, "source": d.source, "why": d.why} for d in offer],
-                    "why": why}
-        except Exception as e:   # noqa: BLE001 — a menu we cannot build must never fail a search
-            # …but it must not fail SILENTLY either. A swallowed exception with no trace is exactly the
-            # failure mode this work has spent its time removing; a menu that never appears and never
-            # says why is indistinguishable from a menu that decided to stay quiet.
+                return {"readings": [], "why": why}
+            # the conversation is part of the key: the same words after a different exchange deserve a
+            # different question, and caching across that would re-ask what was just answered
+            key = ("intent", kind, (query or "").strip().lower(),
+                   json.dumps((out.get("contract") or {}).get("must") or {}, sort_keys=True),
+                   json.dumps(history or [], sort_keys=True, default=str)[:600])
+            cache = getattr(app.state, "_intent_cache", None)
+            if cache is None:
+                cache = app.state._intent_cache = {}
+            import time as _t
+            hit = cache.get(key)
+            if hit and _t.monotonic() - hit[0] < 900.0:
+                return dict(hit[1])
+            from roster_vertical.intent_check_prompt import SYSTEM, user_message
+            ev = evidence(query, c, rows, out.get("counts") or {}, _facet_schema(), kind=kind,
+                          history=history)
+            raw = await asyncio.to_thread(_llm_json, SYSTEM, user_message(ev))
+            got = parse(raw, _facet_schema(), kind)
+            res = {**(got.to_dict() if got else {"readings": []}), "why": why}
+            if len(cache) > 300:
+                cache.clear()
+            cache[key] = (_t.monotonic(), dict(res))
+            return res
+        except Exception as e:   # noqa: BLE001 — a question we cannot ask must never fail a search
             __import__("logging").getLogger("api.jobs").warning(
-                "directions unavailable: %s: %s", type(e).__name__, str(e)[:200])
+                "intent check unavailable: %s: %s", type(e).__name__, str(e)[:200])
             return None
 
     def _carry_forward(c, prior: dict | None) -> list[str]:
