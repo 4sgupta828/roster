@@ -662,6 +662,15 @@ def qa_router_enabled() -> bool:
     return os.environ.get("ROSTER_QA_ROUTER", "").lower() in ("1", "true", "yes")
 
 
+def directions_enabled() -> bool:
+    """Flag (default OFF, Rule 20) via ROSTER_DIRECTIONS: a search that could usefully go several ways
+    returns `directions` — at most three, drawn from the counts over its own slice and from the clusters
+    inside its own rows, each carrying the effect it would have on the contract and the size of the slice
+    it would leave. Deterministic: no model call. Silence is the default; see `worth_steering`.
+    OFF → the response is byte-identical to today."""
+    return os.environ.get("ROSTER_DIRECTIONS", "").lower() in ("1", "true", "yes")
+
+
 def intent_lexicon_enabled() -> bool:
     """Flag (default OFF, Rule 20) via ROSTER_INTENT_LEXICON: read the query against the vertical's own
     vocabularies BEFORE the model compiles it, so a query that IS a facet value — `remote`, `staff`,
@@ -3233,6 +3242,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     "must": None, "level_pref": None, "brief_contract": bc, "contract": _out["contract"], "counts": _out["counts"], "coverage": _out["coverage"],
                     "labels": _out.get("labels"), "merge": _out.get("merge"), "relaxed": _out.get("relaxed") or [], "timings": _out.get("timings") or {},
                     "group_options": _group_options(_rows),
+                    **({"directions": _dirs} if (_dirs := _directions("job", _out, _rows)) else {}),
                     "note": f"evaluator — {_out['coverage'].get('pool', 0)} candidates" + (" · ranked by filters only (semantic ranking is unavailable right now)" if (_out.get("coverage") or {}).get("degraded") else "")}
         # AGENTIC mode (flag): LLM expands the query into multiple angles → multi-leg retrieval → rerank
         if agentic_jobs_enabled():
@@ -6415,6 +6425,37 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             return {}
         cache[kind] = (_time.monotonic(), cov); app.state._facet_cov = cache
         return cov
+
+    def _directions(kind: str, out: dict, rows: list, *, ambiguous: bool = False) -> dict | None:
+        """The few ways this search could usefully go next — or nothing, which is the common answer.
+
+        Costs no model call: `counts` are already computed for the rail, and the emergent clusters come
+        from the same free token split `/jobs/group` falls back to."""
+        if not directions_enabled():
+            return None
+        try:
+            from roster_kernel.facets.directions import (cluster_directions, facet_directions,
+                                                         rank_directions, worth_steering)
+            ok, why = worth_steering(out.get("coverage") or {}, ambiguous=ambiguous)
+            if not ok:
+                return {"offer": [], "why": why}
+            c = out.get("contract") or {}
+            spoken = set(c.get("must") or {}) | set(c.get("avoid") or {})
+            cands = facet_directions(out.get("counts") or {}, _facet_schema(), kind,
+                                     exclude=spoken | {"country"}, labels=out.get("labels") or {})
+            if kind == "job" and rows:
+                from roster_kernel.facets.grouping import token_groups
+                from roster_vertical.job_grouping import tokens
+                # `token_groups` takes a LIST of token sets (ids are row positions) and returns
+                # (groups, leftovers) — the same free split /jobs/group falls back to.
+                gs, _left = token_groups([tokens(r) for r in rows])
+                cands += cluster_directions(gs, len(rows))
+            offer = rank_directions(cands, top=3)
+            return {"offer": [{"key": d.key, "label": d.label, "values": d.values, "section": d.section,
+                               "hits": d.hits, "source": d.source, "why": d.why} for d in offer],
+                    "why": why}
+        except Exception:   # noqa: BLE001 — a menu we cannot build must never fail a search
+            return None
 
     def _carry_forward(c, prior: dict | None) -> list[str]:
         """Fold the PREVIOUS turn's contract into this one, where this one is silent.

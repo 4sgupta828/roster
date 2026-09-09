@@ -270,18 +270,18 @@ def _lex_rows() -> list[dict]:
         mode = ("remote", "hybrid", "onsite")[i % 3]      # every mode has a healthy slice, or a must
         staff = i % 5 == 0                                  # on one would simply be relaxed away
         metro = "nyc" if i % 2 == 0 else "austin"
-        rows.append({"id": f"x{i}", "kind": "job", "sim": 0.30 - i * 0.0001, "company": "acme",
+        rows.append({"id": f"x{i}", "kind": "job", "sim": 0.62 - i * 0.0004, "company": "acme",
                      "title": "Backend Engineer", "url": f"https://a/x{i}", "source": "ashby",
                      "facets": {"work_mode": [mode],
                                 "level": ["staff_plus" if staff else "senior"],
                                 "field": ["software"], "country": ["us"], "metro": [metro]}})
     # the junk row prod actually returned for `remote`, and the one it returned for `austin`
-    rows.append({"id": "junk_remote", "kind": "job", "sim": 0.95, "company": "global_elite",
+    rows.append({"id": "junk_remote", "kind": "job", "sim": 0.70, "company": "global_elite",
                  "title": "Remote Opportunity - Take Back Control of Your Time", "url": "https://a/j1",
                  "source": "lever", "facets": {"work_mode": ["onsite"], "level": ["junior"],
                                                "field": ["other"], "country": ["us"], "metro": ["austin"]}})
     # the shape of the prod failure: the TITLE names the place, the JOB is somewhere else
-    rows.append({"id": "junk_ny", "kind": "job", "sim": 0.94, "company": "us_ghost_adventures",
+    rows.append({"id": "junk_ny", "kind": "job", "sim": 0.69, "company": "us_ghost_adventures",
                  "title": "New York Tour Guide", "url": "https://a/j2", "source": "lever",
                  "facets": {"work_mode": ["onsite"], "level": ["junior"], "field": ["other"],
                             "country": ["us"], "metro": ["austin"]}})
@@ -457,3 +457,59 @@ def test_the_scope_is_never_inherited_from_a_previous_turn(monkeypatch):
     d = _jobs(c, question="anything", country="us",
               prior_contract={"kind": "job", "must": {"country": ["de"]}}).json()
     assert d["contract"]["must"].get("country") == ["us"]
+
+
+# ---------------------------------------------------------------- directions (spec: intent-convergence-loop §3)
+
+def test_a_settled_search_is_offered_no_directions(monkeypatch):
+    """The risk the panel named — turning a precise search into a nagging form. Silence is the default,
+    and it is the common answer."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {"must": {"work_mode": ["remote"]}})
+    d = _jobs(_lex_client(), question="remote roles").json()
+    assert d.get("directions", {}).get("offer") == [], d.get("directions")
+
+
+def _weak_client():
+    """Rows nothing matches well — the case the loop exists for. `calibrated_pct` reads similarity
+    against a 0.40 floor, so a slice down here scores near zero and `coverage.weak` is set."""
+    rows = [dict(r, sim=0.41) for r in LEX_ROWS]
+    app = create_app()
+    app.state.facet_store = InMemoryFacetStore(rows, FACET_SCHEMA)
+    app.state.claim_store = _FakeClaimStore()
+    app.state._co_sites = None
+    return TestClient(app)
+
+
+def test_a_weakly_matched_search_is_offered_a_few_ways_to_steer(monkeypatch):
+    """Nothing matched strongly, the pool is wide: this is what the loop is for."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
+    d = _jobs(_weak_client(), question="something vague and unmatched").json()
+    offer = (d.get("directions") or {}).get("offer") or []
+    assert 0 < len(offer) <= 3, d.get("directions")
+    assert len({o["key"] for o in offer if o["key"]}) == len([o for o in offer if o["key"]])
+    for o in offer:
+        assert o["hits"] > 0, "a direction that leads nowhere is not a choice"
+        assert o["section"] in ("must", "avoid", "center")
+
+
+def test_directions_are_off_by_default(monkeypatch):
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.delenv("ROSTER_DIRECTIONS", raising=False)
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
+    d = _jobs(_weak_client(), question="something vague and unmatched").json()
+    assert "directions" not in d
+
+
+def test_a_direction_never_repeats_a_filter_the_search_already_applies(monkeypatch):
+    """Offering "remote" to a search that is already remote-only is not a direction."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
+    d = _jobs(_weak_client(), question="vague", job_must=["remote"]).json()
+    offer = (d.get("directions") or {}).get("offer") or []
+    assert offer, "this search is weak enough to steer"
+    assert all(o["key"] != "work_mode" for o in offer)
