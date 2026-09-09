@@ -3243,6 +3243,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 _lex_ambig = _ambiguity(_lex_plan)
                 _moved = downgrade_uncovered_musts(_c, await _facet_coverage("job"))
                 _c, _ia_notes = await _index_aware(_c, kind="job", user_keys=set(k for k in ("work_mode", "company_type", "level") if body.job_must), place_or_mode=bool(_ex.get("place_or_mode")))
+                # LAST, once every demotion has run: only now is it known whether anything narrows
+                _lex_notes = list(_lex_notes or []) + _settle_text(_c, _lex_plan)
                 _ia_notes = list(_lex_notes or []) + list(_carried or []) + list(_ia_notes or [])
                 _plain_t = {"plain.compile": round(_j1 - _j0, 2), "plain.coverage_and_index_aware": round(_jtm.monotonic() - _j1, 2)}
             if body.levels and body.levels[0]:
@@ -4344,6 +4346,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     downgrade_uncovered_musts(_c, await _facet_coverage("person"))
                     _p2 = _ptm.monotonic()
                     _c, _ia_notes = await _index_aware(_c, kind="person", place_or_mode=bool(_ex.get("place_or_mode")))
+                    _p_lex_notes = list(_p_lex_notes or []) + _settle_text(_c, _p_lex)
                     _ia_notes = list(_p_lex_notes or []) + list(_ia_notes or [])
                     _plain_t = {"plain.compile": round(_p1 - _p0, 2), "plain.coverage": round(_p2 - _p1, 2), "plain.index_aware": round(_ptm.monotonic() - _p2, 2)}
                     _signal = [k for k in list(_c.must) + list(_c.prefer) if k != "company"]
@@ -6609,16 +6612,28 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             if key in c.must or key in c.prefer or key in c.avoid:
                 continue
             c.prefer[key] = list(vals)
-        # THE POOL, not just the filters. With the whole query accounted for there is no semantic
-        # content left, and the evaluator takes the must-slice as its pool when `text` is empty instead
-        # of one word's diffuse neighbourhood — the difference between `remote` returning remote roles
-        # and returning "Remote Opportunity — Take Back Control of Your Time".
-        if plan.blank_text and not (plan.residual or "").strip():
-            c.text = ""
-            notes.append("your words were all filters, so the filters are the search")
-        elif plan.residual and plan.residual != (c.text or ""):
-            pass          # a partial read leaves the text alone: the model's phrasing is the better query
         return notes
+
+    def _settle_text(c, plan, *, scope_keys=("country",)) -> list[str]:
+        """Decide LAST whether the semantic text may be dropped — after every demotion has run.
+
+        This ran inside `_apply_lexicon`, and that was a live regression. The lexicon promoted `remote`
+        to a must and blanked the text; then `downgrade_uncovered_musts` — correctly — demoted that must
+        to a preference, because `work_mode` is known on only 38 % of jobs. What reached the evaluator
+        was a contract with no must AND no text, so the pool became an arbitrary page of the whole US
+        slice: worse than the diffuse embedding the blanking was meant to replace.
+
+        The guard was always right — "only blank when something narrows" — it was simply asked too
+        early, about a must that no longer existed by the time the search ran. So it is asked here, of
+        the contract that will actually run, and the scope must does not count: `country` is on every
+        search and narrows nothing."""
+        if plan is None or not plan.covered or (plan.residual or "").strip():
+            return []
+        real = [k for k in (c.must or {}) if k not in scope_keys]
+        if not real:
+            return []                       # nothing survived to narrow with — keep the words
+        c.text = ""
+        return ["your words were all filters, so the filters are the search"]
 
     def _judge_provider() -> str:
         """The in-product judge runs on the FAST provider (latency budget §12.9); the eval's judge takes the other one."""

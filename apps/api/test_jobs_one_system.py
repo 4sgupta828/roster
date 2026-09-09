@@ -551,3 +551,46 @@ def test_the_job_link_route_is_off_by_default(monkeypatch):
     monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
     d = _jobs(_lex_client(), question="https://boards.greenhouse.io/acme/jobs/123").json()
     assert d.get("matched_on") != "job_link"
+
+
+def test_the_text_is_never_blanked_when_the_must_does_not_survive(monkeypatch):
+    """THE REGRESSION THAT REACHED PROD. The lexicon promoted `remote` to a must and blanked the
+    semantic text; then `downgrade_uncovered_musts` correctly demoted that must to a preference,
+    because work_mode is known on only 38 % of jobs. What reached the evaluator had no must AND no
+    text, so the pool became an arbitrary page of the whole scope — worse than the diffuse embedding
+    the blanking was meant to replace.
+
+    The guard was right and asked too early. Blanking is now decided after every demotion, of the
+    contract that will actually run, and the scope must does not count as narrowing."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_INTENT_LEXICON", "1")
+    _stub_compiler(monkeypatch, {})
+
+    app = create_app()
+    app.state.facet_store = InMemoryFacetStore(LEX_ROWS, FACET_SCHEMA)
+    app.state.claim_store = _FakeClaimStore(); app.state._co_sites = None
+    # work_mode is barely known → the guard demotes any must on it, exactly as prod does
+    app.state._facet_cov = {"job": (1e18, {"work_mode": 0.20, "level": 0.9, "metro": 0.9})}
+    d = TestClient(app).post("/jobs", json={"tenant_id": "demo", "question": "remote"}).json()
+
+    c = d["contract"]
+    assert "work_mode" not in (c["must"] or {}), "a 20%-covered key must not be a hard filter"
+    assert c["prefer"].get("work_mode") == ["remote"], "it should still rank"
+    assert c["text"], "with nothing narrowing, the words must stay — they are all the search has"
+
+
+def test_the_text_is_blanked_when_a_must_does_survive(monkeypatch):
+    """The other side: when the promoted must is on a well-covered key it survives, and blanking is
+    then the whole point — the must-slice becomes the pool instead of one word's neighbourhood."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_INTENT_LEXICON", "1")
+    _stub_compiler(monkeypatch, {})
+
+    app = create_app()
+    app.state.facet_store = InMemoryFacetStore(LEX_ROWS, FACET_SCHEMA)
+    app.state.claim_store = _FakeClaimStore(); app.state._co_sites = None
+    app.state._facet_cov = {"job": (1e18, {"work_mode": 0.95, "level": 0.95, "metro": 0.95})}
+    d = TestClient(app).post("/jobs", json={"tenant_id": "demo", "question": "remote"}).json()
+    c = d["contract"]
+    assert c["must"].get("work_mode") == ["remote"]
+    assert c["text"] == ""
