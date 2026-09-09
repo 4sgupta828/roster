@@ -11,7 +11,7 @@
   :root{
     color-scheme:light;
     --bg:#F7F8FB; --panel:#FFFFFF; --panel2:#F1F3F9; --ink:#0E1726; --muted:#5B6675;
-    --gold:#4F46E5; --gold-strong:#4338CA; --gold-rgb:79,70,229; --verified:#08744E; --gap:#C2701C;
+    --gold:#4F46E5; --gold-strong:#4338CA; --gold-rgb:79,70,229; --verified:#08744E; --verified-rgb:8,116,78; --gap:#C2701C;
     --applied:#B4235A;   /* already applied — its own meaning, so its own colour */
     --person:#0B5CAD; --person-rgb:11,92,173;   /* deep azure blue (distinct from the indigo accent) */ --graph:#2C5490;
     --on-accent:#FFFFFF; --on-accent-rgb:255,255,255;   /* white text on the indigo accent */
@@ -33,7 +33,7 @@
   :root[data-theme="dark"]{
     color-scheme:dark;
     --bg:#0A0F1E; --panel:#131C30; --panel2:#0F1728; --ink:#EAECF2; --muted:#8B96A9;
-    --gold:#818CF8; --gold-strong:#A5B0FF; --gold-rgb:129,140,248; --verified:#4ADE9E; --gap:#E0A55E;
+    --gold:#818CF8; --gold-strong:#A5B0FF; --gold-rgb:129,140,248; --verified:#4ADE9E; --verified-rgb:74,222,158; --gap:#E0A55E;
     --applied:#FF6B9D;   /* lighter on the dark ground, still unmistakably not the accent */
     --person:#8AB8F8; --person-rgb:138,184,248;   /* soft azure on the dark ground */ --graph:#7FA8E0;
     --on-accent:#0B1020; --on-accent-rgb:11,16,32;
@@ -50,7 +50,7 @@
   :root[data-theme="editorial"]{
     color-scheme:light;
     --bg:#F6F3EA; --panel:#FDFBF5; --panel2:#F0ECE0; --ink:#221D12; --muted:#6E6550;
-    --gold:#8A6A1F; --gold-strong:#6E5314; --gold-rgb:138,106,31; --verified:#2E6B4F; --gap:#A05C24;
+    --gold:#8A6A1F; --gold-strong:#6E5314; --gold-rgb:138,106,31; --verified:#2E6B4F; --verified-rgb:46,107,79; --gap:#A05C24;
     --applied:#8E2749;
     --person:#123F73; --person-rgb:18,63,115;   /* darker azure for the paper theme */ --graph:#234B7A;
     --on-accent:#FDF8EA; --on-accent-rgb:253,248,234;
@@ -867,9 +867,20 @@
   .fpill{font-size:.7rem;padding:.15rem .5rem;border-radius:999px;background:rgba(var(--gold-rgb),.10);color:var(--gold-strong);border:1px solid var(--gold);}
   .fpill button{font:inherit;border:0;background:transparent;color:inherit;cursor:pointer;margin-left:.2rem;}
   @media (max-width:560px){ .frail-k{min-width:64px;font-size:.6rem;} .fchip{font-size:.7rem;} }
-  /* 🎯 Use my résumé — a SWITCH among the must-have chips: dashed until on, so it never reads as
-     just another filter, and its on-state is unmistakable (it changes what the search IS). */
-  .ev-filter.useresume{border-style:dashed;}
+  /* USE RÉSUMÉ TO SEARCH — ONE BUTTON, and a green one. It sat among the must-have chips wearing the
+     same gold as a filter, behind a "Search by" label, so the control that decides what the search IS
+     read as one more thing the search is narrowed BY. Green is used nowhere else on this row, so on
+     and off are legible at a glance and it never gets mistaken for a filter chip. Off is the default
+     and looks it: plain outline, muted, a hollow dot. */
+  .usecv{display:inline-flex;align-items:center;gap:.4rem;font:inherit;font-size:.78rem;cursor:pointer;
+         min-height:36px;padding:.25rem .8rem;border-radius:999px;border:1px solid var(--hair);
+         background:var(--panel);color:var(--muted);white-space:nowrap;transition:background .12s,border-color .12s,color .12s;}
+  .usecv:hover{border-color:var(--verified);color:var(--ink);}
+  .usecv-dot{width:.5rem;height:.5rem;border-radius:50%;border:1.5px solid currentColor;background:transparent;flex:none;}
+  .usecv.on{border-color:var(--verified);background:rgba(var(--verified-rgb),.13);color:var(--verified);font-weight:650;}
+  .usecv.on .usecv-dot{background:var(--verified);border-color:var(--verified);
+                       box-shadow:0 0 0 3px rgba(var(--verified-rgb),.20);}
+  .usecv.busy{opacity:.6;pointer-events:none;}
   /* THE SEARCH PROFILE the AI read off the résumé — every parameter visible and removable, plus a
      free-text add per key. Nothing about the search is hidden state. */
   .spf{border:1px solid var(--hair);border-radius:10px;padding:.6rem .7rem;background:var(--panel);}
@@ -890,14 +901,10 @@
      was 32px. Both go thumb-sized, and the chip grows with its button so nothing is clipped. */
   @media (max-width:560px){ .spf-k{min-width:100%;padding-top:0;} .spf-add{width:100%;min-height:40px;}
     .spf-v{min-height:40px;} .spf-v button{min-height:40px;min-width:40px;} }
-  #evfilters .ev-filter.useresume.on::before{content:none;}   /* a switch, not a required filter */
   #evfswitch{display:inline-flex;align-items:center;gap:.35rem;margin-right:.5rem;padding-right:.6rem;border-right:1px solid var(--hair);}
   /* On a phone the whole chip row was a 32px target — under the thumb-sized minimum. Raised here
      rather than on the new chip alone, so the row stays one row. */
-  @media (max-width:560px){ #evfilters .ev-filter{min-height:40px;} }   /* #evfswitch too: 🎯 is a chip
-     in the switch row, not in #evfchips, so the narrower selector left the most consequential
-     control on the tab at 36px */
-  .ev-filter.useresume.on{border-style:solid;border-color:var(--gold);background:rgba(var(--gold-rgb),.14);font-weight:600;}
+  @media (max-width:560px){ #evfilters .ev-filter{min-height:40px;} .usecv{min-height:40px;} }
   .rev-box.rev-fresh{padding:.4rem .7rem;} .rev-box.rev-fresh .rev-h{margin:0;font-size:.8rem;} .rev-box.rev-fresh details{margin:.15rem 0 0;} .rev-box.rev-fresh summary{font-size:.74rem;cursor:pointer;color:var(--muted);}
   .aptabs{display:flex;gap:.3rem;flex-wrap:wrap;margin:.6rem 0 .5rem;border-bottom:1px solid var(--hair);padding-bottom:.45rem;}
   .aptab{font:inherit;font-size:.78rem;padding:.35rem .75rem;min-height:38px;border:1px solid var(--hair);border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;}
@@ -2391,7 +2398,7 @@
     </div>
   </div>
 </div>
-<!-- RÉSUMÉ SETUP. Not a search: the résumé is an input to the one Jobs search (🎯 Use my résumé). -->
+<!-- RÉSUMÉ SETUP. Not a search: the résumé is an input to the one Jobs search (Use résumé to search). -->
 <div class="acctpage" id="matchmodal" hidden aria-label="Your résumé">
   <div class="acctwrap" style="max-width:760px;">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:.6rem;">
@@ -2417,7 +2424,7 @@
         <button type="button" class="histbtn mfine" id="mFineTune" hidden title="A recruiter AI reads your résumé and builds the brief your searches are shaped by">✨ Let AI read my résumé</button>
       </div>
       <p class="msub" style="margin:.2rem 0 0;">Read once when you upload. These are the search parameters every
-        🎯 Use my résumé search runs on — change any of them and they stick.</p>
+        search with <b>Use résumé to search</b> on runs on — change any of them and they stick.</p>
       <div id="mSearchProfile" style="margin:.6rem 0 0;"></div>
       <div id="mBrief" style="margin:.5rem 0 0;"></div>
       <div id="matchnote" style="font-size:.8rem;color:var(--muted);margin-top:.5rem;"></div>
@@ -2426,7 +2433,7 @@
     <section class="mstep mstep-go">
       <div class="mstep-h"><span class="mstep-n">3</span> Search with it</div>
       <p class="msub" style="margin:.2rem 0 .6rem;">Your résumé is an input to the <b>Jobs</b> search, not a search of its own. Turn on
-        <b>🎯 Use my résumé</b> there and leave the box empty to search by your résumé alone, or type words to steer it.
+        <b>Use résumé to search</b> there and leave the box empty to search by your résumé alone, or type words to steer it.
         Everything that shapes the result — where, level, work mode, company type, pay — is on the chips beside the results,
         where you can change it and run again.</p>
       <button type="button" class="idgo mgo" id="mGo">🎯 Search jobs with my résumé</button>
@@ -2701,19 +2708,50 @@ function levelSelect(){
 // seeker says "shape it with my résumé". It is a SWITCH, not a must-have, so it sits apart from the
 // JOB_MUST chips. OFF by default and always visible when on: the résumé used to shape every signed-in
 // seeker's search invisibly, with no control to turn it off, and that is what this replaces.
-let USE_RESUME = false;
+let USE_RESUME = false;                       // OFF by default: a plain search stays plain
 try{ USE_RESUME = localStorage.getItem("roster_use_resume") === "1"; }catch(e){}
-function resumeChip(){
-  return `<button type="button" class="ev-filter useresume${USE_RESUME?" on":""}" id="useresumechip" aria-pressed="${USE_RESUME}" title="${USE_RESUME?"Your résumé will shape your next search — tap for a plain one":"Rank open roles by your résumé (upload one under 📄 My résumé). Leave the box empty and your résumé is the whole search."}">🎯 Use my résumé</button>`;
+// Do we HAVE a résumé to search with? null = not asked yet. Turning the switch on without one used to
+// arm a search that could only come back empty; now the switch takes you to the upload instead.
+window.HAS_RESUME = null;
+window.RESUME_INTENT = false;                 // "turn it on once I am signed in"
+async function refreshHasResume(){
+  if(!loggedIn()){ HAS_RESUME = false; return false; }
+  try{
+    const r = await fetch("/me/profile", {headers: authHeaders()});
+    HAS_RESUME = r.ok ? !!((await r.json()) || {}).resume : null;
+  }catch(e){ HAS_RESUME = null; }             // unknown — never block the switch on a network blip
+  return HAS_RESUME;
 }
-function toggleUseResume(){
-  if(!USE_RESUME && !loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
-  USE_RESUME = !USE_RESUME;
+function resumeChip(){
+  const t = USE_RESUME ? "On — your résumé shapes your next search. Tap for a plain search."
+                       : "Rank open roles by your résumé. Leave the box empty and your résumé is the whole search.";
+  return `<button type="button" class="usecv${USE_RESUME?" on":""}" id="useresumechip" aria-pressed="${USE_RESUME}" title="${t}"><span class="usecv-dot" aria-hidden="true"></span>Use résumé to search</button>`;
+}
+function setUseResume(on){
+  USE_RESUME = !!on;
   try{ localStorage.setItem("roster_use_resume", USE_RESUME ? "1" : ""); }catch(e){}
   renderEvFilters();
   const qi = document.getElementById("q");
   if(qi) qi.placeholder = USE_RESUME ? "Add words to steer it — or leave empty and search by your résumé alone"
                                      : (qi.dataset.ph || qi.placeholder);
+}
+// TURNING IT ON IS A PROMISE THE APP HAS TO KEEP. Off is always immediate. On needs a résumé to be
+// about: signed out, sign in first and come straight back here; signed in with nothing on file, go to
+// 📄 My résumé and upload one — the switch stays OFF rather than arming a search of nothing.
+async function toggleUseResume(){
+  if(USE_RESUME){ setUseResume(false); return; }
+  if(!loggedIn()){
+    RESUME_INTENT = true;
+    AUTH_MODE = "login"; if(typeof updateAuthUI === "function") updateAuthUI();
+    $("#idmodal").hidden = false; return;
+  }
+  const btn = document.getElementById("useresumechip");
+  if(HAS_RESUME === null){ if(btn) btn.classList.add("busy"); await refreshHasResume(); if(btn) btn.classList.remove("busy"); }
+  if(HAS_RESUME === false){
+    if(typeof openMatch === "function") openMatch();   // it says "upload one, then search with it"
+    return;
+  }
+  setUseResume(true);
 }
 function evFilterActive(){ return EVIDENCE_KINDS.size > 0; }
 function renderEvFilters(){
@@ -2725,7 +2763,7 @@ function renderEvFilters(){
   if(SEARCH_MODE === "jobs"){
     wrap.title = "Tap to require it — every selected kind must hold for a role to show. Nothing selected = all roles.";
     box.innerHTML = JOB_MUST_ALL.map(k => `<button type="button" class="ev-filter${JOB_MUST.has(k)?" on":""}" data-kind="${k}" aria-pressed="${JOB_MUST.has(k)}" title="${JOB_MUST.has(k)?"Required — tap to drop":"Tap to require "+JOB_MUST_LABEL[k]}">${JOB_MUST_LABEL[k]}</button>`).join("") + levelSelect();
-    if(sw) sw.innerHTML = `<span class="evf-lbl">Search by</span>` + resumeChip();
+    if(sw) sw.innerHTML = resumeChip();
     wrap.classList.toggle("active", JOB_MUST.size > 0 || !!LEVEL || USE_RESUME);
     return;
   }
@@ -8294,6 +8332,8 @@ $("#idgo").addEventListener("click", async ()=>{
     localStorage.setItem("roster_user", JSON.stringify(USER)); setTimeout(maybeNudgeApplyProfile, 800);
     $("#idmodal").hidden = true;
     maybeShowPulseBell(); maybeShowSavedBtn();
+    HAS_RESUME = null;                                    // a different account, a different résumé
+    if(RESUME_INTENT){ RESUME_INTENT = false; toggleUseResume(); }   // they asked before signing in
     if(PULSE_REAUTH && USER && USER.token){ PULSE_REAUTH = false; openPulsePage(); }
     return;
   }
@@ -8382,6 +8422,7 @@ async function logout(){
   // 🎯 IS A SIGNED-IN SETTING. It is remembered in localStorage, so leaving it on through a sign-out
   // left the next search asking the server to shape results with a résumé nobody was signed in to own.
   USE_RESUME = false;
+  HAS_RESUME = null; RESUME_INTENT = false;
   try{ localStorage.removeItem("roster_use_resume"); }catch(e){}
   if(typeof renderEvFilters === "function") renderEvFilters();
   $("#savedmodal").hidden = true;
@@ -8393,7 +8434,8 @@ function sessionExpired(){
   if(!USER) return;
   USER = null;
   try{ localStorage.removeItem("roster_user"); }catch(e){}
-  USE_RESUME = false;                                  // as in logout: 🎯 is a signed-in setting
+  USE_RESUME = false;                                  // as in logout: this is a signed-in setting
+  HAS_RESUME = null; RESUME_INTENT = false;
   try{ localStorage.removeItem("roster_use_resume"); }catch(e){}
   try{ renderEvFilters(); }catch(e){}
   try{ maybeShowSavedBtn(); }catch(e){}
@@ -9369,7 +9411,7 @@ $("#autofillresume") && $("#autofillresume").addEventListener("click", parseResu
 
 // ===== Find jobs: the RÉSUMÉ SETUP surface =====
 // It uploads the résumé and builds the recruiter brief. It does NOT search — searching is the Jobs
-// tab's 🎯 Use my résumé, running the one contract → evaluator path with the rail as its controls.
+// tab's Use-résumé-to-search switch, running the one contract → evaluator path with the rail as its controls.
 // The preference form that used to live here is gone: every filter it held (where, level, work mode,
 // company type, pay) is a chip on that rail, where it is visible and changeable against real counts.
 function feTitleSeniority(t){
@@ -9405,7 +9447,7 @@ async function matchUploadResume(file){
     await fetch("/me/profile/parse-resume",{method:"POST",headers:authHeaders()});
     for(let i=0;i<24;i++){ await new Promise(r=>setTimeout(r,2500));
       const d = await (await fetch("/me/profile/parse-resume",{headers:authHeaders()})).json();
-      if(d.status==="done"){ $("#matchresumestatus").textContent="Résumé ready — "+file.name;
+      if(d.status==="done"){ $("#matchresumestatus").textContent="Résumé ready — "+file.name; HAS_RESUME = true;
         // the parse is done BEFORE the search profile is compiled off it — wait that out (8 rounds,
         // ~30s) rather than flashing "not read yet" at a résumé that is being read right now
         $("#matchnote").textContent="Résumé read — your search parameters are below."; loadSearchProfile(8);
@@ -9421,6 +9463,7 @@ async function openMatch(){
   let prof = {};
   try{ prof = await (await fetch("/me/profile", {headers: authHeaders()})).json(); }catch(e){}
   const hasResume = !!prof.resume;
+  HAS_RESUME = hasResume;                       // the switch reads this instead of asking again
   $("#matchresumestatus").textContent = hasResume ? ("Résumé on file"+(prof.resume&&prof.resume.name?" — "+prof.resume.name:"")) : "No résumé yet — upload one to get started";
   $("#matchnote").textContent = hasResume ? "" : "Upload your résumé in step 1, then search jobs with it.";
   const go = $("#mGo"); if(go) go.disabled = !hasResume;
@@ -9466,7 +9509,7 @@ function renderSearchProfile(){
   const d = SEARCH_PROFILE || {}, c = d.contract || null, L = (d.labels || {}).keys || {};
   if(!d.has_resume){ box.innerHTML = `<div class="sethint">Upload a résumé above and Roster reads your search parameters from it.</div>`; return; }
   if(!c && d.pending){ box.innerHTML = `<div class="status">Reading your search parameters off your résumé — this takes a few seconds.</div>`; return; }
-  if(!c){ box.innerHTML = `<div class="sethint">Not read yet — press ✨ Let AI read my résumé, or just run a 🎯 search and it will be read then.</div>`; return; }
+  if(!c){ box.innerHTML = `<div class="sethint">Not read yet — press ✨ Let AI read my résumé, or just run a search with Use résumé to search on.</div>`; return; }
   const pref = c.prefer || {}, avoid = c.avoid || {};
   const keys = [...new Set([...SPF_ORDER.filter(k => pref[k] || avoid[k]), ...Object.keys(pref), ...Object.keys(avoid)])];
   const valChip = (k, v, sect) => `<span class="spf-v">${sect === "avoid" ? "▼ " : ""}${esc(String(v).replace(/_/g," "))}<button type="button" class="spf-x" data-k="${esc(k)}" data-v="${esc(String(v))}" data-sect="${sect}" title="Remove" aria-label="Remove ${esc(String(v))}">×</button></span>`;
@@ -9572,14 +9615,13 @@ async function resetSearchProfile(){
 }
 
 // THE HAND-OFF: the résumé is an input to the Jobs search, so this leaves the setup surface and runs
-// that search with 🎯 on and an empty box — the résumé is the whole ask. One search, one result
+// that search with the switch on and an empty box — the résumé is the whole ask. One search, one result
 // surface, one set of controls.
 function searchJobsWithResume(){
   $("#matchmodal").hidden = true;
   if(typeof setSearchMode === "function") setSearchMode("jobs");
-  USE_RESUME = true;
-  try{ localStorage.setItem("roster_use_resume", "1"); }catch(e){}
-  renderEvFilters();
+  HAS_RESUME = true;
+  setUseResume(true);
   const qi = document.getElementById("q"); if(qi) qi.value = "";
   window.scrollTo({top:0});
   askQuestion("", {});
