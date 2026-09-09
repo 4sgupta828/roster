@@ -89,10 +89,17 @@ async def _write_search_profile(conn, user_id: str, profile: dict) -> None:
     text = str(profile.get("_resume_text") or "")
     if len(text) < 200:
         return
+    # CLAIM THE ROW BEFORE SPENDING. The parse is marked done before this runs, so a search fired in
+    # the window between found nothing cached and paid for the same two model calls again, in the web
+    # process, concurrently with this one. A `pending` marker under the résumé's own fingerprint is
+    # what the app reads to know a build is already in flight — and what the account page shows as
+    # "reading your search parameters" instead of "not read yet".
+    fp = _resume_fingerprint(profile)
+    await _set_pref(conn, user_id, "match_contract", json.dumps({"hash": fp, "pending": True}))
     brief = await build_candidate_brief(text, profile, build_llm(mode=resolve_mode()))
     if not brief:
+        await _set_pref(conn, user_id, "match_contract", "")     # nothing to compile — release the claim
         return
-    fp = _resume_fingerprint(profile)
     await _set_pref(conn, user_id, "match_brief", json.dumps({"hash": fp, "brief": brief}))
     schema = load_active_vertical().extraction_schema
     c = await asyncio.to_thread(compile_contract, "job", candidate_pitch(brief, profile), schema,
@@ -143,6 +150,10 @@ async def run(user_id: str):
             await _write_search_profile(c, user_id, fields)
         except Exception as e:   # noqa: BLE001 — a parsed résumé is worth keeping even without it
             print("search profile skipped:", str(e)[:160], flush=True)
+            try:                 # release the claim, or the app waits forever on a build that died
+                await _set_pref(c, user_id, "match_contract", "")
+            except Exception:    # noqa: BLE001
+                pass
     except Exception as e:   # noqa: BLE001
         print("error:", str(e)[:120], flush=True); await fail()
     finally:

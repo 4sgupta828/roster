@@ -671,11 +671,19 @@ def jd_exclude_source_co_enabled() -> bool:
 
 
 def _resume_fingerprint(profile: dict) -> str:
-    """Stable hash of the résumé content — the recruiter brief is cached against this so it's rebuilt
-    only when the résumé changes (not on every search)."""
+    """Stable hash of THE RÉSUMÉ TEXT — the brief and the search profile are cached against this, so a
+    new résumé is read afresh and an unchanged one is never re-read.
+
+    It hashes `_resume_text` and NOTHING ELSE. It used to hash `work_history` too, and that field is
+    both PARSED (the résumé) and SAVED (the Apply-Profile form the user edits by hand). The parser
+    keyed the profile it built to the parsed history, while every app-side caller keys to
+    `{**parsed, **saved}` — so a user who had ever saved their Apply profile got a fingerprint that
+    could never match the one the upload wrote: the once-per-résumé model spend was thrown away, the
+    account page said "not read yet" for a résumé that HAD been read, and a later edit of the form
+    silently orphaned the search profile the user had hand-tuned. The résumé is what changes when the
+    résumé changes; hashing anything else makes the cache a function of unrelated edits."""
     import hashlib
-    t = str(profile.get("_resume_text") or "") + json.dumps(profile.get("work_history") or [],
-                                                            sort_keys=True, default=str)
+    t = str(profile.get("_resume_text") or "")
     return hashlib.sha256(t.encode()).hexdigest()[:32] if t.strip() else ""
 
 
@@ -2904,6 +2912,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         # ran — nothing on screen said so and there was no way to turn it off. Now a plain search
         # stays plain until the seeker asks for their profile to shape it.
         _prof_text, _matched_on, _li_profile, _prof_note = "", "", None, ""
+        # The RÉSUMÉ ITSELF, when the search is shaped by the one on file. The interpreted-brief strip
+        # reads years, disciplines and skills off the profile text, and on that path the profile text is
+        # the AI's summary paragraph — so the strip described the summary rather than the person.
+        _resume_on_file = ""
         _brief, _cand = {}, {}          # the stored search profile — only the résumé-on-file source has one
         _li_m = re.search(r"https?://(?:[a-z]{2,3}\.)?linkedin\.com/in/[^\s]+", (body.question or ""), re.I)
         if _li_m:
@@ -3006,20 +3018,33 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     _prof = {}
             _resume_text = str(_prof.get("_resume_text") or "")
             if len(_resume_text) < 200:
-                return {"jobs": [], "count": 0, "query": {}, "stats": await store.jobs_stats(), "needs_profile": True,
-                        "note": "Upload your résumé under 📄 My résumé to search by your profile — or type what you're looking for."}
+                # NO RÉSUMÉ TO SHAPE WITH. A TYPED SEARCH IS STILL A SEARCH: falling through leaves it
+                # to the plain path, exactly as if the chip were off. Returning `needs_profile` here
+                # killed it instead — and because the chip is remembered in localStorage and survived a
+                # sign-out, a seeker could land in a state where every jobs search came back empty
+                # under a note telling them to type what they are looking for, which they just had.
+                if (body.question or "").strip():
+                    _prof_note = ""
+                else:
+                    return {"jobs": [], "count": 0, "query": {}, "stats": await store.jobs_stats(), "needs_profile": True,
+                            "note": "Upload your résumé under 📄 My résumé to search by your profile — or type what you're looking for."}
             # THE SEARCH PROFILE — read off the résumé ONCE, at upload, by the AI, and reusable
             # forever after. `_search_profile_for` returns the recruiter brief (which roles to pitch,
             # at what level, on which skills) AND the search contract compiled from it, in the rail's
-            # own vocabulary. Built here only when it is missing — a résumé that was uploaded before
-            # this existed, or whose owner never waited for the parse to finish.
-            _brief, _cand = {}, {}
-            if recruiter_match_enabled():
-                _brief, _cand = await _search_profile_for(_pacc, _pu["id"], _prof, build=True)
-            _brief_txt = str(_brief.get("search_text") or "")
-            _prof_text, _matched_on = (_brief_txt or _resume_text[:1500]), "resume"
-            _prof_note = ("Shaped by your résumé" + (" — roles, level and skills read by AI" if _brief else "")
-                          + ". The chips below are the search; change any of them, or turn off 🎯 Use my résumé.")
+            # own vocabulary. The stored profile is READ unconditionally — it is a preference lookup
+            # with no model cost, and gating the read on the build flag meant a profile the user had
+            # opened, edited and saved ("saved — your searches use this") reached no search at all.
+            # Only BUILDING one that is missing spends, so only the build is behind the flag.
+            _brief, _cand = ({}, {}) if len(_resume_text) < 200 else \
+                await _search_profile_for(_pacc, _pu["id"], _prof, build=recruiter_match_enabled())
+            # The contract's own `text` wins: a user who edits the search profile edits THAT, and it is
+            # what the PUT stores. Falling straight back to the brief made the saved text unreachable.
+            _brief_txt = str(_cand.get("text") or _brief.get("search_text") or "")
+            if len(_resume_text) >= 200:
+                _prof_text, _matched_on = (_brief_txt or _resume_text[:1500]), "resume"
+                _resume_on_file = _resume_text
+                _prof_note = ("Shaped by your résumé" + (" — roles, level and skills read by AI" if _brief else "")
+                              + ". The chips below are the search; change any of them, or turn off 🎯 Use my résumé.")
 
         if _prof_text:
             from api.people_population import (apply_job_must, apply_level_pref, job_brief_contract,
@@ -3049,11 +3074,15 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 # pay — arrives as preferences here, and what the reader TYPED wins over any of them
                 # key by key. Embedding only the brief's prose (which is all this did at first) threw
                 # the whole judgment away: target_roles and seniority reached nothing.
+                # THE TYPED QUERY OWNS EVERY KEY IT SPOKE ABOUT, in EITHER section. Checking only the
+                # same section let the résumé's `avoid: work_mode` land on a query that had just asked
+                # to PREFER a work mode, so the search argued with itself.
+                _typed_keys = set(_c.prefer) | set(_c.avoid) | set(_c.must)
                 for _sect in ("prefer", "avoid"):
                     for _k, _v in (_cand.get(_sect) or {}).items():
                         _tgt = getattr(_c, _sect)
-                        if _k in _tgt or _k in _c.must:
-                            continue                       # the typed query already spoke about this key
+                        if _k in _typed_keys:
+                            continue
                         _tgt[_k] = _v
                 if not _c.prefer.get("skill"):
                     _sk = profile_skills(_prof_text, limit=8)
@@ -3093,7 +3122,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 stats = await store.jobs_stats()
                 sid = await _save_job_session(_rows, {"title_keywords": [], "company": [], "location": ""})
                 bc = job_brief_contract(question=_qs_txt, plan={"variants": _c.angles, "intent": ""}, job_must=body.job_must, scope=None,
-                                        profile_text=_prof_text, matched_on=_matched_on, levels=body.levels, level_span=int(body.level_span))
+                                        profile_text=(_resume_on_file or _prof_text), matched_on=_matched_on, levels=body.levels, level_span=int(body.level_span))
                 bc["contract"] = _out["contract"]; bc["counts"] = _out["counts"]; bc["coverage"] = _out["coverage"]
                 return {"jobs": _rows, "count": len(_rows), "query": {}, "semantic": True, "stats": stats, "geo_scope": None, "session_id": sid,
                         "must": None, "level_pref": None, "brief_contract": bc, "contract": _out["contract"], "counts": _out["counts"], "coverage": _out["coverage"],
@@ -7743,13 +7772,19 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         profile = {**((await store.get_parse(user["id"])).get("profile") or {}),
                    **((await store.get_profile(user["id"])).get("profile") or {})}
         brief, contract = await _search_profile_for(store, user["id"], profile, build=False)
-        edited = False
+        edited, pending = False, False
         try:
             raw = await store.get_pref(user["id"], "match_contract")
-            edited = bool((json.loads(raw) if raw else {}).get("edited"))
+            got = json.loads(raw) if raw else {}
+            edited = bool(got.get("edited"))
+            # THE UPLOAD IS STILL READING IT. The parser marks the parse done before it compiles the
+            # search profile, so the account page asked for the profile in the gap and was told
+            # "not read yet" about a résumé that was being read at that moment — under a button that
+            # would have paid for the same two calls again. `pending` is what it waits on instead.
+            pending = bool(got.get("pending")) and not contract
         except Exception:   # noqa: BLE001
             edited = False
-        return {"brief": brief or None, "contract": contract or None, "edited": edited,
+        return {"brief": brief or None, "contract": contract or None, "edited": edited, "pending": pending,
                 "labels": _facet_labels("job"), "has_resume": len(str(profile.get("_resume_text") or "")) >= 200}
 
     @app.put("/me/search-profile")
@@ -7762,8 +7797,12 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         profile = {**((await store.get_parse(user["id"])).get("profile") or {}),
                    **((await store.get_profile(user["id"])).get("profile") or {})}
         if body.reset:                                    # hand it back to the AI
+            # RE-READ MEANS RE-READ. Clearing only the contract left the cached BRIEF in place, so the
+            # button labelled "let the AI read the résumé again" recompiled the same judgment: a wrong
+            # target role or seniority in the brief was unreachable, whatever the reader pressed.
+            await _safe_set_pref(store, user["id"], "match_brief", "")
             await _safe_set_pref(store, user["id"], "match_contract", "")
-            brief, contract = await _search_profile_for(store, user["id"], profile, build=True)
+            brief, contract = await _search_profile_for(store, user["id"], profile, build=True, force=True)
             return {"contract": contract or None, "brief": brief or None, "edited": False}
         c = _C.from_dict({**(body.contract or {}), "kind": "job"})
         c.must = {}                                       # a saved profile ranks; the rail is where a must is made
@@ -7787,10 +7826,12 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     def _validate_contract(c) -> dict:
         return validate_job_contract(c, _facet_schema())
 
-    async def _search_profile_for(acc, uid: str, profile: dict, *, build: bool = False) -> tuple[dict, dict]:
+    async def _search_profile_for(acc, uid: str, profile: dict, *, build: bool = False,
+                                  force: bool = False) -> tuple[dict, dict]:
         """(brief, contract) for a user — the AI's read of their résumé, cached against the résumé's
         fingerprint so it costs ONE pair of model calls per résumé, ever. `build` fills a missing one
         in place (a résumé uploaded before this existed, or a parse the owner never waited out).
+        `force` is a person pressing a button, and skips the still-parsing guard below.
 
         A contract the USER has edited is kept as theirs: it is stored under the same fingerprint with
         `edited`, and is never recompiled behind their back. A NEW résumé changes the fingerprint, and
@@ -7802,14 +7843,22 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         cb = await _get_cached_brief(acc, uid)
         if cb and cb.get("hash") == fp:
             brief = cb.get("brief") or {}
+        building = False
         try:
             raw = await acc.get_pref(uid, "match_contract")
             got = json.loads(raw) if raw else None
             if got and got.get("hash") == fp:
                 cand = got.get("contract") or {}
+                building = bool(got.get("pending"))
         except Exception:   # noqa: BLE001
             cand = {}
-        if not build:
+        if not build or (brief and cand):
+            return brief, cand
+        if building and not force:
+            # THE UPLOAD IS ALREADY BUILDING THIS. `resume_parser` claims the row before it starts, so
+            # a search fired in that window no longer pays for the SAME two model calls a second time,
+            # concurrently, and no longer races the parser to overwrite the identical row. This one
+            # search falls back to the résumé's own text; the next reads what the parser wrote.
             return brief, cand
         resume_text = str(profile.get("_resume_text") or "")
         if not brief and len(resume_text) >= 200:
@@ -7869,33 +7918,26 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
 
     @app.post("/me/match-jobs/fine-tune")
     async def me_match_fine_tune(body: MatchIn, x_roster_token: str = Header(default="")) -> dict:
-        """✨ Fine-tune config: an LLM recruiter reads the résumé (weighting the last 3–5y) and proposes
-        an optimized search config for maximum relevant matches, plus the candidate brief it built. The FE
-        populates the form from `config` and shows `brief`. 404 when the recruiter-match flag is off."""
+        """✨ Let AI read my résumé — an LLM recruiter reads it (weighting the last 3–5y) and the read is
+        compiled into the SEARCH PROFILE the account page draws and every 🎯 search runs on.
+
+        It writes BOTH halves. It used to write only the brief, so pressing it on a résumé with no
+        compiled contract spent a model call and left the page saying "not read yet" — the same button,
+        the same message, forever. 404 when the recruiter-match flag is off."""
         if not recruiter_match_enabled():
             raise HTTPException(status_code=404, detail="recruiter match not enabled")
         store, user = await _require_user(x_roster_token)
         saved = (await store.get_profile(user["id"])).get("profile") or {}
         parsed = (await store.get_parse(user["id"])).get("profile") or {}
         profile = {**parsed, **saved}
-        from api.people_population import build_candidate_brief
-        brief = await build_candidate_brief(profile.get("_resume_text", ""), profile, build_llm(mode=resolve_mode()))
+        if len(str(profile.get("_resume_text") or "")) < 200:
+            raise HTTPException(status_code=400, detail="Upload/parse a résumé first — nothing to tune from.")
+        await _safe_set_pref(store, user["id"], "match_brief", "")     # a press means read it AGAIN
+        await _safe_set_pref(store, user["id"], "match_contract", "")
+        brief, contract = await _search_profile_for(store, user["id"], profile, build=True, force=True)
         if not brief:
             raise HTTPException(status_code=400, detail="Upload/parse a résumé first — nothing to tune from.")
-        # CACHE the brief against the résumé fingerprint so plain searches reuse it (no per-search LLM).
-        await _safe_set_pref(store, user["id"], "match_brief",
-                             json.dumps({"hash": _resume_fingerprint(profile), "brief": brief}))
-        cur = body.model_dump()
-        # LLM proposals win for role/seniority; keep the user's geo/company/salary unless empty.
-        config = {
-            "role_keywords": brief.get("target_roles") or cur.get("role_keywords") or [],
-            "seniorities": ([brief["seniority"]] if brief.get("seniority") else (cur.get("seniorities") or [])),
-            "locations": cur.get("locations") or [],
-            "remote": bool(cur.get("remote")),
-            "company_types": cur.get("company_types") or [],
-            "min_salary": cur.get("min_salary") or None,
-        }
-        return {"config": config, "brief": brief}
+        return {"brief": brief, "contract": contract or None}
 
     async def _apply_jd_and_profile(store, user, body: "ApplyIn"):
         """Shared: resolve the JD text (from job_url via the SSRF-guarded fetcher, or pasted

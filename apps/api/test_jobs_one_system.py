@@ -218,3 +218,42 @@ def test_an_invented_level_centre_is_dropped_rather_than_stored():
     d = validate_job_contract(Contract(kind="job", center={"key": "level", "value": "wizard", "span": 1}),
                               FACET_SCHEMA)
     assert d["center"] is None
+
+
+# ---------------------------------------------------------------- the fixes this line of work needed
+
+def test_the_resume_toggle_never_kills_a_typed_search(monkeypatch):
+    """🎯 Use my résumé is remembered in the browser and outlived a sign-out, so a seeker could reach a
+    state where EVERY jobs search came back empty under a note telling them to type what they were
+    looking for — which is what they had just done. With no résumé to shape it, the opt-in is ignored
+    and a typed search is a typed search."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    c = _client()
+    plain = _jobs(c, question="backend engineer").json()
+    opted = _jobs(c, question="backend engineer", use_resume=True).json()
+    assert plain["count"] == len(ROWS)
+    assert opted["count"] == plain["count"], "the opt-in emptied a search it had nothing to shape"
+    assert not opted.get("needs_profile")
+
+
+def test_asking_for_the_resume_with_nothing_typed_still_says_how_to_get_one(monkeypatch):
+    """The other half: with no query AND no résumé there is nothing to search on, and that is the one
+    case that should ask for a résumé."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    d = _jobs(_client(), question="", use_resume=True).json()
+    assert d["count"] == 0 and d["needs_profile"] is True
+
+
+def test_the_resume_fingerprint_is_the_resume_and_nothing_else():
+    """The brief and the search profile are cached against this. It used to hash `work_history` too —
+    a field that is both parsed FROM the résumé and saved BY HAND on the Apply-Profile form — so the
+    parser (parsed only) and the app (parsed under saved) computed different keys for the same résumé:
+    the once-per-résumé model spend was thrown away, the account page said "not read yet" about a
+    résumé that had been read, and editing the form orphaned a hand-tuned search profile."""
+    from api.app import _resume_fingerprint
+    text = "x" * 400
+    parsed = {"_resume_text": text, "work_history": [{"title": "SWE", "company": "acme"}]}
+    edited = {"_resume_text": text, "work_history": [{"title": "Senior SWE", "company": "acme"}]}
+    assert _resume_fingerprint(parsed) == _resume_fingerprint(edited) != ""
+    assert _resume_fingerprint({"_resume_text": text + "!"}) != _resume_fingerprint(parsed)
+    assert _resume_fingerprint({}) == ""
