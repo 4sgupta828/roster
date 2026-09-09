@@ -84,6 +84,8 @@ def history_pack(history: list | None, *, max_turns: int = 6) -> list[dict]:
             turn["chose"] = str(t["chose"]).strip()[:60]
         if str(t.get("told") or "").strip():
             turn["told"] = str(t["told"]).strip()[:200]
+        if t.get("pool"):
+            turn["pool"] = int(t["pool"])          # so the next turn can say what changed
         est = [str(u).strip()[:120] for u in (t.get("understood") or []) if str(u).strip()][:6]
         if est:
             turn["understood"] = est
@@ -177,17 +179,26 @@ def parse(raw: dict | None, schema: FacetSchema, kind: str, *, max_readings: int
 
 
 def worth_asking(query: str, coverage: dict | None, *, ambiguous: bool = False,
-                 min_pool: int = 12, max_words: int = 6) -> tuple[bool, str]:
+                 min_pool: int = 12, max_words: int = 6, history: list | None = None) -> tuple[bool, str]:
     """Is the search unsure enough to be worth a question — and a model call?
 
     A debugger that interrupts a session it understands is noise, and every ask here costs a call, so
-    this is deliberately narrow. It fires where a reading genuinely could be wrong: a short query (few
-    words carry little constraint), one the lexicon found more than one way to read, or a result set
-    nothing matched well. A long, specific sentence that landed on strong matches is left alone."""
+    the cold-start test is narrow: a short query, one the lexicon read two ways, or a result set nothing
+    matched well.
+
+    ONCE A CONVERSATION IS UNDER WAY, THAT TEST IS THE WRONG ONE. The reader answering in their own
+    words makes the query LONGER, so the "specific enough" rule fired exactly when they had just
+    engaged — the notes and the question vanished the moment they used them, and the new results
+    arrived with nothing to read them by. A conversation in progress keeps its thread: the model is
+    given the turn and decides for itself whether anything is left to ask, returning no readings when
+    it has converged. That is the right place for the decision, because only it can tell the difference
+    between "answered" and "still vague"."""
     cov = coverage or {}
     pool = int(cov.get("pool") or 0)
     if pool < min_pool:
         return False, "too few results to reinterpret"
+    if history:
+        return True, "we are mid-conversation"
     if ambiguous:
         return True, "the words carry more than one reading"
     words = len([w for w in (query or "").split() if w])

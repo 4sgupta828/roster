@@ -734,3 +734,41 @@ def test_a_converged_conversation_keeps_its_notes_and_stops_asking(monkeypatch):
     ic = d.get("intent_check") or {}
     assert ic.get("readings") == [] and ic.get("understanding"), ic
     assert ic.get("noticed")
+
+
+def test_answering_in_your_own_words_does_not_end_the_conversation(monkeypatch):
+    """THE BUG THE OWNER HIT. Typing an answer makes the query LONGER, and the cold-start gate read a
+    long query as "specific enough" — so the notes and the question vanished at exactly the moment they
+    were used, and the new results arrived with nothing to read them by. A conversation in progress
+    keeps its thread; whether anything is left to ask is the model's call, not a word count's."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
+    _stub_intent(monkeypatch, READINGS)
+    long_q = "platform engineer — I care about reliability at scale and want to be close to the metal"
+    fresh = _jobs(_lex_client(), question=long_q).json()
+    assert (fresh.get("intent_check") or {}).get("readings") == [], "a cold long query is left alone"
+
+    carried = _jobs(_lex_client(), question=long_q, intent_history=[
+        {"asked": "platform engineer", "offered": ["Infra", "DevEx"], "chose": "Infra",
+         "understood": ["infrastructure, not tooling"], "pool": 690}]).json()
+    ic = carried.get("intent_check") or {}
+    assert ic.get("readings"), "mid-conversation the thread must not drop"
+    assert ic.get("understanding"), "and the notes must still be there"
+
+
+def test_the_previous_turns_result_size_reaches_the_model(monkeypatch):
+    """"That took it from 690 to 240" says more about what their answer did than any adjective."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
+    seen = {}
+
+    def _route(system, user, **kw):
+        if "recruiting consultant" in (system or "").lower():
+            seen["user"] = user
+            return dict(READINGS)
+        return {}
+
+    monkeypatch.setattr("api.model_json.llm_json", _route)
+    _jobs(_lex_client(), question="platform engineer", intent_history=[
+        {"asked": "platform", "chose": "Infra", "pool": 690}])
+    assert "690" in (seen.get("user") or ""), "the turn before's size is part of the picture"

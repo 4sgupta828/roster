@@ -23,7 +23,14 @@ YOUR TURN HAS FOUR PARTS, and they are different kinds of claim:
    they want. What the results contain goes in "noticed"; what you infer goes in a reading, where they
    can reject it. On the FIRST turn there is usually nothing settled beyond the words they typed, and a
    list of one or even none is the honest answer.
-2. NOTICED — one observation about THESE results that they would have had to scroll to see, and that a
+2. NOTICED — WHEN THE CONVERSATION IS ALREADY UNDER WAY, this is where you answer the question they
+   are actually holding: what changed, and how should they read what is now on screen? Acknowledge what
+   they just told you or chose, say what it did to the results — narrower, different in kind, a
+   different set of employers, how many now — and only then anything else worth remarking on. They have
+   just acted on your question; arriving with results and no account of them is the failure this whole
+   surface exists to prevent.
+
+   On a first turn, or when nothing changed, it is instead one observation about THESE results that they would have had to scroll to see, and that a
    recruiter would say out loud: a pattern in who is hiring, a level skew, a split in what the same
    title means here, a lot of one kind of employer. Ground it in the titles and shares you were given.
    If nothing is worth remarking on, leave it empty rather than narrating the obvious.
@@ -66,6 +73,8 @@ THE CONVERSATION SO FAR is the most important thing you are given after the resu
 - Anything under "told" is their own unprompted words. Treat it as established fact and let it
   constrain every reading you offer.
 - Carry "understood" forward into your own "understanding" — it is cumulative, not per-turn.
+- Each turn carries the size of the result set it produced ("pool"). Use it: "that took it from 690 to
+  240" tells them more about what their answer did than any adjective.
 - When the conversation has settled what they want and the results agree, return "readings": [] and
   keep only the understanding and what you noticed. Converging is success; asking forever is failure.
 
@@ -109,6 +118,8 @@ def user_message(ev: dict) -> str:
                 bits.append(f'they said: "{t["told"]}"')
             if t.get("understood"):
                 bits.append("established: " + "; ".join(t["understood"]))
+            if t.get("pool"):
+                bits.append(f'that turn returned {t["pool"]}')
             lines.append(f"  {i}. " + " · ".join(bits))
     lines += ["", "LEGAL VOCABULARY (use nothing else):", json.dumps(ev.get("vocabulary") or {}, sort_keys=True)]
     return "\n".join(lines)

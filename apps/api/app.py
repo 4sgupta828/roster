@@ -6509,7 +6509,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             return None
         try:
             from roster_kernel.facets.intent_check import evidence, parse, worth_asking
-            ok, why = worth_asking(query, out.get("coverage") or {}, ambiguous=ambiguous)
+            ok, why = worth_asking(query, out.get("coverage") or {}, ambiguous=ambiguous, history=history)
             if not ok:
                 return {"readings": [], "why": why}
             # the conversation is part of the key: the same words after a different exchange deserve a

@@ -3115,7 +3115,8 @@ async function runJobs(question, opts){
       const ic = d.intent_check || {}; const p = JOBS_INTENT_PENDING || {};
       JOBS_INTENT_HISTORY.push({asked: question || "", offered: (ic.readings || []).map(r => r.label),
                                 chose: p.chose || "", told: p.told || "",
-                                understood: ic.understanding || []});   // cumulative, not per-turn
+                                understood: ic.understanding || [],
+                                pool: (d.coverage || {}).pool || 0});   // so the next turn can say what changed
       if(JOBS_INTENT_HISTORY.length > 8) JOBS_INTENT_HISTORY.shift();
       JOBS_INTENT_PENDING = null;
     }
