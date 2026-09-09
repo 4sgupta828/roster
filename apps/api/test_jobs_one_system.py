@@ -465,14 +465,24 @@ def test_the_scope_is_never_inherited_from_a_previous_turn(monkeypatch):
 
 # ---------------------------------------------------------------- directions (spec: intent-convergence-loop §3)
 
-def test_a_settled_search_is_offered_no_directions(monkeypatch):
-    """The risk the panel named — turning a precise search into a nagging form. Silence is the default,
-    and it is the common answer."""
+def test_a_search_already_narrowed_to_a_handful_is_offered_no_directions(monkeypatch):
+    """The anti-nagging protection, in its right place. It is no longer keyed on match quality — a
+    cleanly-matched pool of hundreds is exactly what a reader narrows down — but on whether there is
+    anything left to split. A reader who has reached a handful has converged."""
     monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
     monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
-    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {"must": {"work_mode": ["remote"]}})
-    d = _jobs(_lex_client(), question="remote roles").json()
-    assert d.get("directions", {}).get("offer") == [], d.get("directions")
+    monkeypatch.setattr("api.model_json.llm_json",
+                        lambda s, u, **kw: {"must": {"work_mode": ["remote"], "level": ["staff_plus"],
+                                                     "metro": ["austin"]}})
+    few = [dict(r, id=f"few{i}") for i, r in enumerate(LEX_ROWS[:14])]      # a handful, already narrowed
+    app = create_app()
+    app.state.facet_store = InMemoryFacetStore(few, FACET_SCHEMA)
+    app.state.claim_store = _FakeClaimStore(); app.state._co_sites = None
+    app.state._facet_cov = {"job": (1e18, {"work_mode": 0.95, "level": 0.95, "metro": 0.95})}
+    d = TestClient(app).post("/jobs", json={"tenant_id": "demo",
+                                            "question": "remote staff roles in austin"}).json()
+    assert (d.get("coverage") or {}).get("pool", 999) < 25, "the fixture should be a handful"
+    assert (d.get("directions") or {}).get("offer") == [], d.get("directions")
 
 
 def _weak_client():

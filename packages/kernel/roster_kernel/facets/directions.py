@@ -104,37 +104,50 @@ def cluster_directions(groups: list, n_rows: int, *, min_share: float = 0.10,
 
 
 def worth_steering(coverage: dict | None, *, ambiguous: bool = False, min_pool: int = 12,
-                   tight_match: int = 70) -> tuple[bool, str]:
+                   converged_pool: int = 25) -> tuple[bool, str]:
     """Should anything be offered at all?
 
-    The literature on clarifying questions is blunt: a low-quality one measurably disturbs people, and
-    asking only the good ones beats asking all of them. So this fails CLOSED — the default is silence,
-    and a reason is returned either way so the surface can say what it decided.
+    THE QUESTION IS WHETHER A USEFUL SPLIT EXISTS, NOT WHETHER THE QUERY WAS UNCLEAR. The first version
+    keyed on match quality — silence whenever `best_match` was high — which reads the clarifying-question
+    research too literally. That research is about interrupting someone with a QUESTION; these are
+    passive chips beside the results that cost a glance to ignore. Tuned the strict way, a clean query
+    like "backend engineer" with 691 in the pool got nothing, even though seniority, place and work mode
+    all split it usefully — which is exactly the narrowing the reader wanted help with.
 
-    A weak `best_match` on its own is deliberately NOT enough. It usually means the index holds nothing
-    good, not that the reader was misunderstood, and steering on it offers chips for a coverage gap —
-    blaming the reader for the corpus."""
+    So the gate now asks about the SET, and the quality bar moves to the candidates themselves (a
+    direction is only offered if it meaningfully splits the pool — see `rank_directions`):
+
+    - a pool too thin to split is never split further;
+    - a pool the reader has already narrowed to a handful is left alone — they have converged;
+    - an ambiguous query is always steered, however good the scores look;
+    - otherwise, offer, and let the candidates decide whether anything is worth showing."""
     cov = coverage or {}
     pool = int(cov.get("pool") or 0)
-    if pool < min_pool:
-        return False, "too few results to split"
-    best = cov.get("best_match")
-    if best is not None and int(best) >= tight_match and not ambiguous:
-        return False, "the top results already match closely"
     if ambiguous:
         return True, "the query could be read more than one way"
+    if pool < min_pool:
+        return False, "too few results to split"
+    if pool < converged_pool:
+        return False, "already narrowed to a handful"
     if cov.get("weak") or cov.get("diagnosis"):
         return True, "nothing matched strongly"
-    return False, "the results look settled"
+    return True, "these split the results"
 
 
-def rank_directions(candidates: list, *, top: int = 3, per_key: int = 1) -> list[Direction]:
+def rank_directions(candidates: list, *, top: int = 3, per_key: int = 1,
+                    min_score: float = 0.30) -> list[Direction]:
     """The handful actually offered: highest scoring, at most one per key so three chips are three
-    different questions rather than three values of the same one, and never two halves of one cluster."""
+    different questions rather than three values of the same one, and never two halves of one cluster.
+
+    `min_score` is where the quality bar lives now that the gate is about the set rather than the query.
+    A direction scoring below it barely moves the result set, and a chip that changes nothing is the
+    low-quality question the research warns about — just wearing different clothes."""
     seen_key: dict = {}
     seen_cluster: set = set()
     out: list[Direction] = []
     for d in sorted(candidates or [], key=lambda x: -float(x.score or 0.0)):
+        if float(d.score or 0.0) < min_score:
+            break                      # sorted: nothing after this clears the bar either
         if d.source == "cluster":
             if d.label.removeprefix("not ") in seen_cluster:
                 continue

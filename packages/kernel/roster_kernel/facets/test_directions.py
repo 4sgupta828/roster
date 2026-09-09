@@ -69,10 +69,18 @@ def test_facet_and_cluster_candidates_are_comparable_on_one_scale():
 
 # ---------------------------------------------------------------- the gate
 
-def test_a_tight_well_matched_result_set_is_left_alone():
-    """The risk the panel named: turning a precise search into a nagging form. Silence is the default."""
+def test_a_set_the_reader_has_already_narrowed_is_left_alone():
+    """The risk the panel named — turning a search into a nagging form — now lives where it belongs: a
+    reader who has narrowed to a handful has converged, and a pool too thin to split is never split.
+
+    What does NOT silence the offer any more is a high match score. Tuned that way, a clean query like
+    "backend engineer" with 691 results got nothing, even though seniority, place and work mode all
+    split it usefully — which is precisely the narrowing the reader wanted. The quality bar moved to
+    the candidates: a direction that barely moves the set is never shown."""
+    ok, why = worth_steering({"pool": 18, "best_match": 88})
+    assert ok is False and "narrowed" in why
     ok, why = worth_steering({"pool": 400, "best_match": 88})
-    assert ok is False and "match" in why
+    assert ok is True, "a big, cleanly-matched pool is exactly what a reader narrows down"
 
 
 def test_a_thin_pool_is_never_split_further():
@@ -87,8 +95,10 @@ def test_an_ambiguous_query_is_steered_even_when_the_matches_look_good():
     assert ok is True
 
 
-def test_a_weak_match_alone_steers_but_a_low_score_is_not_treated_as_misunderstanding():
-    assert worth_steering({"pool": 400, "best_match": 30, "weak": True})[0] is True
-    # a middling score with nothing else wrong is the index being ordinary, not the reader being unclear
-    ok, why = worth_steering({"pool": 400, "best_match": 50})
-    assert ok is False and "settled" in why
+def test_a_direction_that_barely_moves_the_set_is_never_offered():
+    """The quality bar, now that the gate is about the set rather than the query: a 96/4 split is not a
+    choice, and offering it is the low-quality question the research warns about in different clothes."""
+    counts = {"mode": {"remote": 96, "onsite": 4}}
+    assert rank_directions(facet_directions(counts, SCHEMA, "thing")) == []
+    counts = {"mode": {"remote": 60, "onsite": 40}}
+    assert rank_directions(facet_directions(counts, SCHEMA, "thing"))
