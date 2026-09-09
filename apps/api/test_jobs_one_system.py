@@ -513,3 +513,41 @@ def test_a_direction_never_repeats_a_filter_the_search_already_applies(monkeypat
     offer = (d.get("directions") or {}).get("offer") or []
     assert offer, "this search is weak enough to steer"
     assert all(o["key"] != "work_mode" for o in offer)
+
+
+def test_a_pasted_job_link_is_read_as_a_profile_not_embedded_as_a_url(monkeypatch):
+    """Measured on prod: a greenhouse URL was embedded as a string, so the search returned the nearest
+    neighbours of a URL. What the reader means is "more roles like this one"."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_JD_URL", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
+    jd = ("Senior Backend Engineer at Acme. You will build distributed payment systems in Go and "
+          "Kubernetes on Postgres. We are looking for someone with deep experience in reliability, "
+          "on-call ownership and API design. This role is remote within the United States. ") * 3
+    c = _lex_client()
+    c.app.state.jd_reader = lambda url: jd
+    d = _jobs(c, question="https://boards.greenhouse.io/acme/jobs/123").json()
+    assert d.get("matched_on") == "job_link", d.get("note")
+    assert d["jobs"], "a linked posting should return its neighbours"
+    assert "posting you linked" in (d.get("note") or "")
+    assert jd[:40].lower().split()[0] in (d["contract"]["text"] or "").lower()
+
+
+def test_a_job_link_that_cannot_be_read_stays_an_ordinary_search(monkeypatch):
+    """Fail-safe: an unreachable or empty posting must not silently become an empty profile."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_JD_URL", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
+    c = _lex_client()
+    c.app.state.jd_reader = lambda url: ""
+    d = _jobs(c, question="https://boards.greenhouse.io/acme/jobs/123").json()
+    assert d.get("matched_on") != "job_link"
+    assert "jobs" in d
+
+
+def test_the_job_link_route_is_off_by_default(monkeypatch):
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.delenv("ROSTER_JD_URL", raising=False)
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
+    d = _jobs(_lex_client(), question="https://boards.greenhouse.io/acme/jobs/123").json()
+    assert d.get("matched_on") != "job_link"

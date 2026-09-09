@@ -106,6 +106,10 @@ class FacetStore(Protocol):
     async def counts(self, kind: str, must: dict, schema: FacetSchema, *, depth: dict | None = None) -> dict: ...
     async def coverage(self, kind: str, must: dict, schema: FacetSchema) -> dict[str, float]: ...
     async def noise_floor(self, kind: str, text: str) -> float | None: ...
+    # OPTIONAL: a lexical (keyword) leg. A store that cannot answer one simply does not define it —
+    # `evaluate` checks with getattr and carries on, because a missing keyword index must degrade the
+    # ranking, never fail the search.
+    async def lexical(self, kind: str, text: str, must: dict, *, cap: int = 200) -> list[dict]: ...
 
 
 class InMemoryFacetStore:
@@ -137,6 +141,25 @@ class InMemoryFacetStore:
     async def coverage(self, kind: str, must: dict, schema: FacetSchema) -> dict[str, float]:
         rows = [r for r in self._rows if r.get("kind") == kind and matches_must(r, must, schema)]
         return coverage_rows(rows, schema, kind)
+
+    async def lexical(self, kind: str, text: str, must: dict, *, cap: int = 200) -> list[dict]:
+        """Rows whose own words contain the query's — the ANCHOR a dense leg cannot provide.
+
+        A one- or two-word query has a diffuse embedding: `austin` lands near "Austin Tour Guide"
+        because the vector says the word is present, not that the job is there. The lexical leg is the
+        half of a hybrid index that says "these words actually appear". Reference implementation:
+        substring over the row's own text, scored by how many of the query's words are present."""
+        want = [w for w in str(text or "").lower().split() if w]
+        if not want:
+            return []
+        out = []
+        for r in self._filtered(kind, must):
+            hay = " ".join(str(v) for v in [r.get("title"), r.get("company"), r.get("text")] if v).lower()
+            hits = sum(1 for w in want if w in hay)
+            if hits:
+                out.append({**r, "sim": float(r.get("sim") or 0.0), "lex": hits / len(want)})
+        out.sort(key=lambda r: (-float(r.get("lex") or 0), -float(r.get("sim") or 0)))
+        return out[:cap]
 
     async def noise_floor(self, kind: str, text: str) -> float | None:
         return None

@@ -401,3 +401,37 @@ def test_coverage_reports_set_keys_honestly_so_a_must_on_one_can_be_downgraded()
     counts = _run(store.counts("thing", {}, s))
     assert UNKNOWN not in counts["tags"]
     assert counts["colour"].get(UNKNOWN, 0) == 0      # every row has one, so no unknown either
+
+
+def test_the_lexical_leg_anchors_a_query_whose_embedding_is_diffuse():
+    """DENSE EXPANDS, SPARSE ANCHORS. A one- or two-word query has a diffuse embedding: the vector says
+    the word is present, not that the row is about it. The keyword leg brings in the rows whose own
+    words actually contain the query — and the union, not either leg, is the pool."""
+    s = _schema()
+    rows = [
+        # the semantically nearest rows do not contain the word at all
+        {"id": "near1", "kind": "thing", "sim": 0.80, "title": "unrelated", "facets": {"colour": ["red"]}},
+        {"id": "near2", "kind": "thing", "sim": 0.79, "title": "also unrelated", "facets": {"colour": ["red"]}},
+        # the row that actually says it is far away in vector space
+        {"id": "says_it", "kind": "thing", "sim": 0.05, "title": "cuda kernel work", "facets": {"colour": ["red"]}},
+    ]
+    store = InMemoryFacetStore(rows, s)
+    c = Contract(kind="thing", text="cuda kernel", limit=10)
+    without = _run(evaluate(c, store, s, FacetWeights(), noise_floor=0.40))
+    with_lex = _run(evaluate(c, store, s, FacetWeights(), noise_floor=0.40, lexical_leg=True))
+    assert "says_it" in {r["id"] for r in with_lex["rows"]}
+    assert with_lex["coverage"]["legs"].get("lexical", 0) > 0
+    # the dense-only pool still holds it here (a 3-row store), but the leg is what guarantees it at scale
+    assert {r["id"] for r in without["rows"]} <= {r["id"] for r in with_lex["rows"]}
+
+
+def test_a_store_without_a_keyword_index_is_simply_not_asked():
+    """A missing keyword index must degrade the ranking, never fail the search."""
+    class _NoLexical(InMemoryFacetStore):
+        lexical = None
+
+    s = _schema()
+    store = _NoLexical(_rows(), s)
+    out = _run(evaluate(Contract(kind="thing", text="q", limit=5), store, s, FacetWeights(),
+                        noise_floor=0.40, lexical_leg=True))
+    assert out["rows"] and out["coverage"]["legs"].get("lexical", 0) == 0

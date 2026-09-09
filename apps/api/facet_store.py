@@ -6,6 +6,8 @@ GROUP BY over the must-filtered slice; `project` is the ONLY writer of facet row
 Semantics are the kernel's (`matches_must` / `count_rows`); the parity test runs both over the same data."""
 from __future__ import annotations
 
+import re as _re
+
 import json
 from typing import Any
 
@@ -380,6 +382,46 @@ class FacetSQLStore:
             cache.clear()
         cache[ckey] = (_time.monotonic(), _json.loads(_json.dumps(out)), dict(self.last_counts_meta))
         return out
+
+    LEXICAL_SCAN_MAX = 60_000        # rows we will look through without an index; above this, decline
+
+    async def lexical(self, kind: str, text: str, must: dict, *, cap: int = 200) -> list[dict]:
+        """The keyword leg — rows whose own words contain the query's.
+
+        NOTE ON THE INDEX, because this is the honest limit of what ships. `rs_block` (the research
+        corpus) has a `tsv` tsvector column; `rs_job` and `rs_entity`, which are what people and jobs
+        search, have NONE — the only text index on rs_job is a btree on `title_norm`, which serves
+        prefixes and not words-inside-text. A proper leg wants a generated tsvector + GIN index on both
+        tables (≈250k jobs, ≈429k people); that is a prod migration and is not taken here.
+
+        So this does what can be done without one: it matches inside the MUST-SLICE only, and declines
+        entirely when that slice is larger than `LEXICAL_SCAN_MAX` rather than seq-scanning the index.
+        That makes it useful exactly where a narrow query has already been narrowed, and silent — never
+        slow — everywhere else. `evaluate` treats an empty answer as "no keyword leg", so declining
+        costs the ranking nothing it had before."""
+        words = [w for w in _re.findall(r"[a-z0-9+#.]{2,}", str(text or "").lower())][:6]
+        if not words or kind != "job":
+            return []                     # people carry no single text column to match on yet
+        await self.ensure_schema()
+        pool = await self._conn()
+        args: list = []
+        cl = self._must_sql("('job:' || j.id::text)", must, args)
+        where = " AND ".join(["j.closed_at IS NULL"] + [c.strip() for c in cl]) or "TRUE"
+        async with pool.acquire() as conn:
+            n = int(await conn.fetchval(
+                f"SELECT count(*) FROM (SELECT 1 FROM rs_job j WHERE {where} LIMIT {self.LEXICAL_SCAN_MAX + 1}) x", *args) or 0)
+            if n > self.LEXICAL_SCAN_MAX:
+                return []                 # too wide to look through without an index — say nothing
+            conds = " OR ".join(f"lower(j.title) LIKE ${len(args) + i + 1}" for i in range(len(words)))
+            rows = await conn.fetch(
+                f"""SELECT ('job:' || j.id::text) AS id, j.title, j.company,
+                           ({" + ".join(f"(lower(j.title) LIKE ${len(args) + i + 1})::int" for i in range(len(words)))})::float
+                             / {len(words)} AS lex
+                    FROM rs_job j WHERE {where} AND ({conds})
+                    ORDER BY lex DESC LIMIT {int(cap)}""",
+                *args, *[f"%{w}%" for w in words])
+        return [{"id": r["id"], "kind": "job", "sim": 0.0, "lex": float(r["lex"]),
+                 "title": r["title"], "company": r["company"], "facets": {}} for r in rows]
 
     COVERAGE_TTL = 3600.0
 

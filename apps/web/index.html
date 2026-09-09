@@ -3399,12 +3399,21 @@ function jobsMarkup(d){
   window.JOBS_RENDERS = window.JOBS_RENDERS || {};
   if(!d._jpid){ d._jpid = "j" + String(Date.now()) + Math.random().toString(36).slice(2,6); }
   window.JOBS_RENDERS[d._jpid] = d;
-  const JPAGE = 20, jpagesN = Math.max(1, Math.ceil(jobs.length / JPAGE));
+  // A SMALL FIRST BATCH, BUT ONLY WHEN THERE IS SOMETHING TO STEER. The search stays evaluated WIDE —
+  // `limit` and the counts are untouched, because directions are computed from the slice and would
+  // collapse if they were computed from ten rows. This is purely how many are drawn first: when the
+  // server offered directions, a short first page makes picking one cheap; when it offered none, the
+  // search is settled and a full page is what the reader came for.
+  const steering = !!((d.directions || {}).offer || []).length;
+  const JPAGE = 20, FIRST = steering ? 10 : JPAGE;
+  const pageStart = p => p === 0 ? 0 : FIRST + (p - 1) * JPAGE;
+  const pageLen = p => p === 0 ? FIRST : JPAGE;
+  const jpagesN = Math.max(1, jobs.length <= FIRST ? 1 : 1 + Math.ceil((jobs.length - FIRST) / JPAGE));
   const jpage = Math.min(jpagesN - 1, Math.max(0, d._jpage || 0));
-  const pagedJobs = jobs.slice(jpage * JPAGE, jpage * JPAGE + JPAGE);
-  const jfrom = jpage * JPAGE + 1, jto = jpage * JPAGE + pagedJobs.length;
+  const pagedJobs = jobs.slice(pageStart(jpage), pageStart(jpage) + pageLen(jpage));
+  const jfrom = pageStart(jpage) + 1, jto = pageStart(jpage) + pagedJobs.length;
   const jpager = jpagesN > 1
-    ? `<div class="ppl-pager"><button type="button" class="jobs-page" data-jpid="${esc(d._jpid)}" data-page="${jpage-1}" ${jpage===0?"disabled":""}>‹ Previous 20</button><span class="ppl-pageinfo">Page <b>${jpage+1}</b> of ${jpagesN} · roles ${jfrom}–${jto} of ${jobs.length}</span><button type="button" class="jobs-page" data-jpid="${esc(d._jpid)}" data-page="${jpage+1}" ${jpage>=jpagesN-1?"disabled":""}>Next 20 ›</button></div>` : "";
+    ? `<div class="ppl-pager"><button type="button" class="jobs-page" data-jpid="${esc(d._jpid)}" data-page="${jpage-1}" ${jpage===0?"disabled":""}>‹ Previous</button><span class="ppl-pageinfo">Page <b>${jpage+1}</b> of ${jpagesN} · roles ${jfrom}–${jto} of ${jobs.length}</span><button type="button" class="jobs-page" data-jpid="${esc(d._jpid)}" data-page="${jpage+1}" ${jpage>=jpagesN-1?"disabled":""}>Next ${pageLen(jpage+1)} ›</button></div>` : "";
   const cardOf = j=>{
     const co = esc((j.company||"").replace(/_/g," "));
     const loc = j.location?`<span class="ppl-tag">${esc(j.location)}</span>`:"";
@@ -8558,6 +8567,7 @@ $("#searchlist") && $("#searchlist").addEventListener("click", (e)=>{
 // ---- Bucket picker popover (from a card's ＋ Save) ----
 let PICK_ITEM = null;
 function openBucketPicker(anchor, item){
+  markEngaged();          // shortlisting is the clearest alignment signal there is
   if(!loggedIn()){ $("#idmodal").hidden = false; return; }
   PICK_ITEM = item;
   const pop = $("#bucketpick"); const r = anchor.getBoundingClientRect();
@@ -8693,7 +8703,19 @@ function mergeContract(d, c){
 // disturbs people, and asking only the good ones beats asking all of them. So these are chips beside
 // the results that a reader can ignore entirely — the server has already decided (`worth_steering`)
 // that this search is worth steering at all, and says nothing far more often than it says something.
+// ALIGNMENT, INFERRED BEFORE IT IS ASKED. Asking "does this look right?" every turn spends the one
+// budget that is genuinely scarce. A reader who opens a posting or shortlists one has answered the
+// question by acting, so the offer to redirect the search is withdrawn for that result set. (This is
+// the cheap half of the spec's §3.4 — the server-side history, /me/buckets and /me/applications, is
+// not read yet, so this only knows about the current page.)
+function markEngaged(){
+  try{
+    const d = (window.JOBS_RENDERS || {})[Object.keys(window.JOBS_RENDERS || {}).slice(-1)[0]];
+    if(d && !d._engaged){ d._engaged = true; if(typeof rerenderRail === "function") rerenderRail(d._jpid); }
+  }catch(e){}
+}
 function directionsMarkup(d){
+  if(d._engaged) return "";               // they are reading results, not looking for a different search
   const dir = d.directions || {};
   // a cluster has no facet key, so "not this" has nothing to hang an `avoid` on — those are dropped
   // here rather than shown as a chip that cannot do what it says
@@ -9753,6 +9775,7 @@ function toggleJobSummary(ref){
   if(!boxes.length) return;
   if(boxes[0].innerHTML.trim()){ boxes.forEach(b => { b.innerHTML = ""; }); window.OPEN_JOB_SUMS.delete(String(ref)); return; }   // second click folds it
   window.OPEN_JOB_SUMS.add(String(ref));
+  markEngaged();          // reading a posting is alignment: stop offering to redirect the search
   summarizeJob(ref);
 }
 async function summarizeJob(ref){
@@ -11161,7 +11184,9 @@ function rerenderPeople(pid){
 function gotoJobsPage(jpid, page){
   if(typeof loadApplied === "function") loadApplied().then(()=>{ try{ markAppliedCards(); }catch(e){} });
   const d = (window.JOBS_RENDERS||{})[jpid]; if(!d) return;
-  const n = Math.max(1, Math.ceil((d.jobs||[]).length / 20));
+  const steering = !!((d.directions || {}).offer || []).length;   // must match jobsMarkup's paging
+  const first = steering ? 10 : 20, len = (d.jobs||[]).length;
+  const n = Math.max(1, len <= first ? 1 : 1 + Math.ceil((len - first) / 20));
   d._jpage = Math.min(n - 1, Math.max(0, page || 0));
   const wrap = document.querySelector(`.ppl-wrap[data-jpid="${CSS.escape(jpid)}"]`); if(!wrap) return;
   wrap.outerHTML = jobsMarkup(d);
