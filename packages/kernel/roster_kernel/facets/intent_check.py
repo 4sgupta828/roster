@@ -108,24 +108,39 @@ def evidence(query: str, contract, rows: list, counts: dict | None, schema: Face
         c = str((r or {}).get("company") or "").strip()
         if c:
             companies.append(c.replace("_", " "))
-    spread = {}
-    for key, dist in (counts or {}).items():
-        k = schema.key(key)
-        if k is None or not isinstance(dist, dict) or k.type is FacetType.numeric:
+    # WHAT THESE RESULTS ARE MADE OF — read off the ROWS, never off `counts`.
+    #
+    # `counts` are computed over the MUST-SLICE, and for a query whose only must is the country that
+    # slice is the entire index. Feeding them here told the debugger that a search for ML infrastructure
+    # had returned "truck driving 3280, insurance 1440" — the shape of the whole job market — and it
+    # duly reported that retrieval was pulling in noise. It was reasoning correctly from evidence that
+    # was wrong, and the accusation it made about the search was false: the rows themselves were
+    # machine learning, AI, infrastructure, distributed systems. A reader asked to judge "these
+    # results" must be shown these results.
+    spread: dict = {}
+    tally: dict = {}
+    for r in (rows or []):
+        for key, vals in ((r or {}).get("facets") or {}).items():
+            k = schema.key(key)
+            if k is None or k.type is FacetType.numeric:
+                continue
+            for v in (vals if isinstance(vals, (list, tuple)) else [vals]):
+                v = str(v)
+                if v and v != "unknown":
+                    tally.setdefault(key, {})[v] = tally.setdefault(key, {}).get(v, 0) + 1
+    n_rows = len(rows or []) or 1
+    for key, dist in tally.items():
+        if len(dist) < 2:
             continue
-        known = {v: int(n) for v, n in dist.items() if v != "unknown" and int(n) > 0}
-        if len(known) < 2:
-            continue
-        top = sorted(known.items(), key=lambda kv: -kv[1])[:3]
-        total = sum(known.values()) or 1
-        spread[key] = [{"value": v, "share": round(n / total, 2)} for v, n in top]
+        top = sorted(dist.items(), key=lambda kv: -kv[1])[:3]
+        spread[key] = [{"value": v, "share": round(c / n_rows, 2)} for v, c in top]
     return {
         "query": (query or "").strip(),
         "believed": {"must": dict(getattr(contract, "must", {}) or {}),
                      "prefer": dict(getattr(contract, "prefer", {}) or {}),
                      "text": str(getattr(contract, "text", "") or "")},
         "returned": {"titles": titles, "companies": sorted(set(companies))[:8],
-                     "pool": int(((counts or {}).get("__pool__") or 0)) or None},
+                     "shown": len(rows or [])},
         "spread": spread,
         "vocabulary": {k.key: list(k.values) for k in schema.for_kind(kind)
                        if k.type in (FacetType.categorical, FacetType.ordinal)},

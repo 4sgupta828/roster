@@ -17,15 +17,32 @@ def test_the_evidence_shows_what_was_asked_what_was_decided_and_what_came_back()
     """A debugger that will not show its current hypothesis is just a prompt. The model is given the
     query, the contract in force, and the actual result set — enough to judge whether they agree."""
     c = Contract(kind="thing", text="platform", must={"mode": ["remote"]}, prefer={"tier": ["senior"]})
-    rows = [{"title": "Platform Engineer", "company": "acme"}, {"title": "Infra Engineer", "company": "acme"}]
-    counts = {"tier": {"senior": 60, "mid": 40}, "mode": {"remote": 100}}
+    rows = [{"title": "Platform Engineer", "company": "acme", "facets": {"tier": ["senior"], "mode": ["remote"]}},
+            {"title": "Infra Engineer", "company": "acme", "facets": {"tier": ["mid"], "mode": ["remote"]}}]
+    counts = {"tier": {"senior": 9000, "mid": 1000}}          # the whole slice — deliberately unlike the rows
     ev = evidence("platform", c, rows, counts, SCHEMA, kind="thing")
     assert ev["query"] == "platform"
     assert ev["believed"]["must"] == {"mode": ["remote"]}
     assert ev["returned"]["titles"] == ["Platform Engineer", "Infra Engineer"]
-    assert ev["spread"]["tier"][0] == {"value": "senior", "share": 0.6}
-    assert "mode" not in ev["spread"], "a single-valued key distinguishes nothing and is left out"
     assert ev["vocabulary"]["mode"] == ["remote", "hybrid", "onsite"]
+    # the spread describes THESE ROWS, not the slice they were drawn from
+    assert ev["spread"]["tier"] == [{"value": "senior", "share": 0.5}, {"value": "mid", "share": 0.5}]
+    assert "mode" not in ev["spread"], "a value every row shares distinguishes nothing"
+
+
+def test_the_spread_describes_the_rows_not_the_whole_index():
+    """THE BUG THIS EXISTS FOR. `counts` are computed over the MUST-SLICE, and when the only must is a
+    country that slice is the entire index. Feeding them here told the debugger that a search for ML
+    infrastructure had returned "truck driving 3280, insurance 1440" — the shape of the whole job
+    market — and it duly reported that retrieval was pulling in noise. It reasoned correctly from
+    evidence that was wrong, and accused the search of a fault it did not have."""
+    rows = [{"title": "ML Infra Engineer", "facets": {"tags": ["machine learning", "infrastructure"]}},
+            {"title": "Distributed Systems Engineer", "facets": {"tags": ["distributed systems", "machine learning"]}}]
+    index_wide = {"tags": {"truck driving": 3280, "insurance": 1440, "machine learning": 12}}
+    ev = evidence("ml infra", Contract(kind="thing"), rows, index_wide, SCHEMA, kind="thing")
+    values = [v["value"] for v in ev["spread"]["tags"]]
+    assert "truck driving" not in values and "insurance" not in values
+    assert "machine learning" in values
 
 
 def test_a_reading_keeps_only_values_the_vocabulary_holds():

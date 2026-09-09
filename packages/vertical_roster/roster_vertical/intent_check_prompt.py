@@ -102,7 +102,8 @@ def user_message(ev: dict) -> str:
         lines.append("  employers: " + ", ".join(r["companies"]))
     sp = ev.get("spread") or {}
     if sp:
-        lines += ["", "HOW THE RESULTS SPREAD (share of the slice):"]
+        shown = int((ev.get("returned") or {}).get("shown") or 0)
+        lines += ["", f"WHAT THESE {shown} RESULTS ARE MADE OF (share of the rows on screen, not of the index):"]
         for key, vals in sp.items():
             lines.append("  " + key + ": " + ", ".join(f"{v['value']} {int(v['share'] * 100)}%" for v in vals))
     sf = ev.get("so_far") or []
