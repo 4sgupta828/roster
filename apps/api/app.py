@@ -6509,7 +6509,12 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             return {"offer": [{"key": d.key, "label": d.label, "values": d.values, "section": d.section,
                                "hits": d.hits, "source": d.source, "why": d.why} for d in offer],
                     "why": why}
-        except Exception:   # noqa: BLE001 — a menu we cannot build must never fail a search
+        except Exception as e:   # noqa: BLE001 — a menu we cannot build must never fail a search
+            # …but it must not fail SILENTLY either. A swallowed exception with no trace is exactly the
+            # failure mode this work has spent its time removing; a menu that never appears and never
+            # says why is indistinguishable from a menu that decided to stay quiet.
+            __import__("logging").getLogger("api.jobs").warning(
+                "directions unavailable: %s: %s", type(e).__name__, str(e)[:200])
             return None
 
     def _carry_forward(c, prior: dict | None) -> list[str]:
