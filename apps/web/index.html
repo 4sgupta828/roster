@@ -864,6 +864,23 @@
   .frail-apply .idgo{width:auto;padding:.4rem .9rem;min-height:36px;}
   .frail-apply .histbtn{min-height:36px;}
   .frail.busy{opacity:.6;pointer-events:none;}
+  /* DIRECTIONS: offered, never asked. Quiet enough to ignore, distinct from the must/prefer/avoid rail
+     chips beneath them — these change what the search IS, the rail changes how it is filtered. */
+  .dirs{display:flex;flex-direction:column;gap:.35rem;padding:.5rem .6rem;margin-bottom:.5rem;
+        border:1px dashed var(--hair);border-radius:10px;background:var(--panel2);}
+  .dirs-h{display:flex;flex-wrap:wrap;gap:.4rem;align-items:baseline;font-size:.76rem;color:var(--muted);}
+  .dirs-h b{color:var(--ink);font-size:.8rem;}
+  .dirs-row{display:flex;flex-wrap:wrap;gap:.35rem;}
+  .dirchip{font:inherit;font-size:.76rem;cursor:pointer;min-height:36px;padding:.25rem .7rem;
+           border-radius:999px;border:1px solid var(--hair);background:var(--panel);color:var(--ink);}
+  .dirchip:hover{border-color:var(--gold);background:rgba(var(--gold-rgb),.08);}
+  .dirchip.drop{color:var(--muted);}
+  .dirchip.drop:hover{border-color:var(--gap);color:var(--ink);}
+  .dirchip-n{color:var(--muted);font-size:.7rem;margin-left:.15rem;}
+  .dirback{font:inherit;font-size:.72rem;cursor:pointer;margin-left:auto;border:0;background:none;
+           color:var(--muted);text-decoration:underline;min-height:36px;}
+  .dirback:hover{color:var(--ink);}
+  @media (max-width:560px){ .dirchip{min-height:40px;} .dirback{min-height:40px;} }
   .fpill{font-size:.7rem;padding:.15rem .5rem;border-radius:999px;background:rgba(var(--gold-rgb),.10);color:var(--gold-strong);border:1px solid var(--gold);}
   .fpill button{font:inherit;border:0;background:transparent;color:inherit;cursor:pointer;margin-left:.2rem;}
   @media (max-width:560px){ .frail-k{min-width:64px;font-size:.6rem;} .fchip{font-size:.7rem;} }
@@ -3076,7 +3093,8 @@ async function runJobs(question, opts){
     THREAD.turns.push({question, kind: "jobs", jobs: d.jobs||[], query: d.query||{},
                        contract: d.contract||null, counts: d.counts||null, coverage: d.coverage||null, labels: d.labels||null,   // the evaluator's rail
                        relaxed: d.relaxed||[], merge: d.merge||null,                                       // smart relaxing notes; merged-search recipes
-                       group_options: d.group_options||[],                                                  // which groupings organise THESE rows (server-computed)
+                       group_options: d.group_options||[],
+                       directions: d.directions||null,   // the few ways this search could go next                                                  // which groupings organise THESE rows (server-computed)
                        stats: d.stats||{}, semantic: d.semantic, geo_scope: d.geo_scope||null,
                        related_jobs: d.related_jobs||[], company_indexed: d.company_indexed,
                        agentic: !!d.agentic, intent: d.intent||"", query_angles: d.query_angles||[],
@@ -8670,6 +8688,45 @@ function mergeContract(d, c){
 }
 // SMART RELAXING (owner, 2026-09-06): too few results → the least important filters became preferences; say which, and
 // that the chip makes them strict again (the rail already shows them as ▲ prefer)
+// ===== DIRECTIONS — the few ways this search could go next =====
+// Offered, never asked. The research on clarifying questions is blunt: a low-quality one measurably
+// disturbs people, and asking only the good ones beats asking all of them. So these are chips beside
+// the results that a reader can ignore entirely — the server has already decided (`worth_steering`)
+// that this search is worth steering at all, and says nothing far more often than it says something.
+function directionsMarkup(d){
+  const dir = d.directions || {};
+  // a cluster has no facet key, so "not this" has nothing to hang an `avoid` on — those are dropped
+  // here rather than shown as a chip that cannot do what it says
+  const offer = (dir.offer || []).filter(o => o.key || o.section !== "avoid");
+  const back = (d._backStack || []).length;
+  if(!offer.length && !back) return "";
+  const chip = (o, i) => `<button type="button" class="dirchip${o.section === "avoid" ? " drop" : ""}" data-jpid="${esc(d._jpid)}" data-di="${i}" title="${esc(o.why || "")} — tap to steer the search this way">${o.section === "avoid" ? "▼ " : ""}${esc(o.label)} <span class="dirchip-n">${o.hits}</span></button>`;
+  const undo = back ? `<button type="button" class="dirback" data-jpid="${esc(d._jpid)}" title="Undo the last narrowing">↩ back</button>` : "";
+  return `<div class="dirs"><div class="dirs-h"><b>Narrow it</b> <span class="tgt-q-hint">${esc(dir.why || "")} — or ignore these and keep scrolling</span>${undo}</div>
+    <div class="dirs-row">${offer.map(chip).join("")}</div></div>`;
+}
+// Picking one is an ordinary contract edit re-run through the same endpoint the rail's Apply uses —
+// no new search path, and the previous contract is kept so going back is a pop, not a recompile.
+async function takeDirection(jpid, idx){
+  const d = facetRenderOf(jpid); if(!d) return;
+  const o = ((d.directions || {}).offer || [])[idx]; if(!o) return;
+  const contract = JSON.parse(JSON.stringify(d.contract || {}));
+  if(o.key){
+    const bag = o.section === "avoid" ? (contract.avoid = contract.avoid || {}) : (contract.must = contract.must || {});
+    bag[o.key] = [...new Set([...(Array.isArray(bag[o.key]) ? bag[o.key] : []), ...(o.values || [])])];
+  }else{
+    // an emergent cluster names no facet key, so it steers the WORDS — which is what produced it
+    contract.text = ((contract.text || "") + " " + ((o.values || [])[0] || "")).trim();
+  }
+  // the turn before, kept for a one-tap back: a pop and a re-run, never a recompile
+  d._backStack = (d._backStack || []).concat([JSON.parse(JSON.stringify(d.contract || {}))]);
+  await facetReevaluate(jpid, contract, false);
+}
+async function undoDirection(jpid){
+  const d = facetRenderOf(jpid); if(!d || !(d._backStack || []).length) return;
+  const prev = d._backStack.pop();
+  await facetReevaluate(jpid, prev, false);
+}
 function relaxedMarkup(d){
   const notes = (d.relaxed || []).filter(n => n.rule === "relaxed"); if(!notes.length) return "";
   const sum = (d.relaxed || []).find(n => n.rule === "relax_summary") || {};
@@ -8769,7 +8826,7 @@ function facetRailMarkup(d){
       <button type="button" class="idgo frail-go" data-jpid="${esc(d._jpid)}">Apply</button><button type="button" class="histbtn frail-reset" data-jpid="${esc(d._jpid)}">Reset</button></div>`
     : `<div class="frail-apply">${d._applied && d._delta ? `<span class="frail-done">Applied ✓ — ${d._delta.after} shown${d._delta.added ? ` · <b>${d._delta.added} new</b>` : ""}${d._delta.removed ? ` · ${d._delta.removed} dropped` : ""}${!d._delta.added && !d._delta.removed ? " · same rows, order may differ" : ""}${(d._delta.prevPool != null && d._delta.pool != null && d._delta.prevPool !== d._delta.pool) ? ` · pool ${d._delta.prevPool} → ${d._delta.pool}` : ""}</span> ${d._delta.added && !d._newFirst ? (() => { const rowsNow = Array.isArray(d.people_rows) ? d.people_rows : (d.jobs||[]); const per = 20, pg = Array.isArray(d.people_rows) ? (d._page||0) : (d._jpage||0); const onPage = rowsNow.slice(pg*per, pg*per+per).filter(r => r._new).length; return `${onPage ? ` <span class="frail-note">${onPage} of them on this page (corner flag)</span>` : ` <span class="frail-note">none of them on this page</span>`} <button type="button" class="histbtn frail-shownew" data-jpid="${esc(d._jpid)}">Show the ${d._delta.added} new first</button>`; })() : ""}` : "Tap chips to stage changes, then apply once. "}${saveBtn}</div>`;
   const empty = (cov.diagnosis && !facetPending(d)) ? diagnosisMarkup({...cov.diagnosis, best_match: cov.best_match}, d._jpid, L) : "";
-  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}">${degradedMarkup(d)}${relaxedMarkup(d)}${mergeMarkup(d)}<div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : (cov.slice != null ? `· ${Number(cov.slice).toLocaleString()} match these filters` : "")}${stale ? ` <span class="frail-note" title="The pool is empty, so these counts are from the last result that had rows — change a filter and apply">· chips from the last result</span>` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${whereRowMarkup(d)}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
+  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}">${degradedMarkup(d)}${directionsMarkup(d)}${relaxedMarkup(d)}${mergeMarkup(d)}<div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : (cov.slice != null ? `· ${Number(cov.slice).toLocaleString()} match these filters` : "")}${stale ? ` <span class="frail-note" title="The pool is empty, so these counts are from the last result that had rows — change a filter and apply">· chips from the last result</span>` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${whereRowMarkup(d)}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
 }
 // EMPTY RESULT → which must is doing it (leave-one-out from the evaluator), with one-tap Drop (staged)
 function diagnosisMarkup(diag, jpid, L){
@@ -10975,6 +11032,10 @@ document.addEventListener("click", e => {
   if(jpg){ e.preventDefault(); if(!jpg.disabled) gotoJobsPage(jpg.dataset.jpid, parseInt(jpg.dataset.page||"0",10)); return; }
   const rr = e.target.closest && e.target.closest(".ppl-rerank");
   if(rr){ e.preventDefault(); rerankShown(rr.dataset.pid); return; }
+  const dc = e.target.closest && e.target.closest(".dirchip");
+  if(dc){ e.preventDefault(); takeDirection(dc.dataset.jpid, parseInt(dc.dataset.di || "0", 10)); return; }
+  const db = e.target.closest && e.target.closest(".dirback");
+  if(db){ e.preventDefault(); undoDirection(db.dataset.jpid); return; }
   const ur = e.target.closest && e.target.closest("#useresumechip");
   if(ur){ e.preventDefault(); toggleUseResume(); return; }        // a switch, not a must-have — caught first
   const ef = e.target.closest && e.target.closest("#evfilters .ev-filter");
