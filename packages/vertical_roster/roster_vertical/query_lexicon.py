@@ -10,7 +10,7 @@ Area" is a second thing to get out of step.
 from __future__ import annotations
 
 from .facet_schema import FACET_SCHEMA
-from .people_facets import METRO_ALIAS, US_METROS
+from .people_facets import US_METROS
 
 # Words that carry no facet meaning in a search box. A query made only of spans and these is a query
 # with nothing left to search semantically — which is what lets the evaluator use the must-slice as its
@@ -73,18 +73,34 @@ _WORK_TYPE_ALIAS = {
 
 
 def _metro_aliases() -> dict[str, str]:
-    """Every surface form of a metro the vertical already knows, canonicalised the way the INDEX stores
-    it. Built from `US_METROS` (its city lists) and `METRO_ALIAS` — the two tables that already exist —
-    so a place cannot mean one thing to the geo code and another to a query."""
+    """Surface forms of a place → the token THE FACET INDEX HOLDS.
+
+    Measured against prod, because the first version of this got it backwards. `METRO_ALIAS` exists for
+    GEO SCOPE resolution and rewrites `new_york → nyc` and `san_francisco → bay_area`. The facet index
+    follows the extractor's own guidance instead ("normalized metro token: bay_area, new_york, seattle,
+    london"), and the counts are decisive:
+
+        new_york 21,942 · san_francisco 21,328 · london 15,157 · seattle 10,928 · bay_area 9,641 · nyc 3,126
+
+    So applying METRO_ALIAS here canonicalised a query AWAY from the rows: "new york" would have
+    targeted 3,126 postings instead of 21,942, and "san francisco" 9,641 instead of 21,328 — worse than
+    not canonicalising at all. Two vocabularies for one key is the underlying defect; until they are
+    reconciled, the query side must speak the INDEX's dialect, not the scope resolver's.
+
+    The rule: a typed place becomes its own underscored form, and short or alternative names point at
+    the long form the index uses."""
     out: dict[str, str] = {}
     for canon, meta in US_METROS.items():
-        out[canon.replace("_", " ")] = canon
+        out[canon.replace("_", " ")] = canon                 # "bay area" → bay_area
         for city in (meta.get("cities") or []):
-            out[str(city).lower()] = canon
-    for surface, canon in METRO_ALIAS.items():
-        out[surface.replace("_", " ")] = canon
-    # METRO_ALIAS is applied last so it wins: `new_york → nyc` is what the index holds, and the schema's
-    # own guidance string still says "new_york", which is the mismatch the spec flagged (§1.3).
+            city = str(city).lower().strip()
+            if city:
+                out.setdefault(city, city.replace(" ", "_"))  # "san francisco" → san_francisco, as stored
+    # nicknames and abbreviations, pointed at the long form rather than at the scope resolver's token
+    out.update({"nyc": "new_york", "new york city": "new_york", "manhattan": "new_york",
+                "brooklyn": "new_york", "sf": "san_francisco", "san fran": "san_francisco",
+                "la": "los_angeles", "bengaluru": "bangalore", "washington dc": "washington",
+                "dc": "washington", "silicon valley": "bay_area", "south bay": "bay_area"})
     return out
 
 

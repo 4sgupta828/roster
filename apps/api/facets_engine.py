@@ -224,11 +224,21 @@ def pay_figures_present(text: str) -> bool:
 
 
 
-def downgrade_uncovered_musts(contract: Contract, coverage_known: dict[str, float], *, min_known: float = 0.5) -> list[str]:
+def downgrade_uncovered_musts(contract: Contract, coverage_known: dict[str, float], *, min_known: float = 0.5,
+                              user_keys: set | frozenset = frozenset()) -> list[str]:
     """A must on a key the index barely knows (share of entities with a value < min_known) would filter by
-    absence, not by fact — downgrade it to a prefer and say so. Returns the keys moved."""
+    absence, not by fact — downgrade it to a prefer and say so. Returns the keys moved.
+
+    `user_keys` are exempt, and the distinction is the whole point of this guard: it exists to stop the
+    MODEL from inventing a hard filter on a key the corpus cannot support. A reader who typed exactly
+    `remote`, or who tapped the remote chip, did not infer anything — they asked. Demoting that turns
+    their request into a hint and hands back the same unfiltered page they were trying to get away from.
+    The rail's own toggles already get this treatment through `_index_aware(user_keys=…)`; a query that
+    IS a facet value is the same kind of statement, and is treated the same way."""
     moved = []
     for key in list(contract.must):
+        if key in user_keys:
+            continue
         known = coverage_known.get(key)
         if known is not None and known < min_known and isinstance(contract.must[key], list):
             vals = contract.must.pop(key)

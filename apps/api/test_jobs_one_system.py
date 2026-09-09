@@ -269,7 +269,7 @@ def _lex_rows() -> list[dict]:
     for i in range(240):
         mode = ("remote", "hybrid", "onsite")[i % 3]      # every mode has a healthy slice, or a must
         staff = i % 5 == 0                                  # on one would simply be relaxed away
-        metro = "nyc" if i % 2 == 0 else "austin"
+        metro = "new_york" if i % 2 == 0 else "austin"
         rows.append({"id": f"x{i}", "kind": "job", "sim": 0.62 - i * 0.0004, "company": "acme",
                      "title": "Backend Engineer", "url": f"https://a/x{i}", "source": "ashby",
                      "facets": {"work_mode": [mode],
@@ -327,14 +327,18 @@ def test_a_bare_facet_value_becomes_a_filter_instead_of_a_one_word_embedding(mon
 
 
 def test_a_bare_place_is_canonicalised_the_way_the_index_stores_it(monkeypatch):
-    """`jobs in new york` named a place explicitly and still compiled no metro; and the schema's own
-    guidance says to emit `new_york` while the index holds `nyc`."""
+    """`jobs in new york` named a place explicitly and still compiled no metro.
+
+    And it must canonicalise toward the token the INDEX holds. Measured on prod: metro `new_york`
+    has 21,942 rows and `nyc` 3,126, because the facet extractor follows the schema's guidance while
+    `METRO_ALIAS` — which serves geo-scope resolution — rewrites the other way. Aliasing to the scope
+    resolver's token pointed queries at the smaller bucket, which is worse than not aliasing at all."""
     _no_model(monkeypatch)
     d = _jobs(_lex_client(), question="jobs in new york").json()
-    assert d["contract"]["must"].get("metro") == ["nyc"], d["contract"]
+    assert d["contract"]["must"].get("metro") == ["new_york"], d["contract"]
     ids = [j["id"] for j in d["jobs"]]
     assert "junk_ny" not in ids, "a row TITLED 'New York Tour Guide' is not a New York job"
-    assert ids and all(j["facets"]["metro"] == ["nyc"] for j in d["jobs"])
+    assert ids and all(j["facets"]["metro"] == ["new_york"] for j in d["jobs"])
 
 
 def test_a_bare_seniority_word_becomes_the_level(monkeypatch):
@@ -553,30 +557,29 @@ def test_the_job_link_route_is_off_by_default(monkeypatch):
     assert d.get("matched_on") != "job_link"
 
 
-def test_the_text_is_never_blanked_when_the_must_does_not_survive(monkeypatch):
-    """THE REGRESSION THAT REACHED PROD. The lexicon promoted `remote` to a must and blanked the
-    semantic text; then `downgrade_uncovered_musts` correctly demoted that must to a preference,
-    because work_mode is known on only 38 % of jobs. What reached the evaluator had no must AND no
-    text, so the pool became an arbitrary page of the whole scope — worse than the diffuse embedding
-    the blanking was meant to replace.
+def test_a_search_never_runs_with_neither_a_filter_nor_a_query(monkeypatch):
+    """THE INVARIANT BEHIND THE REGRESSION THAT REACHED PROD. The lexicon blanked the semantic text on
+    the strength of a must that `downgrade_uncovered_musts` then demoted; what ran had no filter and no
+    words, so the pool became an arbitrary page of the whole scope.
 
-    The guard was right and asked too early. Blanking is now decided after every demotion, of the
-    contract that will actually run, and the scope must does not count as narrowing."""
+    The exemption for reader-named keys means that particular sequence can no longer happen — but the
+    property is what matters, not the mechanism that threatened it, so it is asserted directly over
+    every shape: a bare facet value, a partly-understood query, and one the lexicon cannot read at all.
+    `country` never counts as narrowing; it is on every search."""
     monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
     monkeypatch.setenv("ROSTER_INTENT_LEXICON", "1")
     _stub_compiler(monkeypatch, {})
 
-    app = create_app()
-    app.state.facet_store = InMemoryFacetStore(LEX_ROWS, FACET_SCHEMA)
-    app.state.claim_store = _FakeClaimStore(); app.state._co_sites = None
-    # work_mode is barely known → the guard demotes any must on it, exactly as prod does
-    app.state._facet_cov = {"job": (1e18, {"work_mode": 0.20, "level": 0.9, "metro": 0.9})}
-    d = TestClient(app).post("/jobs", json={"tenant_id": "demo", "question": "remote"}).json()
-
-    c = d["contract"]
-    assert "work_mode" not in (c["must"] or {}), "a 20%-covered key must not be a hard filter"
-    assert c["prefer"].get("work_mode") == ["remote"], "it should still rank"
-    assert c["text"], "with nothing narrowing, the words must stay — they are all the search has"
+    for coverage in ({"work_mode": 0.20, "level": 0.2, "metro": 0.2},      # sparse: demotions likely
+                     {"work_mode": 0.95, "level": 0.95, "metro": 0.95}):   # dense: musts stand
+        for q in ("remote", "staff backend engineer in austin", "cuda kernels", "jobs in new york"):
+            app = create_app()
+            app.state.facet_store = InMemoryFacetStore(LEX_ROWS, FACET_SCHEMA)
+            app.state.claim_store = _FakeClaimStore(); app.state._co_sites = None
+            app.state._facet_cov = {"job": (1e18, dict(coverage))}
+            c = TestClient(app).post("/jobs", json={"tenant_id": "demo", "question": q}).json()["contract"]
+            narrowing = [k for k in (c["must"] or {}) if k != "country"]
+            assert c["text"] or narrowing, f"{q!r} at {coverage}: no filter and no query — the pool is arbitrary"
 
 
 def test_the_text_is_blanked_when_a_must_does_survive(monkeypatch):
@@ -594,3 +597,46 @@ def test_the_text_is_blanked_when_a_must_does_survive(monkeypatch):
     c = d["contract"]
     assert c["must"].get("work_mode") == ["remote"]
     assert c["text"] == ""
+
+
+def test_a_facet_the_reader_typed_survives_the_coverage_guard(monkeypatch):
+    """THE REASON THE FEATURE DID NOTHING IN PROD. `work_mode` is known on 38 % of jobs, so the guard
+    demoted the lexicon's `must: remote` to a preference — and with the semantic text kept, the same
+    one-word embedding chose the pool and `remote` still returned "Remote Opportunity — Take Back
+    Control of Your Time".
+
+    The guard is right about the MODEL and wrong about the READER: it exists to stop a compiler
+    inventing a hard filter the corpus cannot support. Someone who types exactly `remote` has not
+    inferred anything, they have asked. So a key the reader named is exempt, exactly as the rail's own
+    toggles already are, and the must survives — which is what makes the slice the pool."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_INTENT_LEXICON", "1")
+    _stub_compiler(monkeypatch, {})
+
+    app = create_app()
+    app.state.facet_store = InMemoryFacetStore(LEX_ROWS, FACET_SCHEMA)
+    app.state.claim_store = _FakeClaimStore(); app.state._co_sites = None
+    app.state._facet_cov = {"job": (1e18, {"work_mode": 0.38, "level": 0.42, "metro": 0.41})}
+    d = TestClient(app).post("/jobs", json={"tenant_id": "demo", "question": "remote"}).json()
+
+    c = d["contract"]
+    assert c["must"].get("work_mode") == ["remote"], "the reader asked for it; it must not be demoted"
+    assert c["text"] == "", "with the must standing, the slice is the pool"
+    assert d["jobs"] and all(j["facets"]["work_mode"] == ["remote"] for j in d["jobs"])
+
+
+def test_a_facet_only_the_model_guessed_is_still_demoted(monkeypatch):
+    """The other half: the guard must keep doing its job for a compiled must on a sparse key, or a
+    model's guess silently filters out most of the index by absence."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.delenv("ROSTER_INTENT_LEXICON", raising=False)
+    _stub_compiler(monkeypatch, {"must": {"work_mode": ["remote"]}})
+
+    app = create_app()
+    app.state.facet_store = InMemoryFacetStore(LEX_ROWS, FACET_SCHEMA)
+    app.state.claim_store = _FakeClaimStore(); app.state._co_sites = None
+    app.state._facet_cov = {"job": (1e18, {"work_mode": 0.38})}
+    d = TestClient(app).post("/jobs", json={"tenant_id": "demo", "question": "somewhere flexible"}).json()
+    c = d["contract"]
+    assert "work_mode" not in (c["must"] or {}), "a model's guess on a 38 %-covered key still demotes"
+    assert c["prefer"].get("work_mode") == ["remote"]
