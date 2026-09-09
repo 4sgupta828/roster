@@ -381,6 +381,52 @@ class FacetSQLStore:
         cache[ckey] = (_time.monotonic(), _json.loads(_json.dumps(out)), dict(self.last_counts_meta))
         return out
 
+    COVERAGE_TTL = 3600.0
+
+    async def coverage(self, kind: str, must: dict, schema: FacetSchema) -> dict[str, float]:
+        """Per navigable key: the share of entities in the slice that hold ANY value for it.
+
+        Read straight from presence, NOT from `counts`. `count_rows` deliberately never files a set key
+        under `unknown`, so a coverage derived from counts measures 1.000 for every set key — and
+        `downgrade_uncovered_musts` could never fire for `metro`, `company`, `skill`, `specialty`,
+        `state` or `country`, which are precisely the keys a query decoder turns into musts. One cheap
+        query, cached an hour (its only caller is the index-wide guard)."""
+        import json as _json, time as _time
+        cache = self.__dict__.setdefault("_cov_cache", {})
+        ckey = (kind, _json.dumps(must or {}, sort_keys=True))
+        hit = cache.get(ckey)
+        if hit and _time.monotonic() - hit[0] < self.COVERAGE_TTL:
+            return dict(hit[1])
+        await self.ensure_schema()
+        pool = await self._conn()
+        args: list = []
+        ent = "('job:' || j.id::text)" if kind == "job" else "e.entity_id"
+        cl = self._must_sql(ent, must, args)
+        if kind == "job":
+            slice_sql = "SELECT ('job:' || j.id::text) AS entity_id FROM rs_job j WHERE j.closed_at IS NULL" + "".join(" AND " + c for c in cl)
+        else:
+            slice_sql = "SELECT e.entity_id FROM rs_entity e WHERE e.kind = 'person' AND e.status = 'active'" + "".join(" AND " + c for c in cl)
+        # `via` keys (company_type / stage / industry) hold no rows of their own — they are read through
+        # the employer — so a presence count over `roster_entity_facet` would score them 0 and downgrade
+        # every must on them. They are left OUT: `downgrade_uncovered_musts` skips a key it has no
+        # reading for (`known is not None`), which is the right fail-open.
+        nav = [k.key for k in schema.for_kind(kind) if k.navigable and not k.via]
+        out: dict[str, float] = {}
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(f"CREATE TEMP TABLE _cov_slice ON COMMIT DROP AS {slice_sql}", *args)
+                total = int(await conn.fetchval("SELECT count(*) FROM _cov_slice") or 0)
+                if not total:
+                    return {k: 0.0 for k in nav}
+                have = await conn.fetch(
+                    """SELECT f.facet_key, count(DISTINCT f.entity_id) AS n
+                       FROM _cov_slice s JOIN roster_entity_facet f ON f.entity_id = s.entity_id
+                       WHERE f.facet_key = ANY($1) AND f.facet_value_norm <> 'unknown' GROUP BY 1""", nav)
+                got = {r["facet_key"]: int(r["n"]) for r in have}
+                out = {k: min(1.0, got.get(k, 0) / total) for k in nav}
+        cache[ckey] = (_time.monotonic(), dict(out))
+        return out
+
     async def noise_floor(self, kind: str, text: str) -> float | None:
         if self._embed is None or self._baseline is None:
             return None

@@ -374,3 +374,30 @@ def test_the_total_preference_bonus_can_be_capped_so_a_wide_contract_cannot_outr
     b = _run(evaluate(narrow, narrow_store, s, FacetWeights(prefer=w, max_prefer=0.30), noise_floor=0.40))
     assert [r["id"] for r in a["rows"]] == [r["id"] for r in b["rows"]]
     assert [r["score"] for r in a["rows"]] == [r["score"] for r in b["rows"]]
+
+
+def test_coverage_reports_set_keys_honestly_so_a_must_on_one_can_be_downgraded():
+    """COVERAGE IS NOT COUNTS. `count_rows` deliberately never files a set key under `unknown` — a row
+    with no tags is not a row whose tags are "unknown", and an unknown chip on a tag rail is noise. But
+    the guard that decides whether a compiled `must` can be a promise was reading coverage OFF those
+    counts, so every set key measured 1.000 and `downgrade_uncovered_musts` could never fire for one.
+
+    `metro`, `company`, `skill`, `specialty`, `state` and `country` are all set keys, and "bare place →
+    must: metro" is exactly what an intent decoder wants to do. So coverage gets its own reading: the
+    share of rows of that kind holding ANY value for the key — right for sets and non-sets alike, and
+    it changes no displayed count."""
+    s = _schema()
+    rows = [
+        {"id": "a", "kind": "thing", "sim": 0.5, "facets": {"colour": ["red"], "tags": ["warm"]}},
+        {"id": "b", "kind": "thing", "sim": 0.5, "facets": {"colour": ["red"]}},          # no tags
+        {"id": "c", "kind": "thing", "sim": 0.5, "facets": {"colour": ["blue"]}},         # no tags
+        {"id": "d", "kind": "thing", "sim": 0.5, "facets": {"colour": ["blue"]}},         # no tags
+    ]
+    store = InMemoryFacetStore(rows, s)
+    cov = _run(store.coverage("thing", {}, s))
+    assert cov["colour"] == 1.0                       # every row states a colour
+    assert cov["tags"] == 0.25, cov                   # ONE row in four has a tag — not 1.0
+    # and the counts themselves are untouched: no unknown bucket appears on the set key
+    counts = _run(store.counts("thing", {}, s))
+    assert UNKNOWN not in counts["tags"]
+    assert counts["colour"].get(UNKNOWN, 0) == 0      # every row has one, so no unknown either

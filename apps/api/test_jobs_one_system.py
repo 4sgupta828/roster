@@ -257,3 +257,107 @@ def test_the_resume_fingerprint_is_the_resume_and_nothing_else():
     assert _resume_fingerprint(parsed) == _resume_fingerprint(edited) != ""
     assert _resume_fingerprint({"_resume_text": text + "!"}) != _resume_fingerprint(parsed)
     assert _resume_fingerprint({}) == ""
+
+
+# ---------------------------------------------------------------- the lexicon (spec: query-intent-decoding §4)
+
+# A slice big enough that the evaluator's smart relaxation does NOT fire. `relax_to_enough` widens a
+# contract whose slice is tiny, so a three-row fixture would demote the very must under test and the
+# assertion would be about relaxation rather than about the lexicon.
+def _lex_rows() -> list[dict]:
+    rows = []
+    for i in range(240):
+        mode = ("remote", "hybrid", "onsite")[i % 3]      # every mode has a healthy slice, or a must
+        staff = i % 5 == 0                                  # on one would simply be relaxed away
+        metro = "nyc" if i % 2 == 0 else "austin"
+        rows.append({"id": f"x{i}", "kind": "job", "sim": 0.30 - i * 0.0001, "company": "acme",
+                     "title": "Backend Engineer", "url": f"https://a/x{i}", "source": "ashby",
+                     "facets": {"work_mode": [mode],
+                                "level": ["staff_plus" if staff else "senior"],
+                                "field": ["software"], "country": ["us"], "metro": [metro]}})
+    # the junk row prod actually returned for `remote`, and the one it returned for `austin`
+    rows.append({"id": "junk_remote", "kind": "job", "sim": 0.95, "company": "global_elite",
+                 "title": "Remote Opportunity - Take Back Control of Your Time", "url": "https://a/j1",
+                 "source": "lever", "facets": {"work_mode": ["onsite"], "level": ["junior"],
+                                               "field": ["other"], "country": ["us"], "metro": ["austin"]}})
+    # the shape of the prod failure: the TITLE names the place, the JOB is somewhere else
+    rows.append({"id": "junk_ny", "kind": "job", "sim": 0.94, "company": "us_ghost_adventures",
+                 "title": "New York Tour Guide", "url": "https://a/j2", "source": "lever",
+                 "facets": {"work_mode": ["onsite"], "level": ["junior"], "field": ["other"],
+                            "country": ["us"], "metro": ["austin"]}})
+    return rows
+
+
+LEX_ROWS = _lex_rows()
+
+
+def _lex_client():
+    app = create_app()
+    app.state.facet_store = InMemoryFacetStore(LEX_ROWS, FACET_SCHEMA)
+    app.state.claim_store = _FakeClaimStore()
+    app.state._co_sites = None
+    return TestClient(app)
+
+
+def _stub_compiler(monkeypatch, out: dict):
+    """Pin what the MODEL returns. `api.model_json.llm_json` is the one call `compile_contract` makes
+    (via `_llm_json`), so stubbing it keeps the whole real compile path — validation included — while
+    spending nothing and touching no network."""
+    monkeypatch.setattr("api.model_json.llm_json", lambda system, user, **kw: dict(out))
+
+
+def _no_model(monkeypatch):
+    """The compiler returns NOTHING — exactly what prod does for these queries. The point of the
+    lexicon is that the search still works when the model reads a bare word as stating nothing."""
+    _stub_compiler(monkeypatch, {})
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_INTENT_LEXICON", "1")
+
+
+def test_a_bare_facet_value_becomes_a_filter_instead_of_a_one_word_embedding(monkeypatch):
+    """Measured on prod 2026-09-09: `remote` compiled to `country=us` and nothing else, and returned
+    "Remote Opportunity — Take Back Control of Your Time". `remote` is a literal member of WORK_MODES."""
+    _no_model(monkeypatch)
+    d = _jobs(_lex_client(), question="remote").json()
+    assert d["contract"]["must"].get("work_mode") == ["remote"], d["contract"]
+    assert d["contract"]["text"] == "", "the query was all filters — the must-slice should BE the pool"
+    ids = [j["id"] for j in d["jobs"]]
+    assert "junk_remote" not in ids, "the row whose TITLE says Remote is not a remote role"
+    assert ids and all(j["facets"]["work_mode"] == ["remote"] for j in d["jobs"])
+
+
+def test_a_bare_place_is_canonicalised_the_way_the_index_stores_it(monkeypatch):
+    """`jobs in new york` named a place explicitly and still compiled no metro; and the schema's own
+    guidance says to emit `new_york` while the index holds `nyc`."""
+    _no_model(monkeypatch)
+    d = _jobs(_lex_client(), question="jobs in new york").json()
+    assert d["contract"]["must"].get("metro") == ["nyc"], d["contract"]
+    ids = [j["id"] for j in d["jobs"]]
+    assert "junk_ny" not in ids, "a row TITLED 'New York Tour Guide' is not a New York job"
+    assert ids and all(j["facets"]["metro"] == ["nyc"] for j in d["jobs"])
+
+
+def test_a_bare_seniority_word_becomes_the_level(monkeypatch):
+    _no_model(monkeypatch)
+    d = _jobs(_lex_client(), question="staff").json()
+    assert d["contract"]["must"].get("level") == ["staff_plus"]
+    assert d["jobs"] and all(j["facets"]["level"] == ["staff_plus"] for j in d["jobs"])
+
+
+def test_the_lexicon_never_overrides_what_the_model_already_said(monkeypatch):
+    """The compiler saw the whole sentence; the lexicon saw words. On any key the model spoke about,
+    the model wins."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_INTENT_LEXICON", "1")
+    _stub_compiler(monkeypatch, {"must": {"work_mode": ["hybrid"]}})
+    d = _jobs(_lex_client(), question="remote").json()
+    assert d["contract"]["must"].get("work_mode") == ["hybrid"]
+
+
+def test_the_lexicon_is_off_by_default(monkeypatch):
+    """Rule 20: flag off → byte-identical to today, junk results included."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.delenv("ROSTER_INTENT_LEXICON", raising=False)
+    _stub_compiler(monkeypatch, {})
+    d = _jobs(_lex_client(), question="remote").json()
+    assert not d["contract"]["must"].get("work_mode")

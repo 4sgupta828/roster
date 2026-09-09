@@ -284,3 +284,14 @@ def test_worldwide_is_expressible_by_the_absence_of_a_country():
     from roster_kernel.facets import Contract
     c = Contract(kind="job", text="backend engineer")     # no country: the reader chose worldwide
     assert "country" not in c.must
+
+
+def test_a_must_on_a_sparse_set_key_is_downgraded_once_coverage_can_see_it():
+    """The other half of the kernel's coverage fix: `metro`, `company` and `skill` are SET keys, and
+    coverage over them used to read 1.000 always, so this guard could never fire for the very keys an
+    intent decoder most wants to turn into a must."""
+    from roster_kernel.facets import Contract
+    from api.facets_engine import downgrade_uncovered_musts
+    c = Contract(kind="job", must={"skill": ["go"]}, limit=10)
+    moved = downgrade_uncovered_musts(c, {"skill": 0.25})
+    assert moved == ["skill"] and "skill" not in c.must and c.prefer["skill"] == ["go"]

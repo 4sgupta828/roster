@@ -662,6 +662,15 @@ def qa_router_enabled() -> bool:
     return os.environ.get("ROSTER_QA_ROUTER", "").lower() in ("1", "true", "yes")
 
 
+def intent_lexicon_enabled() -> bool:
+    """Flag (default OFF, Rule 20) via ROSTER_INTENT_LEXICON: read the query against the vertical's own
+    vocabularies BEFORE the model compiles it, so a query that IS a facet value — `remote`, `staff`,
+    `austin`, `new york` — becomes that facet instead of a one-word embedding. Deterministic, no model
+    call, and when the lexicon accounts for the whole query the semantic text is dropped so the
+    must-slice is the pool. OFF → the compile is byte-identical to today."""
+    return os.environ.get("ROSTER_INTENT_LEXICON", "").lower() in ("1", "true", "yes")
+
+
 def jd_exclude_source_co_enabled() -> bool:
     """Flag (default OFF, Rule 20) via ROSTER_JD_EXCLUDE_SOURCE_CO: when ON, "Find candidates" hides
     people who currently work at the JD's HIRING company (recruiters don't poach from the client),
@@ -3169,8 +3178,13 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 _j0 = _jtm.monotonic()
                 _c = await asyncio.to_thread(compile_contract, "job", body.question or "", _facet_schema(), _llm_json, limit=80, scope=_scope, extras=_ex)
                 _j1 = _jtm.monotonic()
+                # THE LEXICON, after the model and never over it: a query that IS a facet value reaches
+                # the contract even when the compiler — prompted to extract only what is "stated
+                # explicitly as a requirement" — read one bare word as stating nothing.
+                _lex_notes = _apply_lexicon(_c, _lexicon_plan("job", body.question or ""))
                 _moved = downgrade_uncovered_musts(_c, await _facet_coverage("job"))
                 _c, _ia_notes = await _index_aware(_c, kind="job", user_keys=set(k for k in ("work_mode", "company_type", "level") if body.job_must), place_or_mode=bool(_ex.get("place_or_mode")))
+                _ia_notes = list(_lex_notes or []) + list(_ia_notes or [])
                 _plain_t = {"plain.compile": round(_j1 - _j0, 2), "plain.coverage_and_index_aware": round(_jtm.monotonic() - _j1, 2)}
             if body.levels and body.levels[0]:
                 _c.center = {"key": "level", "value": body.levels[0], "span": int(body.level_span)}
@@ -6370,16 +6384,68 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         store = _facet_store()
         if store is None:
             return {}
+        # PRESENCE, not counts. Derived from `counts` this read was 1.000 for every SET key — because
+        # `count_rows` deliberately never files a set under `unknown` — so the guard below could never
+        # fire for metro / company / skill / specialty / state / country, which are exactly the keys a
+        # short query turns into a must. `store.coverage` asks the index directly.
         try:
-            counts = await store.counts(kind, {}, _facet_schema())
+            cov = await store.coverage(kind, {}, _facet_schema())
+        except AttributeError:      # a store without the newer protocol member
+            try:
+                counts = await store.counts(kind, {}, _facet_schema())
+            except Exception:   # noqa: BLE001
+                return {}
+            cov = {}
+            for key, d in (counts or {}).items():
+                total = sum(d.values()) or 1
+                cov[key] = 1.0 - (d.get("unknown", 0) / total)
         except Exception:   # noqa: BLE001
             return {}
-        cov = {}
-        for key, d in (counts or {}).items():
-            total = sum(d.values()) or 1
-            cov[key] = 1.0 - (d.get("unknown", 0) / total)
         cache[kind] = (_time.monotonic(), cov); app.state._facet_cov = cache
         return cov
+
+    def _lexicon_plan(kind: str, text: str):
+        """The deterministic first read of a query, or None when the flag is off / nothing matched."""
+        if not intent_lexicon_enabled() or not (text or "").strip():
+            return None
+        try:
+            from roster_kernel.facets.lexicon import find_spans, plan_from_spans
+            from roster_vertical.query_lexicon import lexicon_config
+            cfg = lexicon_config(kind)
+            spans = find_spans(text, _facet_schema(), kind, aliases=cfg["aliases"])
+            if not spans:
+                return None
+            return plan_from_spans(text, spans, filler=cfg["filler"], must_keys=cfg["must_keys"],
+                                   risky_values=cfg["risky_values"])
+        except Exception:   # noqa: BLE001 — a lexicon that cannot read must never fail a search
+            return None
+
+    def _apply_lexicon(c, plan) -> list[str]:
+        """Fold the lexicon's read into a compiled contract. THE MODEL STILL WINS: a key the compiler
+        already spoke about is left alone, because it saw the whole sentence and this saw only words.
+        Returns notes for the surface — nothing here is hidden state."""
+        if plan is None:
+            return []
+        notes = list(plan.notes)
+        for key, vals in (plan.must or {}).items():
+            if key in c.must or key in c.prefer or key in c.avoid:
+                continue
+            c.must[key] = list(vals)
+            notes.append(f"read “{key.replace('_', ' ')}” straight from your words")
+        for key, vals in (plan.prefer or {}).items():
+            if key in c.must or key in c.prefer or key in c.avoid:
+                continue
+            c.prefer[key] = list(vals)
+        # THE POOL, not just the filters. With the whole query accounted for there is no semantic
+        # content left, and the evaluator takes the must-slice as its pool when `text` is empty instead
+        # of one word's diffuse neighbourhood — the difference between `remote` returning remote roles
+        # and returning "Remote Opportunity — Take Back Control of Your Time".
+        if plan.blank_text and not (plan.residual or "").strip():
+            c.text = ""
+            notes.append("your words were all filters, so the filters are the search")
+        elif plan.residual and plan.residual != (c.text or ""):
+            pass          # a partial read leaves the text alone: the model's phrasing is the better query
+        return notes
 
     def _judge_provider() -> str:
         """The in-product judge runs on the FAST provider (latency budget §12.9); the eval's judge takes the other one."""
