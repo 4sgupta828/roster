@@ -640,3 +640,28 @@ def test_a_facet_only_the_model_guessed_is_still_demoted(monkeypatch):
     c = d["contract"]
     assert "work_mode" not in (c["must"] or {}), "a model's guess on a 38 %-covered key still demotes"
     assert c["prefer"].get("work_mode") == ["remote"]
+
+
+def test_the_reader_naming_a_facet_hardens_what_the_model_only_ranked(monkeypatch):
+    """Measured on prod: "jobs in new york" compiled `prefer: metro=new_york` — the place was
+    recognised and then only ranked on, so results were New York-flavoured rather than in New York.
+    When the lexicon covers the whole query and names the same value, that is the reader stating it."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_INTENT_LEXICON", "1")
+    _stub_compiler(monkeypatch, {"prefer": {"metro": ["new_york"]}})
+    d = _jobs(_lex_client(), question="jobs in new york").json()
+    c = d["contract"]
+    assert c["must"].get("metro") == ["new_york"], c
+    assert "metro" not in (c["prefer"] or {})
+    assert d["jobs"] and all(j["facets"]["metro"] == ["new_york"] for j in d["jobs"])
+
+
+def test_a_disagreement_still_leaves_the_model_in_charge(monkeypatch):
+    """The lexicon read words; the compiler read the sentence. Where they name DIFFERENT values, the
+    one that saw the grammar wins and nothing is hardened behind the reader's back."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_INTENT_LEXICON", "1")
+    _stub_compiler(monkeypatch, {"prefer": {"work_mode": ["hybrid"]}})
+    c = _jobs(_lex_client(), question="remote").json()["contract"]
+    assert c["prefer"].get("work_mode") == ["hybrid"], c
+    assert "work_mode" not in (c["must"] or {})
