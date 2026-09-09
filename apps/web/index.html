@@ -870,6 +870,23 @@
   /* 🎯 Use my résumé — a SWITCH among the must-have chips: dashed until on, so it never reads as
      just another filter, and its on-state is unmistakable (it changes what the search IS). */
   .ev-filter.useresume{border-style:dashed;}
+  /* THE SEARCH PROFILE the AI read off the résumé — every parameter visible and removable, plus a
+     free-text add per key. Nothing about the search is hidden state. */
+  .spf{border:1px solid var(--hair);border-radius:10px;padding:.6rem .7rem;background:var(--panel);}
+  .spf-h{display:flex;flex-wrap:wrap;gap:.5rem;align-items:baseline;font-size:.76rem;color:var(--muted);margin-bottom:.45rem;}
+  .spf-h b{color:var(--ink);font-size:.84rem;}
+  .spf-row{display:flex;gap:.4rem;align-items:flex-start;padding:.3rem 0;border-top:1px dashed var(--hair);flex-wrap:wrap;}
+  .spf-row:first-of-type{border-top:0;}
+  .spf-k{flex:none;min-width:96px;font-size:.68rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding-top:.3rem;}
+  .spf-vals{display:flex;flex-wrap:wrap;gap:.3rem;flex:1 1 200px;}
+  .spf-v{display:inline-flex;align-items:center;gap:.3rem;min-height:32px;padding:.15rem .5rem;border:1px solid var(--hair);
+         border-radius:999px;background:var(--panel2);font-size:.76rem;}
+  .spf-v button{border:0;background:none;color:var(--muted);cursor:pointer;font-size:.9rem;line-height:1;padding:0 .1rem;min-height:28px;}
+  .spf-v button:hover{color:var(--gap);}
+  .spf-add{font:inherit;font-size:.74rem;min-height:32px;padding:.15rem .5rem;border:1px dashed var(--hair);border-radius:999px;
+           background:transparent;color:var(--ink);width:150px;}
+  .spf-foot{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-top:.55rem;padding-top:.45rem;border-top:1px dashed var(--hair);font-size:.76rem;color:var(--muted);}
+  @media (max-width:560px){ .spf-k{min-width:100%;padding-top:0;} .spf-add{width:100%;} }
   #evfilters .ev-filter.useresume.on::before{content:none;}   /* a switch, not a required filter */
   #evfswitch{display:inline-flex;align-items:center;gap:.35rem;margin-right:.5rem;padding-right:.6rem;border-right:1px solid var(--hair);}
   /* On a phone the whole chip row was a 32px target — under the thumb-sized minimum. Raised here
@@ -2394,8 +2411,9 @@
       <div class="mstep-h"><span class="mstep-n">2</span> How Roster reads it
         <button type="button" class="histbtn mfine" id="mFineTune" hidden title="A recruiter AI reads your résumé and builds the brief your searches are shaped by">✨ Let AI read my résumé</button>
       </div>
-      <p class="msub" style="margin:.2rem 0 0;">Roster reads your résumé into a brief — the roles, level and skills it will rank
-        open jobs by. Build it once and every search with 🎯 Use my résumé is shaped by it.</p>
+      <p class="msub" style="margin:.2rem 0 0;">Read once when you upload. These are the search parameters every
+        🎯 Use my résumé search runs on — change any of them and they stick.</p>
+      <div id="mSearchProfile" style="margin:.6rem 0 0;"></div>
       <div id="mBrief" style="margin:.5rem 0 0;"></div>
       <div id="matchnote" style="font-size:.8rem;color:var(--muted);margin-top:.5rem;"></div>
     </section>
@@ -9373,7 +9391,9 @@ async function matchUploadResume(file){
     await fetch("/me/profile/parse-resume",{method:"POST",headers:authHeaders()});
     for(let i=0;i<24;i++){ await new Promise(r=>setTimeout(r,2500));
       const d = await (await fetch("/me/profile/parse-resume",{headers:authHeaders()})).json();
-      if(d.status==="done"){ $("#matchresumestatus").textContent="Résumé ready — "+file.name; $("#matchnote").textContent="Résumé read. ✨ Let AI read my résumé builds the brief your searches are shaped by — or search with it now."; return; }
+      if(d.status==="done"){ $("#matchresumestatus").textContent="Résumé ready — "+file.name;
+        $("#matchnote").textContent="Résumé read — your search parameters are below."; loadSearchProfile();
+        const g=$("#mGo"); if(g) g.disabled=false; return; }
       if(d.status==="failed"){ $("#matchresumestatus").textContent="Couldn't read that résumé — try another file."; return; }
     }
     $("#matchresumestatus").textContent="Still reading — try the search in a moment.";
@@ -9386,10 +9406,103 @@ async function openMatch(){
   try{ prof = await (await fetch("/me/profile", {headers: authHeaders()})).json(); }catch(e){}
   const hasResume = !!prof.resume;
   $("#matchresumestatus").textContent = hasResume ? ("Résumé on file"+(prof.resume&&prof.resume.name?" — "+prof.resume.name:"")) : "No résumé yet — upload one to get started";
-  $("#matchnote").textContent = hasResume ? "Ready — search jobs with it below, or let AI read it first."
-                                          : "Upload your résumé in step 1, then search jobs with it.";
+  $("#matchnote").textContent = hasResume ? "" : "Upload your résumé in step 1, then search jobs with it.";
   const go = $("#mGo"); if(go) go.disabled = !hasResume;
+  loadSearchProfile();
 }
+// ===== THE SEARCH PROFILE — what the AI read off the résumé, shown and editable =====
+// The old flow hid this: a recruiter AI proposed roles and seniority into a form, the form fed a search,
+// and nothing on screen said which parameters were in play. Here every parameter the search runs on is
+// a chip you can drop, and every key takes a new one. Edits are yours — they are stored under the
+// résumé's fingerprint and nothing recompiles over them until you upload a new résumé or press Reset.
+window.SEARCH_PROFILE = null;
+async function loadSearchProfile(){
+  const box = $("#mSearchProfile"); if(!box) return;
+  if(!loggedIn()){ box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="status">Reading your search profile…</div>`;
+  try{
+    const r = await fetch("/me/search-profile", {headers: authHeaders()});
+    if(!r.ok){ box.innerHTML = ""; return; }
+    SEARCH_PROFILE = await r.json();
+    renderSearchProfile();
+  }catch(e){ box.innerHTML = ""; }
+}
+const SPF_ORDER = ["role_family","level","field","function","specialty","skill","work_mode","work_type",
+                   "employment_type","company_type","metro","state","country","comp"];
+function renderSearchProfile(){
+  const box = $("#mSearchProfile"); if(!box) return;
+  const d = SEARCH_PROFILE || {}, c = d.contract || null, L = (d.labels || {}).keys || {};
+  if(!d.has_resume){ box.innerHTML = `<div class="sethint">Upload a résumé above and Roster reads your search parameters from it.</div>`; return; }
+  if(!c){ box.innerHTML = `<div class="sethint">Not read yet — press ✨ Let AI read my résumé, or just run a 🎯 search and it will be read then.</div>`; return; }
+  const pref = c.prefer || {}, avoid = c.avoid || {};
+  const keys = [...new Set([...SPF_ORDER.filter(k => pref[k] || avoid[k]), ...Object.keys(pref), ...Object.keys(avoid)])];
+  const valChip = (k, v, sect) => `<span class="spf-v">${sect === "avoid" ? "▼ " : ""}${esc(String(v).replace(/_/g," "))}<button type="button" class="spf-x" data-k="${esc(k)}" data-v="${esc(String(v))}" data-sect="${sect}" title="Remove" aria-label="Remove ${esc(String(v))}">×</button></span>`;
+  const rows = keys.map(k => {
+    const pv = Array.isArray(pref[k]) ? pref[k] : (pref[k] ? [JSON.stringify(pref[k])] : []);
+    const av = Array.isArray(avoid[k]) ? avoid[k] : [];
+    return `<div class="spf-row"><span class="spf-k">${esc(L[k] || k.replace(/_/g," "))}</span>
+      <span class="spf-vals">${pv.map(v => valChip(k, v, "prefer")).join("")}${av.map(v => valChip(k, v, "avoid")).join("")}
+      <input class="spf-add" data-k="${esc(k)}" type="text" placeholder="add…" aria-label="Add a ${esc(L[k]||k)}"/></span></div>`;
+  }).join("");
+  const ctr = c.center && c.center.value
+    ? `<div class="spf-row"><span class="spf-k">Centred on</span><span class="spf-vals">${valChip("__center", c.center.value, "center")}</span></div>` : "";
+  box.innerHTML = `<div class="spf">
+    <div class="spf-h"><b>Your search parameters</b> ${d.edited ? "· edited by you" : "· read from your résumé"}
+      <span class="tgt-q-hint" style="margin-left:auto;">these rank roles — they never hide any</span></div>
+    ${rows}${ctr}
+    <div class="spf-foot"><button type="button" class="idgo" style="width:auto;padding:.35rem .9rem;min-height:36px;" id="spfSave">Save</button>
+      <button type="button" class="histbtn" id="spfReset" title="Discard my edits and let the AI read the résumé again">↻ Re-read my résumé</button>
+      <span id="spfNote"></span></div></div>`;
+}
+function spfEdit(fn){ const c = (SEARCH_PROFILE || {}).contract; if(!c) return; fn(c); renderSearchProfile(); markSpfDirty(); }
+function markSpfDirty(){ const n = $("#spfNote"); if(n){ n.textContent = "unsaved"; n.style.color = "var(--gold)"; } }
+document.addEventListener("click", (e) => {
+  const x = e.target.closest && e.target.closest(".spf-x");
+  if(x){ e.preventDefault(); spfEdit(c => {
+      if(x.dataset.sect === "center"){ c.center = null; return; }
+      const bag = c[x.dataset.sect] || {}; const k = x.dataset.k;
+      bag[k] = (bag[k] || []).filter(v => String(v) !== x.dataset.v);
+      if(!bag[k].length) delete bag[k];
+    }); return; }
+  const sv = e.target.closest && e.target.closest("#spfSave");
+  if(sv){ e.preventDefault(); saveSearchProfile(); return; }
+  const rs = e.target.closest && e.target.closest("#spfReset");
+  if(rs){ e.preventDefault(); resetSearchProfile(); return; }
+});
+document.addEventListener("keydown", (e) => {
+  const add = e.target.closest && e.target.closest(".spf-add");
+  if(!add || e.key !== "Enter") return;
+  e.preventDefault();
+  const v = (add.value || "").trim().toLowerCase(); if(!v) return;
+  spfEdit(c => { c.prefer = c.prefer || {}; const k = add.dataset.k;
+    c.prefer[k] = [...new Set([...(c.prefer[k] || []), v])]; });
+});
+async function saveSearchProfile(){
+  const c = (SEARCH_PROFILE || {}).contract; if(!c) return;
+  const n = $("#spfNote"); if(n){ n.textContent = "saving…"; n.style.color = "var(--muted)"; }
+  try{
+    const r = await fetch("/me/search-profile", {method:"PUT", headers:{"content-type":"application/json", ...authHeaders()},
+      body: JSON.stringify({contract: c})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ if(n){ n.textContent = d.detail || "couldn't save"; n.style.color = "var(--gap)"; } return; }
+    // the server dropped anything outside the vocabulary — show what it actually kept
+    SEARCH_PROFILE = {...SEARCH_PROFILE, contract: d.contract, edited: true};
+    renderSearchProfile();
+    const n2 = $("#spfNote"); if(n2){ n2.textContent = "saved — your searches use this"; n2.style.color = "var(--verified)"; }
+  }catch(e){ if(n){ n.textContent = "couldn't save"; n.style.color = "var(--gap)"; } }
+}
+async function resetSearchProfile(){
+  const n = $("#spfNote"); if(n){ n.textContent = "re-reading your résumé…"; n.style.color = "var(--muted)"; }
+  try{
+    const r = await fetch("/me/search-profile", {method:"PUT", headers:{"content-type":"application/json", ...authHeaders()},
+      body: JSON.stringify({reset: true})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ if(n){ n.textContent = d.detail || "couldn't re-read"; n.style.color = "var(--gap)"; } return; }
+    SEARCH_PROFILE = {...SEARCH_PROFILE, contract: d.contract, brief: d.brief || SEARCH_PROFILE.brief, edited: false};
+    renderSearchProfile();
+  }catch(e){ if(n){ n.textContent = "couldn't re-read"; n.style.color = "var(--gap)"; } }
+}
+
 // THE HAND-OFF: the résumé is an input to the Jobs search, so this leaves the setup surface and runs
 // that search with 🎯 on and an empty box — the résumé is the whole ask. One search, one result
 // surface, one set of controls.
@@ -9413,7 +9526,8 @@ async function runFineTune(){
     if(!r.ok){ const e = await r.json().catch(()=>({})); $("#matchnote").textContent = e.detail || "Couldn't fine-tune — upload/parse a résumé first."; return; }
     const d = await r.json();
     renderBrief(d.brief);
-    $("#matchnote").textContent = "Brief built from your résumé — searches with 🎯 Use my résumé are shaped by it.";
+    $("#matchnote").textContent = "Read from your résumé — the parameters above are what your searches run on.";
+    loadSearchProfile();
   }catch(e){ $("#matchnote").textContent = "Fine-tune failed — try again."; }
   finally{ if(btn){ btn.disabled = false; btn.textContent = orig; } }
 }

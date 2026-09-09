@@ -77,6 +77,43 @@ def llm_fields(text: str) -> dict:
     return out
 
 
+async def _write_search_profile(conn, user_id: str, profile: dict) -> None:
+    """Recruiter brief → search contract → `roster_user_pref`, keyed to the résumé's fingerprint so a
+    new résumé is read afresh and an unchanged one is never re-read."""
+    from api.app import _resume_fingerprint, build_llm, resolve_mode
+    from api.facets_engine import compile_contract
+    from api.model_json import llm_json
+    from api.people_population import build_candidate_brief, candidate_pitch
+    from roster_kernel.runtime.build import load_active_vertical
+
+    text = str(profile.get("_resume_text") or "")
+    if len(text) < 200:
+        return
+    brief = await build_candidate_brief(text, profile, build_llm(mode=resolve_mode()))
+    if not brief:
+        return
+    fp = _resume_fingerprint(profile)
+    await _set_pref(conn, user_id, "match_brief", json.dumps({"hash": fp, "brief": brief}))
+    schema = load_active_vertical().extraction_schema
+    c = await asyncio.to_thread(compile_contract, "job", candidate_pitch(brief, profile), schema,
+                                lambda sysm, usr: llm_json(sysm, usr, timeout=60), limit=80, scope={})
+    for key, vals in list(c.must.items()):       # a read of a person ranks; it never gates
+        cur = c.prefer.get(key)
+        c.prefer[key] = sorted(set(list(cur or []) + list(vals))) if isinstance(vals, list) else vals
+    c.must, c.scope = {}, {}
+    c.text = str(brief.get("search_text") or "") or c.text
+    await _set_pref(conn, user_id, "match_contract",
+                    json.dumps({"hash": fp, "contract": c.to_dict(), "edited": False}))
+    print(f"search profile: {len(c.prefer)} preference keys", flush=True)
+
+
+async def _set_pref(conn, user_id: str, key: str, value: str) -> None:
+    await conn.execute(
+        """INSERT INTO roster_user_pref (user_id, key, value) VALUES ($1,$2,$3)
+           ON CONFLICT (user_id, key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()""",
+        user_id, key[:64], (value or "")[:60000])
+
+
 async def run(user_id: str):
     c = await asyncpg.connect(os.environ["ROSTER_CORPUS_DSN"])
     async def fail():
@@ -98,6 +135,14 @@ async def run(user_id: str):
             "UPDATE roster_candidate_profile SET parse_status='done', parsed_profile=$2::jsonb, "
             "parsed_at=now() WHERE user_id=$1", user_id, json.dumps(fields))
         print(f"done: {len(fields)} fields + raw text", flush=True)
+        # THE SEARCH PROFILE, read ONCE, HERE. The AI decides what this person should be searching for
+        # — roles, level, field, skills, work mode, company type — and it is compiled into a contract in
+        # the rail's vocabulary and stored. Every later search reuses it, so the model cost is paid once
+        # per résumé, at upload, off the web process, instead of on a button or on every click.
+        try:
+            await _write_search_profile(c, user_id, fields)
+        except Exception as e:   # noqa: BLE001 — a parsed résumé is worth keeping even without it
+            print("search profile skipped:", str(e)[:160], flush=True)
     except Exception as e:   # noqa: BLE001
         print("error:", str(e)[:120], flush=True); await fail()
     finally:

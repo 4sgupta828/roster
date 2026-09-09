@@ -169,3 +169,52 @@ def test_profile_slate_leads_with_a_diverse_set_and_never_drops_a_row():
     assert len(out) == len(rows), "a row was dropped — the overflow must be appended, never removed"
     assert [r["company"] for r in out[:4]] == ["acme", "acme", "acme", "sierra"]
     assert {r["id"] for r in out} == {r["id"] for r in rows}
+
+
+# ---------------------------------------------------------------- the search profile the AI reads once
+
+def test_the_pitch_carries_the_ais_judgment_not_just_its_prose():
+    """The recruiter brief's JUDGMENT — which roles to pitch, at what level, on which skills, in which
+    field — is what "let AI figure out the best roles for me" means. Embedding only `search_text` threw
+    it away: target_roles and seniority reached nothing. The pitch is what the contract compiler reads,
+    so every one of those becomes a facet term the rail can show."""
+    from api.people_population import candidate_pitch
+    brief = {"target_roles": ["Staff Software Engineer", "Principal Engineer"], "seniority": "staff_plus",
+             "fields": ["software"], "technical_skills": ["go", "kubernetes"],
+             "search_text": "Builds large distributed payment systems."}
+    p = candidate_pitch(brief, {"city": "Austin", "region": "TX"})
+    for must_appear in ("Staff Software Engineer", "Principal Engineer", "staff plus", "software",
+                        "go", "kubernetes", "Austin", "distributed payment systems"):
+        assert must_appear in p, f"{must_appear!r} missing from the pitch: {p!r}"
+
+
+def test_an_empty_brief_makes_no_pitch_and_so_costs_no_compile():
+    from api.people_population import candidate_pitch
+    assert candidate_pitch({}, {}).strip() == ""
+    assert candidate_pitch(None, None).strip() == ""
+
+
+def test_a_saved_search_profile_is_held_to_the_vocabulary():
+    """A hand-edited profile is validated exactly as a compiled one is: illegal keys and values are
+    dropped, never stored. A typo must not become a preference that quietly matches nothing."""
+    from roster_kernel.facets import Contract
+    from api.app import validate_job_contract
+
+    c = Contract(kind="job",
+                 prefer={"level": ["senior", "not_a_level"], "made_up_key": ["x"],
+                         "work_mode": ["remote", "teleport"], "skill": ["Go", "Kubernetes"]},
+                 center={"key": "level", "value": "senior", "span": 1})
+    d = validate_job_contract(c, FACET_SCHEMA)
+    assert d["prefer"]["level"] == ["senior"]              # the invented level is gone
+    assert "made_up_key" not in d["prefer"]                # the invented key is gone
+    assert d["prefer"]["work_mode"] == ["remote"]          # 'teleport' is not in the vocabulary
+    assert d["prefer"]["skill"] == ["go", "kubernetes"]    # open sets are kept, lowercased
+    assert d["center"] == {"key": "level", "value": "senior", "span": 1}
+
+
+def test_an_invented_level_centre_is_dropped_rather_than_stored():
+    from roster_kernel.facets import Contract
+    from api.app import validate_job_contract
+    d = validate_job_contract(Contract(kind="job", center={"key": "level", "value": "wizard", "span": 1}),
+                              FACET_SCHEMA)
+    assert d["center"] is None

@@ -1243,6 +1243,12 @@ class MatchIn(BaseModel):
     #                                  — the one HARD filter in matching
 
 
+class SearchProfileIn(BaseModel):
+    """PUT /me/search-profile — the user's own edit of what Roster searches with on their behalf."""
+    contract: dict | None = None
+    reset: bool = False        # discard my edits and let the AI read the résumé again
+
+
 class LinkedInResolveIn(BaseModel):
     """POST /people/linkedin-resolve — module-level so FastAPI can resolve the (string) annotation."""
     entity_id: str
@@ -1953,6 +1959,35 @@ def thin_repeats(rows: list, *, per_title: int = 2) -> list:
         seen[k] = seen.get(k, 0) + 1
         out.append(r)
     return out
+
+
+def validate_job_contract(c, schema) -> dict:
+    """Keep only keys and values the vocabulary actually has, for jobs. The compile path drops illegal
+    terms rather than failing; a HAND-EDITED search profile is held to the same rule, so a typo can never
+    become a preference that quietly matches nothing."""
+    from roster_kernel.facets import FacetType
+    for sect in ("must", "prefer", "avoid"):
+        out = {}
+        for key, vals in (getattr(c, sect) or {}).items():
+            k = schema.key(key)
+            if k is None or "job" not in k.kinds:
+                continue
+            if isinstance(vals, dict) and k.type is FacetType.numeric:
+                rng = {b: float(vals[b]) for b in ("min", "max") if isinstance(vals.get(b), (int, float))}
+                if rng:
+                    out[key] = rng
+                continue
+            keep = [str(v).strip().lower() for v in (vals if isinstance(vals, list) else [vals]) if str(v).strip()]
+            if k.values:
+                keep = [v for v in keep if v in set(k.values)]
+            if keep:
+                out[key] = sorted(set(keep))[:12]
+        setattr(c, sect, out)
+    ctr = c.center or {}
+    lvl = schema.key("level")
+    if not (ctr.get("key") == "level" and str(ctr.get("value") or "") in set((lvl.values if lvl else None) or ())):
+        c.center = None
+    return c.to_dict()
 
 
 def profile_slate(rows: list, *, per_company: int = 3) -> list:
@@ -2869,6 +2904,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         # ran — nothing on screen said so and there was no way to turn it off. Now a plain search
         # stays plain until the seeker asks for their profile to shape it.
         _prof_text, _matched_on, _li_profile, _prof_note = "", "", None, ""
+        _brief, _cand = {}, {}          # the stored search profile — only the résumé-on-file source has one
         _li_m = re.search(r"https?://(?:[a-z]{2,3}\.)?linkedin\.com/in/[^\s]+", (body.question or ""), re.I)
         if _li_m:
             # A PASTED LINKEDIN PROFILE URL: "jobs for this person" — read what search engines show for
@@ -2972,17 +3008,18 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             if len(_resume_text) < 200:
                 return {"jobs": [], "count": 0, "query": {}, "stats": await store.jobs_stats(), "needs_profile": True,
                         "note": "Upload your résumé under 📄 My résumé to search by your profile — or type what you're looking for."}
-            # THE CACHED recruiter brief is the résumé's 'soul' (built once by ✨ Fine tune, keyed to the
-            # résumé's fingerprint). Reused here, never rebuilt per search — that would be an LLM call
-            # on every click.
-            _brief_txt = ""
+            # THE SEARCH PROFILE — read off the résumé ONCE, at upload, by the AI, and reusable
+            # forever after. `_search_profile_for` returns the recruiter brief (which roles to pitch,
+            # at what level, on which skills) AND the search contract compiled from it, in the rail's
+            # own vocabulary. Built here only when it is missing — a résumé that was uploaded before
+            # this existed, or whose owner never waited for the parse to finish.
+            _brief, _cand = {}, {}
             if recruiter_match_enabled():
-                _cb = await _get_cached_brief(_pacc, _pu["id"])
-                if _cb and _cb.get("hash") == _resume_fingerprint(_prof) and (_cb.get("brief") or {}).get("search_text"):
-                    _brief_txt = _cb["brief"]["search_text"]
+                _brief, _cand = await _search_profile_for(_pacc, _pu["id"], _prof, build=True)
+            _brief_txt = str(_brief.get("search_text") or "")
             _prof_text, _matched_on = (_brief_txt or _resume_text[:1500]), "resume"
-            _prof_note = ("Shaped by your résumé" + (" and the brief from ✨ Fine tune" if _brief_txt else "")
-                          + " — the chips below are the search; turn off 🎯 Use my résumé for a plain one.")
+            _prof_note = ("Shaped by your résumé" + (" — roles, level and skills read by AI" if _brief else "")
+                          + ". The chips below are the search; change any of them, or turn off 🎯 Use my résumé.")
 
         if _prof_text:
             from api.people_population import (apply_job_must, apply_level_pref, job_brief_contract,
@@ -3007,12 +3044,31 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 _c, _ia_notes = await _index_aware(_c, kind="job", user_keys={k for k in ("work_mode", "company_type", "level") if body.job_must})
                 # WHAT WAS TYPED STEERS, THE PROFILE SHAPES: both are the semantic text, query first.
                 _c.text = "\n\n".join(x for x in (_qs_txt, _prof_text) if x).strip()
-                _sk = profile_skills(_prof_text, limit=8)
-                if _sk and "skill" not in _c.prefer:
-                    _c.prefer["skill"] = sorted(set(_sk))
-                _lvl = (body.levels or [""])[0] or (sorted(years_to_levels(_prof_text)) or [""])[0]
-                if _lvl and not _c.center:
+                # THE SEARCH PROFILE IS THE BASE CONTRACT. Every parameter the AI read off the résumé —
+                # roles, level, field, function, specialty, skills, work mode and type, company type,
+                # pay — arrives as preferences here, and what the reader TYPED wins over any of them
+                # key by key. Embedding only the brief's prose (which is all this did at first) threw
+                # the whole judgment away: target_roles and seniority reached nothing.
+                for _sect in ("prefer", "avoid"):
+                    for _k, _v in (_cand.get(_sect) or {}).items():
+                        _tgt = getattr(_c, _sect)
+                        if _k in _tgt or _k in _c.must:
+                            continue                       # the typed query already spoke about this key
+                        _tgt[_k] = _v
+                if not _c.prefer.get("skill"):
+                    _sk = profile_skills(_prof_text, limit=8)
+                    if _sk:
+                        _c.prefer["skill"] = sorted(set(_sk))
+                # what the USER set wins, then the profile's centre, then years read off the text
+                _lvl = (body.levels or [""])[0]
+                if _lvl:
                     _c.center = {"key": "level", "value": _lvl, "span": int(body.level_span)}
+                elif not _c.center and (_cand.get("center") or {}).get("value"):
+                    _c.center = dict(_cand["center"])
+                elif not _c.center:
+                    _y = (sorted(years_to_levels(_prof_text)) or [""])[0]
+                    if _y:
+                        _c.center = {"key": "level", "value": _y, "span": int(body.level_span)}
                 # THE SAME scope + toggle musts the typed path applies. The résumé path used to skip
                 # them entirely (it passed scope=None and set no country must), so a US-scoped résumé
                 # search quietly returned postings from anywhere.
@@ -7678,6 +7734,45 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=502, detail=f"could not start parser: {e}") from e
         return {"status": "pending"}
 
+    @app.get("/me/search-profile")
+    async def me_search_profile(x_roster_token: str = Header(default="")) -> dict:
+        """WHAT ROSTER LEARNED FROM YOUR RÉSUMÉ, and what it searches with. Returns the AI's brief and
+        the search contract compiled from it, plus the vocabulary's labels so the account page can draw
+        every parameter as a named chip. Nothing here is hidden state: this IS the search."""
+        store, user = await _require_user(x_roster_token)
+        profile = {**((await store.get_parse(user["id"])).get("profile") or {}),
+                   **((await store.get_profile(user["id"])).get("profile") or {})}
+        brief, contract = await _search_profile_for(store, user["id"], profile, build=False)
+        edited = False
+        try:
+            raw = await store.get_pref(user["id"], "match_contract")
+            edited = bool((json.loads(raw) if raw else {}).get("edited"))
+        except Exception:   # noqa: BLE001
+            edited = False
+        return {"brief": brief or None, "contract": contract or None, "edited": edited,
+                "labels": _facet_labels("job"), "has_resume": len(str(profile.get("_resume_text") or "")) >= 200}
+
+    @app.put("/me/search-profile")
+    async def me_search_profile_put(body: SearchProfileIn, x_roster_token: str = Header(default="")) -> dict:
+        """The user's OWN edit of their search profile. Validated against the schema the same way a
+        compiled contract is (illegal keys and values are dropped, never accepted silently), stored
+        under the current résumé's fingerprint and marked `edited` so nothing recompiles over it."""
+        from roster_kernel.facets import Contract as _C
+        store, user = await _require_user(x_roster_token)
+        profile = {**((await store.get_parse(user["id"])).get("profile") or {}),
+                   **((await store.get_profile(user["id"])).get("profile") or {})}
+        if body.reset:                                    # hand it back to the AI
+            await _safe_set_pref(store, user["id"], "match_contract", "")
+            brief, contract = await _search_profile_for(store, user["id"], profile, build=True)
+            return {"contract": contract or None, "brief": brief or None, "edited": False}
+        c = _C.from_dict({**(body.contract or {}), "kind": "job"})
+        c.must = {}                                       # a saved profile ranks; the rail is where a must is made
+        c.scope = {}
+        clean = _validate_contract(c)
+        await _safe_set_pref(store, user["id"], "match_contract",
+                             json.dumps({"hash": _resume_fingerprint(profile), "contract": clean, "edited": True}))
+        return {"contract": clean, "edited": True}
+
     @app.get("/me/profile/parse-resume")
     async def me_parse_status(x_roster_token: str = Header(default="")) -> dict:
         store, user = await _require_user(x_roster_token)
@@ -7688,6 +7783,82 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             await store.set_pref(uid, key, val)
         except Exception:   # noqa: BLE001 — best-effort persistence, never blocks the response
             pass
+
+    def _validate_contract(c) -> dict:
+        return validate_job_contract(c, _facet_schema())
+
+    async def _search_profile_for(acc, uid: str, profile: dict, *, build: bool = False) -> tuple[dict, dict]:
+        """(brief, contract) for a user — the AI's read of their résumé, cached against the résumé's
+        fingerprint so it costs ONE pair of model calls per résumé, ever. `build` fills a missing one
+        in place (a résumé uploaded before this existed, or a parse the owner never waited out).
+
+        A contract the USER has edited is kept as theirs: it is stored under the same fingerprint with
+        `edited`, and is never recompiled behind their back. A NEW résumé changes the fingerprint, and
+        the AI reads the new one."""
+        if acc is None or not uid:
+            return {}, {}
+        fp = _resume_fingerprint(profile)
+        brief, cand = {}, {}
+        cb = await _get_cached_brief(acc, uid)
+        if cb and cb.get("hash") == fp:
+            brief = cb.get("brief") or {}
+        try:
+            raw = await acc.get_pref(uid, "match_contract")
+            got = json.loads(raw) if raw else None
+            if got and got.get("hash") == fp:
+                cand = got.get("contract") or {}
+        except Exception:   # noqa: BLE001
+            cand = {}
+        if not build:
+            return brief, cand
+        resume_text = str(profile.get("_resume_text") or "")
+        if not brief and len(resume_text) >= 200:
+            try:
+                from api.people_population import build_candidate_brief
+                brief = await build_candidate_brief(resume_text, profile, build_llm(mode=resolve_mode())) or {}
+                if brief:
+                    await _safe_set_pref(acc, uid, "match_brief", json.dumps({"hash": fp, "brief": brief}))
+            except Exception:   # noqa: BLE001 — a brief we cannot build must never fail a search
+                brief = {}
+        if not cand and brief:
+            try:
+                cand = await _candidate_contract(profile, brief)
+                if cand:
+                    await _safe_set_pref(acc, uid, "match_contract",
+                                         json.dumps({"hash": fp, "contract": cand, "edited": False}))
+            except Exception:   # noqa: BLE001
+                cand = {}
+        return brief, cand
+
+    async def _candidate_contract(profile: dict, brief: dict) -> dict:
+        """THE CANDIDATE'S SEARCH CONTRACT — every search parameter the AI can read off a résumé, in the
+        rail's own vocabulary, compiled ONCE per résumé. The recruiter brief decides what to pitch this
+        person for; `compile_contract` turns that into legal facet terms (role, level, field, function,
+        specialty, skills, work mode/type, company type, place, pay), which is what makes it navigable:
+        every parameter arrives as a chip the reader can see and change.
+
+        Everything the model chose is a PREFERENCE. A read of a person is a judgment, not a promise, and
+        a must here would silently hide roles the person never ruled out — the reader promotes a chip to
+        a must on the rail if they want one."""
+        from api.people_population import candidate_pitch
+        pitch = candidate_pitch(brief, profile)
+        if not pitch.strip():
+            return {}
+        c = await asyncio.to_thread(compile_contract_fn(), "job", pitch, _facet_schema(), _llm_json, limit=80, scope={})
+        for key, vals in list(c.must.items()):        # the model's read never gates
+            c.prefer.setdefault(key, [])
+            if isinstance(c.prefer[key], list) and isinstance(vals, list):
+                c.prefer[key] = sorted(set(list(c.prefer[key]) + list(vals)))
+            else:
+                c.prefer[key] = vals
+        c.must = {}
+        c.text = str(brief.get("search_text") or "") or c.text
+        c.scope = {}                                  # the reader's scope selector owns place, not the résumé
+        return c.to_dict()
+
+    def compile_contract_fn():
+        from api.facets_engine import compile_contract
+        return compile_contract
 
     async def _get_cached_brief(store, uid: str):
         try:

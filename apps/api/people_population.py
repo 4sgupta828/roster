@@ -1173,6 +1173,34 @@ class _CandidateBrief(BaseModel):
     fields: list[str] = []               # every field they credibly fit (primary first), from JOB_FIELDS
 
 
+def candidate_pitch(brief: dict, profile: dict) -> str:
+    """The recruiter's read of a candidate, written as the ASK a job search would be given. This is what
+    the contract compiler reads, so the AI's judgment — which roles to pitch, at what level, on which
+    skills, in which field — is expressed once, in the same words a person would type, and comes back as
+    a contract in the rail's own vocabulary."""
+    b = brief or {}
+    bits = []
+    roles = [str(r).strip() for r in (b.get("target_roles") or []) if str(r).strip()]
+    if roles:
+        bits.append(", ".join(roles[:6]) + " roles")
+    if b.get("seniority"):
+        bits.append(f"at {str(b['seniority']).replace('_', ' ')} level")
+    fields = [str(f).strip() for f in ((b.get("fields") or []) or ([b["field"]] if b.get("field") else [])) if str(f).strip()]
+    if fields:
+        bits.append("in " + ", ".join(fields[:3]))
+    skills = [str(k).strip() for k in (b.get("technical_skills") or []) if str(k).strip()]
+    if skills:
+        bits.append("using " + ", ".join(skills[:10]))
+    where = " ".join(str((profile or {}).get(k) or "").strip() for k in ("city", "region")).strip()
+    if where:
+        bits.append(f"near {where}")
+    head = "; ".join(bits)
+    body = str(b.get("search_text") or "").strip()
+    if not head:
+        return body                      # nothing read off the résumé is nothing to compile
+    return (head + "." + ("\n\n" + body if body else "")).strip()
+
+
 async def build_candidate_brief(resume_text: str, profile: dict, llm) -> dict | None:
     """Act as a professional recruiter representing this candidate: read the résumé (WEIGHTING the last
     3–5 years far more than earlier roles) and build a comprehensive, multi-dimensional picture —
