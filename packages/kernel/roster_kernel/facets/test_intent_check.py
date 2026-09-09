@@ -64,11 +64,19 @@ def test_a_short_query_is_worth_asking_about():
     assert worth_asking("platform engineer", {"pool": 400})[0] is True
 
 
-def test_a_long_specific_query_that_matched_well_is_left_alone():
-    """A debugger that interrupts a session it understands is noise, and every ask costs a call."""
+def test_a_long_query_still_gets_a_read():
+    """A word count cannot judge whether a question was understood — only what came back can, and only
+    the model sees that. "ML Infra Distributed Systems, AI Agents VP Director roles" is eight words and
+    was silently skipped; a reader cannot tell that from a query that simply had nothing to say. The
+    model is asked, and returns no readings when nothing is unclear."""
     ok, why = worth_asking("staff backend engineer at stripe working on payments infrastructure",
                            {"pool": 400, "best_match": 95})
-    assert ok is False and "specific" in why
+    assert ok is True and why
+
+
+def test_the_only_silences_are_the_ones_that_cannot_be_argued_with():
+    assert worth_asking("", {"pool": 400})[0] is False           # nothing was typed
+    assert worth_asking("platform", {"pool": 3})[0] is False     # nothing to have a view about
 
 
 def test_an_ambiguous_query_is_always_worth_asking_about():

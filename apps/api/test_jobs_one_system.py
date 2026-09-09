@@ -509,22 +509,46 @@ def test_a_short_query_gets_readings_in_prose_not_chips(monkeypatch):
     assert "directions" not in d, "the chip surface is gone"
 
 
-def test_a_long_specific_query_is_not_interrupted(monkeypatch):
-    """Every ask costs a model call and a reader's attention. A specific question that matched well is
-    left alone — and the call is never made."""
+def test_every_real_search_gets_a_read(monkeypatch):
+    """The owner, on a live session: "some search results don't have it". The query was
+    "ML Infra Distributed Systems, AI Agents VP Director roles" — eight words, over the old word-count
+    threshold, so the gate called it "specific enough" and said nothing. From the reader's side that is
+    indistinguishable from a search with nothing to say, and it made the surface feel arbitrary.
+
+    A word count cannot judge whether a question was understood; only what came back can, and only the
+    model sees that. So every real search gets a read, and the model returns no readings when nothing is
+    unclear — the same silence, arrived at by something qualified to judge it."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
+    _stub_intent(monkeypatch, READINGS)
+    d = _jobs(_lex_client(), question="ML Infra Distributed Systems, AI Agents VP Director roles").json()
+    ic = d.get("intent_check") or {}
+    assert ic.get("readings"), "a long query is still read"
+    assert ic.get("understanding")
+
+
+def test_a_search_with_almost_nothing_back_is_not_reinterpreted(monkeypatch):
+    """The two silences left are the ones that cannot be argued with: nothing typed, and too few results
+    to have a view about. With almost nothing back the problem is coverage, not comprehension."""
     monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
     monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
     calls = []
 
-    def _count(system, user, **kw):
-        calls.append(system)
-        return dict(READINGS) if "recruiting consultant" in (system or "").lower() else {}
+    def _route(system, user, **kw):
+        if "recruiting consultant" in (system or "").lower():
+            calls.append(1)
+            return dict(READINGS)
+        return {"must": {"work_mode": ["remote"], "level": ["staff_plus"], "metro": ["austin"]}}
 
-    monkeypatch.setattr("api.model_json.llm_json", _count)
-    q = "staff backend engineer at stripe working on payments infrastructure in new york"
-    d = _jobs(_lex_client(), question=q).json()
+    monkeypatch.setattr("api.model_json.llm_json", _route)
+    few = [dict(r, id=f"f{i}") for i, r in enumerate(LEX_ROWS[:8])]
+    app = create_app()
+    app.state.facet_store = InMemoryFacetStore(few, FACET_SCHEMA)
+    app.state.claim_store = _FakeClaimStore(); app.state._co_sites = None
+    app.state._facet_cov = {"job": (1e18, {"work_mode": 0.95, "level": 0.95, "metro": 0.95})}
+    d = TestClient(app).post("/jobs", json={"tenant_id": "demo", "question": "remote staff austin"}).json()
     assert (d.get("intent_check") or {}).get("readings") == []
-    assert not any("recruiting consultant" in (c or "").lower() for c in calls), "no call for a specific query"
+    assert not calls, "and no model call is made for it"
 
 
 def test_a_reading_that_names_an_illegal_value_is_cleaned_not_shown(monkeypatch):
@@ -745,9 +769,6 @@ def test_answering_in_your_own_words_does_not_end_the_conversation(monkeypatch):
     monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
     _stub_intent(monkeypatch, READINGS)
     long_q = "platform engineer — I care about reliability at scale and want to be close to the metal"
-    fresh = _jobs(_lex_client(), question=long_q).json()
-    assert (fresh.get("intent_check") or {}).get("readings") == [], "a cold long query is left alone"
-
     carried = _jobs(_lex_client(), question=long_q, intent_history=[
         {"asked": "platform engineer", "offered": ["Infra", "DevEx"], "chose": "Infra",
          "understood": ["infrastructure, not tooling"], "pool": 690}]).json()

@@ -182,9 +182,11 @@ def worth_asking(query: str, coverage: dict | None, *, ambiguous: bool = False,
                  min_pool: int = 12, max_words: int = 6, history: list | None = None) -> tuple[bool, str]:
     """Is the search unsure enough to be worth a question — and a model call?
 
-    A debugger that interrupts a session it understands is noise, and every ask here costs a call, so
-    the cold-start test is narrow: a short query, one the lexicon read two ways, or a result set nothing
-    matched well.
+    The only silences left are the two that cannot be argued with: nothing was typed, and there are too
+    few results to have a view about. Everything else gets a read — because the question this used to
+    answer with a word count ("is this query specific enough?") is not answerable without seeing what
+    came back, and the model does see that. It is told to return no readings when nothing is unclear,
+    which is the same silence arrived at by something qualified to judge it.
 
     ONCE A CONVERSATION IS UNDER WAY, THAT TEST IS THE WRONG ONE. The reader answering in their own
     words makes the query LONGER, so the "specific enough" rule fired exactly when they had just
@@ -195,17 +197,24 @@ def worth_asking(query: str, coverage: dict | None, *, ambiguous: bool = False,
     between "answered" and "still vague"."""
     cov = coverage or {}
     pool = int(cov.get("pool") or 0)
+    words = len([w for w in (query or "").split() if w])
+    if not words:
+        return False, "nothing was typed"
     if pool < min_pool:
         return False, "too few results to reinterpret"
+    # EVERY REAL SEARCH GETS A READ. The earlier version stayed silent on anything longer than a few
+    # words, and the result was a surface that appeared and vanished for reasons no reader could see —
+    # "some search results don't have it". But the judgement it was making was never a word count's to
+    # make: whether a question is worth asking depends on what came back, and only the model sees that.
+    # It is told to return no readings when nothing is unclear, and the notes and the observation are
+    # worth having either way — knowing what the search believes and what the results are made of is
+    # useful on every search, not only on confusing ones.
     if history:
         return True, "we are mid-conversation"
     if ambiguous:
         return True, "the words carry more than one reading"
-    words = len([w for w in (query or "").split() if w])
-    if not words:
-        return False, "nothing was typed"
     if words <= max_words:
         return True, "a short query leaves a lot unsaid"
     if cov.get("weak") or cov.get("diagnosis"):
         return True, "nothing matched strongly"
-    return False, "the question looks specific enough"
+    return True, "reading the results back"
