@@ -3176,7 +3176,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 _ex: dict = {}
                 import time as _jtm
                 _j0 = _jtm.monotonic()
-                _c = await asyncio.to_thread(compile_contract, "job", body.question or "", _facet_schema(), _llm_json, limit=80, scope=_scope, extras=_ex)
+                _c = await _compile_cached("job", body.question or "", limit=80, scope=_scope, extras=_ex)
                 _j1 = _jtm.monotonic()
                 # THE LEXICON, after the model and never over it: a query that IS a facet value reaches
                 # the contract even when the compiler — prompted to extract only what is "stated
@@ -6403,6 +6403,37 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             return {}
         cache[kind] = (_time.monotonic(), cov); app.state._facet_cov = cache
         return cov
+
+    async def _compile_cached(kind: str, text: str, *, limit: int, scope: dict, extras: dict | None = None):
+        """`compile_contract`, cached on what actually determines its answer.
+
+        The one model call a typed search makes, and nothing cached it on this path — only
+        `/search/compile` did. Short queries are exactly the ones that repeat (`remote`, `stripe`,
+        `austin` are typed by many readers and retyped by the same one), and a steering loop asks again
+        every turn. `extras` is an OUT parameter — the compiler fills it with `place_or_mode` — so it is
+        cached alongside the contract and copied back on a hit, or a cached compile would quietly lose
+        the signal the caller reads afterwards."""
+        from roster_kernel.facets import Contract as _C
+        key = ("compile", kind, (text or "").strip().lower(), int(limit),
+               json.dumps(scope or {}, sort_keys=True))
+        cache = getattr(app.state, "_compile_cache2", None)
+        if cache is None:
+            cache = app.state._compile_cache2 = {}
+        import time as _t
+        hit = cache.get(key)
+        if hit and _t.monotonic() - hit[0] < 900.0:
+            if extras is not None:
+                extras.update(hit[2])
+            return _C.from_dict(json.loads(hit[1]))          # a COPY: callers mutate the contract
+        _ex: dict = {}
+        c = await asyncio.to_thread(compile_contract_fn(), kind, text or "", _facet_schema(), _llm_json,
+                                    limit=limit, scope=scope, extras=_ex)
+        if len(cache) > 400:
+            cache.clear()
+        cache[key] = (_t.monotonic(), json.dumps(c.to_dict()), dict(_ex))
+        if extras is not None:
+            extras.update(_ex)
+        return c
 
     def _lexicon_plan(kind: str, text: str):
         """The deterministic first read of a query, or None when the flag is off / nothing matched."""

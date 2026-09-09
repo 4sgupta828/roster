@@ -361,3 +361,35 @@ def test_the_lexicon_is_off_by_default(monkeypatch):
     _stub_compiler(monkeypatch, {})
     d = _jobs(_lex_client(), question="remote").json()
     assert not d["contract"]["must"].get("work_mode")
+
+
+def test_the_same_query_compiles_once(monkeypatch):
+    """The one model call a typed search makes was uncached on this path — only /search/compile cached.
+    Short queries are the ones that repeat, and a steering loop asks again every turn."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    calls = []
+
+    def _one(system, user, **kw):
+        calls.append(user)
+        return {"prefer": {"field": ["software"]}}
+
+    monkeypatch.setattr("api.model_json.llm_json", _one)
+    c = _lex_client()
+    a = _jobs(c, question="backend engineer").json()
+    b = _jobs(c, question="backend engineer").json()
+    assert len(calls) == 1, "the second identical search must not pay for the compile again"
+    assert a["contract"]["prefer"] == b["contract"]["prefer"]
+    _jobs(c, question="data engineer")
+    assert len(calls) == 2, "a different query is a different compile"
+
+
+def test_a_cached_compile_is_a_copy_not_the_same_object(monkeypatch):
+    """The routes mutate the contract they get back — scope musts, toggles, the lexicon. A cache that
+    handed out one shared object would accumulate every previous search's edits."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {"prefer": {"field": ["software"]}})
+    c = _lex_client()
+    first = _jobs(c, question="backend engineer", job_must=["remote"]).json()
+    second = _jobs(c, question="backend engineer").json()
+    assert "work_mode" in (first["contract"]["must"] or {})
+    assert "work_mode" not in (second["contract"]["must"] or {}), "the toggle leaked through the cache"
