@@ -867,6 +867,15 @@
   .fpill{font-size:.7rem;padding:.15rem .5rem;border-radius:999px;background:rgba(var(--gold-rgb),.10);color:var(--gold-strong);border:1px solid var(--gold);}
   .fpill button{font:inherit;border:0;background:transparent;color:inherit;cursor:pointer;margin-left:.2rem;}
   @media (max-width:560px){ .frail-k{min-width:64px;font-size:.6rem;} .fchip{font-size:.7rem;} }
+  /* 🎯 Use my résumé — a SWITCH among the must-have chips: dashed until on, so it never reads as
+     just another filter, and its on-state is unmistakable (it changes what the search IS). */
+  .ev-filter.useresume{border-style:dashed;}
+  #evfilters .ev-filter.useresume.on::before{content:none;}   /* a switch, not a required filter */
+  #evfswitch{display:inline-flex;align-items:center;gap:.35rem;margin-right:.5rem;padding-right:.6rem;border-right:1px solid var(--hair);}
+  /* On a phone the whole chip row was a 32px target — under the thumb-sized minimum. Raised here
+     rather than on the new chip alone, so the row stays one row. */
+  @media (max-width:560px){ #evfchips .ev-filter{min-height:40px;} }
+  .ev-filter.useresume.on{border-style:solid;border-color:var(--gold);background:rgba(var(--gold-rgb),.14);font-weight:600;}
   .rev-box.rev-fresh{padding:.4rem .7rem;} .rev-box.rev-fresh .rev-h{margin:0;font-size:.8rem;} .rev-box.rev-fresh details{margin:.15rem 0 0;} .rev-box.rev-fresh summary{font-size:.74rem;cursor:pointer;color:var(--muted);}
   .aptabs{display:flex;gap:.3rem;flex-wrap:wrap;margin:.6rem 0 .5rem;border-bottom:1px solid var(--hair);padding-bottom:.45rem;}
   .aptab{font:inherit;font-size:.78rem;padding:.35rem .75rem;min-height:38px;border:1px solid var(--hair);border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;}
@@ -2000,7 +2009,7 @@
       </select>
     </label>
     <button type="button" class="histbtn newbtn" id="newbtn" style="margin-left:12px;">＋ New search</button>
-    <button type="button" class="histbtn" id="matchhdr" style="margin-left:0;" title="Upload your résumé → get ranked matching jobs">🎯 Find jobs</button>
+    <button type="button" class="histbtn" id="matchhdr" style="margin-left:0;" title="Upload the résumé Roster shapes your job searches with">📄 My résumé</button>
     <button type="button" class="histbtn" id="candhdr" style="margin-left:0;" title="Recruiter: paste a job description → ranked candidate people">🧲 Find candidates</button>
     <button type="button" class="histbtn" id="applyhdr" hidden style="margin-left:0;" title="Paste any job link → your fit, every application answer, résumé & cover letter, then fill it in your browser">🎯 Apply to a job link</button>
     <button type="button" class="histbtn" id="signinbtn" style="margin-left:0;" title="Sign in or create an account">Sign in</button>
@@ -2085,7 +2094,7 @@
   <!-- Talent Map PRE-SEARCH evidence filter: which kinds of linked public work a person must have.
        All on = no restriction; deselect to require at least one of the remaining kinds. -->
   <div id="evfilters" class="evfilters" hidden title="Tap a kind to require it — people must have at least one of the selected kinds of linked public work. Nothing selected = everyone.">
-    <span class="evf-lbl">Must have</span><span id="evfchips"></span>
+<span id="evfswitch"></span><span class="evf-lbl">Must have</span><span id="evfchips"></span>
   </div>
 
   <section id="voicesbody" aria-label="Voices — what practitioners say about hiring and job search" hidden>
@@ -2287,7 +2296,7 @@
     <div class="acctgrid">
       <section class="acctcard">
         <h3>Apply profile</h3>
-        <p class="acctcardsub">Fill it once — then autofill any job application. (Find jobs & History are in the top bar.)</p>
+        <p class="acctcardsub">Fill it once — then autofill any job application. (My résumé & History are in the top bar.)</p>
         <div class="acctcardbtns">
           <button type="button" class="idgo" id="acctapply" style="width:auto;">⚑ Edit apply profile</button>
         </div>
@@ -2355,19 +2364,19 @@
     </div>
     <div style="display:flex;gap:.5rem;align-items:center;margin:.6rem 0;flex-wrap:wrap;">
       <button type="button" class="idgo" id="applysave" style="width:auto;padding:.45rem 1rem;">Save profile</button>
-      <button type="button" class="histbtn" id="matchbtn2" style="margin-left:0;">🎯 Match jobs to my résumé</button>
+      <button type="button" class="histbtn" id="matchbtn2" style="margin-left:0;">📄 My résumé</button>
       <span id="applysaved" style="font-size:.8rem;color:var(--gold);"></span>
     </div>
   </div>
 </div>
-<!-- Match jobs to résumé: on-demand, preference-ranked -->
-<div class="acctpage" id="matchmodal" hidden aria-label="Find jobs">
+<!-- RÉSUMÉ SETUP. Not a search: the résumé is an input to the one Jobs search (🎯 Use my résumé). -->
+<div class="acctpage" id="matchmodal" hidden aria-label="Your résumé">
   <div class="acctwrap" style="max-width:760px;">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:.6rem;">
-      <h2 style="margin:0;">Match jobs to your résumé</h2>
+      <h2 style="margin:0;">Your résumé</h2>
       <button type="button" class="histbtn" id="matchclose">← Back</button>
     </div>
-    <p class="msub">Three steps: your résumé, what you're looking for, then ranked open roles. Location follows the top-right scope.</p>
+    <p class="msub">Roster keeps one résumé for you and uses it to shape job searches, plan applications and judge fit.</p>
 
     <section class="mstep">
       <div class="mstep-h"><span class="mstep-n">1</span> Your résumé</div>
@@ -2382,47 +2391,24 @@
     </section>
 
     <section class="mstep">
-      <div class="mstep-h"><span class="mstep-n">2</span> What you're looking for
-        <button type="button" class="histbtn mfine" id="mFineTune" hidden title="A recruiter AI reads your résumé and fills these in for you">✨ Let AI fill this from my résumé</button>
+      <div class="mstep-h"><span class="mstep-n">2</span> How Roster reads it
+        <button type="button" class="histbtn mfine" id="mFineTune" hidden title="A recruiter AI reads your résumé and builds the brief your searches are shaped by">✨ Let AI read my résumé</button>
       </div>
-      <div class="mgrid">
-        <div>
-          <span class="mlabel">Roles</span>
-          <select id="mRoleSel" style="width:100%;font-size:.88rem;margin-bottom:.35rem;"><option value="">Pick a role…</option></select>
-          <div class="chipbox" id="mRoleBox"><input id="mRole" type="text" placeholder="…or type a role, press Enter"/></div>
-        </div>
-        <div>
-          <span class="mlabel">Locations</span>
-          <div class="chipbox" id="mLocBox"><input id="mLoc" type="text" placeholder="Add a city, press Enter"/></div>
-          <label class="mcheck" style="margin-top:.45rem;"><input type="checkbox" id="mRemote"/> Include remote roles</label>
-        </div>
-      </div>
-      <span class="mlabel">Seniority <span class="mhint">pick any</span></span>
-      <div class="sentogs" id="mSenBox"></div>
-      <details class="mmore">
-        <summary>More filters <span class="mhint">never-show words · company type · minimum salary</span></summary>
-        <span class="mlabel">Never show me</span>
-        <input id="mExclude" type="text" placeholder="Title words to exclude, comma-separated (e.g. sales, manager, intern)" style="width:100%;font-size:.86rem;margin-bottom:.35rem;"/>
-        <span class="mlabel">Company type</span>
-        <div class="mchecks">
-          <label class="mcheck"><input type="checkbox" id="mF500"/> Fortune 500</label>
-          <label class="mcheck"><input type="checkbox" id="mPublic"/> Public</label>
-          <label class="mcheck"><input type="checkbox" id="mStartup"/> Startup</label>
-        </div>
-        <span class="mlabel">Minimum salary</span>
-        <input id="mSal" type="number" placeholder="optional, e.g. 180000" style="width:180px;font-size:.86rem;"/>
-      </details>
+      <p class="msub" style="margin:.2rem 0 0;">Roster reads your résumé into a brief — the roles, level and skills it will rank
+        open jobs by. Build it once and every search with 🎯 Use my résumé is shaped by it.</p>
       <div id="mBrief" style="margin:.5rem 0 0;"></div>
+      <div id="matchnote" style="font-size:.8rem;color:var(--muted);margin-top:.5rem;"></div>
     </section>
 
     <section class="mstep mstep-go">
-      <div class="mstep-h"><span class="mstep-n">3</span> Your matches</div>
-      <button type="button" class="idgo mgo" id="mGo">🎯 Find matching jobs</button>
-      <div id="matchnote" style="font-size:.8rem;color:var(--muted);margin-top:.5rem;"></div>
-      <div id="matchresults" style="margin-top:.5rem;"></div>
+      <div class="mstep-h"><span class="mstep-n">3</span> Search with it</div>
+      <p class="msub" style="margin:.2rem 0 .6rem;">Your résumé is an input to the <b>Jobs</b> search, not a search of its own. Turn on
+        <b>🎯 Use my résumé</b> there and leave the box empty to search by your résumé alone, or type words to steer it.
+        Everything that shapes the result — where, level, work mode, company type, pay — is on the chips beside the results,
+        where you can change it and run again.</p>
+      <button type="button" class="idgo mgo" id="mGo">🎯 Search jobs with my résumé</button>
     </section>
   </div>
-</div>
 <!-- Recruiter reverse-match: a job description → ranked candidate people -->
 <div class="acctpage" id="jdmodal" hidden aria-label="Find candidates">
   <div class="acctwrap" style="max-width:760px;">
@@ -2687,15 +2673,36 @@ function levelSelect(){
   const seg = LEVEL ? `<span class="lvseg" role="group" aria-label="how wide a band around the level ranks up">${SPAN_HINT.map((h,i)=>`<button type="button" class="lvsegb${LEVEL_SPAN===i?" on":""}" onclick="LEVEL_SPAN=${i}; renderEvFilters();" title="${["only this level ranks up","this level and the ones next to it rank up","a wide band of levels ranks up"][i]}">${h}</button>`).join("")}</span>` : "";
   return `<span class="lvwrap"><span class="lvlbl">Center around</span><select id="levelsel" class="lvsel" title="Ranks results around a level — nothing is dropped (levels aren't calibrated across companies)" onchange="LEVEL=this.value; renderEvFilters();"><option value=""${LEVEL?"":" selected"}>any level</option>${LEVEL_ALL.map(k=>`<option value="${k}"${LEVEL===k?" selected":""}>${LEVEL_LABEL[k]}</option>`).join("")}</select>${seg}</span>`;
 }
+// 🎯 PROFILE-BASED SEARCH (opt-in). A jobs search takes a query, a profile, or both — this is how a
+// seeker says "shape it with my résumé". It is a SWITCH, not a must-have, so it sits apart from the
+// JOB_MUST chips. OFF by default and always visible when on: the résumé used to shape every signed-in
+// seeker's search invisibly, with no control to turn it off, and that is what this replaces.
+let USE_RESUME = false;
+try{ USE_RESUME = localStorage.getItem("roster_use_resume") === "1"; }catch(e){}
+function resumeChip(){
+  return `<button type="button" class="ev-filter useresume${USE_RESUME?" on":""}" id="useresumechip" aria-pressed="${USE_RESUME}" title="${USE_RESUME?"Your résumé is shaping these results — tap for a plain search":"Rank open roles by your résumé (upload one under 📄 My résumé). Leave the box empty and your résumé is the whole search."}">🎯 Use my résumé</button>`;
+}
+function toggleUseResume(){
+  if(!USE_RESUME && !loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
+  USE_RESUME = !USE_RESUME;
+  try{ localStorage.setItem("roster_use_resume", USE_RESUME ? "1" : ""); }catch(e){}
+  renderEvFilters();
+  const qi = document.getElementById("q");
+  if(qi) qi.placeholder = USE_RESUME ? "Add words to steer it — or leave empty and search by your résumé alone"
+                                     : (qi.dataset.ph || qi.placeholder);
+}
 function evFilterActive(){ return EVIDENCE_KINDS.size > 0; }
 function renderEvFilters(){
   const box = document.getElementById("evfchips"), wrap = document.getElementById("evfilters"), rs = document.getElementById("evfreset");
+  const sw = document.getElementById("evfswitch");
   if(!box || !wrap) return;
+  if(sw){ sw.innerHTML = ""; }                 // the résumé switch is a JOBS control only
   wrap.hidden = !(SEARCH_MODE === "people" || SEARCH_MODE === "jobs");
   if(SEARCH_MODE === "jobs"){
     wrap.title = "Tap to require it — every selected kind must hold for a role to show. Nothing selected = all roles.";
     box.innerHTML = JOB_MUST_ALL.map(k => `<button type="button" class="ev-filter${JOB_MUST.has(k)?" on":""}" data-kind="${k}" aria-pressed="${JOB_MUST.has(k)}" title="${JOB_MUST.has(k)?"Required — tap to drop":"Tap to require "+JOB_MUST_LABEL[k]}">${JOB_MUST_LABEL[k]}</button>`).join("") + levelSelect();
-    wrap.classList.toggle("active", JOB_MUST.size > 0 || !!LEVEL);
+    if(sw) sw.innerHTML = `<span class="evf-lbl">Search by</span>` + resumeChip();
+    wrap.classList.toggle("active", JOB_MUST.size > 0 || !!LEVEL || USE_RESUME);
     return;
   }
   wrap.title = "Tap a kind to require it — people must have at least one of the selected kinds of linked public work. Nothing selected = everyone.";
@@ -2980,6 +2987,7 @@ async function runJobs(question, opts){
       body: JSON.stringify({question, tenant_id:"demo", refine_query: (JOBS_CTX||undefined),
         ...geoPayload(),   // the top-right scope applies to jobs too
         job_must: JOB_MUST.size ? [...JOB_MUST] : undefined,   // the pre-search "must have" toggles
+        use_resume: USE_RESUME || undefined,                   // 🎯 shape this search with the résumé on file
         levels: LEVEL ? [LEVEL] : undefined, level_span: LEVEL_SPAN,   // centre + band
         attachments: sent.length ? sent.map(a => ({data:a.data, media_type:a.media_type||"", name:a.name||""})) : undefined,
         contract: opts.contract || undefined,                 // a READY Guided intake: the evaluator runs it as is
@@ -5392,6 +5400,10 @@ $("#ask").addEventListener("submit", e=>{
   if(APP_MODE === "triage"){ submitTriage(question); return; }        // guided intake → next clarifying turn
   if(APP_MODE === "panel"){ submitPanelIntake(question); return; }   // panel mode → convene / follow-up
   if(CURRENT_ABORT) return;               // a question is in flight — Enter/submit is a no-op (use Stop)
+  // 🎯 JOBS + a PROFILE: the résumé (or an attached CV) is the whole ask — an empty box is not an
+  // empty search. Checked before the attachment-only branch below, which would otherwise turn a CV
+  // attached in Jobs mode into a "analyze this" research question.
+  if(!question && SEARCH_MODE === "jobs" && (USE_RESUME || ATTACHMENTS.length)){ askQuestion("", {}); return; }
   if(!question && ATTACHMENTS.length){    // attachment-only ask (e.g. a converted long paste IS the question)
     askQuestion("Analyze the attached material; if it contains a question, answer it.", {skipRefine: true});
     return;
@@ -7700,7 +7712,7 @@ function appliedBadgeHtml(a){
 function markAppliedCards(root){
   const idx = window.APPLIED; if(!idx) return;
   (root || document).querySelectorAll(".job-card[data-jref]").forEach(card => {
-    const j = (window.JOBS_INDEX||{})[card.dataset.jref] || (window.MATCH_JOBS||{})[card.dataset.jref];
+    const j = (window.JOBS_INDEX||{})[card.dataset.jref];
     const a = appliedOf(j, card.dataset.jref);
     const have = card.querySelector(":scope > .appliedflag");
     if(!a){ if(have) have.remove(); card.classList.remove("has-applied"); return; }
@@ -8855,7 +8867,7 @@ function apHeader(){
 function openApplyFlow(o){
   o = o || {};
   if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
-  const j = o.ref ? ((window.JOBS_INDEX||{})[o.ref] || (window.MATCH_JOBS||{})[o.ref] || null) : (o.job || null);
+  const j = o.ref ? ((window.JOBS_INDEX||{})[o.ref] || null) : (o.job || null);
   Object.assign(APPLY, {ref: o.ref||"", url: (j && j.url) || o.url || "", text: "", job: j, appId: o.appId||0, app: null, fit: null, manual: !!o.manual});
   $("#appmodal").hidden = false;
   apSourceUI();
@@ -9114,7 +9126,7 @@ $("#apGo") && $("#apGo").addEventListener("click", ()=>{
 // from Roster's public index, each with its evidence label. Roster never sends anything.
 async function showIntroPath(ref){
   if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
-  const j = (window.JOBS_INDEX||{})[ref] || (window.MATCH_JOBS||{})[ref]; if(!j) return;
+  const j = (window.JOBS_INDEX||{})[ref]; if(!j) return;
   const boxes = document.querySelectorAll(`.js-introbox[data-ref="${CSS.escape(String(ref))}"]`);
   const set = html => boxes.forEach(b => { b.innerHTML = html; });
   if(boxes.length && boxes[0].innerHTML && boxes[0].dataset.open === "1"){ set(""); boxes.forEach(b => b.dataset.open = "0"); return; }
@@ -9323,9 +9335,11 @@ async function parseResume(){
 }
 $("#autofillresume") && $("#autofillresume").addEventListener("click", parseResume);
 
-// ===== Match jobs to résumé (on-demand, preference-ranked) =====
-const SEN_OPTS = [["intern","Intern"],["junior","Junior"],["mid","Mid"],["senior","Senior"],["staff_plus","Staff+"],["leadership","Leadership"]];
-let MATCH_LOCS = [], MATCH_ROLES = [], MATCH_SENS = new Set();
+// ===== Find jobs: the RÉSUMÉ SETUP surface =====
+// It uploads the résumé and builds the recruiter brief. It does NOT search — searching is the Jobs
+// tab's 🎯 Use my résumé, running the one contract → evaluator path with the rail as its controls.
+// The preference form that used to live here is gone: every filter it held (where, level, work mode,
+// company type, pay) is a chip on that rail, where it is visible and changeable against real counts.
 function feTitleSeniority(t){
   t = (t||"").toLowerCase();
   if(/\b(principal|staff|distinguished|fellow)\b/.test(t)) return "staff_plus";
@@ -9350,17 +9364,6 @@ function wireChipInput(boxId, arr){
   input.addEventListener("blur", add);
   box.addEventListener("click",(e)=>{ const b=e.target.closest("b[data-i]"); if(b){ arr.splice(+b.dataset.i,1); renderChips(boxId,arr); } else input.focus(); });
 }
-function renderSenToggles(){
-  const box=$("#mSenBox"); if(!box) return;
-  box.innerHTML = SEN_OPTS.map(([k,l])=>`<span class="sentog ${MATCH_SENS.has(k)?"on":""}" data-sen="${k}">${esc(l)}</span>`).join("");
-}
-function applyMatchDefaults(profile){
-  if(!MATCH_LOCS.length && profile.city){ MATCH_LOCS.push([profile.city,profile.region].filter(Boolean).join(", ")); renderChips("mLocBox",MATCH_LOCS); }
-  if(!MATCH_ROLES.length){ const sk=Array.isArray(profile.skills)?profile.skills:[];
-    const kws = sk.length? sk.slice(0,3) : (profile.current_title||"").split(/\s+/).filter(w=>w.length>3 && !/engineer|manager|senior/i.test(w)).slice(0,2);
-    kws.forEach(k=>{ if(k && !MATCH_ROLES.includes(k)) MATCH_ROLES.push(k); }); renderChips("mRoleBox",MATCH_ROLES); }
-  if(!MATCH_SENS.size){ const s=feTitleSeniority(profile.current_title||""); if(s){ MATCH_SENS.add(s); renderSenToggles(); } }
-}
 async function matchUploadResume(file){
   $("#matchresumestatus").textContent = "Uploading & reading your résumé…";
   try{
@@ -9370,41 +9373,35 @@ async function matchUploadResume(file){
     await fetch("/me/profile/parse-resume",{method:"POST",headers:authHeaders()});
     for(let i=0;i<24;i++){ await new Promise(r=>setTimeout(r,2500));
       const d = await (await fetch("/me/profile/parse-resume",{headers:authHeaders()})).json();
-      if(d.status==="done"){ $("#matchresumestatus").textContent="Résumé ready — "+file.name; applyMatchDefaults(d.profile||{}); $("#matchnote").textContent="Résumé read — step 2 is pre-filled; adjust anything, then Find matching jobs."; return; }
+      if(d.status==="done"){ $("#matchresumestatus").textContent="Résumé ready — "+file.name; $("#matchnote").textContent="Résumé read. ✨ Let AI read my résumé builds the brief your searches are shaped by — or search with it now."; return; }
       if(d.status==="failed"){ $("#matchresumestatus").textContent="Couldn't read that résumé — try another file."; return; }
     }
-    $("#matchresumestatus").textContent="Still reading — press Find matches in a moment.";
+    $("#matchresumestatus").textContent="Still reading — try the search in a moment.";
   }catch(e){ $("#matchresumestatus").textContent="Upload failed — try again."; }
 }
 async function openMatch(){
   if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
-  $("#matchmodal").hidden = false; $("#matchresults").innerHTML = ""; renderSenToggles();
-  $("#matchnote").textContent = "";
-  let prof = {}, parsed = {};
+  $("#matchmodal").hidden = false; $("#matchnote").textContent = "";
+  let prof = {};
   try{ prof = await (await fetch("/me/profile", {headers: authHeaders()})).json(); }catch(e){}
-  try{ parsed = (await (await fetch("/me/profile/parse-resume", {headers: authHeaders()})).json()).profile || {}; }catch(e){}
-  const profile = {...parsed, ...(prof.profile||{})};
   const hasResume = !!prof.resume;
   $("#matchresumestatus").textContent = hasResume ? ("Résumé on file"+(prof.resume&&prof.resume.name?" — "+prof.resume.name:"")) : "No résumé yet — upload one to get started";
-  if(hasResume || Object.keys(profile).length>=3){ applyMatchDefaults(profile); $("#matchnote").textContent="Step 2 is pre-filled from your résumé — adjust anything, then Find matching jobs."; }
-  else { $("#matchnote").textContent="Upload your résumé in step 1 to get matches."; }
-  // REMEMBERED config wins over the heuristic defaults (locations/roles/seniority/company & more).
-  try{
-    const cfg = (await (await fetch("/me/match-jobs/config", {headers: authHeaders()})).json()).config;
-    if(cfg) applySavedConfig(cfg);
-  }catch(e){}
+  $("#matchnote").textContent = hasResume ? "Ready — search jobs with it below, or let AI read it first."
+                                          : "Upload your résumé in step 1, then search jobs with it.";
+  const go = $("#mGo"); if(go) go.disabled = !hasResume;
 }
-function applySavedConfig(cfg){
-  cfg = cfg || {};
-  if(Array.isArray(cfg.locations)){ MATCH_LOCS = cfg.locations.slice(); renderChips("mLocBox", MATCH_LOCS); }
-  if(Array.isArray(cfg.role_keywords)){ MATCH_ROLES = cfg.role_keywords.slice(); renderChips("mRoleBox", MATCH_ROLES); }
-  if(Array.isArray(cfg.seniorities)){ MATCH_SENS = new Set(cfg.seniorities); renderSenToggles(); }
-  const set = (id,v)=>{ const el=$(id); if(el) el.checked = !!v; };
-  const ct = new Set(cfg.company_types||[]);
-  set("#mF500", ct.has("f500")); set("#mPublic", ct.has("public")); set("#mStartup", ct.has("startup"));
-  set("#mRemote", cfg.remote);
-  if(cfg.min_salary){ const s=$("#mSal"); if(s) s.value = cfg.min_salary; }
-  if(Array.isArray(cfg.exclude_keywords)){ const x=$("#mExclude"); if(x) x.value = cfg.exclude_keywords.join(", "); }
+// THE HAND-OFF: the résumé is an input to the Jobs search, so this leaves the setup surface and runs
+// that search with 🎯 on and an empty box — the résumé is the whole ask. One search, one result
+// surface, one set of controls.
+function searchJobsWithResume(){
+  $("#matchmodal").hidden = true;
+  if(typeof setSearchMode === "function") setSearchMode("jobs");
+  USE_RESUME = true;
+  try{ localStorage.setItem("roster_use_resume", "1"); }catch(e){}
+  renderEvFilters();
+  const qi = document.getElementById("q"); if(qi) qi.value = "";
+  window.scrollTo({top:0});
+  askQuestion("", {});
 }
 // ✨ Fine tune config: a recruiter AI reads the résumé (recency-weighted, multi-dimensional) and
 // proposes an optimized config; we populate the form and show the candidate brief it built.
@@ -9412,13 +9409,11 @@ async function runFineTune(){
   const btn = $("#mFineTune"); const orig = btn ? btn.textContent : "";
   if(btn){ btn.disabled = true; btn.textContent = "✨ Reading your résumé like a recruiter…"; }
   try{
-    const cur = collectMatchPrefs();
-    const r = await fetch("/me/match-jobs/fine-tune", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(cur)});
+    const r = await fetch("/me/match-jobs/fine-tune", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: "{}"});
     if(!r.ok){ const e = await r.json().catch(()=>({})); $("#matchnote").textContent = e.detail || "Couldn't fine-tune — upload/parse a résumé first."; return; }
     const d = await r.json();
-    if(d.config) applySavedConfig(d.config);
     renderBrief(d.brief);
-    $("#matchnote").textContent = "Config fine-tuned from your résumé — review and Find matches.";
+    $("#matchnote").textContent = "Brief built from your résumé — searches with 🎯 Use my résumé are shaped by it.";
   }catch(e){ $("#matchnote").textContent = "Fine-tune failed — try again."; }
   finally{ if(btn){ btn.disabled = false; btn.textContent = orig; } }
 }
@@ -9436,58 +9431,8 @@ function renderBrief(b){
       ${(b.major_achievements||[]).length?`<div><b>Major achievements</b><ul style="margin:.2rem 0;padding-left:1.1rem;">${li(b.major_achievements)}</ul></div>`:""}
     </div></details>`;
 }
-function collectMatchPrefs(){
-  return {
-    locations: MATCH_LOCS.slice(),
-    role_keywords: MATCH_ROLES.map(s=>s.toLowerCase()),
-    seniorities: Array.from(MATCH_SENS),
-    min_salary: parseInt(($("#mSal")||{}).value||"0",10)||0,
-    remote: ($("#mRemote")||{}).checked,
-    company_types: [($("#mF500")||{}).checked&&"f500", ($("#mPublic")||{}).checked&&"public", ($("#mStartup")||{}).checked&&"startup"].filter(Boolean),
-    ...geoPayload(), limit: 40,
-    seen_ids: seenJobIds(),   // ids shown in prior runs — the server rotates fresh options in
-    exclude_keywords: (($("#mExclude")||{}).value||"").split(",").map(s=>s.trim().toLowerCase()).filter(Boolean).slice(0,12),
-  };
-}
-// VARIETY memory for Find-jobs: the browser remembers which job ids were already shown (capped,
-// per-device); the match engine demotes those so every run exposes different available options.
-function seenJobIds(){ try{ return JSON.parse(localStorage.getItem("roster_seen_job_ids")||"[]").slice(-300); }catch(e){ return []; } }
-function rememberSeenJobs(jobs){ try{
-  // remember the JOB identity (server-provided company|title key) — a twin row of the same posting
-  // under another id/source must count as seen too; fall back to the row id for old payloads.
-  const add = (jobs||[]).map(j=>String(j.key||j.id||"")).filter(Boolean);
-  const merged = [...new Set([...seenJobIds(), ...add])].slice(-300);
-  localStorage.setItem("roster_seen_job_ids", JSON.stringify(merged));
-}catch(e){} }
-function resetJobRotation(){ try{ localStorage.removeItem("roster_seen_job_ids"); }catch(e){} runMatch(); }
-async function runMatch(){
-  const prefs = collectMatchPrefs();
-  $("#matchnote").textContent = "Matching your résumé to open roles…"; $("#matchresults").innerHTML = "";
-  try{
-    const r = await fetch("/me/match-jobs", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(prefs)});
-    if(!r.ok){ const e = await r.json().catch(()=>({})); $("#matchnote").textContent = e.detail || "Upload your résumé above first."; return; }
-    const d = await r.json();
-    if(d.brief) renderBrief(d.brief);
-    renderMatchResults(d);
-  }catch(e){ $("#matchnote").textContent = "Match failed — try again."; }
-}
-function renderMatchResults(d){
-  const jobs = d.jobs||[];
-  const base = jobs.length ? (d.note||`Top ${jobs.length} matches for your résumé.`) : (d.note || "No matches yet — add or parse a résumé, or loosen preferences.");
-  $("#matchnote").innerHTML = esc(base) + (d.rotated
-    ? ` · <a href="#" onclick="resetJobRotation();return false;" style="color:var(--gold);">start over</a>` : "")
-    + scopeChip(d.geo_scope);
-  rememberSeenJobs(jobs);   // what's on screen now rotates DOWN next run (never removed)
-  // SAME CARDS as the Jobs tab (summary on click, 🚀 Apply, Apply directly, Intro path, feedback) and
-  // the same Save-as-Job-Map bar.
-  const view = {jobs, query: {}, stats: {}, geo_scope: d.geo_scope||null, note: "", matched_on: "resume", brief_contract: d.brief_contract||null, _noScope: true};
-  window.MATCH_JOBS = window.MATCH_JOBS || {};
-  jobs.forEach(j => { const jref = j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||"")); window.MATCH_JOBS[String(jref)] = {...j, from: "match"}; });
-  $("#matchresults").innerHTML = jobsMarkup(view);
-  jobs.forEach(j => { const jref = String(j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||""))); if(window.JOBS_INDEX && window.JOBS_INDEX[jref]) window.JOBS_INDEX[jref].from = "match"; });
-}
 $("#matchclose") && $("#matchclose").addEventListener("click", ()=>{ $("#matchmodal").hidden = true; });
-$("#mGo") && $("#mGo").addEventListener("click", runMatch);
+$("#mGo") && $("#mGo").addEventListener("click", searchJobsWithResume);
 $("#mFineTune") && $("#mFineTune").addEventListener("click", runFineTune);
 
 // ===== ✨ Job summary: AI reads the posting so the job seeker doesn't have to =====
@@ -9520,7 +9465,7 @@ function toggleJobSummary(ref){
   summarizeJob(ref);
 }
 async function summarizeJob(ref){
-  const j = (window.MATCH_JOBS||{})[ref] || (window.JOBS_INDEX||{})[ref];
+  const j = (window.JOBS_INDEX||{})[ref];
   if(!j || !j.url) return;
   const boxes = document.querySelectorAll(`.js-sumbox[data-ref="${CSS.escape(String(ref))}"]`);
   const set = html => boxes.forEach(b => { b.innerHTML = html; });
@@ -9577,15 +9522,11 @@ function saveAsPdf(title, text, filename, isResume){
 }
 $("#applyhdr") && $("#applyhdr").addEventListener("click", ()=>openApplyFlow({manual:true}));
 $("#matchbtn2") && $("#matchbtn2").addEventListener("click", ()=>{ $("#applymodal").hidden=true; openMatch(); });
-$("#mSenBox") && $("#mSenBox").addEventListener("click",(e)=>{ const t=e.target.closest(".sentog"); if(!t) return;
-  const k=t.dataset.sen; MATCH_SENS.has(k)?MATCH_SENS.delete(k):MATCH_SENS.add(k); renderSenToggles(); });
 $("#matchfile") && $("#matchfile").addEventListener("change",(e)=>{ if(e.target.files&&e.target.files[0]) matchUploadResume(e.target.files[0]); });
 $("#matchhdr") && $("#matchhdr").addEventListener("click", openMatch);   // top-level header button
-wireChipInput("mLocBox", MATCH_LOCS); wireChipInput("mRoleBox", MATCH_ROLES);
 
-// Smart role dropdown for "Find jobs": curated tech roles (grouped), so the Roles field guides the
-// choice instead of being totally free-form. Selecting a role adds it as a chip; the chip input stays
-// for a genuinely custom role. Kept in sync with MATCH_ROLES so runMatch sends the same role_keywords.
+// Curated role list — the Talent-Map/JD surfaces still offer it; the Find-jobs form that used to
+// consume it is gone (roles are typed into the Jobs box, or narrowed on the rail).
 const ROLE_OPTIONS = {
   "Engineering": ["Software Engineer","Frontend Engineer","Backend Engineer","Full-Stack Engineer",
     "Mobile Engineer","Platform Engineer","Infrastructure Engineer","DevOps Engineer","Site Reliability Engineer",
@@ -9598,20 +9539,6 @@ const ROLE_OPTIONS = {
     "Director of Engineering","VP of Engineering","CTO"],
   "Go-to-Market & Ops": ["Developer Advocate","Solutions Engineer","Sales Engineer","Technical Program Manager"],
 };
-function populateRoleSelect(){
-  const sel = $("#mRoleSel"); if(!sel || sel.dataset.filled) return;
-  Object.entries(ROLE_OPTIONS).forEach(([grp, roles])=>{
-    const og = document.createElement("optgroup"); og.label = grp;
-    roles.forEach(r=>{ const o=document.createElement("option"); o.value=r; o.textContent=r; og.appendChild(o); });
-    sel.appendChild(og);
-  });
-  sel.dataset.filled = "1";
-  sel.addEventListener("change", ()=>{
-    const v = sel.value; sel.value = "";
-    if(v && !MATCH_ROLES.includes(v)){ MATCH_ROLES.push(v); renderChips("mRoleBox", MATCH_ROLES); }
-  });
-}
-populateRoleSelect();
 
 // ===== Recruiter reverse-match: job description → ranked candidate people =====
 let JD_LOCS = [], JD_SENS = new Set(), JD_SKILLS = [], JD_SEARCH_TEXT = "", JD_LOC_LABEL = {};
@@ -10157,7 +10084,11 @@ async function reviseMapRun(){
 // summaries already read), notes, private link, CSV. Saved with map_type 'jobs'.
 function jobMapBarMarkup(d){
   const m = window.ACTIVE_MAP;
-  if(m && m.map_type === "jobs"){
+  // A SAVED MAP'S BAR describes the map's OWN rows. It used to draw on any jobs render while a map
+  // was active, so a later search wore the saved map's title, revision and row count over rows that
+  // were never in it. The bar belongs to the render carrying the map's id; every other render is an
+  // unsaved result and gets the Save button — a different list is a new map, never a silent edit.
+  if(m && m.map_type === "jobs" && (!d || !d._jpid || d._map_id === m.id)){
     const share = m.share_path ? `<button type="button" class="mb-btn" onclick="copyMapLink()">🔗 Copy private link</button>` : "";
     const csvHref = `/maps/${encodeURIComponent(m.id)}/export.csv${m.token?`?t=${encodeURIComponent(m.token)}`:""}`;
     const title = m.is_owner
@@ -10227,6 +10158,7 @@ async function forkJobMap(){
     if(!r.ok){ alert(res.detail || "Couldn't save the new map."); return; }
     window.ACTIVE_MAP = {id:res.id, map_type:"jobs", title:res.title, share_path:res.share_path, token:(res.share_token||""), is_owner:true,
                          reviews:{}, feedback:[], revisions:[], n_rows:rows.length, notes:"", refresh_every:"off"};
+    d._map_id = res.id; d._map_token = (res.share_token||""); d._map_owner = true;   // this render is the new map
     try{ history.replaceState(null, "", res.share_path); }catch(e){}
     renderThread();
   }catch(e){ alert("Couldn't save the new map — " + (e.message||e)); }
@@ -10236,9 +10168,11 @@ async function saveJobMap(jpid){
   const d = (window.JOBS_RENDERS||{})[jpid]; if(!d) return;
   const t = (THREAD.turns||[]).slice().reverse().find(x => x.kind === "jobs") || {};
   const rows = (d.jobs||[]).slice(0,400).map(j => ({...j, summary: (window.JOB_SUMMARIES||{})[j.url||""] || undefined}));
-  const briefTxt = d.matched_on === "resume" ? "Match jobs to my résumé" : (t.question||CURRENT_Q||"Job search");
-  const _lastRender = (window.JOBS_RENDERS && Object.values(window.JOBS_RENDERS).slice(-1)[0]) || {};
-  const body = {tenant_id:"demo", map_type:"jobs", brief:briefTxt, title:briefTxt.slice(0,80), contract:(_lastRender.contract||null),
+  const briefTxt = (t.question||CURRENT_Q||"").trim() || (d.matched_on ? "Roles matched to my résumé" : "Job search");
+  // THE CONTRACT OF THIS RENDER — not of whatever render happened to be inserted last. Saving map A
+  // while search B was on screen persisted B's contract against A's rows: a rail that described
+  // something else. (And a résumé match used to persist no contract at all, so the map had no rail.)
+  const body = {tenant_id:"demo", map_type:"jobs", brief:briefTxt, title:briefTxt.slice(0,80), contract:(d.contract||null),
     rows, coverage:{must:d.must||null, geo_scope:d.geo_scope||null, linkedin_profile:d.linkedin_profile||null, note:d.note||"", brief_contract:d.brief_contract||null,
                     counts:(d.counts||null)},   // the rail travels with the map: reopening it draws the chips at once
     filters:(d.query||{})};
@@ -10247,6 +10181,9 @@ async function saveJobMap(jpid){
     if(!r.ok){ const e = await r.json().catch(()=>({})); alert(e.detail || "Couldn't save the job map."); return; }
     const res = await r.json();
     window.ACTIVE_MAP = {id:res.id, map_type:"jobs", title:res.title, share_path:res.share_path, token:(res.share_token||""), is_owner:true, reviews:{}, feedback:[], revisions:[], n_rows:res.rows, notes:"", created_at:new Date().toISOString()};
+    // THIS RENDER *IS* THE MAP NOW: the map bar binds to it (and only it), and the rail can offer
+    // "save these filters to the map" without a reload — it needs _map_id to show that button.
+    d._map_id = res.id; d._map_token = (res.share_token||""); d._map_owner = true;
     try{ history.replaceState(null, "", res.share_path); }catch(e){}
     renderThread();
   }catch(e){ alert("Couldn't save the job map — " + (e.message||e)); }
@@ -10804,6 +10741,8 @@ document.addEventListener("click", e => {
   if(jpg){ e.preventDefault(); if(!jpg.disabled) gotoJobsPage(jpg.dataset.jpid, parseInt(jpg.dataset.page||"0",10)); return; }
   const rr = e.target.closest && e.target.closest(".ppl-rerank");
   if(rr){ e.preventDefault(); rerankShown(rr.dataset.pid); return; }
+  const ur = e.target.closest && e.target.closest("#useresumechip");
+  if(ur){ e.preventDefault(); toggleUseResume(); return; }        // a switch, not a must-have — caught first
   const ef = e.target.closest && e.target.closest("#evfilters .ev-filter");
   if(ef){ e.preventDefault(); toggleEvidenceFilter(ef.dataset.kind); return; }
   const aa = e.target.closest && e.target.closest(".aa-apply");
@@ -10901,7 +10840,6 @@ document.addEventListener("click", e => {
   if(!b) return;
   e.preventDefault();
   const v = b.dataset.scope || "us";
-  if(b.closest("#matchresults,#matchnote")){ setScopeOnly(v); if(typeof runMatch === "function") runMatch(); return; }
   if(b.closest("#jdresults,#jdnote")){ setScopeOnly(v); if(typeof runJDMatch === "function") runJDMatch(); return; }
   setScopeAndRerun(v);
 });

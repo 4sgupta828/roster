@@ -670,13 +670,6 @@ def jd_exclude_source_co_enabled() -> bool:
     return os.environ.get("ROSTER_JD_EXCLUDE_SOURCE_CO", "").lower() in ("1", "true", "yes")
 
 
-def _match_config_of(prefs: dict) -> dict:
-    """The rememberable Find-jobs config fields (what the form prefills next time)."""
-    return {k: prefs.get(k) for k in ("locations", "role_keywords", "seniorities", "remote",
-                                      "company_types", "min_salary", "country",
-                                      "exclude_keywords")}
-
-
 def _resume_fingerprint(profile: dict) -> str:
     """Stable hash of the résumé content — the recruiter brief is cached against this so it's rebuilt
     only when the résumé changes (not on every search)."""
@@ -1072,6 +1065,11 @@ class ResearchIn(BaseModel):
     #                                       SEARCH surfaces (never prose answers); Q&A owns questions
     refine_facets: dict | None = None     # People-tab CONVERSATION: the previous turn's accumulated facet
     #                                       filter — the new utterance refines/narrows it (None = fresh)
+    use_resume: bool = False              # 🎯 PROFILE-BASED SEARCH (opt-in): shape this jobs search with
+    #                                       the résumé on file. Opt-IN by design — the résumé used to
+    #                                       reshape every signed-in seeker's search invisibly, with no
+    #                                       control to turn it off. An attached/pasted CV or a LinkedIn
+    #                                       URL in the question supplies the profile without this flag.
     refine_query: dict | None = None      # Jobs-tab CONVERSATION: the previous turn's parsed job query —
     #                                       merged so follow-ups narrow the same search (None = fresh)
     prior_person: str = ""                # People-tab PERSON LOOKUP conversation: the name the previous
@@ -1955,6 +1953,22 @@ def thin_repeats(rows: list, *, per_title: int = 2) -> list:
         seen[k] = seen.get(k, 0) + 1
         out.append(r)
     return out
+
+
+def profile_slate(rows: list, *, per_company: int = 3) -> list:
+    """The slate a PROFILE search shows. `thin_repeats` first (an aggregator reposting one title cannot
+    fill the page), then at most `per_company` rows per employer LEAD — the overflow is appended, never
+    dropped, so one company's hundred open postings can't crowd out the rest of the market. Carried over
+    from the résumé matcher this path replaced; the order within is otherwise the evaluator's."""
+    lead, overflow, seen = [], [], {}
+    for r in thin_repeats(rows or []):
+        co = str((r or {}).get("company") or "").strip().lower()
+        if co and seen.get(co, 0) >= per_company:
+            overflow.append(r)
+        else:
+            seen[co] = seen.get(co, 0) + 1
+            lead.append(r)
+    return lead + overflow
 
 
 def create_app(service: ResearchService | None = None) -> FastAPI:
@@ -2842,13 +2856,25 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 pass
             return None
 
-        # A PASTED LINKEDIN PROFILE URL: "jobs for this person" — read what search engines show for
-        # that profile (name, headline, snippet; never linkedin.com itself) and run the résumé-style
-        # match on it, honoring the scope. No sign-in needed; a résumé upload gives a deeper match.
+        # ── PROFILE-BASED JOB SEARCH — ONE PATH (owner, 2026-09-09) ──────────────────────────────
+        # A jobs search takes a QUERY, a PROFILE, or both. The profile text comes from whichever
+        # source the request carries: a pasted LinkedIn profile URL, an attached résumé, a pasted CV,
+        # a self-description, or — opt-in via `use_resume` — the résumé on file. All of them land on
+        # the SAME contract → evaluator → rail as a typed search, so there is ONE job-matching system,
+        # one result surface and one set of controls (the rail). The second engine that served
+        # "Match jobs to my résumé" is gone, and with it a results list that could show no rail, save
+        # a map with no contract, and rank by rules the typed path never used.
+        #
+        # The résumé is never applied IMPLICITLY. It used to reshape every search a signed-in seeker
+        # ran — nothing on screen said so and there was no way to turn it off. Now a plain search
+        # stays plain until the seeker asks for their profile to shape it.
+        _prof_text, _matched_on, _li_profile, _prof_note = "", "", None, ""
         _li_m = re.search(r"https?://(?:[a-z]{2,3}\.)?linkedin\.com/in/[^\s]+", (body.question or ""), re.I)
         if _li_m:
+            # A PASTED LINKEDIN PROFILE URL: "jobs for this person" — read what search engines show for
+            # that profile (name, headline, snippet; never linkedin.com itself). No sign-in needed; a
+            # résumé upload gives a deeper match.
             from api.linkedin_resolve import profile_from_url
-            from api.people_population import match_resume_jobs
             prof = {}
             try:
                 prof = await asyncio.wait_for(profile_from_url(_li_m.group(0)), 20)
@@ -2856,7 +2882,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 prof = {}
             extra = (body.question or "").replace(_li_m.group(0), " ").strip()
             slug_name = " ".join(w.capitalize() for w in re.split(r"[-_]+", _li_m.group(0).rstrip("/").rsplit("/in/", 1)[-1]) if w and not w.isdigit() and len(w) > 1)
-            matched_on = "headline"
+            _matched_on = "headline"
             if not prof:
                 # NOT VISIBLE TO SEARCH ENGINES (private / not indexed — we never read linkedin.com itself):
                 # fall back to what we DO hold — the signed-in user's résumé, or text pasted with the link
@@ -2864,197 +2890,178 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 _acc = _accounts() if _user else None
                 _saved = ((await _acc.get_profile(_user["id"])).get("profile") or {}) if _acc else {}
                 _parsed = ((await _acc.get_parse(_user["id"])).get("profile") or {}) if _acc else {}
-                _prof_text = " ".join(str(x) for x in [_parsed.get("_resume_text", ""), _saved.get("summary", ""), _saved.get("current_title", "")] if x).strip()
-                if len(_prof_text) >= 40:
-                    prof = {"name": _user.get("name") or slug_name, "headline": _saved.get("current_title") or "", "snippet": _prof_text[:2000],
+                _on_file = " ".join(str(x) for x in [_parsed.get("_resume_text", ""), _saved.get("summary", ""), _saved.get("current_title", "")] if x).strip()
+                if len(_on_file) >= 40:
+                    prof = {"name": (_user or {}).get("name") or slug_name, "headline": _saved.get("current_title") or "", "snippet": _on_file[:2000],
                             "url": _li_m.group(0)}
-                    matched_on = "resume"
+                    _matched_on = "resume"
                 elif len(extra) >= 20:
                     prof = {"name": slug_name, "headline": "", "snippet": extra, "url": _li_m.group(0)}
-                    matched_on = "pasted"
+                    _matched_on = "pasted"
                 else:
                     from api.linkedin_resolve import search_unavailable
                     if search_unavailable():
                         return {"jobs": [], "count": 0, "query": {}, "stats": await store.jobs_stats(),
                                 "note": "Roster's web-search quota is exhausted right now, so the profile could not be looked up. "
-                                        "Paste your headline after the link, or upload a résumé under Find jobs."}
+                                        "Paste your headline after the link, or upload a résumé under 📄 My résumé."}
                     return {"jobs": [], "count": 0, "query": {}, "stats": await store.jobs_stats(),
                             "note": f"That LinkedIn profile isn't visible to search engines (private, or not indexed), and Roster never "
                                     f"reads linkedin.com directly — so there is nothing to match on yet. Two ways in: paste your headline "
                                     f"after the link (e.g. “{_li_m.group(0)} Senior backend engineer at Stripe, Go/Postgres/Kafka”), or "
-                                    f"sign in and upload your résumé under Find jobs — then paste the link again."}
-            text = " ".join(x for x in [prof.get("name", ""), prof.get("headline", ""), prof.get("snippet", ""), extra] if x)
-            res = await match_resume_jobs(store, {"_resume_text": text, "summary": prof.get("headline", "")},
-                                          {"limit": 40, "country": (body.country or "us"), "metro": (body.metro or ""),
-                                           "state": (body.state or "")})
-            jobs = res.get("jobs") or []
-            if body.job_must:
-                from api.people_population import apply_job_must
-                jobs, res["must"] = await apply_job_must(store, jobs, body.job_must)
-            jobs = await _with_employer(jobs)
-            res.update({"jobs": jobs, "count": len(jobs), "query": {"company": [], "title_keywords": [], "location": ""},
-                        "linkedin_profile": {"name": prof.get("name"), "headline": prof.get("headline"), "url": prof.get("url")},
-                        "note": ({"headline": f"Matched to {prof.get('name')}'s LinkedIn headline — “{prof.get('headline') or 'no headline shown'}” "
-                                              f"(as search engines show it). For a deeper match, upload a résumé under Find jobs.",
-                                  "resume": f"That profile isn't visible to search engines, so these roles are matched to the résumé on your account instead.",
-                                  "pasted": f"That profile isn't visible to search engines, so these roles are matched to the text you pasted with the link."}[matched_on]),
-                        "stats": await store.jobs_stats()})
-            from api.people_population import apply_level_pref, job_brief_contract
-            jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job", span=int(body.level_span))
-            res.update({"jobs": await _with_employer(jobs), "count": len(jobs)})
-            res["brief_contract"] = job_brief_contract(question=body.question or "", job_must=body.job_must, scope=res.get("geo_scope"),
-                                                       profile_text=text, matched_on=matched_on, levels=body.levels, level_span=int(body.level_span))
-            res["session_id"] = await _save_job_session(jobs, res["query"])
-            return res
+                                    f"sign in and upload your résumé under 📄 My résumé — then paste the link again."}
+            _prof_text = " ".join(x for x in [prof.get("name", ""), prof.get("headline", ""), prof.get("snippet", ""), extra] if x)
+            _li_profile = {"name": prof.get("name"), "headline": prof.get("headline"), "url": prof.get("url")}
+            _prof_note = {"headline": f"Matched to {prof.get('name')}'s LinkedIn headline — “{prof.get('headline') or 'no headline shown'}” "
+                                      f"(as search engines show it). For a deeper match, upload a résumé under 📄 My résumé.",
+                          "resume": "That profile isn't visible to search engines, so these roles are matched to the résumé on your account instead.",
+                          "pasted": "That profile isn't visible to search engines, so these roles are matched to the text you pasted with the link."}[_matched_on]
 
-        # A RÉSUMÉ (attached PDF / text file, or pasted) or a SELF-DESCRIPTION ("SDE/SRE roles for me,
-        # I'm a software engineer with 5 years…") is a PROFILE, not a query: it goes to résumé matching
-        # (title / skills / level), never to free-text vector search over posting titles. Signed-in
-        # users with a parsed résumé on file get it used when they say "for me" / "my résumé".
-        from api.media import attachment_texts_async
-        from api.people_population import is_self_description, years_to_levels
-        from api.qa_router import extract_resume_text
-        _att_texts = await attachment_texts_async([a.model_dump() for a in (body.attachments or [])])
-        _ask, _pasted_cv = extract_resume_text(body.question or "")
-        _qs = (body.question or "").strip()
-        # a bare "jobs for me" stays a search; a description of oneself (or an explicit résumé mention) is a profile
-        _self = is_self_description(_qs) and (len(_qs) >= 60 or bool(re.search(r"(?i)\b(my r[ée]sum[ée]|my cv|based on my|my background|my profile)\b", _qs)))
-        if _att_texts or _pasted_cv or _self:
-            from api.people_population import apply_job_must, match_resume_jobs
-            cv_text, matched_on = "", ""
-            if _att_texts:
-                cv_text, matched_on = "\n\n".join(t for _, t in _att_texts)[:20000], "attachment"
-            elif _pasted_cv:
-                cv_text, matched_on = _pasted_cv, "pasted"
-            else:
-                _user = await _optional_user(x_roster_token)
-                _acc = _accounts() if _user else None
-                _parsed = ((await _acc.get_parse(_user["id"])).get("profile") or {}) if _acc else {}
-                _saved = ((await _acc.get_profile(_user["id"])).get("profile") or {}) if _acc else {}
-                _on_file = " ".join(str(x) for x in [_parsed.get("_resume_text", ""), _saved.get("summary", ""), _saved.get("current_title", "")] if x).strip()
-                if len(_on_file) >= 40:
-                    cv_text, matched_on = (body.question or "") + "\n\n" + _on_file, "resume"
+        if not _prof_text:
+            # A RÉSUMÉ (attached PDF / text file, or pasted) or a SELF-DESCRIPTION ("SDE/SRE roles for me,
+            # I'm a software engineer with 5 years…") is a PROFILE, not a query: the text itself is what
+            # the search is shaped by, never a free-text vector search over posting titles.
+            from api.media import attachment_texts_async
+            from api.people_population import is_self_description
+            from api.qa_router import extract_resume_text
+            _att_texts = await attachment_texts_async([a.model_dump() for a in (body.attachments or [])])
+            _ask, _pasted_cv = extract_resume_text(body.question or "")
+            _qs = (body.question or "").strip()
+            # a bare "jobs for me" stays a search; a description of oneself (or an explicit résumé mention) is a profile
+            _names_own_resume = bool(re.search(r"(?i)\b(my r[ée]sum[ée]|my cv|based on my|my background|my profile)\b", _qs))
+            _self = is_self_description(_qs) and (len(_qs) >= 60 or _names_own_resume)
+            if _att_texts or _pasted_cv or _self:
+                _names = ", ".join(n for n, _ in _att_texts)
+                if _att_texts:
+                    _prof_text, _matched_on = "\n\n".join(t for _, t in _att_texts)[:20000], "attachment"
+                elif _pasted_cv:
+                    _prof_text, _matched_on = _pasted_cv, "pasted"
+                elif _names_own_resume:
+                    # THEY ASKED FOR IT BY NAME — that is the opt-in; read the résumé on file.
+                    _user = await _optional_user(x_roster_token)
+                    _acc = _accounts() if _user else None
+                    _parsed = ((await _acc.get_parse(_user["id"])).get("profile") or {}) if _acc else {}
+                    _saved = ((await _acc.get_profile(_user["id"])).get("profile") or {}) if _acc else {}
+                    _on_file = " ".join(str(x) for x in [_parsed.get("_resume_text", ""), _saved.get("summary", ""), _saved.get("current_title", "")] if x).strip()
+                    if len(_on_file) >= 40:
+                        _prof_text, _matched_on = _qs + "\n\n" + _on_file, "resume"
                 elif len(_qs) >= 60 and re.search(r"(?i)\b(i(?:'|’)?m an?|i am an?|\d+\+? ?years?|skilled|experience (?:in|with)|worked (?:at|on|with)|proficient)\b", _qs) \
                         and not re.search(r"(?i)\b(can i|could i|how do i|where do i|give you|upload|attach|send you)\b", _qs):
-                    cv_text, matched_on = _qs, "description"      # it DESCRIBES a person (role / years / skills), not a meta-question
-            if not cv_text:
+                    _prof_text, _matched_on = _qs, "description"      # it DESCRIBES a person (role / years / skills), not a meta-question
+                if not _prof_text:
+                    return {"jobs": [], "count": 0, "query": {}, "stats": await store.jobs_stats(), "needs_profile": True,
+                            "note": "To match roles to you, attach your résumé (📎, PDF or text) or describe your background in a "
+                                    "sentence — role, years, main skills — e.g. “backend engineer, 5 years, Java, Kubernetes, Postgres”."}
+                _prof_note = {"attachment": f"Matched to your attached résumé ({_names}) — title, skills and level first, wording second.",
+                              "pasted": "Matched to the résumé you pasted — title, skills and level first, wording second.",
+                              "resume": "Matched to the résumé on your account plus what you wrote — title, skills and level first.",
+                              "description": "Matched to your description — title, skills and level first. Attach a résumé (📎) for a deeper match."}[_matched_on]
+
+        if not _prof_text and body.use_resume:
+            # THE OPT-IN: 🎯 Use my résumé. With nothing typed this is what "Match jobs to my résumé"
+            # used to be — the same search, on the one path, with the rail as its controls.
+            _pu = await _optional_user(x_roster_token)
+            _pacc = _accounts() if _pu else None
+            _prof = {}
+            if _pacc is not None:
+                try:
+                    _prof = {**((await _pacc.get_parse(_pu["id"])).get("profile") or {}),
+                             **((await _pacc.get_profile(_pu["id"])).get("profile") or {})}
+                except Exception:  # noqa: BLE001
+                    _prof = {}
+            _resume_text = str(_prof.get("_resume_text") or "")
+            if len(_resume_text) < 200:
                 return {"jobs": [], "count": 0, "query": {}, "stats": await store.jobs_stats(), "needs_profile": True,
-                        "note": "To match roles to you, attach your résumé (📎, PDF or text) or describe your background in a "
-                                "sentence — role, years, main skills — e.g. “backend engineer, 5 years, Java, Kubernetes, Postgres”."}
+                        "note": "Upload your résumé under 📄 My résumé to search by your profile — or type what you're looking for."}
+            # THE CACHED recruiter brief is the résumé's 'soul' (built once by ✨ Fine tune, keyed to the
+            # résumé's fingerprint). Reused here, never rebuilt per search — that would be an LLM call
+            # on every click.
+            _brief_txt = ""
+            if recruiter_match_enabled():
+                _cb = await _get_cached_brief(_pacc, _pu["id"])
+                if _cb and _cb.get("hash") == _resume_fingerprint(_prof) and (_cb.get("brief") or {}).get("search_text"):
+                    _brief_txt = _cb["brief"]["search_text"]
+            _prof_text, _matched_on = (_brief_txt or _resume_text[:1500]), "resume"
+            _prof_note = ("Shaped by your résumé" + (" and the brief from ✨ Fine tune" if _brief_txt else "")
+                          + " — the chips below are the search; turn off 🎯 Use my résumé for a plain one.")
+
+        if _prof_text:
+            from api.people_population import (apply_job_must, apply_level_pref, job_brief_contract,
+                                               match_resume_jobs, profile_skills, years_to_levels)
+            _qs_txt = (body.question or "").strip()
+            if _li_m:
+                _qs_txt = _qs_txt.replace(_li_m.group(0), " ").strip()
+            if _matched_on in ("attachment", "pasted", "description"):
+                _qs_txt = ""          # the question WAS the profile — there is no query left in it
+            if facet_evaluator_enabled():
+                from api.facets_engine import compile_contract, downgrade_uncovered_musts
+                from roster_kernel.facets import Contract as _Contract
+                _scope = {"country": (body.country or "us").strip().lower()}
+                if _qs_txt:
+                    _c = await asyncio.to_thread(compile_contract, "job", _qs_txt, _facet_schema(), _llm_json, limit=80, scope=_scope)
+                    downgrade_uncovered_musts(_c, await _facet_coverage("job"))
+                else:
+                    # NOTHING TYPED: the profile is the whole ask, so there is no query to parse and no
+                    # contract to compile. It is built from the profile and the tab's own toggles at zero
+                    # model cost — the surface this replaces spent two LLM calls compiling an empty string.
+                    _c = _Contract(kind="job", limit=80, scope=dict(_scope))
+                _c, _ia_notes = await _index_aware(_c, kind="job", user_keys={k for k in ("work_mode", "company_type", "level") if body.job_must})
+                # WHAT WAS TYPED STEERS, THE PROFILE SHAPES: both are the semantic text, query first.
+                _c.text = "\n\n".join(x for x in (_qs_txt, _prof_text) if x).strip()
+                _sk = profile_skills(_prof_text, limit=8)
+                if _sk and "skill" not in _c.prefer:
+                    _c.prefer["skill"] = sorted(set(_sk))
+                _lvl = (body.levels or [""])[0] or (sorted(years_to_levels(_prof_text)) or [""])[0]
+                if _lvl and not _c.center:
+                    _c.center = {"key": "level", "value": _lvl, "span": int(body.level_span)}
+                # THE SAME scope + toggle musts the typed path applies. The résumé path used to skip
+                # them entirely (it passed scope=None and set no country must), so a US-scoped résumé
+                # search quietly returned postings from anywhere.
+                if _scope.get("country") and not _c.must.get("country"):
+                    _c.must["country"] = [_scope["country"]]
+                if (body.metro or "").strip() and not _c.must.get("metro"):
+                    _c.must["metro"] = [body.metro.strip().lower()]
+                elif (body.state or "").strip() and not _c.must.get("state"):
+                    _c.must["state"] = [body.state.strip().lower()]
+                for _m in (body.job_must or []):
+                    if _m in ("remote", "hybrid"):
+                        _c.must.setdefault("work_mode", []).append(_m)
+                    elif _m in ("f500", "public", "startup"):
+                        _c.must.setdefault("company_type", []).append("fortune500" if _m == "f500" else _m)
+                    elif _m == "leadership":
+                        _c.must.setdefault("level", []).append("leadership")
+                _out = await _run_contract({**_c.to_dict(), "user_keys": [k for k in ("work_mode", "company_type", "level") if body.job_must],
+                                            "notes": list(_ia_notes or [])}, "job", relax=True)
+                _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display", "fit", "fit_why", "found_by")},
+                          "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in _out["rows"]]
+                _rows = await _with_employer(profile_slate(_rows))
+                stats = await store.jobs_stats()
+                sid = await _save_job_session(_rows, {"title_keywords": [], "company": [], "location": ""})
+                bc = job_brief_contract(question=_qs_txt, plan={"variants": _c.angles, "intent": ""}, job_must=body.job_must, scope=None,
+                                        profile_text=_prof_text, matched_on=_matched_on, levels=body.levels, level_span=int(body.level_span))
+                bc["contract"] = _out["contract"]; bc["counts"] = _out["counts"]; bc["coverage"] = _out["coverage"]
+                return {"jobs": _rows, "count": len(_rows), "query": {}, "semantic": True, "stats": stats, "geo_scope": None, "session_id": sid,
+                        "must": None, "level_pref": None, "brief_contract": bc, "contract": _out["contract"], "counts": _out["counts"], "coverage": _out["coverage"],
+                        "labels": _out.get("labels"), "merge": _out.get("merge"), "relaxed": _out.get("relaxed") or [], "timings": _out.get("timings") or {},
+                        "group_options": _group_options(_rows), "matched_on": _matched_on,
+                        **({"linkedin_profile": _li_profile} if _li_profile else {}),
+                        "note": _prof_note or f"evaluator — {_out['coverage'].get('pool', 0)} candidates"}
+            # ---- evaluator OFF (ROSTER_FACET_EVALUATOR unset): the legacy matcher, unchanged ----
             prefs = {"limit": 40, "country": (body.country or "us"), "metro": (body.metro or ""), "state": (body.state or ""),
-                     "seniorities": sorted(years_to_levels(cv_text if matched_on != "resume" else (body.question or "")) or years_to_levels(cv_text))}
-            res = await match_resume_jobs(store, {"_resume_text": cv_text, "summary": (_ask if _pasted_cv else "")}, prefs)
+                     "seniorities": sorted(years_to_levels(_prof_text))}
+            res = await match_resume_jobs(store, {"_resume_text": _prof_text}, prefs)
             jobs = res.get("jobs") or []
             if body.job_must:
                 jobs, res["must"] = await apply_job_must(store, jobs, body.job_must)
-            _names = ", ".join(n for n, _ in _att_texts)
+            jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job", span=int(body.level_span))
             jobs = await _with_employer(jobs)
             res.update({"jobs": jobs, "count": len(jobs), "query": {"company": [], "title_keywords": [], "location": ""},
-                        "matched_on": matched_on,
-                        "note": {"attachment": f"Matched to your attached résumé ({_names}) — title, skills and level first, wording second.",
-                                 "pasted": "Matched to the résumé you pasted — title, skills and level first, wording second.",
-                                 "resume": "Matched to the résumé on your account plus what you wrote — title, skills and level first.",
-                                 "description": "Matched to your description — title, skills and level first. Attach a résumé (📎) for a deeper match."}[matched_on],
-                        "stats": await store.jobs_stats()})
-            from api.people_population import apply_level_pref, job_brief_contract
-            jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job", span=int(body.level_span))
-            res.update({"jobs": await _with_employer(jobs), "count": len(jobs)})
-            res["brief_contract"] = job_brief_contract(question=body.question or "", job_must=body.job_must, scope=res.get("geo_scope"),
-                                                       profile_text=cv_text, matched_on=matched_on, levels=body.levels, level_span=int(body.level_span))
+                        "matched_on": _matched_on, "note": _prof_note, "stats": await store.jobs_stats()})
+            if _li_profile:
+                res["linkedin_profile"] = _li_profile
+            res["brief_contract"] = job_brief_contract(question=_qs_txt, job_must=body.job_must, scope=res.get("geo_scope"),
+                                                       profile_text=_prof_text, matched_on=_matched_on, levels=body.levels, level_span=int(body.level_span))
             res["session_id"] = await _save_job_session(jobs, res["query"])
             return res
-
-        # PROFILE-STEERED search (signed in, résumé on file): the free-text query runs through the
-        # résumé-match engine — the query steers, the résumé's brief + remembered preferences shape —
-        # instead of a bare vector search over titles. What made "Match jobs to résumé" good, for Jobs.
-        _pu = await _optional_user(x_roster_token)
-        _pacc = _accounts() if _pu else None
-        if _pacc is not None and not (body.refine_query and isinstance(body.refine_query, dict) and body.refine_query.get("company")):
-            try:
-                _saved = ((await _pacc.get_profile(_pu["id"])).get("profile") or {})
-                _parsed = ((await _pacc.get_parse(_pu["id"])).get("profile") or {})
-            except Exception:  # noqa: BLE001
-                _saved, _parsed = {}, {}
-            _prof = {**_parsed, **_saved}
-            # a READY Guided contract is the ask; the résumé-on-file match must not pre-empt it (it did: the intake's
-            # ratified contract was ignored for every signed-in seeker with a résumé)
-            if len(str(_prof.get("_resume_text") or "")) >= 200 and not body.contract:
-                from api.people_population import (apply_job_must, apply_level_pref, job_brief_contract, match_resume_jobs,
-                                                   parse_job_query, profile_search_prefs)
-                try:
-                    _pq = await parse_job_query(body.question, build_llm(mode=resolve_mode()))
-                except Exception:  # noqa: BLE001
-                    _pq = {"company": [], "title_keywords": [], "location": ""}
-                _cos = [c for c in (_pq.get("company") or []) if str(c).strip()]
-                if not _cos:      # a company-named search stays the company's own board (below)
-                    _brief_txt = ""
-                    try:
-                        _cb = await _get_cached_brief(_pacc, _pu["id"])
-                        if _cb and _cb.get("hash") == _resume_fingerprint(_prof) and (_cb.get("brief") or {}).get("search_text"):
-                            _brief_txt = _cb["brief"]["search_text"]
-                    except Exception:  # noqa: BLE001
-                        _brief_txt = ""
-                    try:
-                        _cfg = json.loads(await _pacc.get_pref(_pu["id"], "match_config") or "{}")
-                    except Exception:  # noqa: BLE001
-                        _cfg = {}
-                    _geo = people_geo_scope_enabled()
-                    prefs = profile_search_prefs(body.question or "", brief_search_text=_brief_txt, saved_config=_cfg,
-                                                 title_keywords=_pq.get("title_keywords") or [], level=(body.levels or [""])[0],
-                                                 country=((body.country or "us").strip().lower() if _geo else ""),
-                                                 metro=((body.metro or "") if _geo else ""), state=((body.state or "") if _geo else ""))
-                    if facet_evaluator_enabled():
-                        # RÉSUMÉ → CONTRACT (spec §6): the brief compiles the query; the résumé's soul joins the
-                        # semantic text; named skills become prefers; the stated level centres.
-                        from api.facets_engine import compile_contract, downgrade_uncovered_musts
-                        from api.people_population import profile_skills, years_to_levels
-                        _sc = {"country": (body.country or "us").strip().lower()}
-                        _c = await asyncio.to_thread(compile_contract, "job", body.question or "", _facet_schema(), _llm_json, limit=80, scope=_sc)
-                        downgrade_uncovered_musts(_c, await _facet_coverage("job"))
-                        _c.text = ((body.question or "").strip() + "\n\n" + (_brief_txt or str(_prof.get("_resume_text") or "")[:1500])).strip()
-                        _sk = profile_skills(str(_prof.get("_resume_text") or ""), limit=8)
-                        if _sk and "skill" not in _c.prefer:
-                            _c.prefer["skill"] = sorted(set(_sk))
-                        _lvl = (body.levels or [""])[0] or (sorted(years_to_levels(str(_prof.get("_resume_text") or ""))) or [""])[0]
-                        if _lvl and not _c.center:
-                            _c.center = {"key": "level", "value": _lvl, "span": int(body.level_span)}
-                        for _m in (body.job_must or []):
-                            if _m in ("remote", "hybrid"):
-                                _c.must.setdefault("work_mode", []).append(_m)
-                            elif _m in ("f500", "public", "startup"):
-                                _c.must.setdefault("company_type", []).append("fortune500" if _m == "f500" else _m)
-                            elif _m == "leadership":
-                                _c.must.setdefault("level", []).append("leadership")
-                        _out = await _run_contract({**_c.to_dict(), "user_keys": [k for k in ("work_mode", "company_type", "level") if body.job_must]}, "job", relax=True)
-                        _rows = [{**{k: r.get(k) for k in ("id", "company", "title", "location", "department", "url", "source", "match_pct", "reasons", "facets", "provenance", "display")},
-                                  "seniority": ((r.get("facets") or {}).get("level") or [""])[0], "updated_at": r.get("updated_at")} for r in _out["rows"]]
-                        _rows = await _with_employer(thin_repeats(_rows))
-                        stats = await store.jobs_stats()
-                        sid = await _save_job_session(_rows, {"title_keywords": _pq.get("title_keywords") or [], "company": [], "location": _pq.get("location") or ""})
-                        bc = job_brief_contract(question=body.question or "", plan={"variants": _c.angles, "intent": ""}, job_must=body.job_must, scope=None,
-                                                profile_text=str(_prof.get("_resume_text") or ""), matched_on="resume", levels=body.levels, level_span=int(body.level_span))
-                        bc["contract"] = _out["contract"]; bc["counts"] = _out["counts"]; bc["coverage"] = _out["coverage"]
-                        return {"jobs": _rows, "count": len(_rows), "query": _pq, "semantic": True, "stats": stats, "geo_scope": None, "session_id": sid,
-                                "must": None, "level_pref": None, "brief_contract": bc, "contract": _out["contract"], "counts": _out["counts"], "coverage": _out["coverage"],
-                                "labels": _out.get("labels"), "relaxed": _out.get("relaxed") or [], "note": f"evaluator — {_out['coverage'].get('pool', 0)} candidates · your résumé shapes"}
-                    res = await match_resume_jobs(store, _prof, prefs)
-                    jobs = list(res.get("jobs") or [])
-                    if body.job_must:
-                        jobs, res["must"] = await apply_job_must(store, jobs, body.job_must)
-                    jobs, res["level_pref"] = apply_level_pref(jobs, (body.levels or [""])[0], kind="job", span=int(body.level_span))
-                    bc = job_brief_contract(question=body.question or "", query=_pq, job_must=body.job_must, scope=res.get("geo_scope"),
-                                            profile_text=str(_prof.get("_resume_text") or ""), matched_on="resume",
-                                            levels=body.levels, level_span=int(body.level_span))
-                    bc["soft"] = {"title words": [str(k) for k in (_pq.get("title_keywords") or [])][:6], **bc.get("soft", {})} if _pq.get("title_keywords") else bc.get("soft", {})
-                    bc["ranking"] = ("your search steers, your résumé shapes: postings whose title carries your search words lead; within them, "
-                                     "similarity to your résumé's brief, your remembered preferences, skills the posting names, the level you "
-                                     "centered on and location — the reasons are on each card")
-                    res.update({"jobs": jobs, "count": len(jobs), "query": {"company": [], "title_keywords": _pq.get("title_keywords") or [], "location": _pq.get("location") or ""},
-                                "matched_on": "profile_search", "brief_contract": bc,
-                                "note": "Matched to your résumé, steered by this search" + (" and the brief from Fine-tune" if _brief_txt else "")
-                                        + ". Sign out (or search a company by name) for a plain search.", "stats": await store.jobs_stats()})
-                    res["session_id"] = await _save_job_session(jobs, res["query"])
-                    return res
 
         if facet_evaluator_enabled():
             # THE EVALUATOR (docs/specs/facet-contract-evaluator.md): brief → contract → rows + counts.
@@ -7676,42 +7683,6 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         store, user = await _require_user(x_roster_token)
         return await store.get_parse(user["id"])
 
-    @app.post("/me/match-jobs")
-    async def me_match_jobs(body: MatchIn, x_roster_token: str = Header(default="")) -> dict:
-        """On-demand résumé → best-matching jobs, ranked by the user's preferences (location/remote,
-        seniority, role, company type, best-effort salary). Uses the stored parsed profile + embeddings."""
-        store, user = await _require_user(x_roster_token)
-        saved = (await store.get_profile(user["id"])).get("profile") or {}
-        parsed = (await store.get_parse(user["id"])).get("profile") or {}
-        profile = {**parsed, **saved}   # merge parsed résumé data; the user's saved edits win
-        cstore = _claim_store_cached()
-        if cstore is None:
-            raise HTTPException(status_code=503, detail="job index unavailable")
-        from api.people_population import match_resume_jobs
-        prefs = body.model_dump()
-        prefs.pop("brief_text", None)   # server-controlled — never honor a client-supplied brief_text
-        # REMEMBER the config for next time (prefilled via GET /me/match-jobs/config) — off the hot path.
-        asyncio.create_task(_safe_set_pref(store, user["id"], "match_config",
-                                           json.dumps(_match_config_of(prefs))))
-        # RECRUITER BRIEF (flag): match on the recency-weighted "soul" — but reuse the CACHED brief built
-        # by "Fine tune" (keyed to the résumé fingerprint); never build it per-search (cost/latency).
-        brief = None
-        if recruiter_match_enabled():
-            cached = await _get_cached_brief(store, user["id"])
-            if cached and cached.get("hash") == _resume_fingerprint(profile) and cached.get("brief"):
-                brief = cached["brief"]
-                if brief.get("search_text"):
-                    prefs["brief_text"] = brief["search_text"]
-                if brief.get("fields") or brief.get("field"):     # the model's read of the candidate's field(s)
-                    prefs["profile_fields"] = list(brief.get("fields") or []) + ([brief["field"]] if brief.get("field") else [])
-        try:
-            res = await match_resume_jobs(cstore, profile, prefs)
-            if brief:
-                res["brief"] = brief
-            return res
-        except Exception as e:   # noqa: BLE001
-            raise HTTPException(status_code=502, detail=f"match failed: {e}") from e
-
     async def _safe_set_pref(store, uid: str, key: str, val: str) -> None:
         try:
             await store.set_pref(uid, key, val)
@@ -7724,16 +7695,6 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             return json.loads(raw) if raw else None
         except Exception:   # noqa: BLE001
             return None
-
-    @app.get("/me/match-jobs/config")
-    async def me_match_config(x_roster_token: str = Header(default="")) -> dict:
-        """The user's last Find-jobs config (locations/roles/seniority/company-types/…) to prefill the form."""
-        store, user = await _require_user(x_roster_token)
-        try:
-            raw = await store.get_pref(user["id"], "match_config")
-            return {"config": json.loads(raw) if raw else None}
-        except Exception:   # noqa: BLE001
-            return {"config": None}
 
     @app.post("/me/match-jobs/fine-tune")
     async def me_match_fine_tune(body: MatchIn, x_roster_token: str = Header(default="")) -> dict:
