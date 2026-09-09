@@ -112,7 +112,13 @@ FACET_WEIGHTS = FacetWeights(
     prefer={"field": 0.25, "work_type": 0.20, "function": 0.15, "metro": 0.15, "state": 0.15, "country": 0.10, "work_mode": 0.15, "company_type": 0.12, "company": 0.15, "company_industry": 0.22,
             "skill": 0.06, "role_family": 0.10, "specialty": 0.08, "evidence": 0.10, "level": 0.12},
     avoid={"field": 0.30, "function": 0.15, "level": 0.10, "metro": 0.10, "work_mode": 0.10, "company": 0.15, "company_type": 0.10, "company_industry": 0.25},
-    default_prefer=0.10, default_avoid=0.10, center_per_step=0.06, max_hits_per_key=3)
+    default_prefer=0.10, default_avoid=0.10, center_per_step=0.06, max_hits_per_key=3,
+    # 0.60 similarity units = 30 points on the calibrated match scale — just under the 5-point-band gap
+    # the ranking rule names ("a 25 % match with preferred values must never outrank a 60 % one":
+    # 25 + 30 < 60). Below a dozen preferred values nothing reaches it, so a typed search ranks exactly
+    # as before; a résumé's search profile, which speaks about every key it can read off a person,
+    # stops being able to out-point relevance itself.
+    max_prefer=0.60)
 
 SCHEMA_VERSION = FACET_SCHEMA.version()
 

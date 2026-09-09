@@ -22,6 +22,15 @@ class FacetWeights:
     default_avoid: float = 0.10
     center_per_step: float = 0.06                  # per ordinal step beyond `span`
     max_hits_per_key: int = 3
+    # CEILING ON THE TOTAL PREFERENCE BONUS, in similarity units (None = uncapped, the old behaviour).
+    # The per-key weights were sized for a contract that speaks about ONE OR TWO keys, and the ranking
+    # comment below states the invariant they were sized to hold: a preference reorders rows WITHIN a
+    # relevance band, it never lifts a weak match over a strong one. A contract that fills a dozen keys
+    # — a profile compiled from a whole résumé, say — breaks that arithmetic by addition alone: twelve
+    # keys of a few points each add up to more than the entire 0–100 match scale, and the ranking stops
+    # being about relevance and becomes a count of ticked facets. Capping the SUM keeps every existing
+    # per-key judgment intact and restores the invariant for contracts of any width.
+    max_prefer: float | None = None
 
 
 def calibrated_pct(sim: float, floor: float | None = None, span: float = _SPAN) -> int:
@@ -130,11 +139,15 @@ async def evaluate(contract: Contract, store: FacetStore, schema: FacetSchema, w
         sim = float(r.get("sim") or 0.0)
         score, reasons = sim, []
         avoid_pen = 0.0
+        prefer_pts = 0.0
         for key, vals in (contract.prefer or {}).items():
             hits = [v for v in _vals(r, key) if v in {str(x) for x in vals}]
             if hits:
                 n = min(len(hits), w.max_hits_per_key)
-                score += n * float(w.prefer.get(key, w.default_prefer)); reasons.append(f"prefers {_label(schema, key)}: " + ", ".join(hits[:3]))
+                prefer_pts += n * float(w.prefer.get(key, w.default_prefer)); reasons.append(f"prefers {_label(schema, key)}: " + ", ".join(hits[:3]))
+        if w.max_prefer is not None:
+            prefer_pts = min(prefer_pts, float(w.max_prefer))
+        score += prefer_pts
         for key, vals in (contract.avoid or {}).items():
             hits = [v for v in _vals(r, key) if v in {str(x) for x in vals}]
             if hits:

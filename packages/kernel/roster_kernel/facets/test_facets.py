@@ -340,3 +340,37 @@ def test_counts_only_depth_skips_every_row_leg_and_still_draws_the_rail():
     assert out["coverage"]["counts_only"] is True
     assert out["coverage"]["slice"] == full["coverage"]["pool"] == 1   # the must-slice, read off the counts
     assert "pool" not in out["coverage"]                            # no rows were ranked: none is claimed
+
+
+def test_the_total_preference_bonus_can_be_capped_so_a_wide_contract_cannot_outrank_relevance():
+    """The per-key weights are sized for a contract that speaks about one or two keys, and the ranking
+    rule they hold up is that a preference reorders rows WITHIN a relevance band — it never lifts a weak
+    match over a strong one. A contract that fills many keys (a profile compiled from a whole person,
+    say) breaks that by addition alone: enough small bonuses outweigh the entire match scale. Capping
+    the SUM restores the invariant, and leaves narrow contracts untouched."""
+    s = _schema()
+    # "strong" is the far better match and meets one preferred key; "wide" is a much weaker match
+    # that meets every one of them — the shape a whole-profile contract produces on a real index.
+    store = InMemoryFacetStore([
+        {"id": "strong", "kind": "thing", "sim": 0.55, "facets": {"colour": ["red"]}},      # a 60 % match
+        {"id": "wide_row", "kind": "thing", "sim": 0.4625,                                    # a 25 % match
+         "facets": {"colour": ["red"], "size": ["l"], "price": ["10_to_50"],
+                    "tags": ["warm", "cotton", "wool"], "place": ["us/ca/la"], "maker_tier": ["a"]}},
+    ])
+    wide = Contract(kind="thing", text="q", prefer={"colour": ["red"], "size": ["l"],
+                                                    "price": ["10_to_50"], "tags": ["warm", "cotton", "wool"],
+                                                    "place": ["us/ca/la"], "maker_tier": ["a"]}, limit=10)
+    w = {"colour": 0.25, "size": 0.20, "price": 0.20, "tags": 0.10, "place": 0.15, "maker_tier": 0.20}
+    uncapped = _run(evaluate(wide, store, s, FacetWeights(prefer=w), noise_floor=0.40))
+    capped = _run(evaluate(wide, store, s, FacetWeights(prefer=w, max_prefer=0.30), noise_floor=0.40))
+    assert [r["match_pct"] for r in uncapped["rows"] if r["id"] == "strong"] == [60]
+    assert uncapped["rows"][0]["id"] == "wide_row", "the fixture no longer shows the pile-up this guards"
+    assert capped["rows"][0]["id"] == "strong", "the cap did not stop facet count from outranking the match"
+
+    # a NARROW contract is under the cap, so its ranking is byte-identical either way
+    narrow_store = InMemoryFacetStore(_rows())
+    narrow = Contract(kind="thing", text="q", prefer={"tags": ["warm"]}, limit=10)
+    a = _run(evaluate(narrow, narrow_store, s, FacetWeights(prefer=w), noise_floor=0.40))
+    b = _run(evaluate(narrow, narrow_store, s, FacetWeights(prefer=w, max_prefer=0.30), noise_floor=0.40))
+    assert [r["id"] for r in a["rows"]] == [r["id"] for r in b["rows"]]
+    assert [r["score"] for r in a["rows"]] == [r["score"] for r in b["rows"]]
