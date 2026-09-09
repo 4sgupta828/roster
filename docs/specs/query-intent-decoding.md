@@ -24,6 +24,8 @@ Six short queries against `POST /jobs` on 2026-09-09. `must` and `prefer` are th
 | `staff` | `country:us` | — | **wrong** — "Staff Feed Staff", "Supervisor, Talent Coordinators" |
 | `remote` | `country:us` | — | **wrong** — "Remote Opportunity - Take Back Control of Your Time" |
 | `CUDA kernels` | `country:us` | — | half-right by luck — an NVIDIA GPU-kernel role at #2, a freelance "AI Task Auditor" at #1 |
+| `new york` | `country:us` | — | **wrong** — every hit is the employer `city_of_new_york` |
+| `jobs in new york` | `country:us` | — | **wrong** — an explicit place, still no `metro`; "Stock Worker @ city_of_new_york" |
 | a greenhouse JD URL | `country:us` | — | never fetched; the URL string was embedded |
 
 The pattern is not "acronyms are broken". Role acronyms decode **well**. What fails is narrower and
@@ -66,6 +68,35 @@ evaluator path through `compile_contract` — **three unrelated prompts and sche
 today an aspiration, not a description, and any proposal has to either consolidate them into one
 vertical-owned schema and prompt family or explicitly design for consistency between them. This spec
 takes the first option: Layer 0 is a shared module both surfaces call before their own parse.
+
+### 1.3 Three latent lexicon bugs, waiting for the day the compiler does emit a place
+
+`jobs in new york` naming a place explicitly and still producing no `metro` is the §1.1 failure. But
+when that is fixed, three things break immediately underneath it:
+
+1. **The vocabulary disagrees with itself.** `metro`'s guidance tells the model to emit `new_york`
+   (facet_schema.py:61 — "bay_area, new_york, seattle, london"), while `METRO_ALIAS` canonicalises
+   `new_york → nyc` (people_facets.py:236), which is what the index stores.
+2. **And that disagreement is unrecoverable**, because `metro` is in `_EXACT_SET_KEYS`
+   (facets_engine.py:145), so unlike other set keys a `must` on it is NOT demoted to `prefer`. A
+   compiled `must: metro=new_york` is kept, exact, and matches zero rows.
+3. **Nothing canonicalises on the way in.** `canon_metro` (geo.py:121) is called only from
+   `resolve_scope`; a compiled facet value never passes through it. The same holds for `company`,
+   which `_EXACT_SET_KEYS` also promises exactness on with no name→slug resolution at compile time.
+
+So the lexicon layer is not merely an addition — it is the thing that makes the existing
+`_EXACT_SET_KEYS` promise true. Layer 0 must canonicalise every value it emits through the vertical's
+own alias tables, and the `new_york` guidance string should be corrected to `nyc`.
+
+Related: `role_family` is `navigable=False` (facet_schema.py:54), so it never appears in counts or on
+the rail. The decoder may set it, but the reader cannot see or change it — which conflicts with the
+"nothing about the search is hidden state" principle the résumé work established.
+
+### 1.4 An unrelated defect this measurement surfaced
+
+`stripe` returned **both `stripe` and `Stripe` as separate rows** with the same title, and the
+greenhouse-URL query did the same. Company identity is case-normalised somewhere and not everywhere,
+so one employer occupies two rows and dedupe does not join them. Not an intent bug; worth a ticket.
 
 ---
 
@@ -288,19 +319,48 @@ built to pass.
 
 ## 8. Staged rollout, cost, and the evals that must exist first
 
-Today a typed jobs search costs **one** `compile_contract` model call plus one query embedding.
-Layers 0 and 1 add **zero** model calls and a single indexed lookup. Layer 2 is the call we already
-pay. So the decoder is cost-neutral at query time; the only new spend is the offline aggregate.
+Today a typed jobs search costs **one** `compile_contract` model call plus one query embedding, and
+neither is cached on this path. Layers 0 and 0a add **zero** model calls. Layer 2 is the call already
+paid. The decoder is cost-neutral at query time; see §8.1 for where the spend actually goes.
 
 | # | Ships | Flag | Proves it worked |
 |---|---|---|---|
 | 0 | **The eval set that does not exist.** ~60 short-query cases: bare value, bare metro, bare company, bare seniority, ambiguous acronym, deep technical term, JD URL. Today `evals/gold_people_jobs.json` has 27 cases and **not one** of these shapes; `compile_contract` is monkeypatched in every test that touches it. | — | it fails, loudly, on today's code |
 | 1 | **Synthesise the unknown bucket for SET keys (§2.1)** so the guard can see `metro`/`company`/`skill` | — | a `must: metro` on people is demoted instead of silently dropping the 62% with no metro |
-| 2 | tsv leg in the evaluator | `ROSTER_LEXICAL_LEG` | `austin` / `remote` recall on the new set |
-| 3 | Layer 0 lexicon + **0a text-blanking** + `QueryIntent` + notes shown | `ROSTER_INTENT_LEXICON` | `remote`/`staff` become musts with `text=""` and enumerate the slice; no regression on the 27 existing cases |
-| 4 | Ambiguity signal + "did you mean" affordance | `ROSTER_INTENT_CLARIFY` | `PM` stops silently choosing |
-| 5 | JD-URL route → fetch → treat as profile | `ROSTER_JD_URL` | a greenhouse URL returns that job's neighbours, not a URL embedding |
+| 2 | **Cache `compile_contract` + `embed_query`** on (kind, normalised text, scope) (§8.1) | — | model calls per repeated short query drop to zero; no behaviour change |
+| 3 | tsv leg in the evaluator | `ROSTER_LEXICAL_LEG` | `austin` / `new york` / `CUDA kernels` recall on the new set |
+| 4 | Layer 0 lexicon (canonicalising through the vertical's alias tables, §1.3) + **0a text-blanking** + `QueryIntent` + notes shown | `ROSTER_INTENT_LEXICON` | `remote`/`staff` become musts with `text=""` and enumerate the slice; no regression on the 27 existing cases |
+| 5 | Ambiguity signal + "did you mean" affordance | `ROSTER_INTENT_CLARIFY` | `PM` stops silently choosing |
+| 6 | JD-URL route → fetch → treat as profile | `ROSTER_JD_URL` | a greenhouse URL returns that job's neighbours, not a URL embedding |
 | — | Layer 1 statistics | — | **blocked** on §2 preconditions |
+
+### 8.1 The real spend win is caching, not the decoder
+
+The adversarial pass's surviving cost point: a typed search pays **one `compile_contract` call plus one
+`embed_query`**, and neither is cached on the jobs/people paths — only `/search/compile` caches
+(app.py:6777-6786). Short queries are exactly the ones that repeat (`remote`, `stripe`, `austin` are
+typed by many users and re-typed by the same user), so a keyed cache on `(kind, normalised_text,
+scope)` removes most of the model spend on this surface for nothing. That is a larger, safer saving
+than anything the decoder does, and it is independent of it.
+
+Layers 0 and 0a add **zero** model calls and no new I/O. Layer 2 is the call already paid. So the
+decoder is cost-neutral at query time; the only new spend would be Layer 1's offline job, which is
+deferred.
+
+### 8.2 What we will NOT do
+
+- **No LLM rewriting of the string fed to the dense leg.** "Not All Queries Need Rewriting" measures
+  −9.0% nDCG@10 where the query is already lexically aligned with the corpus, and selective-rewrite
+  gating (AUC 0.593) does not beat never-rewriting. Our jargon is stable. We expand into *facets* and
+  we anchor the sparse leg on the user's own words.
+- **No fine-tuned multi-task decoder yet.** LinkedIn's result (a 1.5B model doing planning, tagging,
+  rewriting and facet suggestion; NDCG +33%, poor-match −59%) is the right destination, but they were
+  replacing a mature NER stack. We have not yet spent the cheap wins: a shared lexicon, text-blanking,
+  explicit route/ambiguity outputs, caching, and a sparse leg. Do those first, and let their eval set
+  tell us whether a model is still the bottleneck.
+- **No statistics that filter.** Corpus co-occurrence may propose `prefer`; it may never emit a `must`.
+- **No domain vocabulary in the kernel**, and no new hardwiring of job/people nouns anywhere in
+  `roster_kernel`.
 
 Ordering note: stage 1 is not intent work at all. Codex disagreed with the original ordering and is
 partly right: stage 3's text-blanking is nearly free and fixes the worst measured cases directly,
@@ -317,6 +377,10 @@ vaguely wrong, which is the worse failure.
   model layer exists to adjudicate, and the eval must contain it.
 - A bare metro that is also a person's name (`jordan`, `austin`) must not silently become a metro must
   on the PEOPLE tab.
+- `new york` must not return the employer `city_of_new_york` — the case measured in §1.
+- A `must: metro=new_york` must be canonicalised to `nyc` before it reaches the store, or it matches
+  nothing while looking correct (§1.3).
+- A company named `Remote` or `Square` must survive the lexicon without becoming `work_mode:remote`.
 
 ## 9. Eigen — what generalises and what does not
 
@@ -373,3 +437,26 @@ unification starts by naming them apart; this spec does not attempt that.
   Upgrading the CLI (0.142.5 → 0.153.4) was necessary but not sufficient. It was run instead through a
   valid API key in an isolated `CODEX_HOME`, which bills the shared OpenAI account rather than the
   ChatGPT plan — a per-run cost to weigh against the API-credit discipline.
+
+
+---
+
+## 11. Prior art this spec leans on
+
+- **[Powering Job Search at Scale: LLM-Enhanced Query Understanding](https://arxiv.org/html/2509.09690v1)**
+  (LinkedIn, 2025). One fine-tuned Qwen2.5-1.5B doing four tasks — query planning (route), query
+  tagging (title/company/location/seniority via schema-enforced generation, replacing per-facet NER),
+  query rewriting against the user profile, and taxonomy-constrained facet suggestion. Multi-task SFT,
+  3–5K labelled examples per task, "homogeneous batching". P95 600ms, ~20 qps/A100. Online: NDCG +33%,
+  poor-match −59%, maintenance −75%. Tagging P/R: location 0.954/0.981 (legacy NER 0.934/0.894),
+  company 0.800/0.910 (0.688/0.710). **Our §5 `QueryIntent` is their four tasks as one typed object;
+  our §8.2 says earn the model, don't start with it.**
+- **[Not All Queries Need Rewriting](https://arxiv.org/html/2603.13301)** (2026). LLM rewriting HURTS
+  dense retrieval when the query is already lexically aligned with the corpus (FiQA −9.0% nDCG@10,
+  p<0.001) via jargon substitution, hallucinated context, over-specification and over-formalisation.
+  Feature-based selective gating reaches AUC 0.593 and does not beat never-rewriting; an oracle gate
+  caps at +3pp. **This is why §8.2 forbids rewriting the dense string.**
+- **[Query Expansion Should Be Coordinated: Dense Expands, Sparse Anchors](https://arxiv.org/html/2608.15851)**
+  (2026). In a hybrid index the two channels want different rewrites. **This is why §6 feeds the sparse
+  leg the user's verbatim words and the spans, and the dense leg the normalised form — and why one
+  rewritten string for both is rejected.**
