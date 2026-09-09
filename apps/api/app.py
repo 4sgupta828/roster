@@ -6611,7 +6611,21 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             return []
         notes = list(plan.notes)
         for key, vals in (plan.must or {}).items():
-            if key in c.must or key in c.prefer or key in c.avoid:
+            if key in c.must or key in c.avoid:
+                continue
+            if key in c.prefer:
+                # THE MODEL SPOKE, BUT MORE WEAKLY THAN THE READER DID. Measured on prod: "jobs in new
+                # york" compiled `prefer: metro=new_york` — the place was recognised and then only
+                # ranked on, so the results were New York-flavoured rather than in New York. When the
+                # lexicon accounts for the WHOLE query and names the same value, that is the reader
+                # stating it, and it hardens. On any disagreement the model still wins: it read the
+                # sentence, this read the words.
+                model_vals = c.prefer.get(key)
+                if not (isinstance(model_vals, list) and set(vals) & set(model_vals)):
+                    continue
+                c.prefer.pop(key, None)
+                c.must[key] = sorted(set(vals) & set(model_vals))
+                notes.append(f"you named the {key.replace('_', ' ')}, so it filters rather than ranks")
                 continue
             c.must[key] = list(vals)
             notes.append(f"read “{key.replace('_', ' ')}” straight from your words")
