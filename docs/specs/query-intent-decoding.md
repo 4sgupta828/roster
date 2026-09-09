@@ -53,12 +53,19 @@ much more embarrassing:
    carrying only `text` (facets_engine.py:157-158). A model timeout and a genuinely unconstrained
    query are indistinguishable downstream, and nothing on screen says which happened.
 
-### 1.2 Two decoders, and the tabs bypass the router
+### 1.2 THREE decoders, and the tabs bypass the router
 `POST /jobs` never calls `classify_qa_route`; the Jobs and People tabs return before it
 (app.py:4409-4423, 2851). The router's `indexed_job_search` route uses `parse_job_query`
 (people_population.py:2185-2210) — a **different decoder**, and the only one that knows
 `FAANG → [meta, apple, amazon, netflix, google]` and `SWE → [software, engineer]`. The tab a user
 actually types into cannot reach it.
+
+The Codex pass counted a third: people go through `parse_people_facets_full` / `_FacetParse`
+(people_population.py:1998-2047), jobs through `parse_job_query` / `_JobParse` (:2176-2209), and the
+evaluator path through `compile_contract` — **three unrelated prompts and schemas**. "One decoder" is
+today an aspiration, not a description, and any proposal has to either consolidate them into one
+vertical-owned schema and prompt family or explicitly design for consistency between them. This spec
+takes the first option: Layer 0 is a shared module both surfaces call before their own parse.
 
 ---
 
@@ -67,29 +74,41 @@ actually types into cannot reach it.
 The adversarial pass queried the production database, and I re-ran its two most consequential
 queries myself (`railway ssh --service roster-api`, read-only). Both hold.
 
-### 2.1 `downgrade_uncovered_musts` has never fired in production
+### 2.1 The coverage guard is blind to SET keys — and only to set keys
 
-`_facet_coverage` (app.py:6362-6381) computes, per key, `1.0 - unknown/total` where
-`total = sum(d.values())` over that key's own counts. But **the index stores absence as a missing
-row, not as an `unknown` value** — measured over people, every key returns exactly 0 unknowns:
+*(Corrected after the Codex pass. The first draft of this section said the guard never fires for any
+key. That was wrong, and the measurement behind it measured the wrong thing: it counted `unknown`
+rows in `roster_entity_facet`, where absence is a missing row, whereas `_facet_coverage` reads
+`store.counts()`, which SYNTHESISES the unknown bucket. Corrected below.)*
 
+`FacetSQLStore.counts` (apps/api/facet_store.py:370-377) closes the gap for ordinary keys:
+
+```python
+if k.type is FacetType.set:
+    d = dict(sorted(d.items(), key=lambda kv: -kv[1])[: k.top_n])   # ← no UNKNOWN bucket
+else:
+    unknown = total - have_n.get(k.key, 0)
+    if unknown > 0:
+        d[UNKNOWN] = unknown
 ```
-key               unknown   entities   coverage
-country                 0     366452      1.000
-function                0     346956      1.000
-field                   0     293238      1.000
-role_family             0     233755      1.000
-metro                   0     161660      1.000
-```
 
-So coverage is **1.000 for every key, always**, `min_known = 0.5` is never met, and the guard that is
-supposed to stop a compiled `must` from becoming an impossible promise is inert. The same
-`coverage < 0.5` condition gates `_index_aware`'s collapsing-must demotion, so that arm is dead too.
+For a non-set key the unknown bucket is `total - entities_with_the_key` over the whole slice, so
+`_facet_coverage` is right and `downgrade_uncovered_musts` fires as designed. `level` is ordinal, so
+its 9.4% person coverage IS visible to the guard.
 
-This is a live bug, not a proposal risk. `level` exists for 40,325 of 428,357 people (**9.4%**), so a
-`must: level=…` on the People tab silently excludes ~90% of the index *by absence* — and the mechanism
-built to catch precisely that cannot see it, because it measures coverage over only the entities that
-already have the key. **The denominator is wrong.**
+**For a `set` key it is never added.** The branch takes the top-N values and returns. So
+`cov = 1 - 0/sum(top_n) = 1.000`, always, for every set key: `metro`, `specialty`, `skill`,
+`role_family`, `company`, `country`, `state`. `min_known = 0.5` can never be met, and the
+`coverage < 0.5` arm of `_index_aware` is dead for them too.
+
+That is narrower than the first draft claimed and still directly in this design's path: **`metro` is a
+set key**, and "bare location → `must: metro`" is one of the first things Layer 0 wants to do. Person
+`metro` coverage is 38%. A `must: metro=austin` would silently drop the ~62% of people who have no
+metro at all, and the mechanism built to catch exactly that cannot see it. The same applies to any
+`must: company` or `must: skill`.
+
+Fix: synthesise the unknown bucket for set keys too — `total - have_n[key]` is already computed on the
+line above and is correct for sets as well; only the `top_n` truncation needs to keep it.
 
 ### 2.2 The people index is substantially not the population Roster claims to serve
 
@@ -111,8 +130,9 @@ And `company_industry` — the key this design most wanted to infer — has **0 
 
 **The implication for this spec is the point of the section.** Better intent decoding maps a query
 onto the index we have. It cannot make that index the right one. Ranked honestly, fixing 2.1 and
-auditing 2.2 outrank everything in §4, because a perfectly decoded `must` against a 9%-covered or
-25%-contaminated key produces a confidently wrong answer instead of a vaguely wrong one.
+auditing 2.2 outrank most of §4, because a perfectly decoded `must` against a set key the index
+barely holds, or against a 25%-contaminated one, produces a confidently wrong answer instead of a
+vaguely wrong one.
 
 ---
 
@@ -127,7 +147,7 @@ guesses or emits nothing, and both look the same. The fix is not a better prompt
 the deterministic knowledge we ALREADY HAVE in front of the model, and letting the model do the part
 only a model can do.
 
-## 4. The three layers
+## 4. The layers
 
 ### Layer 0 — LEXICON. Deterministic, zero model calls, cannot hallucinate.
 Match query n-grams (1–3 tokens) against, in order:
@@ -141,8 +161,40 @@ Match query n-grams (1–3 tokens) against, in order:
   `company_type`/`company_stage`/`company_industry` (facet_store.py:45-47,117-119). This is also
   where the observed `stripe` / `Stripe` duplicate gets fixed: one slug, one row.
 
-Output: candidate `(key, value, span, source="lexicon")`. **Only this layer may produce a `must`,**
-and only for a closed set or a resolved entity — the two cases where being wrong is impossible.
+Output: candidate `(key, value, span, source="lexicon")`.
+
+**Only this layer may produce a `must` — but a lexicon hit is a CANDIDATE, never an automatic must.**
+The first draft said a closed-vocabulary match "cannot be wrong". The Codex pass demolished that with
+cases that are all real: *"remote possibility of travel"*, *"staff the front desk"*, a person named
+Austin, companies literally named `Square`, `Apple` and `Remote`. A must is emitted only when **all**
+hold:
+- the lexicon covers the WHOLE query, bar generic search words ("jobs", "roles", "in");
+- no span has a competing reading (company vs place, person-name vs metro);
+- no negation or hedging context around the span ("not remote", "remote possibility of");
+- the value is not on the vertical's list of facet values that are also common English words
+  (`remote`, `staff`, `other`, `lead`, `principal`).
+
+Anything else degrades to `prefer` + an ambiguity entry, and Layer 2 adjudicates it with the spans.
+
+### Layer 0a — BLANK THE TEXT when the query is nothing but facets *(Codex pass)*
+
+The single cheapest fix in this spec, and none of the earlier passes saw it. In the evaluator
+(evaluate.py:83-108) the leg choice is decided by one thing:
+
+```python
+if contract.text:      # → semantic neighbourhood ONLY (+ angles, + 2 prefer legs)
+...
+if not contract.text:  # → "no text → the must-slice itself is the pool"  (enumerate)
+```
+
+So for `remote`, today's path keeps `text="remote"`, takes the semantic branch, and lets one word's
+diffuse embedding choose the neighbourhood — which is literally how "Remote Opportunity — Take Back
+Control of Your Time" wins. If Layer 0 has decided the query IS `work_mode=remote` and nothing else,
+it must **also set `text=""`**, and the pool becomes the filtered slice, ranked by the contract.
+
+Rule: when the lexicon covers the whole query (facet values plus generic search words like
+"jobs"/"roles"), emit the facets and blank the text. When it covers only part, keep the residual as
+text. This costs nothing, needs no new retrieval leg, and fixes the worst measured cases on its own.
 
 ### Layer 1 — CORPUS STATISTICS. **Deferred. Its preconditions do not hold today.**
 The intended mechanism: an offline aggregate over the corpus giving, for a term, the distribution of
@@ -183,6 +235,7 @@ Unchanged in cost (one call, already paid today). Two changes in kind:
 ```
 QueryIntent {
   route:     keyword | natural_language | profile_text | entity_url | question
+  surface:   jobs | people | research | not_search   # explicit, not implicit in the path you hit
   contract:  Contract            # must/prefer/avoid/center/text, as today
   spans:     [{text, key, value, source: lexicon|stats|model, confidence}]
   residual_text: str             # what stayed prose, for the semantic leg
@@ -190,6 +243,10 @@ QueryIntent {
   notes:     [str]               # why the search is what it is — shown, not swallowed
 }
 ```
+`surface` is Codex's addition and it is the right one: for a short query the FIRST question is
+whether `stripe` means "jobs at Stripe", "people at Stripe" or "tell me about Stripe", and today that
+is decided by whichever path the user happened to be on rather than by anything the decoder says.
+
 The three things today's `Contract` cannot express, and every one of them is a bug we measured:
 1. **that the decoder was unsure** (`PM` picked product over project in silence),
 2. **that the decoder failed** (an exception and an unconstrained query are the same empty contract),
@@ -238,14 +295,17 @@ pay. So the decoder is cost-neutral at query time; the only new spend is the off
 | # | Ships | Flag | Proves it worked |
 |---|---|---|---|
 | 0 | **The eval set that does not exist.** ~60 short-query cases: bare value, bare metro, bare company, bare seniority, ambiguous acronym, deep technical term, JD URL. Today `evals/gold_people_jobs.json` has 27 cases and **not one** of these shapes; `compile_contract` is monkeypatched in every test that touches it. | — | it fails, loudly, on today's code |
-| 1 | **Fix the coverage denominator (§2.1)** so `downgrade_uncovered_musts` can fire at all | — | a `must: level` on people is demoted instead of silently excluding 90% |
+| 1 | **Synthesise the unknown bucket for SET keys (§2.1)** so the guard can see `metro`/`company`/`skill` | — | a `must: metro` on people is demoted instead of silently dropping the 62% with no metro |
 | 2 | tsv leg in the evaluator | `ROSTER_LEXICAL_LEG` | `austin` / `remote` recall on the new set |
-| 3 | Layer 0 lexicon + `QueryIntent` + notes shown | `ROSTER_INTENT_LEXICON` | bare closed-vocab values become musts; no regression on the 27 existing cases |
+| 3 | Layer 0 lexicon + **0a text-blanking** + `QueryIntent` + notes shown | `ROSTER_INTENT_LEXICON` | `remote`/`staff` become musts with `text=""` and enumerate the slice; no regression on the 27 existing cases |
 | 4 | Ambiguity signal + "did you mean" affordance | `ROSTER_INTENT_CLARIFY` | `PM` stops silently choosing |
 | 5 | JD-URL route → fetch → treat as profile | `ROSTER_JD_URL` | a greenhouse URL returns that job's neighbours, not a URL embedding |
 | — | Layer 1 statistics | — | **blocked** on §2 preconditions |
 
-Ordering note: stages 1 and 2 are not intent work at all, and both outrank it. A decoder that emits a
+Ordering note: stage 1 is not intent work at all. Codex disagreed with the original ordering and is
+partly right: stage 3's text-blanking is nearly free and fixes the worst measured cases directly,
+so it should not wait behind the tsv leg. Stage 1 still comes first because it is a correctness guard,
+not a quality improvement. A decoder that emits a
 correct `must` against a key the index barely holds makes the product confidently wrong rather than
 vaguely wrong, which is the worse failure.
 
@@ -287,7 +347,7 @@ unification starts by naming them apart; this spec does not attempt that.
   `P > 0.95 → must` rule is **rejected** here for the boilerplate reason in §4; statistics propose,
   they never filter.
 - **Code-grounded pass** — produced the map in §1.1/§1.2: the extractor-shaped prompt, the silent
-  empty-contract fallback, the missing lexical leg, the stranded acronym table, the two decoders, the
+  empty-contract fallback, the missing lexical leg, the stranded acronym table, the three decoders, the
   zero eval coverage.
 - **Adversarial pass** — went to the production database and voided the corpus-statistics layer on
   evidence: `company_industry` has zero rows, person facets carry no extraction provenance, and the
@@ -296,7 +356,20 @@ unification starts by naming them apart; this spec does not attempt that.
   `prefer` only if ever — are adopted.
 - **Live prod measurement** — the table in §1, which corrected the panel's shared assumption that
   "acronyms are broken". They are not; bare facet values are.
-- **Codex — did not run.** Its CLI could not reach any model: the ChatGPT plan 404s on the
-  `gpt-5.5` its config pins, every other model id is refused as "not supported when using Codex with a
-  ChatGPT account", and the `OPENAI_API_KEY` in the environment is rejected as incorrect. Upgrading
-  the CLI 0.142.5 → 0.153.4 did not change it. This needs an interactive `codex login`.
+- **Codex (gpt-5.1, run through the API key after the ChatGPT plan was found lapsed)** — the most
+  useful pass. It (a) caught this spec over-claiming §2.1 and forced the correction above, (b) found
+  the text-blanking behaviour in `evaluate.py` that none of the other passes saw and that fixes the
+  worst measured cases for free, (c) demolished "a lexicon hit cannot be wrong" with concrete
+  counter-examples and supplied the tightened must rule, (d) counted the third decoder, and (e) added
+  `surface` as a first-class output. Where it was WRONG: it claimed short `/jobs` queries never reach
+  `compile_contract` and go through `parse_job_query` instead — refuted by measurement, since the prod
+  responses in §1 carry compiled contracts keyed on `field`/`function`/`role_family`, which only
+  `compile_contract` produces (`parse_job_query` returns company/title_keywords/location). It read the
+  evaluator-off branch.
+- **Why Codex nearly did not run.** Root cause, for the next person: the ChatGPT credential in
+  `~/.codex/auth.json` records `chatgpt_subscription_active_until: 2026-04-24` and its `id_token`
+  expired 2026-09-03 — the plan had lapsed, which is why the pinned `gpt-5.5` 404s as "you do not have
+  access" while every other id is refused as "not supported when using Codex with a ChatGPT account".
+  Upgrading the CLI (0.142.5 → 0.153.4) was necessary but not sufficient. It was run instead through a
+  valid API key in an isolated `CODEX_HOME`, which bills the shared OpenAI account rather than the
+  ChatGPT plan — a per-run cost to weigh against the API-credit discipline.
