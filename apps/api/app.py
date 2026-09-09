@@ -3005,7 +3005,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                               "description": "Matched to your description — title, skills and level first. Attach a résumé (📎) for a deeper match."}[_matched_on]
 
         if not _prof_text and body.use_resume:
-            # THE OPT-IN: 🎯 Use my résumé. With nothing typed this is what "Match jobs to my résumé"
+            # THE OPT-IN: Use résumé to search. With nothing typed this is what "Match jobs to my résumé"
             # used to be — the same search, on the one path, with the rail as its controls.
             _pu = await _optional_user(x_roster_token)
             _pacc = _accounts() if _pu else None
@@ -3044,7 +3044,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 _prof_text, _matched_on = (_brief_txt or _resume_text[:1500]), "resume"
                 _resume_on_file = _resume_text
                 _prof_note = ("Shaped by your résumé" + (" — roles, level and skills read by AI" if _brief else "")
-                              + ". The chips below are the search; change any of them, or turn off 🎯 Use my résumé.")
+                              + ". The chips below are the search; change any of them, or turn off Use résumé to search.")
 
         if _prof_text:
             from api.people_population import (apply_job_must, apply_level_pref, job_brief_contract,
