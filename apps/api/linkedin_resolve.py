@@ -128,6 +128,16 @@ def search_unavailable() -> str:
     return ""
 
 
+def _plain(s: str) -> str:
+    """Search-result text as plain words: entities decoded, tags dropped, whitespace collapsed. A tag
+    becomes a SPACE so it can't weld two words together, then the space is taken back off punctuation
+    it was never in front of ('<b>Chair</b>,' must read 'Chair,' and not 'Chair ,')."""
+    import html as _html
+    out = re.sub(r"\s+", " ", re.sub(r"(?s)<[^>]+>", " ", _html.unescape(s or "")))
+    out = re.sub(r"\s+([,.;:!?%)\]])", r"\1", out)
+    return re.sub(r"([(\[])\s+", r"\1", out).strip()
+
+
 async def search_snippets(query: str, *, max_results: int = 10) -> list[dict]:
     """Search-engine results (url/title/snippet) — NO page fetches. Keyless DuckDuckGo HTML leg
     (works from the prod datacenter, verified); Brave when BRAVE_API_KEY is set."""
@@ -139,7 +149,11 @@ async def search_snippets(query: str, *, max_results: int = 10) -> list[dict]:
             from roster_kernel.providers.brave_web import BraveWebSearch
             res = await BraveWebSearch().search(query, max_results=max_results, open_web=True)
             SEARCH_STATUS["unavailable"] = ""
-            return [{"url": r.url, "title": r.title, "snippet": r.snippet or ""} for r in res]
+            # Brave marks the matched words with <strong>; the DDG leg already cleans its own. These
+            # snippets are quoted to users, matched against grounded hints, and (for a pasted profile)
+            # embedded as the search's semantic text — markup in any of those is noise, and a tag
+            # splits a hint's word boundary so a real company match can be missed.
+            return [{"url": r.url, "title": _plain(r.title), "snippet": _plain(r.snippet or "")} for r in res]
         return await asyncio.to_thread(_ddg_get, query, max_results)
     except Exception as e:  # noqa: BLE001 — the leg is best-effort
         msg = str(e)
@@ -480,6 +494,11 @@ async def profile_from_url(url: str, *, search=search_snippets) -> dict:
                 continue
             rname, headline = parse_title(r.get("title") or "")
             if rname:
-                return {"name": rname, "headline": headline, "snippet": (r.get("snippet") or "")[:400],
+                snip = _plain(r.get("snippet") or "")
+                # search engines usually open the snippet WITH the headline; carrying it twice pads
+                # the text without adding a word of signal
+                if headline and snip.lower().startswith(headline.lower()):
+                    snip = snip[len(headline):].lstrip(" ·—-|")
+                return {"name": rname, "headline": headline, "snippet": snip[:400],
                         "url": "https://www.linkedin.com/in/" + want}
     return {}

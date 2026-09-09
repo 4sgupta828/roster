@@ -257,3 +257,34 @@ def test_headline_for_known_url_reads_only_that_profile():
     assert h2 == ""                                                            # a different profile: nothing
     h3, _ = loop.run_until_complete(headline_for_url({"name": "Ada Byte"}, "https://www.linkedin.com/in/nottombrown", search=search))
     assert h3 == ""                                                            # name mismatch: nothing
+
+
+# ---- search-result text is plain words, never the provider's markup (owner, 2026-09-09) ----
+# Brave marks matched words with <strong>. Those snippets are quoted to users, matched against
+# grounded hints, and — for a pasted profile URL in Jobs — embedded as the search's semantic text.
+# Markup in any of those is noise, and a tag inside a company name breaks the hint's word boundary.
+
+def test_search_result_text_is_stripped_of_markup_and_entities():
+    from api.linkedin_resolve import _plain
+    assert _plain("<strong>Chair</strong>, Gates Foundation") == "Chair, Gates Foundation"
+    assert _plain("Acme &amp; Co.&nbsp;&mdash; hiring") == "Acme & Co. — hiring"
+    assert _plain("") == "" and _plain(None) == ""
+
+
+def test_a_pasted_profile_does_not_carry_the_headline_twice():
+    """Search engines open the snippet WITH the headline; carrying it twice padded the text a job
+    match is embedded from without adding a word of signal."""
+    import asyncio
+    from api.linkedin_resolve import profile_from_url
+
+    async def fake_search(q):
+        return [{"url": "https://www.linkedin.com/in/jane-doe",
+                 "title": "Jane Doe - Staff Engineer at Acme | LinkedIn",
+                 "snippet": "<strong>Staff Engineer at Acme</strong> · Distributed systems, Go and Postgres."}]
+
+    p = asyncio.new_event_loop().run_until_complete(
+        profile_from_url("https://www.linkedin.com/in/jane-doe", search=fake_search))
+    assert p["name"] == "Jane Doe"
+    assert "<strong>" not in p["snippet"] and "<strong>" not in p["headline"]
+    assert not p["snippet"].lower().startswith(p["headline"].lower()), p["snippet"]
+    assert "Distributed systems" in p["snippet"]
