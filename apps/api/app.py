@@ -662,6 +662,40 @@ def qa_router_enabled() -> bool:
     return os.environ.get("ROSTER_QA_ROUTER", "").lower() in ("1", "true", "yes")
 
 
+def lexical_leg_enabled() -> bool:
+    """Flag (default OFF, Rule 20) via ROSTER_LEXICAL_LEG: ask the store for a KEYWORD leg alongside the
+    semantic one, so a query's own words anchor the pool instead of only its embedding's neighbourhood.
+    The store declines when it has no index for it, and a declined leg changes nothing. OFF → the pool
+    is built exactly as today."""
+    return os.environ.get("ROSTER_LEXICAL_LEG", "").lower() in ("1", "true", "yes")
+
+
+def jd_url_search_enabled() -> bool:
+    """Flag (default OFF, Rule 20) via ROSTER_JD_URL: a pasted job-posting link is read and treated as a
+    PROFILE — "more roles like this one" — instead of being embedded as a URL string, which is what it
+    was. Uses the same SSRF-guarded fetcher as the Apply flow. OFF → byte-identical (the link stays a
+    query and reaches the semantic leg as text)."""
+    return os.environ.get("ROSTER_JD_URL", "").lower() in ("1", "true", "yes")
+
+
+def directions_enabled() -> bool:
+    """Flag (default OFF, Rule 20) via ROSTER_DIRECTIONS: a search that could usefully go several ways
+    returns `directions` — at most three, drawn from the counts over its own slice and from the clusters
+    inside its own rows, each carrying the effect it would have on the contract and the size of the slice
+    it would leave. Deterministic: no model call. Silence is the default; see `worth_steering`.
+    OFF → the response is byte-identical to today."""
+    return os.environ.get("ROSTER_DIRECTIONS", "").lower() in ("1", "true", "yes")
+
+
+def intent_lexicon_enabled() -> bool:
+    """Flag (default OFF, Rule 20) via ROSTER_INTENT_LEXICON: read the query against the vertical's own
+    vocabularies BEFORE the model compiles it, so a query that IS a facet value — `remote`, `staff`,
+    `austin`, `new york` — becomes that facet instead of a one-word embedding. Deterministic, no model
+    call, and when the lexicon accounts for the whole query the semantic text is dropped so the
+    must-slice is the pool. OFF → the compile is byte-identical to today."""
+    return os.environ.get("ROSTER_INTENT_LEXICON", "").lower() in ("1", "true", "yes")
+
+
 def jd_exclude_source_co_enabled() -> bool:
     """Flag (default OFF, Rule 20) via ROSTER_JD_EXCLUDE_SOURCE_CO: when ON, "Find candidates" hides
     people who currently work at the JD's HIRING company (recruiters don't poach from the client),
@@ -1073,6 +1107,12 @@ class ResearchIn(BaseModel):
     #                                       SEARCH surfaces (never prose answers); Q&A owns questions
     refine_facets: dict | None = None     # People-tab CONVERSATION: the previous turn's accumulated facet
     #                                       filter — the new utterance refines/narrows it (None = fresh)
+    prior_contract: dict | None = None    # THE TURN BEFORE. A jobs follow-up used to recompile from
+    #                                       scratch: `refine_query` is read only in the legacy branch
+    #                                       (app.py, after the evaluator has already returned), so with
+    #                                       ROSTER_FACET_EVALUATOR on — which is prod — nothing carried
+    #                                       from turn to turn. The contract the last turn ran is the
+    #                                       thing a refinement refines.
     use_resume: bool = False              # 🎯 PROFILE-BASED SEARCH (opt-in): shape this jobs search with
     #                                       the résumé on file. Opt-IN by design — the résumé used to
     #                                       reshape every signed-in seeker's search invisibly, with no
@@ -2912,6 +2952,25 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         # ran — nothing on screen said so and there was no way to turn it off. Now a plain search
         # stays plain until the seeker asks for their profile to shape it.
         _prof_text, _matched_on, _li_profile, _prof_note = "", "", None, ""
+        # A PASTED JOB-DESCRIPTION LINK IS A PROFILE, NOT A QUERY. Measured on prod: a greenhouse URL
+        # was embedded as a string and the nearest neighbours of a URL were returned. What the reader
+        # means is "more like this one", so the posting is fetched (through the same SSRF-guarded
+        # reader the Apply flow uses) and its TEXT becomes the profile the search is shaped by.
+        _jd_m = re.search(r"https?://[^\s]+", (body.question or "")) if jd_url_search_enabled() else None
+        if _jd_m and any(h in _jd_m.group(0).lower() for h in
+                         ("greenhouse.io", "lever.co", "ashbyhq.com", "workable.com", "smartrecruiters.com",
+                          "jobs.", "/careers", "careerpuck", "myworkdayjobs.com")):
+            # `app.state.jd_reader` is a test seam, as `facet_store` and `claim_store` already are —
+            # the real reader resolves DNS to enforce its SSRF guard, which a test must not do.
+            _read_jd = getattr(app.state, "jd_reader", None) or _fetch_jd_text
+            try:
+                _jd_txt = await asyncio.to_thread(_read_jd, _jd_m.group(0))
+            except Exception:   # noqa: BLE001
+                _jd_txt = ""
+            if len((_jd_txt or "").strip()) >= 200:
+                _prof_text, _matched_on = _jd_txt[:20000], "job_link"
+                _prof_note = ("Matched to the posting you linked — these are the roles nearest it. "
+                              "The chips below are the search; change any of them.")
         # The RÉSUMÉ ITSELF, when the search is shaped by the one on file. The interpreted-brief strip
         # reads years, disciplines and skills off the profile text, and on that path the profile text is
         # the AI's summary paragraph — so the strip described the summary rather than the person.
@@ -3052,7 +3111,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             _qs_txt = (body.question or "").strip()
             if _li_m:
                 _qs_txt = _qs_txt.replace(_li_m.group(0), " ").strip()
-            if _matched_on in ("attachment", "pasted", "description"):
+            if _matched_on in ("attachment", "pasted", "description", "job_link"):
                 _qs_txt = ""          # the question WAS the profile — there is no query left in it
             if facet_evaluator_enabled():
                 from api.facets_engine import compile_contract, downgrade_uncovered_musts
@@ -3158,6 +3217,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             # caller states is a scope the search applies — and the rail's Where row is how a reader
             # widens it to worldwide or narrows it to a state or a city.
             _scope = {"country": (body.country or "us").strip().lower()}
+            _lex_ambig: list = []          # a ratified intake contract is not a typed query — nothing to read
             if body.contract and str(body.contract.get("kind") or "job") == "job":
                 from roster_kernel.facets import Contract as _Contract
                 _c = _Contract.from_dict(body.contract); _moved = []                     # a ratified intake contract runs as is
@@ -3167,10 +3227,23 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 _ex: dict = {}
                 import time as _jtm
                 _j0 = _jtm.monotonic()
-                _c = await asyncio.to_thread(compile_contract, "job", body.question or "", _facet_schema(), _llm_json, limit=80, scope=_scope, extras=_ex)
+                _c = await _compile_cached("job", body.question or "", limit=80, scope=_scope, extras=_ex)
+                # A FOLLOW-UP INHERITS THE TURN BEFORE IT. Every jobs turn used to recompile from
+                # nothing, because the only refinement code sits past the evaluator's own return and
+                # cannot run in prod. What the previous contract established and this utterance did
+                # not speak about is carried forward; anything the new compile DID speak about wins,
+                # because that is the reader changing their mind.
+                _carried = _carry_forward(_c, body.prior_contract)
                 _j1 = _jtm.monotonic()
+                # THE LEXICON, after the model and never over it: a query that IS a facet value reaches
+                # the contract even when the compiler — prompted to extract only what is "stated
+                # explicitly as a requirement" — read one bare word as stating nothing.
+                _lex_plan = _lexicon_plan("job", body.question or "")
+                _lex_notes = _apply_lexicon(_c, _lex_plan)
+                _lex_ambig = _ambiguity(_lex_plan)
                 _moved = downgrade_uncovered_musts(_c, await _facet_coverage("job"))
                 _c, _ia_notes = await _index_aware(_c, kind="job", user_keys=set(k for k in ("work_mode", "company_type", "level") if body.job_must), place_or_mode=bool(_ex.get("place_or_mode")))
+                _ia_notes = list(_lex_notes or []) + list(_carried or []) + list(_ia_notes or [])
                 _plain_t = {"plain.compile": round(_j1 - _j0, 2), "plain.coverage_and_index_aware": round(_jtm.monotonic() - _j1, 2)}
             if body.levels and body.levels[0]:
                 _c.center = {"key": "level", "value": body.levels[0], "span": int(body.level_span)}
@@ -3207,6 +3280,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     "must": None, "level_pref": None, "brief_contract": bc, "contract": _out["contract"], "counts": _out["counts"], "coverage": _out["coverage"],
                     "labels": _out.get("labels"), "merge": _out.get("merge"), "relaxed": _out.get("relaxed") or [], "timings": _out.get("timings") or {},
                     "group_options": _group_options(_rows),
+                    **({"ambiguity": _lex_ambig} if _lex_ambig else {}),
+                    **({"directions": _dirs} if (_dirs := _directions("job", _out, _rows, ambiguous=bool(_lex_ambig))) else {}),
                     "note": f"evaluator — {_out['coverage'].get('pool', 0)} candidates" + (" · ranked by filters only (semantic ranking is unavailable right now)" if (_out.get("coverage") or {}).get("degraded") else "")}
         # AGENTIC mode (flag): LLM expands the query into multiple angles → multi-leg retrieval → rerank
         if agentic_jobs_enabled():
@@ -4259,11 +4334,17 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     _ex: dict = {}
                     import time as _ptm
                     _p0 = _ptm.monotonic()
-                    _c = await asyncio.to_thread(compile_contract, "person", _q, _facet_schema(), _llm_json, limit=100, scope={"country": _scope_c} if _scope_c else {}, extras=_ex)
+                    _c = await _compile_cached("person", _q, limit=100, scope=({"country": _scope_c} if _scope_c else {}), extras=_ex)
                     _p1 = _ptm.monotonic()
+                    # THE LEXICON on the talent side too. A bare `staff`, `remote` or `austin` typed
+                    # into Talent has exactly the failure the jobs side had — the compiler is the same
+                    # extractor-shaped prompt, and one bare word states nothing to it.
+                    _p_lex = _lexicon_plan("person", _q)
+                    _p_lex_notes = _apply_lexicon(_c, _p_lex)
                     downgrade_uncovered_musts(_c, await _facet_coverage("person"))
                     _p2 = _ptm.monotonic()
                     _c, _ia_notes = await _index_aware(_c, kind="person", place_or_mode=bool(_ex.get("place_or_mode")))
+                    _ia_notes = list(_p_lex_notes or []) + list(_ia_notes or [])
                     _plain_t = {"plain.compile": round(_p1 - _p0, 2), "plain.coverage": round(_p2 - _p1, 2), "plain.index_aware": round(_ptm.monotonic() - _p2, 2)}
                     _signal = [k for k in list(_c.must) + list(_c.prefer) if k != "company"]
                     if _signal or _c.center:                       # a role / field / level / skill / place was named → the evaluator
@@ -4363,7 +4444,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             if on_event is not None:
                 await on_event({"type": "people", "count": len(rows)})
             nav = {"contract": out["contract"], "counts": out["counts"], "coverage": out["coverage"], "labels": out.get("labels"), "merge": out.get("merge"),
-                   "group_options": _group_options(rows),
+                   "group_options": _group_options(rows, "person"),
                    "relaxed": out.get("relaxed") or [], "timings": {"search": round(_t1 - _t0, 2), "hydrate": round(_t2 - _t1, 2), **{f"search.{k}": v for k, v in (out.get("timings") or {}).items()}, **((cdict or {}).get("timings") or {})}}
             _cc = out["contract"]; _cv = out.get("coverage") or {}
             _lab = (out.get("labels") or {}).get("values") or {}
@@ -6370,16 +6451,174 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         store = _facet_store()
         if store is None:
             return {}
+        # PRESENCE, not counts. Derived from `counts` this read was 1.000 for every SET key — because
+        # `count_rows` deliberately never files a set under `unknown` — so the guard below could never
+        # fire for metro / company / skill / specialty / state / country, which are exactly the keys a
+        # short query turns into a must. `store.coverage` asks the index directly.
         try:
-            counts = await store.counts(kind, {}, _facet_schema())
+            cov = await store.coverage(kind, {}, _facet_schema())
+        except AttributeError:      # a store without the newer protocol member
+            try:
+                counts = await store.counts(kind, {}, _facet_schema())
+            except Exception:   # noqa: BLE001
+                return {}
+            cov = {}
+            for key, d in (counts or {}).items():
+                total = sum(d.values()) or 1
+                cov[key] = 1.0 - (d.get("unknown", 0) / total)
         except Exception:   # noqa: BLE001
             return {}
-        cov = {}
-        for key, d in (counts or {}).items():
-            total = sum(d.values()) or 1
-            cov[key] = 1.0 - (d.get("unknown", 0) / total)
         cache[kind] = (_time.monotonic(), cov); app.state._facet_cov = cache
         return cov
+
+    def _directions(kind: str, out: dict, rows: list, *, ambiguous: bool = False) -> dict | None:
+        """The few ways this search could usefully go next — or nothing, which is the common answer.
+
+        Costs no model call: `counts` are already computed for the rail, and the emergent clusters come
+        from the same free token split `/jobs/group` falls back to."""
+        if not directions_enabled():
+            return None
+        try:
+            from roster_kernel.facets.directions import (cluster_directions, facet_directions,
+                                                         rank_directions, worth_steering)
+            ok, why = worth_steering(out.get("coverage") or {}, ambiguous=ambiguous)
+            if not ok:
+                return {"offer": [], "why": why}
+            c = out.get("contract") or {}
+            spoken = set(c.get("must") or {}) | set(c.get("avoid") or {})
+            cands = facet_directions(out.get("counts") or {}, _facet_schema(), kind,
+                                     exclude=spoken | {"country"}, labels=out.get("labels") or {})
+            if kind == "job" and rows:
+                from roster_kernel.facets.grouping import token_groups
+                from roster_vertical.job_grouping import tokens
+                # `token_groups` takes a LIST of token sets (ids are row positions) and returns
+                # (groups, leftovers) — the same free split /jobs/group falls back to.
+                gs, _left = token_groups([tokens(r) for r in rows])
+                cands += cluster_directions(gs, len(rows))
+            offer = rank_directions(cands, top=3)
+            return {"offer": [{"key": d.key, "label": d.label, "values": d.values, "section": d.section,
+                               "hits": d.hits, "source": d.source, "why": d.why} for d in offer],
+                    "why": why}
+        except Exception:   # noqa: BLE001 — a menu we cannot build must never fail a search
+            return None
+
+    def _carry_forward(c, prior: dict | None) -> list[str]:
+        """Fold the PREVIOUS turn's contract into this one, where this one is silent.
+
+        A conversation narrows. "remote backend roles" then "in austin" should keep remote; today it
+        keeps nothing, because the jobs refinement code sits after the evaluator branch returns and so
+        never runs in prod. The rule is deliberately one-directional and conservative:
+
+        - a key THIS turn spoke about is this turn's, in any section — the reader changed their mind;
+        - `country` is never carried: the scope selector owns it and is applied separately;
+        - `text` is never carried: the new words are the new query, and stitching two queries' prose
+          together is how a search stops being about what was just typed;
+        - a carried MUST stays a must, a carried PREFER stays a prefer — a refinement must not quietly
+          harden something the previous turn only ranked on.
+
+        Returns notes, because a filter the reader cannot see is the thing this codebase keeps
+        relearning not to build."""
+        if not isinstance(prior, dict) or str(prior.get("kind") or "job") != c.kind:
+            return []
+        spoken = set(c.must) | set(c.prefer) | set(c.avoid)
+        notes: list[str] = []
+        for sect in ("must", "prefer", "avoid"):
+            for key, vals in (prior.get(sect) or {}).items():
+                if key in spoken or key == "country" or not vals:
+                    continue
+                getattr(c, sect)[key] = list(vals) if isinstance(vals, list) else vals
+                if sect == "must":
+                    notes.append(f"still only {key.replace('_', ' ')} from your last search")
+        if not c.center and isinstance(prior.get("center"), dict) and prior["center"].get("value"):
+            c.center = dict(prior["center"])
+        return notes
+
+    async def _compile_cached(kind: str, text: str, *, limit: int, scope: dict, extras: dict | None = None):
+        """`compile_contract`, cached on what actually determines its answer.
+
+        The one model call a typed search makes, and nothing cached it on this path — only
+        `/search/compile` did. Short queries are exactly the ones that repeat (`remote`, `stripe`,
+        `austin` are typed by many readers and retyped by the same one), and a steering loop asks again
+        every turn. `extras` is an OUT parameter — the compiler fills it with `place_or_mode` — so it is
+        cached alongside the contract and copied back on a hit, or a cached compile would quietly lose
+        the signal the caller reads afterwards."""
+        from roster_kernel.facets import Contract as _C
+        key = ("compile", kind, (text or "").strip().lower(), int(limit),
+               json.dumps(scope or {}, sort_keys=True))
+        cache = getattr(app.state, "_compile_cache2", None)
+        if cache is None:
+            cache = app.state._compile_cache2 = {}
+        import time as _t
+        hit = cache.get(key)
+        if hit and _t.monotonic() - hit[0] < 900.0:
+            if extras is not None:
+                extras.update(hit[2])
+            return _C.from_dict(json.loads(hit[1]))          # a COPY: callers mutate the contract
+        _ex: dict = {}
+        c = await asyncio.to_thread(compile_contract_fn(), kind, text or "", _facet_schema(), _llm_json,
+                                    limit=limit, scope=scope, extras=_ex)
+        if len(cache) > 400:
+            cache.clear()
+        cache[key] = (_t.monotonic(), json.dumps(c.to_dict()), dict(_ex))
+        if extras is not None:
+            extras.update(_ex)
+        return c
+
+    def _lexicon_plan(kind: str, text: str):
+        """The deterministic first read of a query, or None when the flag is off / nothing matched."""
+        if not intent_lexicon_enabled() or not (text or "").strip():
+            return None
+        try:
+            from roster_kernel.facets.lexicon import find_spans, plan_from_spans
+            from roster_vertical.query_lexicon import lexicon_config
+            cfg = lexicon_config(kind)
+            spans = find_spans(text, _facet_schema(), kind, aliases=cfg["aliases"])
+            if not spans:
+                return None
+            return plan_from_spans(text, spans, filler=cfg["filler"], must_keys=cfg["must_keys"],
+                                   risky_values=cfg["risky_values"])
+        except Exception:   # noqa: BLE001 — a lexicon that cannot read must never fail a search
+            return None
+
+    def _ambiguity(plan) -> list[dict]:
+        """The spans the lexicon could read more than one way. `PM` is legally a `field` and a
+        `function`; the search picked one silently. This is what the gate reads to decide a query is
+        worth a question, and what the surface draws as "did you mean"."""
+        if plan is None:
+            return []
+        out = []
+        for sp in (plan.spans or []):
+            if sp.ambiguous:
+                out.append({"text": sp.text, "keys": [sp.key, *sp.ambiguous],
+                            "chose": sp.key, "value": sp.value})
+        return out
+
+    def _apply_lexicon(c, plan) -> list[str]:
+        """Fold the lexicon's read into a compiled contract. THE MODEL STILL WINS: a key the compiler
+        already spoke about is left alone, because it saw the whole sentence and this saw only words.
+        Returns notes for the surface — nothing here is hidden state."""
+        if plan is None:
+            return []
+        notes = list(plan.notes)
+        for key, vals in (plan.must or {}).items():
+            if key in c.must or key in c.prefer or key in c.avoid:
+                continue
+            c.must[key] = list(vals)
+            notes.append(f"read “{key.replace('_', ' ')}” straight from your words")
+        for key, vals in (plan.prefer or {}).items():
+            if key in c.must or key in c.prefer or key in c.avoid:
+                continue
+            c.prefer[key] = list(vals)
+        # THE POOL, not just the filters. With the whole query accounted for there is no semantic
+        # content left, and the evaluator takes the must-slice as its pool when `text` is empty instead
+        # of one word's diffuse neighbourhood — the difference between `remote` returning remote roles
+        # and returning "Remote Opportunity — Take Back Control of Your Time".
+        if plan.blank_text and not (plan.residual or "").strip():
+            c.text = ""
+            notes.append("your words were all filters, so the filters are the search")
+        elif plan.residual and plan.residual != (c.text or ""):
+            pass          # a partial read leaves the text alone: the model's phrasing is the better query
+        return notes
 
     def _judge_provider() -> str:
         """The in-product judge runs on the FAST provider (latency budget §12.9); the eval's judge takes the other one."""
@@ -6398,14 +6637,16 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         raw = await cs.people_by_ids(ids)
         return {p["entity_id"]: str(p.get("blurb") or "") for p in rows_to_people(raw)}
 
-    def _group_options(rows: list) -> list:
+    def _group_options(rows: list, kind: str = "job") -> list:
         """Which groupings earn a place in the menu FOR THESE ROWS (docs/specs/result-grouping.md §2), ordered by how
         usefully each splits them. Computed once, server-side, so the rule lives in the kernel and not twice."""
         from roster_kernel.facets.grouping import eligible
-        from roster_vertical.job_grouping import GROUP_DIMENSIONS
+        from roster_vertical.job_grouping import group_dimensions
         rows = rows or []
         out = []
-        for key, label, source, kind in GROUP_DIMENSIONS:
+        # the JOB table was applied to person rows as well, so talent results were offered "Work mode"
+        # — which a person does not have — and never the evidence that makes a candidate worth reading
+        for key, label, source, dkind in group_dimensions(kind):
             if key == "auto":
                 out.append({"key": "auto", "label": label, "score": 1e9, "why": "let the model segment these results"})
                 continue
@@ -6416,7 +6657,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             else:
                 fkey = source.split(":", 1)[1]
                 vals = [(((r or {}).get("facets") or {}).get(fkey) or [""])[0] for r in rows]
-            e = eligible([str(v or "").replace("_", " ") for v in vals], kind=kind)
+            e = eligible([str(v or "").replace("_", " ") for v in vals], kind=dkind)   # identity | categorical
             if e.ok:
                 out.append({"key": key, "label": label, "score": e.score, "groups": e.groups, "known": e.known})
         out.sort(key=lambda o: -o["score"])
@@ -6541,7 +6782,8 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             raise HTTPException(status_code=503, detail="the index is unavailable right now")
         c = Contract.from_dict(cdict)
         try:
-            out = await evaluate(c, store, _facet_schema(), FACET_WEIGHTS, depth=depth)
+            out = await evaluate(c, store, _facet_schema(), FACET_WEIGHTS, depth=depth,
+                                 lexical_leg=lexical_leg_enabled())
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"contract: {e}") from e
         _meta = getattr(store, "last_counts_meta", None) or {}
@@ -6855,10 +7097,22 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     @app.post("/search/evaluate")
     async def search_evaluate(body: EvaluateIn) -> dict:
         """Contract → rows + counts + coverage. Deterministic for a given index state (no model call).
-        People rows come back card-shaped (the Talent surface renders them as is)."""
-        out = await _run_contract(body.contract, str((body.contract or {}).get("kind") or "job"), depth=body.depth, relax=bool(body.relax))
-        if (body.contract or {}).get("kind") == "person":
+        People rows come back card-shaped (the Talent surface renders them as is).
+
+        THE JOBS PAYLOAD IS NOT JUST `_run_contract`. `/jobs` enriches its rows with the employer and
+        computes the grouping menu from the rows it is about to return; this endpoint did neither, and
+        the rail's Apply posts here. So an Apply came back with no `group_options` — and the browser,
+        which guards with `if(out.group_options)`, kept the menu computed for the PREVIOUS rows — and
+        with job rows stripped of their employer. Both are now done here too, which fixes the rail and
+        gives the convergence loop something it can re-run a contract through."""
+        kind = str((body.contract or {}).get("kind") or "job")
+        out = await _run_contract(body.contract, kind, depth=body.depth, relax=bool(body.relax))
+        if kind == "person":
             out["rows"] = await _hydrate_people(out.get("rows") or [])
+        elif out.get("rows"):
+            out["rows"] = await _with_employer(list(out["rows"]))
+        if out.get("rows"):
+            out["group_options"] = _group_options(list(out["rows"]), kind)
         return out
 
     @app.post("/jobs/group")
@@ -7021,11 +7275,12 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             out = await _evaluate_contract(cdict, depth={"rows": False})
             return {"rows": [], "counts": out["counts"], "coverage": out["coverage"], "contract": out["contract"],
                     "labels": out.get("labels"), "counts_only": True,
-                    "group_options": _group_options([r for r in (m.get("rows") or []) if isinstance(r, dict)])}
+                    "group_options": _group_options([r for r in (m.get("rows") or []) if isinstance(r, dict)],
+                                                    str((m.get("contract") or {}).get("kind") or "job"))}
         out = await _evaluate_contract(cdict)
         new_rows = await _rows_from_eval(m.get("map_type") or "jobs", out)
         res = {"rows": new_rows, "counts": out["counts"], "coverage": out["coverage"], "contract": out["contract"], "labels": out.get("labels")}
-        res["group_options"] = _group_options(new_rows)          # a saved map navigates like a live search, menu included
+        res["group_options"] = _group_options(new_rows, str((res.get("contract") or {}).get("kind") or "job"))   # a saved map navigates like a live search, menu included
         if body.save:
             if not m.get("is_owner"):
                 raise HTTPException(status_code=403, detail="only the owner can save a navigated view")

@@ -6,6 +6,8 @@ GROUP BY over the must-filtered slice; `project` is the ONLY writer of facet row
 Semantics are the kernel's (`matches_must` / `count_rows`); the parity test runs both over the same data."""
 from __future__ import annotations
 
+import re as _re
+
 import json
 from typing import Any
 
@@ -379,6 +381,92 @@ class FacetSQLStore:
         if len(cache) > 300:
             cache.clear()
         cache[ckey] = (_time.monotonic(), _json.loads(_json.dumps(out)), dict(self.last_counts_meta))
+        return out
+
+    LEXICAL_SCAN_MAX = 60_000        # rows we will look through without an index; above this, decline
+
+    async def lexical(self, kind: str, text: str, must: dict, *, cap: int = 200) -> list[dict]:
+        """The keyword leg — rows whose own words contain the query's.
+
+        NOTE ON THE INDEX, because this is the honest limit of what ships. `rs_block` (the research
+        corpus) has a `tsv` tsvector column; `rs_job` and `rs_entity`, which are what people and jobs
+        search, have NONE — the only text index on rs_job is a btree on `title_norm`, which serves
+        prefixes and not words-inside-text. A proper leg wants a generated tsvector + GIN index on both
+        tables (≈250k jobs, ≈429k people); that is a prod migration and is not taken here.
+
+        So this does what can be done without one: it matches inside the MUST-SLICE only, and declines
+        entirely when that slice is larger than `LEXICAL_SCAN_MAX` rather than seq-scanning the index.
+        That makes it useful exactly where a narrow query has already been narrowed, and silent — never
+        slow — everywhere else. `evaluate` treats an empty answer as "no keyword leg", so declining
+        costs the ranking nothing it had before."""
+        words = [w for w in _re.findall(r"[a-z0-9+#.]{2,}", str(text or "").lower())][:6]
+        if not words or kind != "job":
+            return []                     # people carry no single text column to match on yet
+        await self.ensure_schema()
+        pool = await self._conn()
+        args: list = []
+        cl = self._must_sql("('job:' || j.id::text)", must, args)
+        where = " AND ".join(["j.closed_at IS NULL"] + [c.strip() for c in cl]) or "TRUE"
+        async with pool.acquire() as conn:
+            n = int(await conn.fetchval(
+                f"SELECT count(*) FROM (SELECT 1 FROM rs_job j WHERE {where} LIMIT {self.LEXICAL_SCAN_MAX + 1}) x", *args) or 0)
+            if n > self.LEXICAL_SCAN_MAX:
+                return []                 # too wide to look through without an index — say nothing
+            conds = " OR ".join(f"lower(j.title) LIKE ${len(args) + i + 1}" for i in range(len(words)))
+            rows = await conn.fetch(
+                f"""SELECT ('job:' || j.id::text) AS id, j.title, j.company,
+                           ({" + ".join(f"(lower(j.title) LIKE ${len(args) + i + 1})::int" for i in range(len(words)))})::float
+                             / {len(words)} AS lex
+                    FROM rs_job j WHERE {where} AND ({conds})
+                    ORDER BY lex DESC LIMIT {int(cap)}""",
+                *args, *[f"%{w}%" for w in words])
+        return [{"id": r["id"], "kind": "job", "sim": 0.0, "lex": float(r["lex"]),
+                 "title": r["title"], "company": r["company"], "facets": {}} for r in rows]
+
+    COVERAGE_TTL = 3600.0
+
+    async def coverage(self, kind: str, must: dict, schema: FacetSchema) -> dict[str, float]:
+        """Per navigable key: the share of entities in the slice that hold ANY value for it.
+
+        Read straight from presence, NOT from `counts`. `count_rows` deliberately never files a set key
+        under `unknown`, so a coverage derived from counts measures 1.000 for every set key — and
+        `downgrade_uncovered_musts` could never fire for `metro`, `company`, `skill`, `specialty`,
+        `state` or `country`, which are precisely the keys a query decoder turns into musts. One cheap
+        query, cached an hour (its only caller is the index-wide guard)."""
+        import json as _json, time as _time
+        cache = self.__dict__.setdefault("_cov_cache", {})
+        ckey = (kind, _json.dumps(must or {}, sort_keys=True))
+        hit = cache.get(ckey)
+        if hit and _time.monotonic() - hit[0] < self.COVERAGE_TTL:
+            return dict(hit[1])
+        await self.ensure_schema()
+        pool = await self._conn()
+        args: list = []
+        ent = "('job:' || j.id::text)" if kind == "job" else "e.entity_id"
+        cl = self._must_sql(ent, must, args)
+        if kind == "job":
+            slice_sql = "SELECT ('job:' || j.id::text) AS entity_id FROM rs_job j WHERE j.closed_at IS NULL" + "".join(" AND " + c for c in cl)
+        else:
+            slice_sql = "SELECT e.entity_id FROM rs_entity e WHERE e.kind = 'person' AND e.status = 'active'" + "".join(" AND " + c for c in cl)
+        # `via` keys (company_type / stage / industry) hold no rows of their own — they are read through
+        # the employer — so a presence count over `roster_entity_facet` would score them 0 and downgrade
+        # every must on them. They are left OUT: `downgrade_uncovered_musts` skips a key it has no
+        # reading for (`known is not None`), which is the right fail-open.
+        nav = [k.key for k in schema.for_kind(kind) if k.navigable and not k.via]
+        out: dict[str, float] = {}
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(f"CREATE TEMP TABLE _cov_slice ON COMMIT DROP AS {slice_sql}", *args)
+                total = int(await conn.fetchval("SELECT count(*) FROM _cov_slice") or 0)
+                if not total:
+                    return {k: 0.0 for k in nav}
+                have = await conn.fetch(
+                    """SELECT f.facet_key, count(DISTINCT f.entity_id) AS n
+                       FROM _cov_slice s JOIN roster_entity_facet f ON f.entity_id = s.entity_id
+                       WHERE f.facet_key = ANY($1) AND f.facet_value_norm <> 'unknown' GROUP BY 1""", nav)
+                got = {r["facet_key"]: int(r["n"]) for r in have}
+                out = {k: min(1.0, got.get(k, 0) / total) for k in nav}
+        cache[ckey] = (_time.monotonic(), dict(out))
         return out
 
     async def noise_floor(self, kind: str, text: str) -> float | None:

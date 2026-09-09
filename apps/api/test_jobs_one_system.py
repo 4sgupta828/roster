@@ -257,3 +257,297 @@ def test_the_resume_fingerprint_is_the_resume_and_nothing_else():
     assert _resume_fingerprint(parsed) == _resume_fingerprint(edited) != ""
     assert _resume_fingerprint({"_resume_text": text + "!"}) != _resume_fingerprint(parsed)
     assert _resume_fingerprint({}) == ""
+
+
+# ---------------------------------------------------------------- the lexicon (spec: query-intent-decoding §4)
+
+# A slice big enough that the evaluator's smart relaxation does NOT fire. `relax_to_enough` widens a
+# contract whose slice is tiny, so a three-row fixture would demote the very must under test and the
+# assertion would be about relaxation rather than about the lexicon.
+def _lex_rows() -> list[dict]:
+    rows = []
+    for i in range(240):
+        mode = ("remote", "hybrid", "onsite")[i % 3]      # every mode has a healthy slice, or a must
+        staff = i % 5 == 0                                  # on one would simply be relaxed away
+        metro = "nyc" if i % 2 == 0 else "austin"
+        rows.append({"id": f"x{i}", "kind": "job", "sim": 0.62 - i * 0.0004, "company": "acme",
+                     "title": "Backend Engineer", "url": f"https://a/x{i}", "source": "ashby",
+                     "facets": {"work_mode": [mode],
+                                "level": ["staff_plus" if staff else "senior"],
+                                "field": ["software"], "country": ["us"], "metro": [metro]}})
+    # the junk row prod actually returned for `remote`, and the one it returned for `austin`
+    rows.append({"id": "junk_remote", "kind": "job", "sim": 0.70, "company": "global_elite",
+                 "title": "Remote Opportunity - Take Back Control of Your Time", "url": "https://a/j1",
+                 "source": "lever", "facets": {"work_mode": ["onsite"], "level": ["junior"],
+                                               "field": ["other"], "country": ["us"], "metro": ["austin"]}})
+    # the shape of the prod failure: the TITLE names the place, the JOB is somewhere else
+    rows.append({"id": "junk_ny", "kind": "job", "sim": 0.69, "company": "us_ghost_adventures",
+                 "title": "New York Tour Guide", "url": "https://a/j2", "source": "lever",
+                 "facets": {"work_mode": ["onsite"], "level": ["junior"], "field": ["other"],
+                            "country": ["us"], "metro": ["austin"]}})
+    return rows
+
+
+LEX_ROWS = _lex_rows()
+
+
+def _lex_client():
+    app = create_app()
+    app.state.facet_store = InMemoryFacetStore(LEX_ROWS, FACET_SCHEMA)
+    app.state.claim_store = _FakeClaimStore()
+    app.state._co_sites = None
+    return TestClient(app)
+
+
+def _stub_compiler(monkeypatch, out: dict):
+    """Pin what the MODEL returns. `api.model_json.llm_json` is the one call `compile_contract` makes
+    (via `_llm_json`), so stubbing it keeps the whole real compile path — validation included — while
+    spending nothing and touching no network."""
+    monkeypatch.setattr("api.model_json.llm_json", lambda system, user, **kw: dict(out))
+
+
+def _no_model(monkeypatch):
+    """The compiler returns NOTHING — exactly what prod does for these queries. The point of the
+    lexicon is that the search still works when the model reads a bare word as stating nothing."""
+    _stub_compiler(monkeypatch, {})
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_INTENT_LEXICON", "1")
+
+
+def test_a_bare_facet_value_becomes_a_filter_instead_of_a_one_word_embedding(monkeypatch):
+    """Measured on prod 2026-09-09: `remote` compiled to `country=us` and nothing else, and returned
+    "Remote Opportunity — Take Back Control of Your Time". `remote` is a literal member of WORK_MODES."""
+    _no_model(monkeypatch)
+    d = _jobs(_lex_client(), question="remote").json()
+    assert d["contract"]["must"].get("work_mode") == ["remote"], d["contract"]
+    assert d["contract"]["text"] == "", "the query was all filters — the must-slice should BE the pool"
+    ids = [j["id"] for j in d["jobs"]]
+    assert "junk_remote" not in ids, "the row whose TITLE says Remote is not a remote role"
+    assert ids and all(j["facets"]["work_mode"] == ["remote"] for j in d["jobs"])
+
+
+def test_a_bare_place_is_canonicalised_the_way_the_index_stores_it(monkeypatch):
+    """`jobs in new york` named a place explicitly and still compiled no metro; and the schema's own
+    guidance says to emit `new_york` while the index holds `nyc`."""
+    _no_model(monkeypatch)
+    d = _jobs(_lex_client(), question="jobs in new york").json()
+    assert d["contract"]["must"].get("metro") == ["nyc"], d["contract"]
+    ids = [j["id"] for j in d["jobs"]]
+    assert "junk_ny" not in ids, "a row TITLED 'New York Tour Guide' is not a New York job"
+    assert ids and all(j["facets"]["metro"] == ["nyc"] for j in d["jobs"])
+
+
+def test_a_bare_seniority_word_becomes_the_level(monkeypatch):
+    _no_model(monkeypatch)
+    d = _jobs(_lex_client(), question="staff").json()
+    assert d["contract"]["must"].get("level") == ["staff_plus"]
+    assert d["jobs"] and all(j["facets"]["level"] == ["staff_plus"] for j in d["jobs"])
+
+
+def test_the_lexicon_never_overrides_what_the_model_already_said(monkeypatch):
+    """The compiler saw the whole sentence; the lexicon saw words. On any key the model spoke about,
+    the model wins."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_INTENT_LEXICON", "1")
+    _stub_compiler(monkeypatch, {"must": {"work_mode": ["hybrid"]}})
+    d = _jobs(_lex_client(), question="remote").json()
+    assert d["contract"]["must"].get("work_mode") == ["hybrid"]
+
+
+def test_the_lexicon_is_off_by_default(monkeypatch):
+    """Rule 20: flag off → byte-identical to today, junk results included."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.delenv("ROSTER_INTENT_LEXICON", raising=False)
+    _stub_compiler(monkeypatch, {})
+    d = _jobs(_lex_client(), question="remote").json()
+    assert not d["contract"]["must"].get("work_mode")
+
+
+def test_the_same_query_compiles_once(monkeypatch):
+    """The one model call a typed search makes was uncached on this path — only /search/compile cached.
+    Short queries are the ones that repeat, and a steering loop asks again every turn."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    calls = []
+
+    def _one(system, user, **kw):
+        calls.append(user)
+        return {"prefer": {"field": ["software"]}}
+
+    monkeypatch.setattr("api.model_json.llm_json", _one)
+    c = _lex_client()
+    a = _jobs(c, question="backend engineer").json()
+    b = _jobs(c, question="backend engineer").json()
+    assert len(calls) == 1, "the second identical search must not pay for the compile again"
+    assert a["contract"]["prefer"] == b["contract"]["prefer"]
+    _jobs(c, question="data engineer")
+    assert len(calls) == 2, "a different query is a different compile"
+
+
+def test_a_cached_compile_is_a_copy_not_the_same_object(monkeypatch):
+    """The routes mutate the contract they get back — scope musts, toggles, the lexicon. A cache that
+    handed out one shared object would accumulate every previous search's edits."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {"prefer": {"field": ["software"]}})
+    c = _lex_client()
+    first = _jobs(c, question="backend engineer", job_must=["remote"]).json()
+    second = _jobs(c, question="backend engineer").json()
+    assert "work_mode" in (first["contract"]["must"] or {})
+    assert "work_mode" not in (second["contract"]["must"] or {}), "the toggle leaked through the cache"
+
+
+# ------------------------------------------- the rail's Apply, and what a steering loop re-runs through
+
+def test_re_evaluating_a_contract_returns_the_grouping_menu_for_the_new_rows(monkeypatch):
+    """The rail's Apply posts a mutated contract to /search/evaluate, which returned no `group_options`
+    because only /jobs computed them. The browser guards with `if(out.group_options)`, so it kept the
+    menu built for the PREVIOUS rows — the grouping offered described results that were no longer on
+    screen. It is also what the convergence loop re-runs a contract through, so it has to carry the
+    whole jobs payload."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    c = _lex_client()
+    r = c.post("/search/evaluate", json={"contract": {"kind": "job", "must": {"work_mode": ["remote"]}, "limit": 20}})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["rows"], "the contract matches rows"
+    assert d.get("group_options"), "an Apply must bring back the menu for the rows it just returned"
+    assert all(row["facets"]["work_mode"] == ["remote"] for row in d["rows"])
+
+
+def test_a_follow_up_inherits_the_turn_before_it(monkeypatch):
+    """Measured in the code: `refine_query` is read only past the evaluator's own return, so with the
+    evaluator on — which is prod — every jobs follow-up recompiled from nothing. A conversation
+    narrows: "remote roles", then "in austin", keeps remote."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {"must": {"metro": ["austin"]}})
+    c = _lex_client()
+    prior = {"kind": "job", "must": {"work_mode": ["remote"]}, "prefer": {"field": ["software"]}}
+    d = _jobs(c, question="in austin", prior_contract=prior).json()
+    got = d["contract"]["must"]
+    assert got.get("metro") == ["austin"], got
+    assert got.get("work_mode") == ["remote"], "the previous turn's filter was dropped"
+    assert d["contract"]["prefer"].get("field") == ["software"]
+
+
+def test_the_new_turn_wins_over_the_old_one_on_any_key_it_speaks_about(monkeypatch):
+    """Carrying forward must never overrule the reader. Saying "hybrid" after "remote" is a change of
+    mind, not a contradiction to be merged."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {"must": {"work_mode": ["hybrid"]}})
+    c = _lex_client()
+    d = _jobs(c, question="hybrid instead", prior_contract={"kind": "job", "must": {"work_mode": ["remote"]}}).json()
+    assert d["contract"]["must"].get("work_mode") == ["hybrid"]
+
+
+def test_a_carried_preference_never_hardens_into_a_filter(monkeypatch):
+    """A refinement must not quietly promote something the previous turn only ranked on."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
+    c = _lex_client()
+    d = _jobs(c, question="anything", prior_contract={"kind": "job", "prefer": {"level": ["staff_plus"]}}).json()
+    assert d["contract"]["prefer"].get("level") == ["staff_plus"]
+    assert "level" not in (d["contract"]["must"] or {})
+
+
+def test_the_scope_is_never_inherited_from_a_previous_turn(monkeypatch):
+    """`country` belongs to the Where selector, which is applied separately every turn. Carrying it
+    would let a stale worldwide search silently outlive the control that set it."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
+    c = _lex_client()
+    d = _jobs(c, question="anything", country="us",
+              prior_contract={"kind": "job", "must": {"country": ["de"]}}).json()
+    assert d["contract"]["must"].get("country") == ["us"]
+
+
+# ---------------------------------------------------------------- directions (spec: intent-convergence-loop §3)
+
+def test_a_settled_search_is_offered_no_directions(monkeypatch):
+    """The risk the panel named — turning a precise search into a nagging form. Silence is the default,
+    and it is the common answer."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {"must": {"work_mode": ["remote"]}})
+    d = _jobs(_lex_client(), question="remote roles").json()
+    assert d.get("directions", {}).get("offer") == [], d.get("directions")
+
+
+def _weak_client():
+    """Rows nothing matches well — the case the loop exists for. `calibrated_pct` reads similarity
+    against a 0.40 floor, so a slice down here scores near zero and `coverage.weak` is set."""
+    rows = [dict(r, sim=0.41) for r in LEX_ROWS]
+    app = create_app()
+    app.state.facet_store = InMemoryFacetStore(rows, FACET_SCHEMA)
+    app.state.claim_store = _FakeClaimStore()
+    app.state._co_sites = None
+    return TestClient(app)
+
+
+def test_a_weakly_matched_search_is_offered_a_few_ways_to_steer(monkeypatch):
+    """Nothing matched strongly, the pool is wide: this is what the loop is for."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
+    d = _jobs(_weak_client(), question="something vague and unmatched").json()
+    offer = (d.get("directions") or {}).get("offer") or []
+    assert 0 < len(offer) <= 3, d.get("directions")
+    assert len({o["key"] for o in offer if o["key"]}) == len([o for o in offer if o["key"]])
+    for o in offer:
+        assert o["hits"] > 0, "a direction that leads nowhere is not a choice"
+        assert o["section"] in ("must", "avoid", "center")
+
+
+def test_directions_are_off_by_default(monkeypatch):
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.delenv("ROSTER_DIRECTIONS", raising=False)
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
+    d = _jobs(_weak_client(), question="something vague and unmatched").json()
+    assert "directions" not in d
+
+
+def test_a_direction_never_repeats_a_filter_the_search_already_applies(monkeypatch):
+    """Offering "remote" to a search that is already remote-only is not a direction."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_DIRECTIONS", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
+    d = _jobs(_weak_client(), question="vague", job_must=["remote"]).json()
+    offer = (d.get("directions") or {}).get("offer") or []
+    assert offer, "this search is weak enough to steer"
+    assert all(o["key"] != "work_mode" for o in offer)
+
+
+def test_a_pasted_job_link_is_read_as_a_profile_not_embedded_as_a_url(monkeypatch):
+    """Measured on prod: a greenhouse URL was embedded as a string, so the search returned the nearest
+    neighbours of a URL. What the reader means is "more roles like this one"."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_JD_URL", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
+    jd = ("Senior Backend Engineer at Acme. You will build distributed payment systems in Go and "
+          "Kubernetes on Postgres. We are looking for someone with deep experience in reliability, "
+          "on-call ownership and API design. This role is remote within the United States. ") * 3
+    c = _lex_client()
+    c.app.state.jd_reader = lambda url: jd
+    d = _jobs(c, question="https://boards.greenhouse.io/acme/jobs/123").json()
+    assert d.get("matched_on") == "job_link", d.get("note")
+    assert d["jobs"], "a linked posting should return its neighbours"
+    assert "posting you linked" in (d.get("note") or "")
+    assert jd[:40].lower().split()[0] in (d["contract"]["text"] or "").lower()
+
+
+def test_a_job_link_that_cannot_be_read_stays_an_ordinary_search(monkeypatch):
+    """Fail-safe: an unreachable or empty posting must not silently become an empty profile."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setenv("ROSTER_JD_URL", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
+    c = _lex_client()
+    c.app.state.jd_reader = lambda url: ""
+    d = _jobs(c, question="https://boards.greenhouse.io/acme/jobs/123").json()
+    assert d.get("matched_on") != "job_link"
+    assert "jobs" in d
+
+
+def test_the_job_link_route_is_off_by_default(monkeypatch):
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.delenv("ROSTER_JD_URL", raising=False)
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
+    d = _jobs(_lex_client(), question="https://boards.greenhouse.io/acme/jobs/123").json()
+    assert d.get("matched_on") != "job_link"

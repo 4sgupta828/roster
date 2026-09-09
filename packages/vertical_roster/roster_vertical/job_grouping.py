@@ -19,6 +19,27 @@ GROUP_DIMENSIONS: tuple[tuple[str, str, str, str], ...] = (
     ("work_type", "IC / manager", "facet:work_type", "categorical"),
 )
 
+# HOW A RECRUITER SEGMENTS A SET OF PEOPLE. The job table was being applied to person rows as-is, so
+# talent results were cut by "Work mode" — which a person does not have — and never by the evidence
+# that makes a candidate worth reading. Same shape, different judgement: a recruiter cuts the space by
+# WHO these people are and what can be checked about them.
+PERSON_GROUP_DIMENSIONS: tuple[tuple[str, str, str, str], ...] = (
+    ("auto", "Auto", "", "auto"),
+    ("company", "Employer", "company", "identity"),
+    ("company_industry", "Industry", "facet:company_industry", "categorical"),
+    ("level", "Seniority", "facet:level", "categorical"),
+    ("metro", "Location", "location", "identity"),
+    ("field", "Field", "facet:field", "categorical"),
+    ("work_type", "IC / manager", "facet:work_type", "categorical"),
+    ("evidence", "Public evidence", "facet:evidence", "categorical"),
+)
+
+
+def group_dimensions(kind: str) -> tuple[tuple[str, str, str, str], ...]:
+    """The dimensions offered for this entity kind."""
+    return PERSON_GROUP_DIMENSIONS if kind == "person" else GROUP_DIMENSIONS
+
+
 # words that describe the posting's packaging, not the work; they must never form a group
 STOPWORDS = set("""the a an and or of for to in on with at by as is are be we you your our their new senior junior staff
 lead principal manager engineer engineering developer specialist analyst associate director head chief officer vp full

@@ -284,3 +284,48 @@ def test_worldwide_is_expressible_by_the_absence_of_a_country():
     from roster_kernel.facets import Contract
     c = Contract(kind="job", text="backend engineer")     # no country: the reader chose worldwide
     assert "country" not in c.must
+
+
+def test_a_must_on_a_sparse_set_key_is_downgraded_once_coverage_can_see_it():
+    """The other half of the kernel's coverage fix: `metro`, `company` and `skill` are SET keys, and
+    coverage over them used to read 1.000 always, so this guard could never fire for the very keys an
+    intent decoder most wants to turn into a must."""
+    from roster_kernel.facets import Contract
+    from api.facets_engine import downgrade_uncovered_musts
+    c = Contract(kind="job", must={"skill": ["go"]}, limit=10)
+    moved = downgrade_uncovered_musts(c, {"skill": 0.25})
+    assert moved == ["skill"] and "skill" not in c.must and c.prefer["skill"] == ["go"]
+
+
+def test_the_query_embedding_is_cached_on_its_exact_text(monkeypatch):
+    """One evaluate embeds `contract.text` for the semantic leg and again for each preference leg, so a
+    single search already paid for the same vector up to three times — and a steering loop, where a chip
+    changes `must` and never `text`, would pay again every turn. Keyed on the exact text, so it can
+    never hand back another query's neighbourhood."""
+    import json as _j
+    from api import people_population as pp
+
+    calls: list[str] = []
+
+    class _Resp:
+        def __init__(self, payload: bytes): self._p = payload
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self, *a): return self._p
+
+    def _fake_urlopen(req, timeout=0):
+        calls.append("x")
+        return _Resp(_j.dumps({"data": [{"embedding": [0.1, 0.2, 0.3]}]}).encode())
+
+    pp._EMBED_CACHE.clear()
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr(pp.urllib.request, "urlopen", _fake_urlopen)
+    try:
+        a = pp.embed_query("backend engineer")
+        b = pp.embed_query("backend engineer")
+        c = pp.embed_query("something else")
+        assert a is not None and a == b
+        assert len(calls) == 2, "the repeated text must not be embedded twice"
+        assert c == a, "same stub payload"          # different text, but a second real call was made
+    finally:
+        pp._EMBED_CACHE.clear()

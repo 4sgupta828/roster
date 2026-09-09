@@ -109,13 +109,44 @@ def embed_texts(texts: list[str], *, max_chars: int = 8000) -> list[str | None]:
     return out
 
 
+# THE QUERY VECTOR IS A PURE FUNCTION OF THE TEXT, and the same text is embedded several times over.
+# One evaluate embeds `contract.text` once for the semantic leg and again for each preference leg (up
+# to two), so a single search already pays for the same vector three times; a steering loop, where a
+# chip changes `must` and never `text`, pays for it again on every turn. A small bounded cache removes
+# all of that. Keyed on the exact text, so it can never return another query's neighbourhood.
+_EMBED_CACHE: dict[str, tuple[float, str]] = {}
+EMBED_CACHE_MAX, EMBED_CACHE_TTL = 512, 3600.0
+
+
+def _embed_cache_get(text: str) -> str | None:
+    import time as _t
+    hit = _EMBED_CACHE.get(text)
+    if hit and _t.monotonic() - hit[0] < EMBED_CACHE_TTL:
+        return hit[1]
+    if hit:
+        _EMBED_CACHE.pop(text, None)
+    return None
+
+
+def _embed_cache_put(text: str, vec: str) -> None:
+    import time as _t
+    if len(_EMBED_CACHE) >= EMBED_CACHE_MAX:          # oldest out; this is a cache, not a store
+        for k in sorted(_EMBED_CACHE, key=lambda k: _EMBED_CACHE[k][0])[: EMBED_CACHE_MAX // 4]:
+            _EMBED_CACHE.pop(k, None)
+    _EMBED_CACHE[text] = (_t.monotonic(), vec)
+
+
 def embed_query(text: str) -> str | None:
     """Embed the query with text-embedding-3-small → a pgvector literal '[...]'. None on any failure
-    (the caller falls back to the exact facet path). Never raises to the route."""
+    (the caller falls back to the exact facet path). Never raises to the route. Cached on the exact
+    text for an hour — see `_EMBED_CACHE`."""
     import time as _t
     key = os.environ.get("OPENAI_API_KEY")
     if not key or not (text or "").strip():
         return None
+    cached = _embed_cache_get(text[:2000])
+    if cached is not None:
+        return cached
     if _EMBED_DOWN_UNTIL[0] > _t.monotonic():
         return None
     try:
@@ -124,7 +155,9 @@ def embed_query(text: str) -> str | None:
             headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=15) as r:
             v = json.load(r)["data"][0]["embedding"]
-        return "[" + ",".join(f"{x:.6f}" for x in v) + "]"
+        out = "[" + ",".join(f"{x:.6f}" for x in v) + "]"
+        _embed_cache_put(text[:2000], out)
+        return out
     except urllib.error.HTTPError as e:  # noqa: BLE001
         detail = ""
         try:

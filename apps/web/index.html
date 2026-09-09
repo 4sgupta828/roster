@@ -864,6 +864,23 @@
   .frail-apply .idgo{width:auto;padding:.4rem .9rem;min-height:36px;}
   .frail-apply .histbtn{min-height:36px;}
   .frail.busy{opacity:.6;pointer-events:none;}
+  /* DIRECTIONS: offered, never asked. Quiet enough to ignore, distinct from the must/prefer/avoid rail
+     chips beneath them — these change what the search IS, the rail changes how it is filtered. */
+  .dirs{display:flex;flex-direction:column;gap:.35rem;padding:.5rem .6rem;margin-bottom:.5rem;
+        border:1px dashed var(--hair);border-radius:10px;background:var(--panel2);}
+  .dirs-h{display:flex;flex-wrap:wrap;gap:.4rem;align-items:baseline;font-size:.76rem;color:var(--muted);}
+  .dirs-h b{color:var(--ink);font-size:.8rem;}
+  .dirs-row{display:flex;flex-wrap:wrap;gap:.35rem;}
+  .dirchip{font:inherit;font-size:.76rem;cursor:pointer;min-height:36px;padding:.25rem .7rem;
+           border-radius:999px;border:1px solid var(--hair);background:var(--panel);color:var(--ink);}
+  .dirchip:hover{border-color:var(--gold);background:rgba(var(--gold-rgb),.08);}
+  .dirchip.drop{color:var(--muted);}
+  .dirchip.drop:hover{border-color:var(--gap);color:var(--ink);}
+  .dirchip-n{color:var(--muted);font-size:.7rem;margin-left:.15rem;}
+  .dirback{font:inherit;font-size:.72rem;cursor:pointer;margin-left:auto;border:0;background:none;
+           color:var(--muted);text-decoration:underline;min-height:36px;}
+  .dirback:hover{color:var(--ink);}
+  @media (max-width:560px){ .dirchip{min-height:40px;} .dirback{min-height:40px;} }
   .fpill{font-size:.7rem;padding:.15rem .5rem;border-radius:999px;background:rgba(var(--gold-rgb),.10);color:var(--gold-strong);border:1px solid var(--gold);}
   .fpill button{font:inherit;border:0;background:transparent;color:inherit;cursor:pointer;margin-left:.2rem;}
   @media (max-width:560px){ .frail-k{min-width:64px;font-size:.6rem;} .fchip{font-size:.7rem;} }
@@ -2708,6 +2725,7 @@ function levelSelect(){
 // seeker says "shape it with my résumé". It is a SWITCH, not a must-have, so it sits apart from the
 // JOB_MUST chips. OFF by default and always visible when on: the résumé used to shape every signed-in
 // seeker's search invisibly, with no control to turn it off, and that is what this replaces.
+window.JOBS_PRIOR = null;                     // the contract the last jobs turn ran (see runJobs)
 let USE_RESUME = false;                       // OFF by default: a plain search stays plain
 try{ USE_RESUME = localStorage.getItem("roster_use_resume") === "1"; }catch(e){}
 // Do we HAVE a résumé to search with? null = not asked yet. Turning the switch on without one used to
@@ -3047,6 +3065,11 @@ async function runJobs(question, opts){
   const sent = ATTACHMENTS.slice();          // a résumé attached in Jobs mode rides with the search (PDF / text)
   try{ r = await fetch("/jobs", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()},
       body: JSON.stringify({question, tenant_id:"demo", refine_query: (JOBS_CTX||undefined),
+        // THE TURN BEFORE. Every jobs turn recompiled from nothing: the only refinement code on the
+        // server sits past the evaluator's own return, so with the evaluator on it never ran. The
+        // contract the last turn actually ran is what a follow-up refines. A brand-new search clears
+        // the thread, so this is empty exactly when it should be.
+        prior_contract: (JOBS_PRIOR || undefined),
         ...geoPayload(),   // the top-right scope applies to jobs too
         job_must: JOB_MUST.size ? [...JOB_MUST] : undefined,   // the pre-search "must have" toggles
         use_resume: USE_RESUME || undefined,                   // 🎯 shape this search with the résumé on file
@@ -3066,10 +3089,12 @@ async function runJobs(question, opts){
     // (New search clears it). Redirects don't advance the conversation.
     if(!d.redirect_to_qa && d.query) JOBS_CTX = d.query;
     if(d.session_id && !THREAD.session_id) THREAD.session_id = d.session_id;   // the shareable link, like people
+    JOBS_PRIOR = d.contract || null;             // what THIS turn ran, for the next one to refine
     THREAD.turns.push({question, kind: "jobs", jobs: d.jobs||[], query: d.query||{},
                        contract: d.contract||null, counts: d.counts||null, coverage: d.coverage||null, labels: d.labels||null,   // the evaluator's rail
                        relaxed: d.relaxed||[], merge: d.merge||null,                                       // smart relaxing notes; merged-search recipes
-                       group_options: d.group_options||[],                                                  // which groupings organise THESE rows (server-computed)
+                       group_options: d.group_options||[],
+                       directions: d.directions||null,   // the few ways this search could go next                                                  // which groupings organise THESE rows (server-computed)
                        stats: d.stats||{}, semantic: d.semantic, geo_scope: d.geo_scope||null,
                        related_jobs: d.related_jobs||[], company_indexed: d.company_indexed,
                        agentic: !!d.agentic, intent: d.intent||"", query_angles: d.query_angles||[],
@@ -3374,12 +3399,21 @@ function jobsMarkup(d){
   window.JOBS_RENDERS = window.JOBS_RENDERS || {};
   if(!d._jpid){ d._jpid = "j" + String(Date.now()) + Math.random().toString(36).slice(2,6); }
   window.JOBS_RENDERS[d._jpid] = d;
-  const JPAGE = 20, jpagesN = Math.max(1, Math.ceil(jobs.length / JPAGE));
+  // A SMALL FIRST BATCH, BUT ONLY WHEN THERE IS SOMETHING TO STEER. The search stays evaluated WIDE —
+  // `limit` and the counts are untouched, because directions are computed from the slice and would
+  // collapse if they were computed from ten rows. This is purely how many are drawn first: when the
+  // server offered directions, a short first page makes picking one cheap; when it offered none, the
+  // search is settled and a full page is what the reader came for.
+  const steering = !!((d.directions || {}).offer || []).length;
+  const JPAGE = 20, FIRST = steering ? 10 : JPAGE;
+  const pageStart = p => p === 0 ? 0 : FIRST + (p - 1) * JPAGE;
+  const pageLen = p => p === 0 ? FIRST : JPAGE;
+  const jpagesN = Math.max(1, jobs.length <= FIRST ? 1 : 1 + Math.ceil((jobs.length - FIRST) / JPAGE));
   const jpage = Math.min(jpagesN - 1, Math.max(0, d._jpage || 0));
-  const pagedJobs = jobs.slice(jpage * JPAGE, jpage * JPAGE + JPAGE);
-  const jfrom = jpage * JPAGE + 1, jto = jpage * JPAGE + pagedJobs.length;
+  const pagedJobs = jobs.slice(pageStart(jpage), pageStart(jpage) + pageLen(jpage));
+  const jfrom = pageStart(jpage) + 1, jto = pageStart(jpage) + pagedJobs.length;
   const jpager = jpagesN > 1
-    ? `<div class="ppl-pager"><button type="button" class="jobs-page" data-jpid="${esc(d._jpid)}" data-page="${jpage-1}" ${jpage===0?"disabled":""}>‹ Previous 20</button><span class="ppl-pageinfo">Page <b>${jpage+1}</b> of ${jpagesN} · roles ${jfrom}–${jto} of ${jobs.length}</span><button type="button" class="jobs-page" data-jpid="${esc(d._jpid)}" data-page="${jpage+1}" ${jpage>=jpagesN-1?"disabled":""}>Next 20 ›</button></div>` : "";
+    ? `<div class="ppl-pager"><button type="button" class="jobs-page" data-jpid="${esc(d._jpid)}" data-page="${jpage-1}" ${jpage===0?"disabled":""}>‹ Previous</button><span class="ppl-pageinfo">Page <b>${jpage+1}</b> of ${jpagesN} · roles ${jfrom}–${jto} of ${jobs.length}</span><button type="button" class="jobs-page" data-jpid="${esc(d._jpid)}" data-page="${jpage+1}" ${jpage>=jpagesN-1?"disabled":""}>Next ${pageLen(jpage+1)} ›</button></div>` : "";
   const cardOf = j=>{
     const co = esc((j.company||"").replace(/_/g," "));
     const loc = j.location?`<span class="ppl-tag">${esc(j.location)}</span>`:"";
@@ -7320,7 +7354,7 @@ function newConversation(){
   THREAD = {session_id:null, turns:[]};
   MODE_VIEWS = {}; TAB_THREADS = {};   // "＋ New search" wipes every tab's remembered result/thread
   window.ACTIVE_MAP = null;            // …and leaves any saved-map view
-  PEOPLE_CTX = null; JOBS_CTX = null; PENDING_PERSON = null; PENDING_CTX = ""; EVIDENCE_KINDS = new Set(); JOB_MUST = new Set(); LEVEL = ""; LEVEL_SPAN = 1; renderEvFilters();  // …and both tabs' refinement conversations start fresh
+  PEOPLE_CTX = null; JOBS_CTX = null; JOBS_PRIOR = null; PENDING_PERSON = null; PENDING_CTX = ""; EVIDENCE_KINDS = new Set(); JOB_MUST = new Set(); LEVEL = ""; LEVEL_SPAN = 1; renderEvFilters();  // …and both tabs' refinement conversations start fresh
   GUIDED_REFINED = false;
   // Guided intake state goes too — whichever tab is showing (a stale intake must never greet the next visit)
   INTAKE = {state: null, busy: false, last: null, ready: null};
@@ -8533,6 +8567,7 @@ $("#searchlist") && $("#searchlist").addEventListener("click", (e)=>{
 // ---- Bucket picker popover (from a card's ＋ Save) ----
 let PICK_ITEM = null;
 function openBucketPicker(anchor, item){
+  markEngaged();          // shortlisting is the clearest alignment signal there is
   if(!loggedIn()){ $("#idmodal").hidden = false; return; }
   PICK_ITEM = item;
   const pop = $("#bucketpick"); const r = anchor.getBoundingClientRect();
@@ -8663,6 +8698,57 @@ function mergeContract(d, c){
 }
 // SMART RELAXING (owner, 2026-09-06): too few results → the least important filters became preferences; say which, and
 // that the chip makes them strict again (the rail already shows them as ▲ prefer)
+// ===== DIRECTIONS — the few ways this search could go next =====
+// Offered, never asked. The research on clarifying questions is blunt: a low-quality one measurably
+// disturbs people, and asking only the good ones beats asking all of them. So these are chips beside
+// the results that a reader can ignore entirely — the server has already decided (`worth_steering`)
+// that this search is worth steering at all, and says nothing far more often than it says something.
+// ALIGNMENT, INFERRED BEFORE IT IS ASKED. Asking "does this look right?" every turn spends the one
+// budget that is genuinely scarce. A reader who opens a posting or shortlists one has answered the
+// question by acting, so the offer to redirect the search is withdrawn for that result set. (This is
+// the cheap half of the spec's §3.4 — the server-side history, /me/buckets and /me/applications, is
+// not read yet, so this only knows about the current page.)
+function markEngaged(){
+  try{
+    const d = (window.JOBS_RENDERS || {})[Object.keys(window.JOBS_RENDERS || {}).slice(-1)[0]];
+    if(d && !d._engaged){ d._engaged = true; if(typeof rerenderRail === "function") rerenderRail(d._jpid); }
+  }catch(e){}
+}
+function directionsMarkup(d){
+  if(d._engaged) return "";               // they are reading results, not looking for a different search
+  const dir = d.directions || {};
+  // a cluster has no facet key, so "not this" has nothing to hang an `avoid` on — those are dropped
+  // here rather than shown as a chip that cannot do what it says
+  const offer = (dir.offer || []).filter(o => o.key || o.section !== "avoid");
+  const back = (d._backStack || []).length;
+  if(!offer.length && !back) return "";
+  const chip = (o, i) => `<button type="button" class="dirchip${o.section === "avoid" ? " drop" : ""}" data-jpid="${esc(d._jpid)}" data-di="${i}" title="${esc(o.why || "")} — tap to steer the search this way">${o.section === "avoid" ? "▼ " : ""}${esc(o.label)} <span class="dirchip-n">${o.hits}</span></button>`;
+  const undo = back ? `<button type="button" class="dirback" data-jpid="${esc(d._jpid)}" title="Undo the last narrowing">↩ back</button>` : "";
+  return `<div class="dirs"><div class="dirs-h"><b>Narrow it</b> <span class="tgt-q-hint">${esc(dir.why || "")} — or ignore these and keep scrolling</span>${undo}</div>
+    <div class="dirs-row">${offer.map(chip).join("")}</div></div>`;
+}
+// Picking one is an ordinary contract edit re-run through the same endpoint the rail's Apply uses —
+// no new search path, and the previous contract is kept so going back is a pop, not a recompile.
+async function takeDirection(jpid, idx){
+  const d = facetRenderOf(jpid); if(!d) return;
+  const o = ((d.directions || {}).offer || [])[idx]; if(!o) return;
+  const contract = JSON.parse(JSON.stringify(d.contract || {}));
+  if(o.key){
+    const bag = o.section === "avoid" ? (contract.avoid = contract.avoid || {}) : (contract.must = contract.must || {});
+    bag[o.key] = [...new Set([...(Array.isArray(bag[o.key]) ? bag[o.key] : []), ...(o.values || [])])];
+  }else{
+    // an emergent cluster names no facet key, so it steers the WORDS — which is what produced it
+    contract.text = ((contract.text || "") + " " + ((o.values || [])[0] || "")).trim();
+  }
+  // the turn before, kept for a one-tap back: a pop and a re-run, never a recompile
+  d._backStack = (d._backStack || []).concat([JSON.parse(JSON.stringify(d.contract || {}))]);
+  await facetReevaluate(jpid, contract, false);
+}
+async function undoDirection(jpid){
+  const d = facetRenderOf(jpid); if(!d || !(d._backStack || []).length) return;
+  const prev = d._backStack.pop();
+  await facetReevaluate(jpid, prev, false);
+}
 function relaxedMarkup(d){
   const notes = (d.relaxed || []).filter(n => n.rule === "relaxed"); if(!notes.length) return "";
   const sum = (d.relaxed || []).find(n => n.rule === "relax_summary") || {};
@@ -8762,7 +8848,7 @@ function facetRailMarkup(d){
       <button type="button" class="idgo frail-go" data-jpid="${esc(d._jpid)}">Apply</button><button type="button" class="histbtn frail-reset" data-jpid="${esc(d._jpid)}">Reset</button></div>`
     : `<div class="frail-apply">${d._applied && d._delta ? `<span class="frail-done">Applied ✓ — ${d._delta.after} shown${d._delta.added ? ` · <b>${d._delta.added} new</b>` : ""}${d._delta.removed ? ` · ${d._delta.removed} dropped` : ""}${!d._delta.added && !d._delta.removed ? " · same rows, order may differ" : ""}${(d._delta.prevPool != null && d._delta.pool != null && d._delta.prevPool !== d._delta.pool) ? ` · pool ${d._delta.prevPool} → ${d._delta.pool}` : ""}</span> ${d._delta.added && !d._newFirst ? (() => { const rowsNow = Array.isArray(d.people_rows) ? d.people_rows : (d.jobs||[]); const per = 20, pg = Array.isArray(d.people_rows) ? (d._page||0) : (d._jpage||0); const onPage = rowsNow.slice(pg*per, pg*per+per).filter(r => r._new).length; return `${onPage ? ` <span class="frail-note">${onPage} of them on this page (corner flag)</span>` : ` <span class="frail-note">none of them on this page</span>`} <button type="button" class="histbtn frail-shownew" data-jpid="${esc(d._jpid)}">Show the ${d._delta.added} new first</button>`; })() : ""}` : "Tap chips to stage changes, then apply once. "}${saveBtn}</div>`;
   const empty = (cov.diagnosis && !facetPending(d)) ? diagnosisMarkup({...cov.diagnosis, best_match: cov.best_match}, d._jpid, L) : "";
-  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}">${degradedMarkup(d)}${relaxedMarkup(d)}${mergeMarkup(d)}<div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : (cov.slice != null ? `· ${Number(cov.slice).toLocaleString()} match these filters` : "")}${stale ? ` <span class="frail-note" title="The pool is empty, so these counts are from the last result that had rows — change a filter and apply">· chips from the last result</span>` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${whereRowMarkup(d)}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
+  return `<div class="frail${d._busy?" busy":""}" data-jpid="${esc(d._jpid)}">${degradedMarkup(d)}${directionsMarkup(d)}${relaxedMarkup(d)}${mergeMarkup(d)}<div class="frail-h"><b>Navigate</b> ${cov.pool != null ? `· ${cov.pool} in the pool` : (cov.slice != null ? `· ${Number(cov.slice).toLocaleString()} match these filters` : "")}${stale ? ` <span class="frail-note" title="The pool is empty, so these counts are from the last result that had rows — change a filter and apply">· chips from the last result</span>` : ""}${cov.counts_sampled ? ` <span title="This slice is large, so chip counts are estimated from a 1-in-${cov.counts_sampled} sample">· counts ≈</span>` : ""} ${rank}<span style="margin-left:auto;" title="Tap a chip to cycle: ● must (only these) → ▲ prefer (rank these first) → ▼ avoid (hide these) → off">● must · ▲ prefer · ▼ avoid</span></div>${empty}${whereRowMarkup(d)}${rows}${pills.length ? `<div class="frail-pills">${pills.join("")}</div>` : ""}${applyBar}</div>`;
 }
 // EMPTY RESULT → which must is doing it (leave-one-out from the evaluator), with one-tap Drop (staged)
 function diagnosisMarkup(diag, jpid, L){
@@ -9689,6 +9775,7 @@ function toggleJobSummary(ref){
   if(!boxes.length) return;
   if(boxes[0].innerHTML.trim()){ boxes.forEach(b => { b.innerHTML = ""; }); window.OPEN_JOB_SUMS.delete(String(ref)); return; }   // second click folds it
   window.OPEN_JOB_SUMS.add(String(ref));
+  markEngaged();          // reading a posting is alignment: stop offering to redirect the search
   summarizeJob(ref);
 }
 async function summarizeJob(ref){
@@ -10968,6 +11055,10 @@ document.addEventListener("click", e => {
   if(jpg){ e.preventDefault(); if(!jpg.disabled) gotoJobsPage(jpg.dataset.jpid, parseInt(jpg.dataset.page||"0",10)); return; }
   const rr = e.target.closest && e.target.closest(".ppl-rerank");
   if(rr){ e.preventDefault(); rerankShown(rr.dataset.pid); return; }
+  const dc = e.target.closest && e.target.closest(".dirchip");
+  if(dc){ e.preventDefault(); takeDirection(dc.dataset.jpid, parseInt(dc.dataset.di || "0", 10)); return; }
+  const db = e.target.closest && e.target.closest(".dirback");
+  if(db){ e.preventDefault(); undoDirection(db.dataset.jpid); return; }
   const ur = e.target.closest && e.target.closest("#useresumechip");
   if(ur){ e.preventDefault(); toggleUseResume(); return; }        // a switch, not a must-have — caught first
   const ef = e.target.closest && e.target.closest("#evfilters .ev-filter");
@@ -11093,7 +11184,9 @@ function rerenderPeople(pid){
 function gotoJobsPage(jpid, page){
   if(typeof loadApplied === "function") loadApplied().then(()=>{ try{ markAppliedCards(); }catch(e){} });
   const d = (window.JOBS_RENDERS||{})[jpid]; if(!d) return;
-  const n = Math.max(1, Math.ceil((d.jobs||[]).length / 20));
+  const steering = !!((d.directions || {}).offer || []).length;   // must match jobsMarkup's paging
+  const first = steering ? 10 : 20, len = (d.jobs||[]).length;
+  const n = Math.max(1, len <= first ? 1 : 1 + Math.ceil((len - first) / 20));
   d._jpage = Math.min(n - 1, Math.max(0, page || 0));
   const wrap = document.querySelector(`.ppl-wrap[data-jpid="${CSS.escape(jpid)}"]`); if(!wrap) return;
   wrap.outerHTML = jobsMarkup(d);
