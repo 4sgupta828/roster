@@ -1082,6 +1082,12 @@ class ResearchIn(BaseModel):
     #                                       SEARCH surfaces (never prose answers); Q&A owns questions
     refine_facets: dict | None = None     # People-tab CONVERSATION: the previous turn's accumulated facet
     #                                       filter — the new utterance refines/narrows it (None = fresh)
+    prior_contract: dict | None = None    # THE TURN BEFORE. A jobs follow-up used to recompile from
+    #                                       scratch: `refine_query` is read only in the legacy branch
+    #                                       (app.py, after the evaluator has already returned), so with
+    #                                       ROSTER_FACET_EVALUATOR on — which is prod — nothing carried
+    #                                       from turn to turn. The contract the last turn ran is the
+    #                                       thing a refinement refines.
     use_resume: bool = False              # 🎯 PROFILE-BASED SEARCH (opt-in): shape this jobs search with
     #                                       the résumé on file. Opt-IN by design — the résumé used to
     #                                       reshape every signed-in seeker's search invisibly, with no
@@ -3177,6 +3183,12 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 import time as _jtm
                 _j0 = _jtm.monotonic()
                 _c = await _compile_cached("job", body.question or "", limit=80, scope=_scope, extras=_ex)
+                # A FOLLOW-UP INHERITS THE TURN BEFORE IT. Every jobs turn used to recompile from
+                # nothing, because the only refinement code sits past the evaluator's own return and
+                # cannot run in prod. What the previous contract established and this utterance did
+                # not speak about is carried forward; anything the new compile DID speak about wins,
+                # because that is the reader changing their mind.
+                _carried = _carry_forward(_c, body.prior_contract)
                 _j1 = _jtm.monotonic()
                 # THE LEXICON, after the model and never over it: a query that IS a facet value reaches
                 # the contract even when the compiler — prompted to extract only what is "stated
@@ -3184,7 +3196,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 _lex_notes = _apply_lexicon(_c, _lexicon_plan("job", body.question or ""))
                 _moved = downgrade_uncovered_musts(_c, await _facet_coverage("job"))
                 _c, _ia_notes = await _index_aware(_c, kind="job", user_keys=set(k for k in ("work_mode", "company_type", "level") if body.job_must), place_or_mode=bool(_ex.get("place_or_mode")))
-                _ia_notes = list(_lex_notes or []) + list(_ia_notes or [])
+                _ia_notes = list(_lex_notes or []) + list(_carried or []) + list(_ia_notes or [])
                 _plain_t = {"plain.compile": round(_j1 - _j0, 2), "plain.coverage_and_index_aware": round(_jtm.monotonic() - _j1, 2)}
             if body.levels and body.levels[0]:
                 _c.center = {"key": "level", "value": body.levels[0], "span": int(body.level_span)}
@@ -6404,6 +6416,37 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         cache[kind] = (_time.monotonic(), cov); app.state._facet_cov = cache
         return cov
 
+    def _carry_forward(c, prior: dict | None) -> list[str]:
+        """Fold the PREVIOUS turn's contract into this one, where this one is silent.
+
+        A conversation narrows. "remote backend roles" then "in austin" should keep remote; today it
+        keeps nothing, because the jobs refinement code sits after the evaluator branch returns and so
+        never runs in prod. The rule is deliberately one-directional and conservative:
+
+        - a key THIS turn spoke about is this turn's, in any section — the reader changed their mind;
+        - `country` is never carried: the scope selector owns it and is applied separately;
+        - `text` is never carried: the new words are the new query, and stitching two queries' prose
+          together is how a search stops being about what was just typed;
+        - a carried MUST stays a must, a carried PREFER stays a prefer — a refinement must not quietly
+          harden something the previous turn only ranked on.
+
+        Returns notes, because a filter the reader cannot see is the thing this codebase keeps
+        relearning not to build."""
+        if not isinstance(prior, dict) or str(prior.get("kind") or "job") != c.kind:
+            return []
+        spoken = set(c.must) | set(c.prefer) | set(c.avoid)
+        notes: list[str] = []
+        for sect in ("must", "prefer", "avoid"):
+            for key, vals in (prior.get(sect) or {}).items():
+                if key in spoken or key == "country" or not vals:
+                    continue
+                getattr(c, sect)[key] = list(vals) if isinstance(vals, list) else vals
+                if sect == "must":
+                    notes.append(f"still only {key.replace('_', ' ')} from your last search")
+        if not c.center and isinstance(prior.get("center"), dict) and prior["center"].get("value"):
+            c.center = dict(prior["center"])
+        return notes
+
     async def _compile_cached(kind: str, text: str, *, limit: int, scope: dict, extras: dict | None = None):
         """`compile_contract`, cached on what actually determines its answer.
 
@@ -6952,10 +6995,22 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     @app.post("/search/evaluate")
     async def search_evaluate(body: EvaluateIn) -> dict:
         """Contract → rows + counts + coverage. Deterministic for a given index state (no model call).
-        People rows come back card-shaped (the Talent surface renders them as is)."""
-        out = await _run_contract(body.contract, str((body.contract or {}).get("kind") or "job"), depth=body.depth, relax=bool(body.relax))
-        if (body.contract or {}).get("kind") == "person":
+        People rows come back card-shaped (the Talent surface renders them as is).
+
+        THE JOBS PAYLOAD IS NOT JUST `_run_contract`. `/jobs` enriches its rows with the employer and
+        computes the grouping menu from the rows it is about to return; this endpoint did neither, and
+        the rail's Apply posts here. So an Apply came back with no `group_options` — and the browser,
+        which guards with `if(out.group_options)`, kept the menu computed for the PREVIOUS rows — and
+        with job rows stripped of their employer. Both are now done here too, which fixes the rail and
+        gives the convergence loop something it can re-run a contract through."""
+        kind = str((body.contract or {}).get("kind") or "job")
+        out = await _run_contract(body.contract, kind, depth=body.depth, relax=bool(body.relax))
+        if kind == "person":
             out["rows"] = await _hydrate_people(out.get("rows") or [])
+        elif out.get("rows"):
+            out["rows"] = await _with_employer(list(out["rows"]))
+        if out.get("rows"):
+            out["group_options"] = _group_options(list(out["rows"]))
         return out
 
     @app.post("/jobs/group")

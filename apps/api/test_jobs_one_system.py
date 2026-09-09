@@ -393,3 +393,67 @@ def test_a_cached_compile_is_a_copy_not_the_same_object(monkeypatch):
     second = _jobs(c, question="backend engineer").json()
     assert "work_mode" in (first["contract"]["must"] or {})
     assert "work_mode" not in (second["contract"]["must"] or {}), "the toggle leaked through the cache"
+
+
+# ------------------------------------------- the rail's Apply, and what a steering loop re-runs through
+
+def test_re_evaluating_a_contract_returns_the_grouping_menu_for_the_new_rows(monkeypatch):
+    """The rail's Apply posts a mutated contract to /search/evaluate, which returned no `group_options`
+    because only /jobs computed them. The browser guards with `if(out.group_options)`, so it kept the
+    menu built for the PREVIOUS rows — the grouping offered described results that were no longer on
+    screen. It is also what the convergence loop re-runs a contract through, so it has to carry the
+    whole jobs payload."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    c = _lex_client()
+    r = c.post("/search/evaluate", json={"contract": {"kind": "job", "must": {"work_mode": ["remote"]}, "limit": 20}})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["rows"], "the contract matches rows"
+    assert d.get("group_options"), "an Apply must bring back the menu for the rows it just returned"
+    assert all(row["facets"]["work_mode"] == ["remote"] for row in d["rows"])
+
+
+def test_a_follow_up_inherits_the_turn_before_it(monkeypatch):
+    """Measured in the code: `refine_query` is read only past the evaluator's own return, so with the
+    evaluator on — which is prod — every jobs follow-up recompiled from nothing. A conversation
+    narrows: "remote roles", then "in austin", keeps remote."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {"must": {"metro": ["austin"]}})
+    c = _lex_client()
+    prior = {"kind": "job", "must": {"work_mode": ["remote"]}, "prefer": {"field": ["software"]}}
+    d = _jobs(c, question="in austin", prior_contract=prior).json()
+    got = d["contract"]["must"]
+    assert got.get("metro") == ["austin"], got
+    assert got.get("work_mode") == ["remote"], "the previous turn's filter was dropped"
+    assert d["contract"]["prefer"].get("field") == ["software"]
+
+
+def test_the_new_turn_wins_over_the_old_one_on_any_key_it_speaks_about(monkeypatch):
+    """Carrying forward must never overrule the reader. Saying "hybrid" after "remote" is a change of
+    mind, not a contradiction to be merged."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {"must": {"work_mode": ["hybrid"]}})
+    c = _lex_client()
+    d = _jobs(c, question="hybrid instead", prior_contract={"kind": "job", "must": {"work_mode": ["remote"]}}).json()
+    assert d["contract"]["must"].get("work_mode") == ["hybrid"]
+
+
+def test_a_carried_preference_never_hardens_into_a_filter(monkeypatch):
+    """A refinement must not quietly promote something the previous turn only ranked on."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
+    c = _lex_client()
+    d = _jobs(c, question="anything", prior_contract={"kind": "job", "prefer": {"level": ["staff_plus"]}}).json()
+    assert d["contract"]["prefer"].get("level") == ["staff_plus"]
+    assert "level" not in (d["contract"]["must"] or {})
+
+
+def test_the_scope_is_never_inherited_from_a_previous_turn(monkeypatch):
+    """`country` belongs to the Where selector, which is applied separately every turn. Carrying it
+    would let a stale worldwide search silently outlive the control that set it."""
+    monkeypatch.setenv("ROSTER_JOBS", "1"); monkeypatch.setenv("ROSTER_FACET_EVALUATOR", "1")
+    monkeypatch.setattr("api.model_json.llm_json", lambda s, u, **kw: {})
+    c = _lex_client()
+    d = _jobs(c, question="anything", country="us",
+              prior_contract={"kind": "job", "must": {"country": ["de"]}}).json()
+    assert d["contract"]["must"].get("country") == ["us"]
