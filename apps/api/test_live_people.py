@@ -81,6 +81,42 @@ def test_merge_country_hard_filter(monkeypatch):
     assert out == []                                         # known-foreign dropped
 
 
+def test_normalize_exa_structured_person_entity():
+    rec = ExternalRecord(id="https://linkedin.com/in/adil", source="exa", title="Adil Mubeen",
+        url="https://linkedin.com/in/adil", text="ML engineer",
+        fields={"person": {"name": "Adil Mubeen", "location": "San Francisco, California, United States",
+                           "workHistory": [{"title": "Senior Machine Learning Engineer",
+                                            "company": {"name": "Aozic"}}]}})
+    c = normalize_record(rec)
+    attrs = {a["key"]: a["display"] for a in c["attributes"]}
+    assert c["name"] == "Adil Mubeen"                 # clean name from the entity, not a page title
+    assert attrs.get("title") == "Senior Machine Learning Engineer"
+    assert attrs.get("company") == "Aozic"
+    assert attrs.get("country") == "us"               # parsed from "…United States" → geo filter can act
+    assert c["citation"] is None
+
+
+def test_exa_foreign_profile_gets_country_and_is_droppable(monkeypatch):
+    _patch_embed(monkeypatch, {})
+    rec = ExternalRecord(id="https://linkedin.com/in/x", source="exa", title="Someone",
+        url="https://linkedin.com/in/x",
+        fields={"person": {"name": "Someone", "location": "Chennai, Tamil Nadu, India", "workHistory": []}})
+    client = FakeRecordSearch({"candidates": [rec]})
+    out = _run(lp.merge_live_candidates("[1,0,0]", {"country": "us"}, [], search_client=client))
+    assert out == []                                  # India profile now carries country=in → dropped for a US search
+
+
+def test_reserve_live_slots_guarantees_visibility():
+    from api.people_population import _reserve_live_slots
+    corpus = [{"name": f"c{i}", "_score": 1.0 - i * 0.01} for i in range(40)]
+    live = [{"name": "L1", "live": True, "_score": 0.30}, {"name": "L2", "live": True, "_score": 0.28}]
+    kept = _reserve_live_slots(corpus + live, limit=10)
+    assert len(kept) == 10
+    assert any(c.get("live") for c in kept)           # a live row survives the cut despite a low score
+    # no live rows → plain truncation, no reserved slots wasted
+    assert all(not c.get("live") for c in _reserve_live_slots(corpus, limit=10))
+
+
 def test_flag_default_off():
     import os
     assert lp.live_people_enabled() == (os.environ.get("ROSTER_LIVE_PEOPLE", "").lower()

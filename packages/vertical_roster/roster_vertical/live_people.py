@@ -99,8 +99,12 @@ class PdlPeopleSearch:
 
 
 class ExaPeopleSearch:
-    """Exa neural search for open-web profile pages → ExternalRecord per result. Reuses the kernel's
-    Exa web client (its /search) rather than duplicating the HTTP. Fail-safe to [] with no key."""
+    """Exa NEURAL people search using the `linkedin profile` category, which returns real profiles with
+    a STRUCTURED `entities[].properties` block (name, location, workHistory → title + company) plus the
+    profile text. A generic web search (the old call) threw that structure away and returned page-title
+    'names' and no geo. Fail-safe to [] with no key / any error."""
+
+    URL = "https://api.exa.ai/search"
 
     def __init__(self, *, api_key: str | None = None, timeout: float = 12.0):
         self._api_key = api_key or os.environ.get("EXA_API_KEY", "")
@@ -110,26 +114,36 @@ class ExaPeopleSearch:
                      filters: dict | None = None) -> list[ExternalRecord]:
         if not self._api_key:
             return []
-        from roster_kernel.providers.exa_web import ExaWebSearch
+        import httpx
         f = filters or {}
-        # bias the neural query toward profiles for the role/skills the brief named
         q = str(f.get("search_text") or query).strip()
         locs = ", ".join(str(x) for x in (f.get("locations") or [])[:3] if str(x).strip())
         q = (q + (f" in {locs}" if locs else "")).strip()[:600]
+        payload = {"query": q, "numResults": min(int(max_results), 25), "type": "neural",
+                   "category": "linkedin profile",
+                   "contents": {"text": {"maxCharacters": 900}}}
+        headers = {"x-api-key": self._api_key, "content-type": "application/json"}
         try:
-            web = ExaWebSearch(api_key=self._api_key, timeout=self._timeout)
-            results = await web.search(q, max_results=min(int(max_results), 25), open_web=True)
-        except Exception:   # noqa: BLE001
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                resp = await client.post(self.URL, json=payload, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception:   # noqa: BLE001 — additive leg
             return []
         out: list[ExternalRecord] = []
-        for r in results:
-            if not r.url:
+        for r in data.get("results", []) or []:
+            url = str(r.get("url") or "").strip()
+            if not url:
                 continue
+            ents = r.get("entities") or []
+            props = next((e.get("properties") for e in ents
+                          if isinstance(e, dict) and e.get("type") == "person" and e.get("properties")), None)
             out.append(ExternalRecord(
-                id=r.url, source="exa", title=r.title or r.url,
-                text=(r.body or r.snippet or r.title or ""), url=r.url,
-                fields={"snippet": r.snippet, "highlights": list(r.highlights or ()),
-                        "published": r.published}))
+                id=url, source="exa",
+                title=str((props or {}).get("name") or r.get("title") or url),
+                text=str(r.get("text") or ""), url=url,
+                fields={"person": props, "title_raw": r.get("title"),
+                        "published": r.get("publishedDate"), "score": r.get("score")}))
         return out
 
 
@@ -152,6 +166,41 @@ def _clean(s) -> str:
     return str(s or "").strip()
 
 
+_US_STATE_WORDS = ("alabama", "alaska", "arizona", "arkansas", "california", "colorado", "connecticut",
+    "delaware", "florida", "georgia", "hawaii", "idaho", "illinois", "indiana", "iowa", "kansas",
+    "kentucky", "louisiana", "maine", "maryland", "massachusetts", "michigan", "minnesota", "mississippi",
+    "missouri", "montana", "nebraska", "nevada", "new hampshire", "new jersey", "new mexico", "new york",
+    "north carolina", "north dakota", "ohio", "oklahoma", "oregon", "pennsylvania", "rhode island",
+    "south carolina", "south dakota", "tennessee", "texas", "utah", "vermont", "virginia", "washington",
+    "west virginia", "wisconsin", "wyoming")
+_FOREIGN = {"india": "in", "canada": "ca", "united kingdom": "gb", "england": "gb", "uk": "gb",
+    "germany": "de", "france": "fr", "australia": "au", "singapore": "sg", "netherlands": "nl",
+    "ireland": "ie", "spain": "es", "italy": "it", "brazil": "br", "china": "cn", "japan": "jp",
+    "pakistan": "pk", "bangladesh": "bd", "nigeria": "ng", "israel": "il", "poland": "pl", "sweden": "se",
+    "switzerland": "ch", "mexico": "mx", "united arab emirates": "ae", "dubai": "ae"}
+
+
+def _country_from_location(loc: str) -> str:
+    """Best-effort country from a free-text location → 'us' / an ISO-ish code / '' (unknown → kept).
+    US wins on 'united states'/'usa' or a US state name; a named foreign country maps to its code."""
+    s = (loc or "").lower()
+    if not s.strip():
+        return ""
+    if "united states" in s or "u.s." in s or s.endswith(", us") or ", usa" in s or s.endswith(" usa"):
+        return "us"
+    for name, code in _FOREIGN.items():
+        if name in s:
+            return code
+    if any(st in s for st in _US_STATE_WORDS):
+        return "us"
+    # common US metro/area phrases that name no state (LinkedIn's "… Bay Area" style)
+    if any(m in s for m in ("bay area", "silicon valley", "greater seattle", "greater boston",
+                            "greater new york", "greater los angeles", "greater chicago",
+                            "washington dc", "washington d.c.")):
+        return "us"
+    return ""
+
+
 def normalize_record(rec: ExternalRecord) -> dict | None:
     """Map one ExternalRecord → a people-card partial in the shape match_jd_people/UI expect:
     {entity_id, name, blurb, attributes[], links[], citation:None, source, found_by, _live_fields}.
@@ -171,9 +220,17 @@ def normalize_record(rec: ExternalRecord) -> dict | None:
         country = _clean(f.get("location_country"))
         skills = [_clean(s) for s in (f.get("skills") or []) if _clean(s)][:12]
         li = _clean(f.get("linkedin_url")) or _clean(rec.url)
-    else:  # exa / open-web
-        name = _clean(rec.title).split(" — ")[0].split(" | ")[0][:80]
-        title = company = metro = country = ""
+    else:  # exa linkedin profile — prefer the structured `person` entity Exa returns
+        p = f.get("person") or {}
+        name = _clean(p.get("name")) or _clean(rec.title).split(" | ")[0].split(" — ")[0][:80]
+        loc = _clean(p.get("location"))
+        wh = [w for w in (p.get("workHistory") or []) if isinstance(w, dict)]
+        cur = wh[0] if wh else {}
+        title = _clean(cur.get("title"))
+        _co = cur.get("company")
+        company = _clean(_co.get("name") if isinstance(_co, dict) else _co)
+        metro = loc
+        country = _country_from_location(loc)
         skills = []
         li = _clean(rec.url)
     if not name:

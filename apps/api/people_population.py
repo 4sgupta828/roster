@@ -1848,6 +1848,23 @@ def _co_matches(candidate_norm: str, excl: set[str], raw: str = "") -> bool:
     return any(len(e) >= 3 and e in toks for e in excl)
 
 
+def _reserve_live_slots(out: list[dict], limit: int, frac: float = 0.2) -> list[dict]:
+    """Truncate to `limit` but RESERVE ~`frac` of the slots for live rows so a pure-relevance blend
+    doesn't bury every live candidate below the cut (they score lower: sparser self-stated text +
+    the source-calibration down-weight). No live rows, or everything fits → plain truncation. Kept
+    rows are re-ordered by `_score` so ranking still reads as relevance."""
+    if limit <= 0 or len(out) <= limit:
+        return out[:limit] if limit >= 0 else out
+    live = [c for c in out if c.get("live")]
+    if not live:
+        return out[:limit]
+    k = min(len(live), max(1, round(limit * frac)))
+    corpus = [c for c in out if not c.get("live")]
+    keep = corpus[: max(0, limit - k)] + live[:k]
+    keep.sort(key=lambda c: -c.get("_score", 0.0))
+    return keep[:limit]
+
+
 async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
     """RECRUITER reverse-match: a job description → ranked candidate PEOPLE (semantic over person
     embeddings), re-ranked by preferences (seniority, location, country). Mirror of match_resume_jobs.
@@ -1956,9 +1973,7 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
             out.extend(await merge_live_candidates(qvec, prefs, out))
         except Exception as ex:  # noqa: BLE001
             _log.warning("live people leg skipped: %s", ex)
-    out.sort(key=lambda x: -x["_score"])
-    for c in out:
-        c.pop("_score", None)
+    out.sort(key=lambda x: -x["_score"])   # _score kept until after truncation for the live-slot reserve
     _gs = None
     if loc_scopes:                       # chosen locations: people placed in any of them lead
         _fac = {r["entity_id"]: r["facets"] for r in rows}
@@ -1978,7 +1993,9 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
         _st = _ls or US_METROS.get(_lm, {}).get("state", "")
         _gs = {"metro": _lm, "state": _st, "label": scope_label(_lm, _ls), "state_label": US_STATES.get(_st, ""),
                "counts": _gc, "source": "selector", "statement": scope_statement("people", _lm, _ls, _gc)}
-    out = out[: int(prefs.get("limit", 40))]
+    out = _reserve_live_slots(out, int(prefs.get("limit", 40)))
+    for c in out:
+        c.pop("_score", None)
     from api.artifacts import attach_artifacts
     await attach_artifacts(store, out)          # public artifacts + freshness on the returned cards
     return {"people_rows": out, "geo_scope": _gs,
