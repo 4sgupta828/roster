@@ -9915,6 +9915,9 @@ const ROLE_OPTIONS = {
 
 // ===== Recruiter reverse-match: job description → ranked candidate people =====
 let JD_LOCS = [], JD_SENS = new Set(), JD_SKILLS = [], JD_SEARCH_TEXT = "", JD_LOC_LABEL = {};
+// Seniority toggles for Find candidates — the ONLY values the matcher/backend understand
+// (mirror api/people_population build_jd_brief `_SEN`). Restored after a jobs refactor dropped it.
+const SEN_OPTS = [["intern","Intern"],["junior","Junior"],["mid","Mid"],["senior","Senior"],["staff_plus","Staff+"],["leadership","Leadership"]];
 function renderJDSen(){ const box=$("#jdSenBox"); if(!box) return;
   box.innerHTML = SEN_OPTS.map(([k,l])=>`<span class="sentog ${JD_SENS.has(k)?"on":""}" data-sen="${k}">${esc(l)}</span>`).join(""); }
 // LOCATIONS = the app's own scope list (metros + states from /geo/options), multi-select as chips
@@ -9966,7 +9969,7 @@ async function runJDFineTune(){
     JD_SEARCH_TEXT = c.search_text || "";
     renderJDBrief(d.brief);
     $("#jdnote").textContent = "Filled from the job description — review, adjust, then find candidates.";
-  }catch(e){ $("#jdnote").textContent = "AI fill failed — try again."; }
+  }catch(e){ console.error("[find-candidates] AI fill failed:", e); $("#jdnote").textContent = "AI fill failed — try again."; }
   finally{ if(btn){ btn.disabled = false; btn.textContent = orig; } }
 }
 function openJD(){ $("#jdmodal").hidden=false; $("#jdresults").innerHTML=""; $("#jdnote").textContent=""; renderJDSen(); renderJDLocs(); populateJDLocSelect(); }
