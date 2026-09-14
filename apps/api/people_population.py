@@ -1848,32 +1848,6 @@ def _co_matches(candidate_norm: str, excl: set[str], raw: str = "") -> bool:
     return any(len(e) >= 3 and e in toks for e in excl)
 
 
-def _reserve_live_slots(out: list[dict], limit: int, frac: float = 0.2) -> list[dict]:
-    """Truncate to `limit` while keeping ~`frac` live rows and INTERLEAVING them through the list so
-    they're visible on the FIRST page (the UI pages at ~20), not sunk to the bottom by their lower
-    scores (sparser self-stated text + the source-calibration down-weight). No live rows → plain
-    truncation. Corpus order (relevance) is preserved; live rows are spread at a regular interval,
-    and the source tag on each card explains why a lower-fit live row sits among higher corpus ones."""
-    if limit <= 0:
-        return out[:limit] if limit >= 0 else out
-    live = [c for c in out if c.get("live")]
-    if not live:
-        return out[:limit]
-    corpus = [c for c in out if not c.get("live")]
-    k = min(len(live), max(1, round(limit * frac)))
-    keep_live = live[:k]                                   # already score-ordered
-    keep_corpus = corpus[: max(0, limit - k)]
-    gap = max(2, limit // (k + 1))                         # spread live rows evenly across the page
-    merged: list[dict] = []
-    li = 0
-    for c in keep_corpus:
-        merged.append(c)
-        if li < len(keep_live) and len(merged) % gap == 0:
-            merged.append(keep_live[li]); li += 1
-    merged.extend(keep_live[li:])                          # any remainder rides at the end
-    return merged[:limit]
-
-
 async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
     """RECRUITER reverse-match: a job description → ranked candidate PEOPLE (semantic over person
     embeddings), re-ranked by preferences (seniority, location, country). Mirror of match_resume_jobs.
@@ -1891,6 +1865,21 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
     qvec = embed_query((_brief + "\n\n" + jd) if _brief else jd)
     if not qvec:
         return {"people_rows": [], "note": "Matching is unavailable right now."}
+    # LIVE-ONLY mode: when the recruiter ticks live providers (Exa / PDL), results come ONLY from
+    # them — the grounded index is not queried. Gated on the capability flag. Ranked by relevance;
+    # each row carries citation=None + a source label (never grounded).
+    from api.live_people import live_people_enabled, merge_live_candidates
+    live_sources = [s for s in (prefs.get("live_sources") or []) if s in ("exa", "pdl")]
+    if live_people_enabled() and live_sources:
+        lim = int(prefs.get("limit", 40))
+        cards = await merge_live_candidates(qvec, prefs, [], sources=live_sources, max_out=lim)
+        for c in cards:
+            c.pop("_score", None)
+        from api.artifacts import attach_artifacts
+        await attach_artifacts(store, cards)
+        lbl = " + ".join(s.upper() for s in live_sources)
+        return {"people_rows": cards, "geo_scope": None,
+                "note": f"live · {lbl} only", "excluded_source_company": None}
     cands = await store.match_people_scored(qvec, cap=int(prefs.get("candidate_cap", 400)))
     if not cands:
         return {"people_rows": []}
@@ -1971,18 +1960,9 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
         card = _person_row_from_facets(r)
         card["match_pct"] = calibrated_pct(sim); card["reasons"] = reasons; card["_score"] = score
         out.append(card)
-    # LIVE LEG (ROSTER_LIVE_PEOPLE, default off): blend ephemeral PDL/Exa candidates, scored against
-    # the SAME qvec and re-ranked by the same bonuses, deduped conservatively vs the corpus rows. They
-    # carry citation=None + a live/source label (never grounded). Additive + fail-safe (never breaks).
-    from api.live_people import live_people_enabled, merge_live_candidates
-    # Per-request opt-in: the env flag enables the CAPABILITY; the recruiter's `live_people` opt-in
-    # is what actually spends on the external providers (API-Credit Discipline). Both required.
-    if live_people_enabled() and prefs.get("live_people"):
-        try:
-            out.extend(await merge_live_candidates(qvec, prefs, out))
-        except Exception as ex:  # noqa: BLE001
-            _log.warning("live people leg skipped: %s", ex)
-    out.sort(key=lambda x: -x["_score"])   # _score kept until after truncation for the live-slot reserve
+    out.sort(key=lambda x: -x["_score"])
+    for c in out:
+        c.pop("_score", None)
     _gs = None
     if loc_scopes:                       # chosen locations: people placed in any of them lead
         _fac = {r["entity_id"]: r["facets"] for r in rows}
@@ -2002,9 +1982,7 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
         _st = _ls or US_METROS.get(_lm, {}).get("state", "")
         _gs = {"metro": _lm, "state": _st, "label": scope_label(_lm, _ls), "state_label": US_STATES.get(_st, ""),
                "counts": _gc, "source": "selector", "statement": scope_statement("people", _lm, _ls, _gc)}
-    out = _reserve_live_slots(out, int(prefs.get("limit", 40)))
-    for c in out:
-        c.pop("_score", None)
+    out = out[: int(prefs.get("limit", 40))]
     from api.artifacts import attach_artifacts
     await attach_artifacts(store, out)          # public artifacts + freshness on the returned cards
     return {"people_rows": out, "geo_scope": _gs,

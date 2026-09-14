@@ -106,17 +106,16 @@ def test_exa_foreign_profile_gets_country_and_is_droppable(monkeypatch):
     assert out == []                                  # India profile now carries country=in → dropped for a US search
 
 
-def test_reserve_live_slots_interleaves_onto_first_page():
-    from api.people_population import _reserve_live_slots
-    corpus = [{"name": f"c{i}", "_score": 1.0 - i * 0.01} for i in range(40)]
-    live = [{"name": f"L{i}", "live": True, "_score": 0.30 - i * 0.01} for i in range(8)]
-    kept = _reserve_live_slots(corpus + live, limit=40)
-    assert len(kept) == 40
-    first_page = kept[:20]
-    assert any(c.get("live") for c in first_page)      # KEY: a live row appears on the visible first page
-    assert not kept[0].get("live")                     # but the top result is still the best corpus row
-    # no live rows → plain truncation
-    assert all(not c.get("live") for c in _reserve_live_slots(corpus, limit=20))
+def test_merge_source_filter_restricts_to_picked_provider(monkeypatch):
+    _patch_embed(monkeypatch, {"a": "[1,0,0]", "b": "[1,0,0]"})
+    exa = ExternalRecord(id="u", source="exa", title="Grace", url="https://x",
+                         fields={"person": {"name": "Grace", "location": "New York, United States"}})
+    pdl = ExternalRecord(id="p", source="pdl", title="Ada",
+                         fields={"full_name": "Ada", "job_company_name": "Acme"})
+    client = FakeRecordSearch({"candidates": [exa, pdl]})
+    # only exa requested → pdl row filtered out even though the client returned it
+    out = _run(lp.merge_live_candidates("[1,0,0]", {}, [], search_client=client, sources=["exa"]))
+    assert {c["source"] for c in out} == {"exa"}
 
 
 def test_geo_detection_foreign_and_us():

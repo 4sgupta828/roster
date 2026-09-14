@@ -2510,10 +2510,13 @@
         <input type="checkbox" id="jdAllowSrcCo" style="width:auto;margin:0;" />
         Include people currently at the hiring company <span style="opacity:.7;">(off = don’t poach from the client)</span>
       </label>
-      <label id="jdLiveRow" hidden class="mcheck" style="margin-top:.4rem;color:var(--muted);cursor:pointer;">
-        <input type="checkbox" id="jdLivePeople" style="width:auto;margin:0;" />
-        Also pull live web candidates <span style="opacity:.7;">(PDL + Exa — self-stated, shown as “live · unverified”)</span>
-      </label>
+      <div id="jdLiveRow" hidden class="mcheck" style="margin-top:.5rem;color:var(--muted);flex-wrap:wrap;gap:.15rem .9rem;">
+        <span style="opacity:.7;flex-basis:100%;">Search live web sources instead of Roster’s index <span style="opacity:.8;">(self-stated, shown as “unverified”)</span>:</span>
+        <label style="cursor:pointer;display:inline-flex;align-items:center;gap:.3rem;">
+          <input type="checkbox" id="jdLiveExa" style="width:auto;margin:0;" /> 🌐 Exa</label>
+        <label style="cursor:pointer;display:inline-flex;align-items:center;gap:.3rem;">
+          <input type="checkbox" id="jdLivePdl" style="width:auto;margin:0;" /> 🔗 PDL</label>
+      </div>
     </section>
 
     <section class="mstep">
@@ -9998,7 +10001,7 @@ async function runJDMatch(){
                   skills: JD_SKILLS.slice(), search_text: JD_SEARCH_TEXT,
                   ...geoPayload(), limit: 40,
                   allow_source_company: !!($("#jdAllowSrcCo")||{}).checked,
-                  live_people: !!($("#jdLivePeople")||{}).checked };
+                  live_sources: [...(($("#jdLiveExa")||{}).checked?["exa"]:[]), ...(($("#jdLivePdl")||{}).checked?["pdl"]:[])] };
   try{
     const r = await fetch("/match-people", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(prefs)});
     if(!r.ok){ const e = await r.json().catch(()=>({})); $("#jdnote").textContent = e.detail || "Match failed — try again."; return; }

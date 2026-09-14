@@ -1265,7 +1265,8 @@ class MatchPeopleIn(BaseModel):        # recruiter reverse-match: JD → candida
     allow_source_company: bool = False   # recruiter opt-in: include people at the JD's hiring company
     skills: list[str] = []               # must-have skills (AI fill or typed) — boost, never a gate
     search_text: str = Field(default="", max_length=2000)   # the AI-fill search paragraph (leads the query)
-    live_people: bool = False            # recruiter opt-in: also pull live PDL/Exa candidates (spends)
+    live_people: bool = False            # (legacy) recruiter opt-in for the live leg
+    live_sources: list[str] = []         # ['exa'] / ['pdl'] / both: search ONLY these live providers
 
 
 class JobSummarizeIn(BaseModel):          # ✨ summarize one posting (job seeker: "do I need to read this?")

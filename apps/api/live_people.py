@@ -84,7 +84,7 @@ def _existing_keys(existing_cards: list[dict]) -> set[tuple[str, str]]:
     return keys
 
 
-def build_live_search(*, cassette_root=None, clients=None):
+def build_live_search(*, cassette_root=None, clients=None, sources=None):
     """Build the live people search. There are no people cassettes yet, so the leg calls its
     providers DIRECTLY whenever a key exists — independent of ROSTER_PROVIDER_MODE (which governs
     LLM/web replay/record, and would otherwise wrongly force this leg into replay or a bad-root
@@ -98,17 +98,22 @@ def build_live_search(*, cassette_root=None, clients=None):
         return None
     from roster_kernel.providers.record_search import CompositeRecordSearch
     from roster_vertical.live_people import ExaPeopleSearch, PdlPeopleSearch
-    return CompositeRecordSearch([PdlPeopleSearch(), ExaPeopleSearch()])
+    picked = [s for s in (sources or ("exa", "pdl")) if s in ("exa", "pdl")] or ["exa", "pdl"]
+    built = {"exa": ExaPeopleSearch, "pdl": PdlPeopleSearch}
+    return CompositeRecordSearch([built[s]() for s in picked])
 
 
 async def merge_live_candidates(qvec: str, prefs: dict, existing_cards: list[dict], *,
-                                search_client=None) -> list[dict]:
-    """Return scored live people-cards (each with a transient `_score`) to blend into `out` BEFORE the
-    caller's sort. Fail-safe: any error → [] (the corpus result stands). No DB writes."""
+                                search_client=None, sources=None, max_out: int | None = None) -> list[dict]:
+    """Return scored live people-cards (each with a transient `_score`), ranked by relevance. `sources`
+    restricts to specific providers (['exa'] / ['pdl'] / both); `max_out` caps how many are returned
+    (defaults to the small blend cap). Fail-safe: any error → []. No DB writes."""
     prefs = prefs or {}
-    client = search_client if search_client is not None else build_live_search()
+    want_src = {str(s).lower() for s in (sources or []) if str(s).lower() in ("exa", "pdl")}
+    client = search_client if search_client is not None else build_live_search(sources=sorted(want_src) or None)
     if client is None:
         return []
+    cap = int(max_out) if max_out else _cap()
     from roster_vertical.live_people import normalize_record
 
     filters = {"skills": [str(s) for s in (prefs.get("skills") or [])][:8],
@@ -118,13 +123,15 @@ async def merge_live_candidates(qvec: str, prefs: dict, existing_cards: list[dic
                "seniorities": [str(s).lower() for s in (prefs.get("seniorities") or [])]}
     query = (filters["search_text"] or " ".join(filters["skills"]) or "").strip() or "candidates"
     try:
-        records = await client.search(query, max_results=max(_cap() * 2, 20), filters=filters)
+        records = await client.search(query, max_results=max(cap * 2, 20), filters=filters)
     except Exception as ex:   # noqa: BLE001 — additive leg
         _log.warning("live people search failed: %s", ex)
         return []
     _log.info("live people: %d raw records for %r", len(records or []), query[:60])
 
     cards = [c for c in (normalize_record(r) for r in (records or [])) if c]
+    if want_src:                                          # restrict to the picked providers
+        cards = [c for c in cards if c.get("source") in want_src]
     if not cards:
         return []
 
@@ -176,4 +183,4 @@ async def merge_live_candidates(qvec: str, prefs: dict, existing_cards: list[dic
         c.pop("_live_fields", None)
         out.append(c)
     out.sort(key=lambda x: -x["_score"])
-    return out[: _cap()]
+    return out[:cap]
