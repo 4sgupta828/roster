@@ -106,15 +106,29 @@ def test_exa_foreign_profile_gets_country_and_is_droppable(monkeypatch):
     assert out == []                                  # India profile now carries country=in → dropped for a US search
 
 
-def test_reserve_live_slots_guarantees_visibility():
+def test_reserve_live_slots_interleaves_onto_first_page():
     from api.people_population import _reserve_live_slots
     corpus = [{"name": f"c{i}", "_score": 1.0 - i * 0.01} for i in range(40)]
-    live = [{"name": "L1", "live": True, "_score": 0.30}, {"name": "L2", "live": True, "_score": 0.28}]
-    kept = _reserve_live_slots(corpus + live, limit=10)
-    assert len(kept) == 10
-    assert any(c.get("live") for c in kept)           # a live row survives the cut despite a low score
-    # no live rows → plain truncation, no reserved slots wasted
-    assert all(not c.get("live") for c in _reserve_live_slots(corpus, limit=10))
+    live = [{"name": f"L{i}", "live": True, "_score": 0.30 - i * 0.01} for i in range(8)]
+    kept = _reserve_live_slots(corpus + live, limit=40)
+    assert len(kept) == 40
+    first_page = kept[:20]
+    assert any(c.get("live") for c in first_page)      # KEY: a live row appears on the visible first page
+    assert not kept[0].get("live")                     # but the top result is still the best corpus row
+    # no live rows → plain truncation
+    assert all(not c.get("live") for c in _reserve_live_slots(corpus, limit=20))
+
+
+def test_geo_detection_foreign_and_us():
+    from roster_vertical.live_people import _country_from_location as cc
+    assert cc("San Francisco, California, United States") == "us"
+    assert cc("San Francisco Bay Area") == "us"
+    assert cc("Greater Houston") == "us"
+    assert cc("Manchester, New Hampshire") == "us"      # US state beats the UK-city name
+    assert cc("Tehran, Tehran Province, Iran") == "ir"
+    assert cc("Greater Bengaluru Area") == "in"
+    assert cc("Argentina") == "ar"
+    assert cc("") == ""
 
 
 def test_flag_default_off():

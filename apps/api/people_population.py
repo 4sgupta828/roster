@@ -1849,20 +1849,29 @@ def _co_matches(candidate_norm: str, excl: set[str], raw: str = "") -> bool:
 
 
 def _reserve_live_slots(out: list[dict], limit: int, frac: float = 0.2) -> list[dict]:
-    """Truncate to `limit` but RESERVE ~`frac` of the slots for live rows so a pure-relevance blend
-    doesn't bury every live candidate below the cut (they score lower: sparser self-stated text +
-    the source-calibration down-weight). No live rows, or everything fits → plain truncation. Kept
-    rows are re-ordered by `_score` so ranking still reads as relevance."""
-    if limit <= 0 or len(out) <= limit:
+    """Truncate to `limit` while keeping ~`frac` live rows and INTERLEAVING them through the list so
+    they're visible on the FIRST page (the UI pages at ~20), not sunk to the bottom by their lower
+    scores (sparser self-stated text + the source-calibration down-weight). No live rows → plain
+    truncation. Corpus order (relevance) is preserved; live rows are spread at a regular interval,
+    and the source tag on each card explains why a lower-fit live row sits among higher corpus ones."""
+    if limit <= 0:
         return out[:limit] if limit >= 0 else out
     live = [c for c in out if c.get("live")]
     if not live:
         return out[:limit]
-    k = min(len(live), max(1, round(limit * frac)))
     corpus = [c for c in out if not c.get("live")]
-    keep = corpus[: max(0, limit - k)] + live[:k]
-    keep.sort(key=lambda c: -c.get("_score", 0.0))
-    return keep[:limit]
+    k = min(len(live), max(1, round(limit * frac)))
+    keep_live = live[:k]                                   # already score-ordered
+    keep_corpus = corpus[: max(0, limit - k)]
+    gap = max(2, limit // (k + 1))                         # spread live rows evenly across the page
+    merged: list[dict] = []
+    li = 0
+    for c in keep_corpus:
+        merged.append(c)
+        if li < len(keep_live) and len(merged) % gap == 0:
+            merged.append(keep_live[li]); li += 1
+    merged.extend(keep_live[li:])                          # any remainder rides at the end
+    return merged[:limit]
 
 
 async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:

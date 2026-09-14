@@ -173,11 +173,25 @@ _US_STATE_WORDS = ("alabama", "alaska", "arizona", "arkansas", "california", "co
     "north carolina", "north dakota", "ohio", "oklahoma", "oregon", "pennsylvania", "rhode island",
     "south carolina", "south dakota", "tennessee", "texas", "utah", "vermont", "virginia", "washington",
     "west virginia", "wisconsin", "wyoming")
-_FOREIGN = {"india": "in", "canada": "ca", "united kingdom": "gb", "england": "gb", "uk": "gb",
+_FOREIGN = {"india": "in", "canada": "ca", "united kingdom": "gb", "england": "gb", "scotland": "gb",
     "germany": "de", "france": "fr", "australia": "au", "singapore": "sg", "netherlands": "nl",
     "ireland": "ie", "spain": "es", "italy": "it", "brazil": "br", "china": "cn", "japan": "jp",
     "pakistan": "pk", "bangladesh": "bd", "nigeria": "ng", "israel": "il", "poland": "pl", "sweden": "se",
-    "switzerland": "ch", "mexico": "mx", "united arab emirates": "ae", "dubai": "ae"}
+    "switzerland": "ch", "mexico": "mx", "united arab emirates": "ae", "iran": "ir", "argentina": "ar",
+    "philippines": "ph", "indonesia": "id", "vietnam": "vn", "turkey": "tr", "türkiye": "tr", "egypt": "eg",
+    "kenya": "ke", "south africa": "za", "ukraine": "ua", "romania": "ro", "portugal": "pt", "colombia": "co",
+    "chile": "cl", "peru": "pe", "malaysia": "my", "thailand": "th", "saudi arabia": "sa", "qatar": "qa",
+    "sri lanka": "lk", "nepal": "np", "belgium": "be", "denmark": "dk", "norway": "no", "finland": "fi",
+    "austria": "at", "greece": "gr", "new zealand": "nz", "hong kong": "hk", "taiwan": "tw", "south korea": "kr"}
+# Foreign metros/areas that name no country word (LinkedIn's "Greater <city> Area" style).
+_FOREIGN_CITY = {"bengaluru": "in", "bangalore": "in", "mumbai": "in", "hyderabad": "in", "chennai": "in",
+    "pune": "in", "kolkata": "in", "gurgaon": "in", "gurugram": "in", "noida": "in", "ahmedabad": "in",
+    "tehran": "ir", "toronto": "ca", "vancouver": "ca", "montreal": "ca", "london": "gb", "manchester": "gb",
+    "berlin": "de", "munich": "de", "paris": "fr", "amsterdam": "nl", "dublin": "ie", "sydney": "au",
+    "melbourne": "au", "dubai": "ae", "abu dhabi": "ae", "lagos": "ng", "nairobi": "ke", "lahore": "pk",
+    "karachi": "pk", "dhaka": "bd", "sao paulo": "br", "são paulo": "br", "buenos aires": "ar",
+    "mexico city": "mx", "warsaw": "pl", "kyiv": "ua", "kiev": "ua", "istanbul": "tr", "cairo": "eg",
+    "singapore": "sg", "tel aviv": "il", "beijing": "cn", "shanghai": "cn", "bangkok": "th"}
 
 
 def _country_from_location(loc: str) -> str:
@@ -191,12 +205,20 @@ def _country_from_location(loc: str) -> str:
     for name, code in _FOREIGN.items():
         if name in s:
             return code
+    # a named US state outranks an ambiguous foreign city ("Manchester, New Hampshire" is US, not UK)
     if any(st in s for st in _US_STATE_WORDS):
         return "us"
+    for city, code in _FOREIGN_CITY.items():
+        if city in s:
+            return code
     # common US metro/area phrases that name no state (LinkedIn's "… Bay Area" style)
     if any(m in s for m in ("bay area", "silicon valley", "greater seattle", "greater boston",
                             "greater new york", "greater los angeles", "greater chicago",
-                            "washington dc", "washington d.c.")):
+                            "greater houston", "greater austin", "greater denver", "greater atlanta",
+                            "greater phoenix", "greater philadelphia", "greater minneapolis",
+                            "greater sacramento", "greater san diego", "dallas", "austin", "denver",
+                            "atlanta", "houston", "seattle", "portland", "miami", "washington dc",
+                            "washington d.c.")):
         return "us"
     return ""
 
