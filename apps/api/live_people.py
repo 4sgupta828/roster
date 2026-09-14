@@ -85,13 +85,20 @@ def _existing_keys(existing_cards: list[dict]) -> set[tuple[str, str]]:
 
 
 def build_live_search(*, cassette_root=None, clients=None):
-    """Build the vertical's live people search for the active mode. Pure REPLAY with no injected
-    client and no cassette → None (no live leg in offline runs); tests inject a FakeRecordSearch."""
-    from roster_vertical.live_people import build_live_people_search
-    mode = resolve_mode()
-    if clients is None and mode is ProviderMode.REPLAY and not cassette_root:
+    """Build the live people search. There are no people cassettes yet, so the leg calls its
+    providers DIRECTLY whenever a key exists — independent of ROSTER_PROVIDER_MODE (which governs
+    LLM/web replay/record, and would otherwise wrongly force this leg into replay or a bad-root
+    record). A cassette_root (eval/CI) opts back into the recorded path; tests inject `clients`."""
+    from roster_vertical.live_people import build_live_people_search, live_people_available
+    if clients is not None or cassette_root:
+        return build_live_people_search(mode=resolve_mode(), cassette_root=(cassette_root or ""),
+                                        clients=clients)
+    if not live_people_available():
+        _log.warning("live people leg on but no PDL_API_KEY / EXA_API_KEY configured")
         return None
-    return build_live_people_search(mode=mode, cassette_root=(cassette_root or ""), clients=clients)
+    from roster_kernel.providers.record_search import CompositeRecordSearch
+    from roster_vertical.live_people import ExaPeopleSearch, PdlPeopleSearch
+    return CompositeRecordSearch([PdlPeopleSearch(), ExaPeopleSearch()])
 
 
 async def merge_live_candidates(qvec: str, prefs: dict, existing_cards: list[dict], *,
@@ -113,8 +120,9 @@ async def merge_live_candidates(qvec: str, prefs: dict, existing_cards: list[dic
     try:
         records = await client.search(query, max_results=max(_cap() * 2, 20), filters=filters)
     except Exception as ex:   # noqa: BLE001 — additive leg
-        _log.info("live people search failed: %s", ex)
+        _log.warning("live people search failed: %s", ex)
         return []
+    _log.info("live people: %d raw records for %r", len(records or []), query[:60])
 
     cards = [c for c in (normalize_record(r) for r in (records or [])) if c]
     if not cards:

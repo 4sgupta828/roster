@@ -1955,7 +1955,7 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
         try:
             out.extend(await merge_live_candidates(qvec, prefs, out))
         except Exception as ex:  # noqa: BLE001
-            _log.info("live people leg skipped: %s", ex)
+            _log.warning("live people leg skipped: %s", ex)
     out.sort(key=lambda x: -x["_score"])
     for c in out:
         c.pop("_score", None)
