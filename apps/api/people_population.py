@@ -1945,6 +1945,15 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
         card = _person_row_from_facets(r)
         card["match_pct"] = calibrated_pct(sim); card["reasons"] = reasons; card["_score"] = score
         out.append(card)
+    # LIVE LEG (ROSTER_LIVE_PEOPLE, default off): blend ephemeral PDL/Exa candidates, scored against
+    # the SAME qvec and re-ranked by the same bonuses, deduped conservatively vs the corpus rows. They
+    # carry citation=None + a live/source label (never grounded). Additive + fail-safe (never breaks).
+    from api.live_people import live_people_enabled, merge_live_candidates
+    if live_people_enabled():
+        try:
+            out.extend(await merge_live_candidates(qvec, prefs, out))
+        except Exception as ex:  # noqa: BLE001
+            _log.info("live people leg skipped: %s", ex)
     out.sort(key=lambda x: -x["_score"])
     for c in out:
         c.pop("_score", None)

@@ -536,6 +536,8 @@
   .ppl-name:hover{color:var(--gold);}
   .ppl-ext{color:var(--gold);font-size:.72em;opacity:.6;}
   .ppl-name:hover .ppl-ext{opacity:1;}
+  .ppl-live{display:inline-block;margin-left:.4rem;padding:.08rem .4rem;border-radius:999px;font-size:.66rem;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:#8a5a00;background:rgba(214,158,46,.16);border:1px solid rgba(214,158,46,.4);vertical-align:middle;white-space:nowrap;}
+  .ppl-card.is-live{border-left:2px solid rgba(214,158,46,.5);}
   .ppl-title{font-size:.82rem;line-height:1.42;color:var(--ink);opacity:.86;}
   .ppl-blurb{display:block;font-size:.82rem;line-height:1.45;color:var(--ink);opacity:.82;margin:.15rem 0;}
   .ppl-tags{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.16rem;}
@@ -3605,9 +3607,12 @@ function peopleRowsMarkup(data){
     const liLine = liH ? `<span class="ppl-li" title="The person's own LinkedIn headline, quoted from a search-engine snippet (self-stated)">in “${esc(liH)}”</span>`
       : "";   // no headline → nothing on the card (a 'not found / ambiguous' line is noise; the panel's Unconfirmed line covers it)
     const fitChip = fitChipHtml(p);
-    return `<div class="ppl-card person-card${p._new ? " is-new" : ""}" data-ref="${esc(ref)}" title="Click for the evidence behind this card">${p._new ? `<span class="newflag" title="Not in the previous result">new</span>` : ""}${acts}${avatar}
+    // LIVE row: sourced from a live provider (PDL/Exa), not the grounded corpus — no citation/evidence.
+    // Badge it so it's never read as a verified, evidence-backed profile.
+    const liveBadge = p.live ? `<span class="ppl-live" title="Sourced live from ${esc(p.source||"an external provider")} — self-stated, not corroborated against the grounded corpus">live · unverified</span>` : "";
+    return `<div class="ppl-card person-card${p._new ? " is-new" : ""}${p.live ? " is-live" : ""}" data-ref="${esc(ref)}" title="Click for the evidence behind this card">${p._new ? `<span class="newflag" title="Not in the previous result">new</span>` : ""}${acts}${avatar}
       <span class="ppl-body">
-        ${nameHtml}
+        ${nameHtml}${liveBadge}
         ${p.blurb?`<span class="ppl-blurb">${esc(p.blurb)}</span>`:(title?`<span class="ppl-title">${esc(title)}</span>`:"")}
         ${liLine}
         ${fitChip?`<span class="ppl-tags">${fitChip}</span>`:""}
