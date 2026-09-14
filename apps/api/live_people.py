@@ -104,10 +104,12 @@ def build_live_search(*, cassette_root=None, clients=None, sources=None):
 
 
 async def merge_live_candidates(qvec: str, prefs: dict, existing_cards: list[dict], *,
-                                search_client=None, sources=None, max_out: int | None = None) -> list[dict]:
+                                search_client=None, sources=None, max_out: int | None = None,
+                                query_text: str | None = None) -> list[dict]:
     """Return scored live people-cards (each with a transient `_score`), ranked by relevance. `sources`
-    restricts to specific providers (['exa'] / ['pdl'] / both); `max_out` caps how many are returned
-    (defaults to the small blend cap). Fail-safe: any error → []. No DB writes."""
+    restricts to specific providers (['exa'] / ['pdl'] / both); `max_out` caps how many are returned;
+    `query_text` is the role description that drives the provider query (the brief / JD). Fail-safe:
+    any error → []. No DB writes."""
     prefs = prefs or {}
     want_src = {str(s).lower() for s in (sources or []) if str(s).lower() in ("exa", "pdl")}
     client = search_client if search_client is not None else build_live_search(sources=sorted(want_src) or None)
@@ -116,12 +118,18 @@ async def merge_live_candidates(qvec: str, prefs: dict, existing_cards: list[dic
     cap = int(max_out) if max_out else _cap()
     from roster_vertical.live_people import normalize_record
 
+    search_text = str(query_text or prefs.get("search_text") or "")[:2000]
     filters = {"skills": [str(s) for s in (prefs.get("skills") or [])][:8],
                "locations": [str(l) for l in (prefs.get("locations") or [])][:6],
                "country": (prefs.get("country") or "").lower(),
-               "search_text": str(prefs.get("search_text") or "")[:2000],
+               "search_text": search_text,
                "seniorities": [str(s).lower() for s in (prefs.get("seniorities") or [])]}
-    query = (filters["search_text"] or " ".join(filters["skills"]) or "").strip() or "candidates"
+    # The query MUST describe the role. Never fall back to a meaningless default (searching a bare
+    # "candidates" returns election candidates, not engineers) — with nothing to search, do nothing.
+    query = (search_text or " ".join(filters["skills"])).strip()
+    if len(query) < 6:
+        _log.info("live people: no usable query text — skipping")
+        return []
     try:
         records = await client.search(query, max_results=max(cap * 2, 20), filters=filters)
     except Exception as ex:   # noqa: BLE001 — additive leg

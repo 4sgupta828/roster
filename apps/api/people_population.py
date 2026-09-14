@@ -1872,7 +1872,8 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
     live_sources = [s for s in (prefs.get("live_sources") or []) if s in ("exa", "pdl")]
     if live_people_enabled() and live_sources:
         lim = int(prefs.get("limit", 40))
-        cards = await merge_live_candidates(qvec, prefs, [], sources=live_sources, max_out=lim)
+        cards = await merge_live_candidates(qvec, prefs, [], sources=live_sources, max_out=lim,
+                                            query_text=(_brief or jd))
         for c in cards:
             c.pop("_score", None)
         from api.artifacts import attach_artifacts

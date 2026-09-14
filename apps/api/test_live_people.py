@@ -66,9 +66,9 @@ def test_merge_conservative_dedupe_drops_name_plus_company_collision(monkeypatch
     _patch_embed(monkeypatch, {})   # embeds irrelevant here; dedupe happens before embed
     rec = ExternalRecord(id="p1", source="pdl", title="Ada",
                          fields={"full_name": "Ada", "job_company_name": "Acme", "skills": []})
-    client = FakeRecordSearch({"candidates": [rec]})
+    client = FakeRecordSearch({"senior ml engineer": [rec]})
     existing = [{"name": "Ada", "attributes": [{"key": "company", "display": "Acme"}]}]
-    out = _run(lp.merge_live_candidates("[1,0,0]", {}, existing, search_client=client))
+    out = _run(lp.merge_live_candidates("[1,0,0]", {}, existing, search_client=client, query_text="senior ml engineer"))
     assert out == []                                         # same name+company as a corpus row → dropped
 
 
@@ -76,8 +76,8 @@ def test_merge_country_hard_filter(monkeypatch):
     _patch_embed(monkeypatch, {})
     rec = ExternalRecord(id="p1", source="pdl", title="Bob",
                          fields={"full_name": "Bob", "location_country": "canada", "skills": []})
-    client = FakeRecordSearch({"candidates": [rec]})
-    out = _run(lp.merge_live_candidates("[1,0,0]", {"country": "us"}, [], search_client=client))
+    client = FakeRecordSearch({"senior ml engineer": [rec]})
+    out = _run(lp.merge_live_candidates("[1,0,0]", {"country": "us"}, [], search_client=client, query_text="senior ml engineer"))
     assert out == []                                         # known-foreign dropped
 
 
@@ -101,8 +101,8 @@ def test_exa_foreign_profile_gets_country_and_is_droppable(monkeypatch):
     rec = ExternalRecord(id="https://linkedin.com/in/x", source="exa", title="Someone",
         url="https://linkedin.com/in/x",
         fields={"person": {"name": "Someone", "location": "Chennai, Tamil Nadu, India", "workHistory": []}})
-    client = FakeRecordSearch({"candidates": [rec]})
-    out = _run(lp.merge_live_candidates("[1,0,0]", {"country": "us"}, [], search_client=client))
+    client = FakeRecordSearch({"senior ml engineer": [rec]})
+    out = _run(lp.merge_live_candidates("[1,0,0]", {"country": "us"}, [], search_client=client, query_text="senior ml engineer"))
     assert out == []                                  # India profile now carries country=in → dropped for a US search
 
 
@@ -112,9 +112,9 @@ def test_merge_source_filter_restricts_to_picked_provider(monkeypatch):
                          fields={"person": {"name": "Grace", "location": "New York, United States"}})
     pdl = ExternalRecord(id="p", source="pdl", title="Ada",
                          fields={"full_name": "Ada", "job_company_name": "Acme"})
-    client = FakeRecordSearch({"candidates": [exa, pdl]})
+    client = FakeRecordSearch({"senior ml engineer": [exa, pdl]})
     # only exa requested → pdl row filtered out even though the client returned it
-    out = _run(lp.merge_live_candidates("[1,0,0]", {}, [], search_client=client, sources=["exa"]))
+    out = _run(lp.merge_live_candidates("[1,0,0]", {}, [], search_client=client, sources=["exa"], query_text="senior ml engineer"))
     assert {c["source"] for c in out} == {"exa"}
 
 
