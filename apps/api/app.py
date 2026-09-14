@@ -1265,6 +1265,7 @@ class MatchPeopleIn(BaseModel):        # recruiter reverse-match: JD → candida
     allow_source_company: bool = False   # recruiter opt-in: include people at the JD's hiring company
     skills: list[str] = []               # must-have skills (AI fill or typed) — boost, never a gate
     search_text: str = Field(default="", max_length=2000)   # the AI-fill search paragraph (leads the query)
+    live_people: bool = False            # recruiter opt-in: also pull live PDL/Exa candidates (spends)
 
 
 class JobSummarizeIn(BaseModel):          # ✨ summarize one posting (job seeker: "do I need to read this?")
@@ -2395,6 +2396,7 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             "insights_qa_enabled": insights_qa_enabled(),
             "qa_router_enabled": qa_router_enabled(),
             "jd_exclude_source_co_enabled": jd_exclude_source_co_enabled(),
+            "live_people_enabled": __import__("api.live_people", fromlist=["live_people_enabled"]).live_people_enabled(),
             "people_semantic_first_enabled": _people_semantic_first_enabled(),
             "recruiter_match_enabled": recruiter_match_enabled(),
             "apply_assist_enabled": apply_assist_enabled(),

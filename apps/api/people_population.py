@@ -1949,7 +1949,9 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
     # the SAME qvec and re-ranked by the same bonuses, deduped conservatively vs the corpus rows. They
     # carry citation=None + a live/source label (never grounded). Additive + fail-safe (never breaks).
     from api.live_people import live_people_enabled, merge_live_candidates
-    if live_people_enabled():
+    # Per-request opt-in: the env flag enables the CAPABILITY; the recruiter's `live_people` opt-in
+    # is what actually spends on the external providers (API-Credit Discipline). Both required.
+    if live_people_enabled() and prefs.get("live_people"):
         try:
             out.extend(await merge_live_candidates(qvec, prefs, out))
         except Exception as ex:  # noqa: BLE001
