@@ -120,6 +120,23 @@ def test_merge_source_filter_restricts_to_picked_provider(monkeypatch):
     assert {c["source"] for c in out} == {"exa"}
 
 
+def test_merge_obeys_metro_scope(monkeypatch):
+    _patch_embed(monkeypatch, {"senior ml engineer": "[1,0,0]"})
+    sf = ExternalRecord(id="a", source="exa", title="SF Person", url="https://x/a",
+        fields={"person": {"name": "SF Person", "location": "San Francisco, California, United States"}})
+    la = ExternalRecord(id="b", source="exa", title="LA Person", url="https://x/b",
+        fields={"person": {"name": "LA Person", "location": "Los Angeles, California, United States"}})
+    unk = ExternalRecord(id="c", source="exa", title="Unknown Loc", url="https://x/c",
+        fields={"person": {"name": "Unknown Loc", "location": ""}})
+    client = FakeRecordSearch({"senior ml engineer": [sf, la, unk]})
+    out = _run(lp.merge_live_candidates("[1,0,0]", {"metro": "bay_area", "country": "us"}, [],
+                                        search_client=client, query_text="senior ml engineer"))
+    names = {c["name"] for c in out}
+    assert "SF Person" in names          # in the bay_area metro → kept
+    assert "LA Person" not in names      # clearly a different metro → dropped
+    assert "Unknown Loc" in names        # no location signal → kept (recall)
+
+
 def test_geo_detection_foreign_and_us():
     from roster_vertical.live_people import _country_from_location as cc
     assert cc("San Francisco, California, United States") == "us"

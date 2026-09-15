@@ -240,6 +240,10 @@ def normalize_record(rec: ExternalRecord) -> dict | None:
         company = _clean(f.get("job_company_name"))
         metro = _clean(f.get("location_locality")) or _clean(f.get("location_name"))
         country = _clean(f.get("location_country"))
+        # full free-text location for geo matching (locality, region, country)
+        location = _clean(f.get("location_name")) or ", ".join(x for x in (
+            _clean(f.get("location_locality")), _clean(f.get("location_region")),
+            _clean(f.get("location_country"))) if x)
         skills = [_clean(s) for s in (f.get("skills") or []) if _clean(s)][:12]
         li = _clean(f.get("linkedin_url")) or _clean(rec.url)
     else:  # exa linkedin profile — prefer the structured `person` entity Exa returns
@@ -252,6 +256,7 @@ def normalize_record(rec: ExternalRecord) -> dict | None:
         _co = cur.get("company")
         company = _clean(_co.get("name") if isinstance(_co, dict) else _co)
         metro = loc
+        location = loc
         country = _country_from_location(loc)
         skills = []
         li = _clean(rec.url)
@@ -277,4 +282,5 @@ def normalize_record(rec: ExternalRecord) -> dict | None:
             "attributes": attrs, "links": links, "citation": None,
             "source": src, "found_by": f"live:{src}",
             "_live_fields": {"skills": skills, "title": title, "company": company,
-                             "metro": metro, "country": country, "text": _clean(rec.text)}}
+                             "metro": metro, "country": country, "location": location,
+                             "text": _clean(rec.text)}}

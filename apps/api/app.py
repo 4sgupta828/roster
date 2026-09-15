@@ -4352,9 +4352,10 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                 _lq = (question_text or body.question or "").strip()
                 _lvec = embed_query(_lq) if _lq else None
                 _lprefs = {"country": (body.country or "").strip().lower() if people_geo_scope_enabled() else "",
+                           "metro": (body.metro or "").strip().lower(), "state": (body.state or "").strip().lower(),
                            "seniorities": [str(x) for x in (body.levels or [])], "search_text": _lq}
                 _lcards = (await merge_live_candidates(_lvec, _lprefs, [], sources=_live_sources,
-                                                       max_out=60, query_text=_lq)) if _lvec else []
+                                                       max_out=100, query_text=_lq)) if _lvec else []
                 _llbl = " + ".join(s.upper() for s in _live_sources)
                 return ResearchOut(grounded=False, answer="", claims=[], coverage_gaps=[], rejected=0,
                                    people_rows=_lcards,

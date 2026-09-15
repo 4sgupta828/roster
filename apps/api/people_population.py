@@ -1871,7 +1871,7 @@ async def match_jd_people(store, jd_text: str, prefs: dict) -> dict:
     from api.live_people import live_people_enabled, merge_live_candidates
     live_sources = [s for s in (prefs.get("live_sources") or []) if s in ("exa", "pdl")]
     if live_people_enabled() and live_sources:
-        lim = int(prefs.get("limit", 40))
+        lim = max(int(prefs.get("limit", 40)), 100)   # show more live results (they page in the UI)
         cards = await merge_live_candidates(qvec, prefs, [], sources=live_sources, max_out=lim,
                                             query_text=(_brief or jd))
         for c in cards:

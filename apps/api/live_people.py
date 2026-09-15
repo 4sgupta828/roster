@@ -148,6 +148,20 @@ async def merge_live_candidates(qvec: str, prefs: dict, existing_cards: list[dic
     want_country = (prefs.get("country") or "").lower()
     want_skills = [str(k).lower().strip() for k in (prefs.get("skills") or []) if str(k).strip()][:8]
     excl = {_norm_co(c) for c in (prefs.get("exclude_companies") or []) if _norm_co(str(c))}
+    # GEO SCOPE — obey the metro / state / city the reader chose, on the live rows' free-text location.
+    # `locations` (modal multi-select) are metro keys / state codes; metro/state are the top-right scope.
+    from api.geo import job_geo_status
+    from roster_vertical.people_facets import US_METROS, US_STATES
+    _scopes: list[tuple[str, str]] = []
+    for l in [str(x).lower().strip() for x in (prefs.get("locations") or []) if str(x).strip()]:
+        if l in US_METROS:
+            _scopes.append((l, ""))
+        elif l in US_STATES:
+            _scopes.append(("", l))
+    if not _scopes:
+        _m = str(prefs.get("metro") or "").lower(); _s = str(prefs.get("state") or "").lower()
+        if _m in US_METROS or _s in US_STATES:
+            _scopes.append((_m if _m in US_METROS else "", _s if _s in US_STATES else ""))
 
     kept: list[dict] = []
     for c in cards:
@@ -160,6 +174,11 @@ async def merge_live_candidates(qvec: str, prefs: dict, existing_cards: list[dic
         country = (lf.get("country") or "").lower()
         if want_country and country and country != want_country:
             continue
+        # metro / state / city: drop a live row CLEARLY outside every chosen scope; unknown stays (recall)
+        if _scopes:
+            _sts = [job_geo_status(lf.get("location") or "", metro=m, state=s) for m, s in _scopes]
+            if _sts and all(x == "out" for x in _sts):
+                continue
         if excl and co and co in excl:
             continue
         kept.append(c)
