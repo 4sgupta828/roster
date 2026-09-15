@@ -2520,11 +2520,13 @@
         Include people currently at the hiring company <span style="opacity:.7;">(off = don’t poach from the client)</span>
       </label>
       <div id="jdLiveRow" hidden class="mcheck" style="margin-top:.5rem;color:var(--muted);flex-wrap:wrap;gap:.15rem .9rem;">
-        <span style="opacity:.7;flex-basis:100%;">Search live web sources instead of Roster’s index <span style="opacity:.8;">(self-stated, shown as “unverified”)</span>:</span>
+        <span style="opacity:.7;flex-basis:100%;">Sources — web (Exa/PDL) is primary; tick Roster to search the grounded index instead <span style="opacity:.8;">(live results are self-stated, shown as “unverified”)</span>:</span>
         <label style="cursor:pointer;display:inline-flex;align-items:center;gap:.3rem;">
-          <input type="checkbox" id="jdLiveExa" style="width:auto;margin:0;" /> 🌐 Exa</label>
+          <input type="checkbox" id="jdLiveExa" checked style="width:auto;margin:0;" /> 🌐 Exa</label>
         <label style="cursor:pointer;display:inline-flex;align-items:center;gap:.3rem;">
-          <input type="checkbox" id="jdLivePdl" style="width:auto;margin:0;" /> 🔗 PDL</label>
+          <input type="checkbox" id="jdLivePdl" checked style="width:auto;margin:0;" /> 🔗 PDL</label>
+        <label style="cursor:pointer;display:inline-flex;align-items:center;gap:.3rem;">
+          <input type="checkbox" id="jdRoster" style="width:auto;margin:0;" /> ◍ Roster index</label>
       </div>
     </section>
 
@@ -10016,7 +10018,7 @@ async function runJDMatch(){
                   skills: JD_SKILLS.slice(), search_text: JD_SEARCH_TEXT,
                   ...geoPayload(), limit: 40,
                   allow_source_company: !!($("#jdAllowSrcCo")||{}).checked,
-                  live_sources: [...(($("#jdLiveExa")||{}).checked?["exa"]:[]), ...(($("#jdLivePdl")||{}).checked?["pdl"]:[])] };
+                  live_sources: (window.JD_LIVE_ENABLED ? [...(($("#jdLiveExa")||{}).checked?["exa"]:[]), ...(($("#jdLivePdl")||{}).checked?["pdl"]:[])] : []) };
   try{
     const r = await fetch("/match-people", {method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(prefs)});
     if(!r.ok){ const e = await r.json().catch(()=>({})); $("#jdnote").textContent = e.detail || "Match failed — try again."; return; }
@@ -10043,6 +10045,19 @@ function _tmSourceSync(clicked){
 $("#tmLiveExa") && $("#tmLiveExa").addEventListener("change", ()=>_tmSourceSync("exa"));
 $("#tmLivePdl") && $("#tmLivePdl").addEventListener("change", ()=>_tmSourceSync("pdl"));
 $("#tmRoster")  && $("#tmRoster").addEventListener("change",  ()=>_tmSourceSync("roster"));
+// Same source picker inside the Find candidates modal (web primary + default; Roster index opt-in).
+function _jdSourceSync(clicked){
+  const exa=$("#jdLiveExa"), pdl=$("#jdLivePdl"), ros=$("#jdRoster");
+  if(!exa||!pdl||!ros) return;
+  if(clicked==="roster" && ros.checked){ exa.checked=false; pdl.checked=false; }
+  if((clicked==="exa"||clicked==="pdl") && (exa.checked||pdl.checked)){ ros.checked=false; }
+  if(!exa.checked && !pdl.checked && !ros.checked){
+    if(clicked==="roster"){ ros.checked=true; } else { exa.checked=true; pdl.checked=true; }
+  }
+}
+$("#jdLiveExa") && $("#jdLiveExa").addEventListener("change", ()=>_jdSourceSync("exa"));
+$("#jdLivePdl") && $("#jdLivePdl").addEventListener("change", ()=>_jdSourceSync("pdl"));
+$("#jdRoster")  && $("#jdRoster").addEventListener("change",  ()=>_jdSourceSync("roster"));
 $("#jdclose") && $("#jdclose").addEventListener("click", ()=>{ $("#jdmodal").hidden=true; });
 $("#jdGo") && $("#jdGo").addEventListener("click", runJDMatch);
 $("#jdSenBox") && $("#jdSenBox").addEventListener("click",(e)=>{ const t=e.target.closest(".sentog"); if(!t) return;

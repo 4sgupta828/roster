@@ -119,7 +119,7 @@ class ExaPeopleSearch:
         q = str(f.get("search_text") or query).strip()
         locs = ", ".join(str(x) for x in (f.get("locations") or [])[:3] if str(x).strip())
         q = (q + (f" in {locs}" if locs else "")).strip()[:600]
-        payload = {"query": q, "numResults": min(int(max_results), 25), "type": "neural",
+        payload = {"query": q, "numResults": min(int(max_results), 100), "type": "neural",
                    "category": "linkedin profile",
                    "contents": {"text": {"maxCharacters": 900}}}
         headers = {"x-api-key": self._api_key, "content-type": "application/json"}
