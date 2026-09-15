@@ -2166,6 +2166,14 @@
     <label class="mcheck" style="cursor:pointer;display:inline-flex;align-items:center;gap:.3rem;color:var(--muted);"><input type="checkbox" id="tmRoster" style="width:auto;margin:0;" /> ◍ Roster index</label>
     <span class="ppl-fc" style="text-transform:none;opacity:.7;">web is primary; tick Roster to search the grounded index instead</span>
   </div>
+  <!-- Jobs Map SOURCE picker: live ATS boards (Exa, PRIMARY, on by default) vs the grounded Roster
+       index (opt-in, off by default). Mutually exclusive. -->
+  <div id="jobsLiveRow" class="evfilters" hidden style="gap:.15rem .9rem;flex-wrap:wrap;" title="Live ATS boards (Greenhouse/Lever/Ashby, via Exa) are searched by default; tick Roster index to search Roster's grounded jobs instead. Live postings are shown “unverified”.">
+    <span class="evf-lbl">Sources</span>
+    <label class="mcheck" style="cursor:pointer;display:inline-flex;align-items:center;gap:.3rem;color:var(--muted);"><input type="checkbox" id="jmLiveExa" checked style="width:auto;margin:0;" /> 🌐 Exa (ATS)</label>
+    <label class="mcheck" style="cursor:pointer;display:inline-flex;align-items:center;gap:.3rem;color:var(--muted);"><input type="checkbox" id="jmRoster" style="width:auto;margin:0;" /> ◍ Roster index</label>
+    <span class="ppl-fc" style="text-transform:none;opacity:.7;">live ATS boards are primary; tick Roster for the grounded index instead</span>
+  </div>
 
   <section id="voicesbody" aria-label="Voices — what practitioners say about hiring and job search" hidden>
     <p class="vo-reg-top" id="vo-register">🎙 Practitioner advice and pointers — what these people argue and where they said it. Not verified outcomes, and not Roster's recommendation.</p>
@@ -2816,8 +2824,9 @@ function renderEvFilters(){
   const sw = document.getElementById("evfswitch");
   if(!box || !wrap) return;
   if(sw){ sw.innerHTML = ""; }                 // the résumé switch is a JOBS control only
-  // Live-web opt-in row: People tab only, and only when the capability is enabled.
+  // Source-picker rows: People tab shows the Talent Map row, Jobs tab shows the ATS row (each gated).
   { const lr = document.getElementById("talentLiveRow"); if(lr) lr.hidden = !(SEARCH_MODE === "people" && window.JD_LIVE_ENABLED); }
+  { const jr = document.getElementById("jobsLiveRow"); if(jr) jr.hidden = !(SEARCH_MODE === "jobs" && window.JOBS_LIVE_ENABLED); }
   wrap.hidden = !(SEARCH_MODE === "people" || SEARCH_MODE === "jobs");
   if(SEARCH_MODE === "jobs"){
     wrap.title = "Tap to require it — every selected kind must hold for a role to show. Nothing selected = all roles.";
@@ -2971,8 +2980,9 @@ async function loadConfig(){
     window.JD_EXCLUDE_ENABLED = !!c.jd_exclude_source_co_enabled;   // Find candidates: source-company exclusion
     { const row = document.getElementById("jdSrcCoRow"); if(row) row.hidden = !window.JD_EXCLUDE_ENABLED; }
     window.JD_LIVE_ENABLED = !!c.live_people_enabled;   // Find candidates + Talent Map: opt-in live PDL/Exa leg
+    window.JOBS_LIVE_ENABLED = !!c.live_jobs_enabled;   // Jobs Map: opt-in live ATS-discovery (Exa) leg
     { const row = document.getElementById("jdLiveRow"); if(row) row.hidden = !window.JD_LIVE_ENABLED; }
-    if(typeof renderEvFilters === "function") renderEvFilters();   // reveal the Talent Map live-web row
+    if(typeof renderEvFilters === "function") renderEvFilters();   // reveal the Talent Map / Jobs live rows
     window.RECRUITER_MATCH_ENABLED = !!c.recruiter_match_enabled;   // Find jobs: LLM recruiter brief + fine-tune
     { const b = document.getElementById("mFineTune"); if(b) b.hidden = !window.RECRUITER_MATCH_ENABLED; }
     window.APPLY_ASSIST_ENABLED = !!c.apply_assist_enabled;   // Apply Assistant: JD×résumé fit + cover letter
@@ -3117,6 +3127,9 @@ async function runJobs(question, opts){
         intent_history: (JOBS_INTENT_HISTORY.length ? JOBS_INTENT_HISTORY.slice(-6) : undefined),
         ...geoPayload(),   // the top-right scope applies to jobs too
         job_must: JOB_MUST.size ? [...JOB_MUST] : undefined,   // the pre-search "must have" toggles
+        // Jobs sources: live ATS (Exa) is primary + default; ticking Roster (→ no live_sources) searches
+        // the grounded jobs index instead. Only meaningful when the capability is enabled.
+        live_sources: (window.JOBS_LIVE_ENABLED && ($("#jmLiveExa")||{}).checked) ? ["exa"] : undefined,
         use_resume: USE_RESUME || undefined,                   // 🎯 shape this search with the résumé on file
         levels: LEVEL ? [LEVEL] : undefined, level_span: LEVEL_SPAN,   // centre + band
         attachments: sent.length ? sent.map(a => ({data:a.data, media_type:a.media_type||"", name:a.name||""})) : undefined,
@@ -3494,7 +3507,7 @@ function jobsMarkup(d){
     const fitChip = fitChipHtml(j);
     const _ap = (typeof appliedOf === "function") ? appliedOf(j, jref) : null;
     return `<div class="ppl-card job-card${j._new ? " is-new" : ""}${_ap ? " has-applied" : ""}" data-jref="${esc(String(jref))}" title="Click for a summary of this posting">${_ap ? appliedBadgeHtml(_ap) : ""}${j._new ? `<span class="newflag" title="Not in the previous result">new</span>` : ""}${jsave}<span class="ppl-body">
-      <span class="ppl-name">${esc(j.title)}${pct}</span>
+      <span class="ppl-name">${esc(j.title)}${pct}${j.live?`<span class="ppl-src is-live" title="Live open role discovered on an ATS board (${esc(j.source||'web')}) via Exa — not verified against Roster's index">live · unverified</span>`:""}</span>
       <span class="ppl-blurb">${j.company_site ? `<a class="job-co" href="${esc(j.company_site)}" target="_blank" rel="noopener noreferrer" title="${esc(j.company_site)}">${co} ↗</a>` : co}${j.employer_url ? ` <a class="job-alljobs" href="${esc(j.employer_url)}" target="_blank" rel="noopener noreferrer" title="Every open role at this company">All jobs ↗</a>` : ""}${j.source?` · via ${esc(j.source)}`:""}${jr}</span>
       ${loc||dept?`<span class="ppl-tags">${loc}${dept}</span>`:""}
       ${facetLine}
@@ -10058,6 +10071,16 @@ function _jdSourceSync(clicked){
 $("#jdLiveExa") && $("#jdLiveExa").addEventListener("change", ()=>_jdSourceSync("exa"));
 $("#jdLivePdl") && $("#jdLivePdl").addEventListener("change", ()=>_jdSourceSync("pdl"));
 $("#jdRoster")  && $("#jdRoster").addEventListener("change",  ()=>_jdSourceSync("roster"));
+// Jobs Map source picker: live ATS (Exa) vs Roster index, mutually exclusive, never all-off.
+function _jmSourceSync(clicked){
+  const exa=$("#jmLiveExa"), ros=$("#jmRoster");
+  if(!exa||!ros) return;
+  if(clicked==="exa" && exa.checked) ros.checked=false;
+  if(clicked==="roster" && ros.checked) exa.checked=false;
+  if(!exa.checked && !ros.checked){ if(clicked==="roster"){ ros.checked=true; } else { exa.checked=true; } }
+}
+$("#jmLiveExa") && $("#jmLiveExa").addEventListener("change", ()=>_jmSourceSync("exa"));
+$("#jmRoster")  && $("#jmRoster").addEventListener("change",  ()=>_jmSourceSync("roster"));
 $("#jdclose") && $("#jdclose").addEventListener("click", ()=>{ $("#jdmodal").hidden=true; });
 $("#jdGo") && $("#jdGo").addEventListener("click", runJDMatch);
 $("#jdSenBox") && $("#jdSenBox").addEventListener("click",(e)=>{ const t=e.target.closest(".sentog"); if(!t) return;

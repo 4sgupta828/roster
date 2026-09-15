@@ -2399,6 +2399,7 @@ def create_app(service: ResearchService | None = None) -> FastAPI:
             "qa_router_enabled": qa_router_enabled(),
             "jd_exclude_source_co_enabled": jd_exclude_source_co_enabled(),
             "live_people_enabled": __import__("api.live_people", fromlist=["live_people_enabled"]).live_people_enabled(),
+            "live_jobs_enabled": __import__("api.live_jobs", fromlist=["live_jobs_enabled"]).live_jobs_enabled(),
             "people_semantic_first_enabled": _people_semantic_first_enabled(),
             "recruiter_match_enabled": recruiter_match_enabled(),
             "apply_assist_enabled": apply_assist_enabled(),
@@ -2928,6 +2929,27 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         store = _claim_store_cached()
         if store is None:
             return {"jobs": [], "count": 0, "query": {}, "stats": {"jobs": 0, "companies": 0}}
+
+        # LIVE ATS jobs (Jobs Map): the reader kept Exa on (default) → open roles come from the public
+        # ATS boards (Greenhouse/Lever/Ashby) via Exa, NOT the corpus. Gated on the capability flag +
+        # `live_sources`; ticking Roster clears it → the grounded jobs path below. Rows are labeled
+        # live/unverified, geo-scoped, ranked by relevance. Never grounded, never written to the corpus.
+        _job_live = [s for s in (body.live_sources or []) if s == "exa"]
+        if _job_live and __import__("api.live_jobs", fromlist=["live_jobs_enabled"]).live_jobs_enabled():
+            from api.live_jobs import merge_live_jobs
+            from api.people_population import embed_query
+            _jq = (body.question or "").strip()
+            _jvec = embed_query(_jq) if _jq else ""
+            _jprefs = {"country": (body.country or "").strip().lower() if people_geo_scope_enabled() else "",
+                       "metro": (body.metro or "").strip().lower(), "state": (body.state or "").strip().lower(),
+                       "search_text": _jq}
+            _jrows = await merge_live_jobs(_jvec, _jprefs, max_out=100, query_text=_jq)
+            for _r in _jrows:
+                _r.pop("_score", None); _r.pop("_live_fields", None)
+            _jrows = await _with_employer(_jrows)
+            return {"jobs": _jrows, "count": len(_jrows), "query": {},
+                    "stats": {"jobs": len(_jrows), "companies": len({_r.get("company") for _r in _jrows})},
+                    "note": "live · Exa (ATS boards) only"}
 
         async def _save_job_session(rows: list, qdesc: dict, nav: dict | None = None):
             # Store the actual job rows on the session so History can SHOW the stored results
