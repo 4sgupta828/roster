@@ -106,6 +106,30 @@ def _split_title_company(title: str) -> tuple[str, str]:
     return t, ""
 
 
+def _canon(s: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+def _strip_company_affix(title: str, company: str) -> str:
+    """Remove a leading 'Company - '/'Company | ' or a trailing ' at/@ Company' ONLY when it actually
+    matches the (URL-derived) company — so a title with its own dash ('… Engineer - Model Training')
+    is left intact."""
+    t = (title or "").strip()
+    cc = _canon(company)
+    if not cc:
+        return t
+    m = re.search(r"\s+(?:at|@)\s+(.+)$", t, flags=re.I)          # trailing " at Company"
+    if m and cc in _canon(m.group(1)):
+        t = t[:m.start()].strip()
+    for sep in (" - ", " – ", " | ", ": "):                        # leading "Company - Title"
+        if sep in t:
+            head, rest = t.split(sep, 1)
+            if _canon(head) == cc and rest.strip():
+                t = rest.strip()
+                break
+    return t
+
+
 def normalize_job_record(rec: ExternalRecord) -> dict | None:
     """Map one ATS posting record → Roster's job-row shape (company/title/location/url/source), with
     citation cleared and a live/source label so it's never read as a grounded, verified posting.
@@ -113,10 +137,14 @@ def normalize_job_record(rec: ExternalRecord) -> dict | None:
     if rec is None:
         return None
     url = str(rec.url or "").strip()
-    title, comp_from_title = _split_title_company(str(rec.title or ""))
-    company = _company_from_ats_url(url) or comp_from_title
-    # Drop board landing/listing pages (not an individual posting) — generic titles, or an ATS URL
-    # with no per-job path segment.
+    _raw = re.sub(r"(?i)^\s*job application for\s+", "", str(rec.title or "")).strip()  # greenhouse embed prefix
+    company_url = _company_from_ats_url(url)   # the URL slug is authoritative for the company
+    if company_url:
+        company, title = company_url, _raw
+        title = _strip_company_affix(title, company_url)   # only strip a company affix that MATCHES the slug
+    else:
+        title, company = _split_title_company(_raw)        # no slug → best-effort parse of the title
+    # Drop board landing/listing pages (not an individual posting) — generic titles.
     if not title or title.strip().lower() in ("jobs", "careers", "open roles", "job board",
                                               "openings", "current openings", "all jobs"):
         return None

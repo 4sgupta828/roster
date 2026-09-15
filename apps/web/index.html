@@ -10039,9 +10039,32 @@ async function runJDMatch(){
     const ex = d.excluded_source_company;
     const exNote = (ex && ex.count) ? ` · hid ${ex.count} at ${(ex.companies||[]).join(", ")} (tick the box to include)` : "";
     $("#jdnote").textContent = rows.length ? (`Top ${rows.length} candidates`+(d.note?` · ${d.note}`:"")+exNote) : ("No candidates found — loosen the filters."+exNote);
+    // KEEP the result so it can be saved as a Talent Map (the modal has no THREAD turn, so the main
+    // saveTalentMap can't see these rows). Store a clean copy BEFORE the fit-prefix blurb mutation.
+    window.JD_LAST = {brief: (JD_SEARCH_TEXT || jd).trim().slice(0,2000),
+                      rows: rows.map(x=>({...x})), contract: (d.contract||null)};
     rows.forEach(p=>{ p.blurb = `[${p.match_pct}% fit${(p.reasons&&p.reasons.length)?" · "+p.reasons.join(" · "):""}] ` + (p.blurb||""); });
-    $("#jdresults").innerHTML = scopeChip(d.geo_scope) + peopleRowsMarkup({people_rows: rows, coverage_basis:{query_facets:{}, population_statement:""}});
+    const saveBar = rows.length ? `<div class="mapbar"><span class="mb-meta" style="flex:1 1 200px;">Turn these candidates into a durable, shareable Talent Map.</span><button type="button" class="mb-btn" onclick="saveJDMap()">💾 Save as Talent Map</button></div>` : "";
+    $("#jdresults").innerHTML = scopeChip(d.geo_scope) + saveBar + peopleRowsMarkup({people_rows: rows, coverage_basis:{query_facets:{}, population_statement:""}});
   }catch(e){ $("#jdnote").textContent = "Match failed — try again."; }
+}
+// Save the Find-candidates result as a Talent Map. Separate from saveTalentMap (which reads THREAD,
+// empty in the modal): saves window.JD_LAST directly and gives clear in-modal confirmation + a link.
+async function saveJDMap(){
+  if(!loggedIn()){ AUTH_MODE="login"; if(typeof updateAuthUI==="function") updateAuthUI(); $("#idmodal").hidden=false; return; }
+  const L = window.JD_LAST;
+  if(!L || !(L.rows||[]).length){ $("#jdnote").textContent = "Run a search first, then save."; return; }
+  const btn = document.querySelector("#jdresults .mb-btn");
+  if(btn){ btn.disabled = true; btn.textContent = "Saving…"; }
+  const body = {tenant_id:"demo", map_type:"talent", brief:(L.brief||""), title:(L.brief||"Talent Map").slice(0,80),
+    rows:(L.rows||[]).slice(0,400), coverage:{}, filters:{}, contract:(L.contract||null)};
+  try{
+    const r = await fetch("/maps", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify(body)});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); $("#jdnote").textContent = e.detail || "Couldn't save the map."; if(btn){ btn.disabled=false; btn.textContent="💾 Save as Talent Map"; } return; }
+    const d = await r.json();
+    $("#jdnote").innerHTML = `✓ Saved as Talent Map — <a href="${esc(d.share_path)}" onclick="document.getElementById('jdmodal').hidden=true;">open it ↗</a>`;
+    if(btn){ btn.textContent = "✓ Saved"; }
+  }catch(e){ $("#jdnote").textContent = "Couldn't save the map — " + (e.message||e); if(btn){ btn.disabled=false; btn.textContent="💾 Save as Talent Map"; } }
 }
 $("#candhdr") && $("#candhdr").addEventListener("click", openJD);
 // Talent Map source picker: web (Exa/PDL) and the Roster index are mutually exclusive (either/or),
