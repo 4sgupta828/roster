@@ -1108,6 +1108,7 @@ class ResearchIn(BaseModel):
     state: str = ""                       #   unknown kept, confirmed-local lead; or a US state code; query-named places win
     surface: str = ""                     # which UI tab asked: "people" | "jobs" | "qa" | "" — People/Jobs are
     #                                       SEARCH surfaces (never prose answers); Q&A owns questions
+    live_sources: list[str] = []          # Talent Map live opt-in: ['exa']/['pdl']/both → results ONLY from them
     refine_facets: dict | None = None     # People-tab CONVERSATION: the previous turn's accumulated facet
     #                                       filter — the new utterance refines/narrows it (None = fresh)
     intent_history: list | None = None    # THE CONVERSATION THE DEBUGGER IS HAVING: per turn, what was
@@ -4341,6 +4342,24 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             must never silently become open-web people enumeration. `route_extra` (router mode)
             rides the persisted session extra for auditability."""
             store = _claim_store_cached()
+            # LIVE-ONLY (Talent Map): the reader ticked Exa/PDL → candidates come ONLY from those live
+            # providers, the grounded index is not queried (same contract as the Find-candidates modal).
+            # Per-request opt-in + capability flag both required. Rows carry a source label, never grounded.
+            _live_sources = [s for s in (body.live_sources or []) if s in ("exa", "pdl")]
+            if _live_sources and __import__("api.live_people", fromlist=["live_people_enabled"]).live_people_enabled():
+                from api.live_people import merge_live_candidates
+                from api.people_population import embed_query
+                _lq = (question_text or body.question or "").strip()
+                _lvec = embed_query(_lq) if _lq else None
+                _lprefs = {"country": (body.country or "").strip().lower() if people_geo_scope_enabled() else "",
+                           "seniorities": [str(x) for x in (body.levels or [])], "search_text": _lq}
+                _lcards = (await merge_live_candidates(_lvec, _lprefs, [], sources=_live_sources,
+                                                       max_out=60, query_text=_lq)) if _lvec else []
+                _llbl = " + ".join(s.upper() for s in _live_sources)
+                return ResearchOut(grounded=False, answer="", claims=[], coverage_gaps=[], rejected=0,
+                                   people_rows=_lcards,
+                                   coverage_basis={"query_facets": {}, "population_statement": f"live · {_llbl} only",
+                                                   "note": f"live · {_llbl} only"}), {"kind": "live"}
             # THE EVALUATOR FOR A PLAIN TALENT MAP SEARCH (spec step 4 cutover, owner 2026-09-05: a brief typed
             # into Talent Map ran the old engine, so field / level / skills carried no weight and rows had no
             # facets). A fresh brief compiles to a contract → evaluate → cards + rail. The old engine keeps what

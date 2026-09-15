@@ -9,7 +9,9 @@ from roster_vertical.live_people import normalize_record
 
 
 def _run(coro):
-    return asyncio.new_event_loop().run_until_complete(coro)
+    # match the sibling suites (test_qa_native / test_record_search): share the current loop rather
+    # than creating/closing our own, which would leave a dangling loop those files then pick up.
+    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 # ---- normalizer ------------------------------------------------------------------------------------

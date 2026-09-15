@@ -2157,6 +2157,13 @@
   <div id="evfilters" class="evfilters" hidden title="Tap a kind to require it — people must have at least one of the selected kinds of linked public work. Nothing selected = everyone.">
 <span id="evfswitch"></span><span class="evf-lbl">Must have</span><span id="evfchips"></span>
   </div>
+  <!-- Talent Map LIVE opt-in: search live web sources (Exa / PDL) INSTEAD of the grounded index. -->
+  <div id="talentLiveRow" class="evfilters" hidden style="gap:.15rem .9rem;flex-wrap:wrap;" title="Search live web sources instead of Roster's grounded index. Results are self-stated and shown as “unverified”.">
+    <span class="evf-lbl">Live web</span>
+    <label class="mcheck" style="cursor:pointer;display:inline-flex;align-items:center;gap:.3rem;color:var(--muted);"><input type="checkbox" id="tmLiveExa" style="width:auto;margin:0;" /> 🌐 Exa</label>
+    <label class="mcheck" style="cursor:pointer;display:inline-flex;align-items:center;gap:.3rem;color:var(--muted);"><input type="checkbox" id="tmLivePdl" style="width:auto;margin:0;" /> 🔗 PDL</label>
+    <span class="ppl-fc" style="text-transform:none;opacity:.7;">only these sources · self-stated, “unverified”</span>
+  </div>
 
   <section id="voicesbody" aria-label="Voices — what practitioners say about hiring and job search" hidden>
     <p class="vo-reg-top" id="vo-register">🎙 Practitioner advice and pointers — what these people argue and where they said it. Not verified outcomes, and not Roster's recommendation.</p>
@@ -2805,6 +2812,8 @@ function renderEvFilters(){
   const sw = document.getElementById("evfswitch");
   if(!box || !wrap) return;
   if(sw){ sw.innerHTML = ""; }                 // the résumé switch is a JOBS control only
+  // Live-web opt-in row: People tab only, and only when the capability is enabled.
+  { const lr = document.getElementById("talentLiveRow"); if(lr) lr.hidden = !(SEARCH_MODE === "people" && window.JD_LIVE_ENABLED); }
   wrap.hidden = !(SEARCH_MODE === "people" || SEARCH_MODE === "jobs");
   if(SEARCH_MODE === "jobs"){
     wrap.title = "Tap to require it — every selected kind must hold for a role to show. Nothing selected = all roles.";
@@ -2957,8 +2966,9 @@ async function loadConfig(){
     { const vb = document.getElementById("pjvoices"); if(vb) vb.hidden = !window.VOICES_ENABLED; }
     window.JD_EXCLUDE_ENABLED = !!c.jd_exclude_source_co_enabled;   // Find candidates: source-company exclusion
     { const row = document.getElementById("jdSrcCoRow"); if(row) row.hidden = !window.JD_EXCLUDE_ENABLED; }
-    window.JD_LIVE_ENABLED = !!c.live_people_enabled;   // Find candidates: opt-in live PDL/Exa leg
+    window.JD_LIVE_ENABLED = !!c.live_people_enabled;   // Find candidates + Talent Map: opt-in live PDL/Exa leg
     { const row = document.getElementById("jdLiveRow"); if(row) row.hidden = !window.JD_LIVE_ENABLED; }
+    if(typeof renderEvFilters === "function") renderEvFilters();   // reveal the Talent Map live-web row
     window.RECRUITER_MATCH_ENABLED = !!c.recruiter_match_enabled;   // Find jobs: LLM recruiter brief + fine-tune
     { const b = document.getElementById("mFineTune"); if(b) b.hidden = !window.RECRUITER_MATCH_ENABLED; }
     window.APPLY_ASSIST_ENABLED = !!c.apply_assist_enabled;   // Apply Assistant: JD×résumé fit + cover letter
@@ -6864,6 +6874,8 @@ async function askQuestion(question, opts){
   if(SEARCH_MODE === "people" && PENDING_PERSON){ payload.prior_person = PENDING_PERSON; payload.prior_context = PENDING_CTX; }
   if(SEARCH_MODE === "people" && evFilterActive()) payload.evidence_kinds = [...EVIDENCE_KINDS];
   if(SEARCH_MODE === "people" && LEVEL){ payload.levels = [LEVEL]; payload.level_span = LEVEL_SPAN; }
+  // Live-web opt-in (Talent Map): when Exa/PDL is ticked, results come ONLY from those live providers.
+  if(SEARCH_MODE === "people"){ const ls = [...(($("#tmLiveExa")||{}).checked?["exa"]:[]), ...(($("#tmLivePdl")||{}).checked?["pdl"]:[])]; if(ls.length) payload.live_sources = ls; }
   if(EFFORT_ENABLED && EFFORT > 1) payload.effort = EFFORT;
   if(ATTACHMENTS.length) payload.attachments = ATTACHMENTS.slice();
   if(opts.contract) payload.contract = opts.contract;       // a READY intake: the evaluator runs it as is
