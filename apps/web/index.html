@@ -2157,12 +2157,14 @@
   <div id="evfilters" class="evfilters" hidden title="Tap a kind to require it — people must have at least one of the selected kinds of linked public work. Nothing selected = everyone.">
 <span id="evfswitch"></span><span class="evf-lbl">Must have</span><span id="evfchips"></span>
   </div>
-  <!-- Talent Map LIVE opt-in: search live web sources (Exa / PDL) INSTEAD of the grounded index. -->
-  <div id="talentLiveRow" class="evfilters" hidden style="gap:.15rem .9rem;flex-wrap:wrap;" title="Search live web sources instead of Roster's grounded index. Results are self-stated and shown as “unverified”.">
-    <span class="evf-lbl">Live web</span>
-    <label class="mcheck" style="cursor:pointer;display:inline-flex;align-items:center;gap:.3rem;color:var(--muted);"><input type="checkbox" id="tmLiveExa" style="width:auto;margin:0;" /> 🌐 Exa</label>
-    <label class="mcheck" style="cursor:pointer;display:inline-flex;align-items:center;gap:.3rem;color:var(--muted);"><input type="checkbox" id="tmLivePdl" style="width:auto;margin:0;" /> 🔗 PDL</label>
-    <span class="ppl-fc" style="text-transform:none;opacity:.7;">only these sources · self-stated, “unverified”</span>
+  <!-- Talent Map SOURCE picker: live web (Exa/PDL, PRIMARY, on by default) vs the grounded Roster
+       index (opt-in, off by default). Web and index are mutually exclusive (either/or). -->
+  <div id="talentLiveRow" class="evfilters" hidden style="gap:.15rem .9rem;flex-wrap:wrap;" title="Live web (Exa/PDL) is the primary source and searched by default; tick Roster index to search Roster's grounded corpus instead. Live results are self-stated, shown “unverified”.">
+    <span class="evf-lbl">Sources</span>
+    <label class="mcheck" style="cursor:pointer;display:inline-flex;align-items:center;gap:.3rem;color:var(--muted);"><input type="checkbox" id="tmLiveExa" checked style="width:auto;margin:0;" /> 🌐 Exa</label>
+    <label class="mcheck" style="cursor:pointer;display:inline-flex;align-items:center;gap:.3rem;color:var(--muted);"><input type="checkbox" id="tmLivePdl" checked style="width:auto;margin:0;" /> 🔗 PDL</label>
+    <label class="mcheck" style="cursor:pointer;display:inline-flex;align-items:center;gap:.3rem;color:var(--muted);"><input type="checkbox" id="tmRoster" style="width:auto;margin:0;" /> ◍ Roster index</label>
+    <span class="ppl-fc" style="text-transform:none;opacity:.7;">web is primary; tick Roster to search the grounded index instead</span>
   </div>
 
   <section id="voicesbody" aria-label="Voices — what practitioners say about hiring and job search" hidden>
@@ -6874,8 +6876,9 @@ async function askQuestion(question, opts){
   if(SEARCH_MODE === "people" && PENDING_PERSON){ payload.prior_person = PENDING_PERSON; payload.prior_context = PENDING_CTX; }
   if(SEARCH_MODE === "people" && evFilterActive()) payload.evidence_kinds = [...EVIDENCE_KINDS];
   if(SEARCH_MODE === "people" && LEVEL){ payload.levels = [LEVEL]; payload.level_span = LEVEL_SPAN; }
-  // Live-web opt-in (Talent Map): when Exa/PDL is ticked, results come ONLY from those live providers.
-  if(SEARCH_MODE === "people"){ const ls = [...(($("#tmLiveExa")||{}).checked?["exa"]:[]), ...(($("#tmLivePdl")||{}).checked?["pdl"]:[])]; if(ls.length) payload.live_sources = ls; }
+  // Talent Map sources: web (Exa/PDL) is primary + default; ticking Roster (→ no live_sources) searches
+  // the grounded index instead. Only meaningful when the capability is enabled.
+  if(SEARCH_MODE === "people" && window.JD_LIVE_ENABLED){ const ls = [...(($("#tmLiveExa")||{}).checked?["exa"]:[]), ...(($("#tmLivePdl")||{}).checked?["pdl"]:[])]; if(ls.length) payload.live_sources = ls; }
   if(EFFORT_ENABLED && EFFORT > 1) payload.effort = EFFORT;
   if(ATTACHMENTS.length) payload.attachments = ATTACHMENTS.slice();
   if(opts.contract) payload.contract = opts.contract;       // a READY intake: the evaluator runs it as is
@@ -10026,6 +10029,20 @@ async function runJDMatch(){
   }catch(e){ $("#jdnote").textContent = "Match failed — try again."; }
 }
 $("#candhdr") && $("#candhdr").addEventListener("click", openJD);
+// Talent Map source picker: web (Exa/PDL) and the Roster index are mutually exclusive (either/or),
+// and never all-off. Web is the default; ticking Roster switches to the grounded index.
+function _tmSourceSync(clicked){
+  const exa=$("#tmLiveExa"), pdl=$("#tmLivePdl"), ros=$("#tmRoster");
+  if(!exa||!pdl||!ros) return;
+  if(clicked==="roster" && ros.checked){ exa.checked=false; pdl.checked=false; }
+  if((clicked==="exa"||clicked==="pdl") && (exa.checked||pdl.checked)){ ros.checked=false; }
+  if(!exa.checked && !pdl.checked && !ros.checked){                    // never leave nothing selected
+    if(clicked==="roster"){ ros.checked=true; } else { exa.checked=true; pdl.checked=true; }
+  }
+}
+$("#tmLiveExa") && $("#tmLiveExa").addEventListener("change", ()=>_tmSourceSync("exa"));
+$("#tmLivePdl") && $("#tmLivePdl").addEventListener("change", ()=>_tmSourceSync("pdl"));
+$("#tmRoster")  && $("#tmRoster").addEventListener("change",  ()=>_tmSourceSync("roster"));
 $("#jdclose") && $("#jdclose").addEventListener("click", ()=>{ $("#jdmodal").hidden=true; });
 $("#jdGo") && $("#jdGo").addEventListener("click", runJDMatch);
 $("#jdSenBox") && $("#jdSenBox").addEventListener("click",(e)=>{ const t=e.target.closest(".sentog"); if(!t) return;
