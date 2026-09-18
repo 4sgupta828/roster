@@ -1453,6 +1453,81 @@ async def build_apply_analysis(jd_text: str, profile: dict, resume_text: str, ll
         return None
 
 
+class _GroundedAnswer(BaseModel):
+    index: int = -1            # 1-based question number
+    answer: str = ""
+    source_quote: str = ""     # verbatim résumé span backing any candidate-specific CLAIM ('' if the answer makes none)
+
+
+class _GroundedDrafts(BaseModel):
+    answers: list[_GroundedAnswer] = []
+
+
+def _candidate_source_text(profile: dict, resume_text: str) -> str:
+    """Everything the candidate has actually stated about themselves — résumé + the scalar profile facts —
+    the ONE corpus a drafted claim must be grounded in."""
+    facts = " ".join(str(v) for v in (profile or {}).values() if isinstance(v, (str, int, float)) and str(v).strip())
+    return ((resume_text or "") + "\n" + facts).strip()
+
+
+def assemble_grounded_drafts(questions: list[dict], items: list, profile: dict, resume_text: str) -> list[dict]:
+    """CODE-OWNED grounding gate for drafted free-text answers (pure; no model, no network). Matches the
+    model's answers to the free-text questions by 1-based index and SPAN-CHECKS each `source_quote` against
+    the candidate's own text. An answer that asserts a candidate-specific fact (non-empty source_quote)
+    keeps `grounded=True` only when that quote verifies verbatim; a quote that is NOT in the résumé marks
+    the answer ungrounded (a possible fabrication) so it is never auto-filled. An answer with no claim
+    (empty source_quote — general enthusiasm/fit) is allowed. Mirrors grade_requirements' discipline."""
+    src = _candidate_source_text(profile, resume_text)
+    by_i = {}
+    for it in items or []:
+        try:
+            by_i.setdefault(int(getattr(it, "index", -1)), it)
+        except (TypeError, ValueError):
+            continue
+    out = []
+    for i, q in enumerate(questions or []):
+        it = by_i.get(i + 1)
+        ans = (getattr(it, "answer", "") or "").strip() if it else ""
+        quote = (getattr(it, "source_quote", "") or "").strip() if it else ""
+        if not ans:
+            continue
+        grounded = (not quote) or quote_in_text(quote, src)
+        out.append({"label": q["label"], "answer": ans, "source_quote": quote, "grounded": grounded,
+                    "reason": "" if grounded else "the cited résumé quote was not found — treat as unverified"})
+    return out
+
+
+async def build_grounded_drafts(title: str, company: str, profile: dict, resume_text: str,
+                                questions: list[dict], llm) -> list[dict]:
+    """Draft open free-text application answers with an EXTRACTIVE grounding contract: the model answers in
+    the candidate's voice and, for any specific claim about the candidate, returns the verbatim résumé span
+    that backs it. Code then span-checks every quote (assemble_grounded_drafts) — an unverifiable claim is
+    flagged, never trusted. Returns [{label, answer, source_quote, grounded, reason}]; [] on error/empty."""
+    qs = questions or []
+    if not qs or llm is None:
+        return []
+    rt = _resume_text_of(profile, resume_text)
+    lines = [f"{i + 1}. {q['label']}" for i, q in enumerate(qs)]
+    try:
+        comp = await llm.complete(
+            system=(
+                "You are drafting free-text answers to a job application, for the CANDIDATE to review. Write "
+                "each answer in the candidate's own voice, concise (≤ 90 words). State a SPECIFIC FACT about "
+                "the candidate — a skill, employer, title, number, year, or credential — ONLY if it appears "
+                "in their résumé, and when you do, copy the exact verbatim résumé span that backs it into "
+                "`source_quote` (at least 4 words, unchanged). If an answer makes no résumé-specific claim "
+                "(e.g. general interest in the role or mission), leave `source_quote` empty and keep the "
+                "language aspirational ('I'm eager to…'), not a claim of experience. NEVER invent employers, "
+                "dates, numbers, titles, or credentials. Return one entry per question with its 1-based index."),
+            messages=[{"role": "user", "content": f"ROLE: {title or ''} at {company or ''}\n\nRÉSUMÉ:\n{rt[:6000]}"
+                                                   f"\n\nQUESTIONS:\n" + "\n".join(lines)}],
+            response_format=_GroundedDrafts, max_tokens=1800, temperature=0.0)
+        return assemble_grounded_drafts(qs, list(getattr(comp.parsed, "answers", []) or []), profile, resume_text)
+    except Exception as e:  # noqa: BLE001
+        _log.warning("build_grounded_drafts failed: %s", e)
+        return []
+
+
 class _CoverLetter(BaseModel):
     cover_letter: str = ""
 

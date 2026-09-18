@@ -4,6 +4,8 @@
 
 Policy classes are structural, not rules of thumb:
   identity_sensitive  filled only from explicit profile defaults (EEO); never drafted
+  eligibility         knock-out / hard facts (work auth, sponsorship, visa, salary, years, degree):
+                      filled from the profile ONLY, never drafted; unanswered → needs_confirmation
   legal               filled only from the profile's standing pre-approval; never drafted
   file                the résumé — attached by the extension from Roster's copy
   never               CAPTCHA / passwords — not in any plan
@@ -75,7 +77,10 @@ def bind_plan(form: dict, profile: dict, bank: dict | None = None, user_answers:
             ans = picked or ""
             if not ans:
                 src = ""
-        plan.append({**q, "answer": ans, "source": src, "blocking": bool(q.get("required")) and not ans})
+        plan.append({**q, "answer": ans, "source": src, "blocking": bool(q.get("required")) and not ans,
+                     # an eligibility fact we could NOT source from the profile is never guessed or drafted
+                     # (draftable() excludes non-'open' policies) — it is flagged for the candidate to fill
+                     "needs_confirmation": pol == "eligibility" and not ans})
     return {**form, "plan": plan}
 
 
@@ -104,6 +109,8 @@ def summary(plan: dict) -> dict:
     ps = plan.get("plan") or []
     return {"total": len(ps), "answered": sum(1 for p in ps if p.get("answer")),
             "blocking": [p["label"] for p in ps if p.get("blocking")],
+            # knock-out / hard facts the profile did not hold: the candidate must confirm these — never guessed
+            "needs_confirmation": [p["label"] for p in ps if p.get("needs_confirmation")],
             "by_source": {s: sum(1 for p in ps if p.get("source") == s) for s in ("profile", "saved answer", "agent draft", "your answer")}}
 
 

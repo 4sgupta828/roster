@@ -133,3 +133,50 @@ test("an aria-checked widget counts as set — Ashby's Yes/No pair has no .check
   const off = { getAttribute: () => "false", closest: () => null };
   assert.equal(v.verifyChecked(off), v.SOFT);
 });
+
+
+// ── Phase 4: the review / uncertainty surface + one-tap submit ──────────────────────────────────────
+
+function reviewApi(docButtons = []) {
+  globalThis.document = { querySelectorAll: () => docButtons };
+  const src = `
+    const norm = s => (s || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\\s+/g, " ").trim();
+    ${slice("  function reviewState", "  function findSubmitButton")}
+    ${slice("  function findSubmitButton", "  const REVIEW_COLOUR")}
+    return { reviewState, reviewFields, findSubmitButton };`;
+  return new Function(src)();
+}
+const btn = (o = {}) => ({ textContent: o.text ?? "", value: o.value ?? "", type: o.type ?? "button",
+                           disabled: !!o.disabled, getAttribute: (n) => (o.attrs || {})[n] ?? null });
+
+test("an unsourced eligibility fact needs the human; a model draft is flagged for review; a profile answer is trusted", () => {
+  const r = reviewApi();
+  assert.equal(r.reviewState({ needs_confirmation: true }), "needs");
+  assert.equal(r.reviewState({ source: "agent draft" }), "draft");
+  assert.equal(r.reviewState({ source: "profile" }), "");
+  assert.equal(r.reviewState({ source: "your answer" }), "");
+});
+
+test("reviewFields lists eligibility gaps first, then drafts, and ignores trusted answers", () => {
+  const r = reviewApi();
+  const plan = [{ label: "Work auth?", needs_confirmation: true }, { label: "First name", source: "profile" },
+                { label: "Why us?", source: "agent draft" }, { label: "Clearance?", needs_confirmation: true }];
+  const rv = r.reviewFields(plan);
+  assert.deepEqual(rv.needs, ["Work auth?", "Clearance?"]);
+  assert.deepEqual(rv.drafts, ["Why us?"]);
+  assert.deepEqual(rv.all, ["Work auth?", "Clearance?", "Why us?"]);
+});
+
+test("findSubmitButton picks the real submit, never a save-draft / cancel, and prefers a submit-typed control", () => {
+  const r = reviewApi();
+  const doc = (buttons) => ({ querySelectorAll: () => buttons });
+  // skips 'Save draft' and 'Cancel', finds 'Submit application'
+  assert.equal(r.findSubmitButton(doc([btn({ text: "Save draft" }), btn({ text: "Cancel" }), btn({ text: "Submit application" })])).textContent, "Submit application");
+  // a real submit input wins over a look-alike button
+  const inp = btn({ value: "Submit", type: "submit" });
+  assert.equal(r.findSubmitButton(doc([btn({ text: "Apply now" }), inp])), inp);
+  // nothing submit-like → null (the human submits on the page)
+  assert.equal(r.findSubmitButton(doc([btn({ text: "Back" }), btn({ text: "Save draft" })])), null);
+  // a disabled submit is not offered
+  assert.equal(r.findSubmitButton(doc([btn({ text: "Submit", disabled: true })])), null);
+});

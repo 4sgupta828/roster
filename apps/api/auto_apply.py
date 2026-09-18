@@ -116,6 +116,37 @@ def value_for(key: str, profile: dict, answers: dict | None = None) -> str:
     return str(v).strip() if v not in (None, "") else ""
 
 
+# CANONICAL AUTHORITATIVE FACTS — profile keys the CANDIDATE owns and a model must NEVER generate,
+# override, or infer. This is the profile-key twin of the `eligibility` / `identity_sensitive` / `legal`
+# form-policy classes (apply_adapters.policy_for): the policy walls the LLM off from a FORM QUESTION about
+# these; this list walls it off from asserting the underlying FACT in any free-text it drafts (Phase 2
+# answer generation reads only from here for facts, and blanks + flags what the profile does not hold —
+# never a guessed "authorized to work" / "8 years of Python"). The complement (cover_letter, open
+# narrative) is what a model MAY draft.
+AUTHORITATIVE_FACT_KEYS: frozenset[str] = frozenset({
+    # identity & contact
+    "first_name", "last_name", "full_name", "preferred_name", "email", "phone", "pronouns",
+    # location
+    "city", "region", "country", "work_location", "address_line1", "address_line2", "address_city", "postal_code",
+    # work eligibility / knock-out
+    "requires_sponsorship", "us_citizen_or_permanent_resident", "us_authorized_to_work", "can_work_onsite",
+    "willing_to_relocate", "previously_worked_here", "visa_status", "security_clearance",
+    # quantitative / credential facts
+    "years_experience", "highest_degree", "field_of_study", "grad_year", "school",
+    "current_company", "current_title", "desired_salary", "earliest_start_date",
+    # protected self-identification (EEO)
+    "gender", "race_ethnicity", "hispanic_latino", "veteran_status", "disability_status",
+    # legal acknowledgements — the user's own click, never a model's
+    "ack_privacy", "ack_certify",
+})
+
+
+def is_authoritative_fact(key: str) -> bool:
+    """True for a profile key a model must never generate or override — read it from the profile or leave
+    it for the candidate (see AUTHORITATIVE_FACT_KEYS)."""
+    return (key or "") in AUTHORITATIVE_FACT_KEYS
+
+
 def group_fields(fields: list[dict]) -> list[dict]:
     """Radio / checkbox inputs that share a name are ONE question (its group label) with options; a
     placeholder-only label ('Start typing...') is not a label — the group label is used instead."""

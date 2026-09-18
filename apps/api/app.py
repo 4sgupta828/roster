@@ -1234,6 +1234,10 @@ class ApplicationAnswersIn(BaseModel):
     answers: dict = {}
 
 
+class BlacklistIn(BaseModel):
+    blacklist: list[str] = []     # company names or site hosts to never auto-apply to
+
+
 class ApplicationExecIn(BaseModel):
     filled: list[str] = []        # verified: something we can read back confirms the form took it
     unconfirmed: list[str] = []   # entered, but the form never confirmed it — the user must check
@@ -7908,37 +7912,38 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         merged = {**{k: v for k, v in parsed.items() if isinstance(v, (str, int, float)) and v not in ("", None)}, **{k: v for k, v in prof.items() if v not in ("", None)}}
         return merged, str(parsed.get("_resume_text") or "")
 
+    def apply_shadow_mode() -> bool:
+        """Phase-2 safety: when ON (default), grounded drafts are COMPUTED and logged but NEVER auto-filled —
+        the plan uses only the deterministic (bind_plan) answers. Turn OFF (ROSTER_APPLY_SHADOW=0) once the
+        grounding/hallucination rate has been measured, and only span-verified answers then fill."""
+        return os.environ.get("ROSTER_APPLY_SHADOW", "1").lower() in ("1", "true", "yes")
+
     async def _draft_plan(plan: dict, profile: dict, resume_text: str) -> dict:
-        """The agent's best answer for every OPEN question (policy 'open' only — identity, legal and file
-        questions are structurally out of reach). Choice questions get one real option, validated in code."""
+        """Draft ONLY open free-text questions, extractively grounded: the model's answer must cite a verbatim
+        résumé span for any candidate-specific claim, which code span-checks (build_grounded_drafts). Choice /
+        identity / legal / eligibility / file questions are never model-drafted (policy + this free-text-only
+        filter). In shadow mode the drafts are recorded (`_shadow`) but not applied; otherwise only the
+        span-verified ones fill. Facts always come from the profile via bind_plan — never invented here."""
         from api.apply_plan import apply_drafts, draftable
-        qs = draftable(plan)[:16]
+        # free-text only — a choice/yes-no open question is left for the candidate, never model-guessed
+        qs = [q for q in draftable(plan) if q.get("kind") in ("text", "textarea") and not q.get("options")][:16]
         if not qs:
             return plan
         try:
-            from pydantic import BaseModel as _BM
-
-            class _Drafts(_BM):
-                answers: list[str] = []
-            llm = build_llm(mode=resolve_mode())
-            lines = [f"{i + 1}. {q['label']}" + (f"  [choose exactly one: {' | '.join(q['options'][:30])}]" if q.get("options") else "  [free text, ≤ 90 words]")
-                     for i, q in enumerate(qs)]
-            comp = await llm.complete(
-                system=("You are completing a job application on a candidate's behalf, for their review. Answer EVERY question with the "
-                        "best answer the profile and résumé support. For a choice question return exactly one of the listed options, "
-                        "verbatim. For yes/no questions about the candidate's own circumstances pick the answer most consistent with the "
-                        "profile; if truly unknown, choose the option that keeps the candidate eligible and is safest to correct. For free "
-                        "text, write specifically from the résumé — never invent employers, dates, numbers or credentials. Return answers "
-                        "in the same order, one per question, empty only when nothing reasonable can be said."),
-                messages=[{"role": "user", "content": f"POSTING: {plan.get('title') or ''} at {plan.get('company') or ''}\n"
-                                                       + "PROFILE: " + json.dumps({k: v for k, v in profile.items() if k not in ("work_history", "education", "_resume_text")})[:2500]
-                                                       + "\n\nRÉSUMÉ:\n" + (resume_text or "")[:6000] + "\n\nQUESTIONS:\n" + "\n".join(lines)}],
-                response_format=_Drafts, max_tokens=1600, temperature=0.0)
-            ans = list(getattr(comp.parsed, "answers", []) or [])
-            drafts = {q["label"]: (a or "").strip() for q, a in zip(qs, ans) if (a or "").strip()}
-            return apply_drafts(plan, drafts)
+            from api.people_population import build_grounded_drafts
+            graded = await build_grounded_drafts(plan.get("title") or "", plan.get("company") or "",
+                                                 profile, resume_text, qs, build_llm(mode=resolve_mode()))
         except Exception:  # noqa: BLE001 — drafts are a convenience; the plan stands without them
             return plan
+        shadow = apply_shadow_mode()
+        n_ground = sum(1 for g in graded if g.get("grounded"))
+        __import__("logging").getLogger("api.apply").info(
+            "apply drafts: %d free-text, %d grounded, %d flagged, shadow=%s (%s)",
+            len(graded), n_ground, len(graded) - n_ground, shadow, plan.get("company") or "?")
+        plan["_shadow"] = {"shadow": shadow, "drafts": graded}
+        if not shadow:                          # live: only span-verified answers fill; flagged ones stay open
+            apply_drafts(plan, {g["label"]: g["answer"] for g in graded if g.get("grounded") and g.get("answer")})
+        return plan
 
     async def _plan_for(store, user: dict, url: str, *, user_answers: dict | None = None, draft: bool = True) -> dict:
         from api.apply_adapters import detect, fetch_form
@@ -7975,19 +7980,50 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         profile, _ = await _apply_profile(store, user["id"])
         if not (profile.get("email") and (profile.get("first_name") or profile.get("last_name"))):
             raise HTTPException(status_code=400, detail="fill your Apply profile first (name + email) under Account → Apply profile")
-        from api.apply_adapters import detect
-        rec = await store.queue_application(user["id"], job_ref=body.job_ref or "", company=body.company or "", title=body.title or "", url=url, ats=detect(url))
+        from api.apply_adapters import detect, pick_existing_application
+        from api.apply_safety import is_blocked, rate_limit_reason
+        ats = detect(url)
+        apps = await store.list_applications(user["id"])           # one fetch: reused for blocklist, rate-limit, dedup
+        # SAFETY GATES (deterministic, before any planning): a blacklisted employer/site is a hard stop;
+        # a runaway loop is capped per-user and per-ATS. Both are pre-existing career-ops disciplines.
+        try:
+            _bl_raw = await store.get_pref(user["id"], "apply_blacklist")
+            _personal = json.loads(_bl_raw) if _bl_raw else []
+        except Exception:   # noqa: BLE001
+            _personal = []
+        _blocked = is_blocked(body.company or "", url, personal=_personal if isinstance(_personal, list) else [])
+        if _blocked:
+            raise HTTPException(status_code=403, detail=_blocked)
+        _rl = rate_limit_reason(apps, ats=ats)
+        if _rl:
+            raise HTTPException(status_code=429, detail=_rl)
+        # DEDUP: never pile up duplicate applications for the same posting (re-planning, tracking-param
+        # variants, embed vs public URL all collapse to one). An already-submitted match is not re-planned
+        # — it is handed back with `already_applied` so the surface can warn instead of silently re-applying.
+        existing = pick_existing_application(apps, url)
+        if existing and existing.get("status") == "submitted":
+            return {"id": existing["id"], "status": "submitted", "already_applied": True,
+                    "submitted_at": existing.get("submitted_at"), "reason": "You already applied to this posting.",
+                    "summary": {}, "form_url": existing.get("form_url") or url, "ats": existing.get("ats"),
+                    "n_questions": 0, "blocking": []}
+        if existing:                                  # an open plan for this posting already exists — reuse it
+            rec, reused = {"id": existing["id"]}, True
+        else:
+            rec = await store.queue_application(user["id"], job_ref=body.job_ref or "", company=body.company or "", title=body.title or "", url=url, ats=ats)
+            reused = False
         plan = await _plan_for(store, user, url)
         sm = plan.get("summary") or {}
         await store.update_application(user["id"], rec["id"], status=plan.get("status") or "planned", reason=plan.get("reason") or "",
                                        plan=plan.get("plan") or [], form_url=(plan.get("form_url") or url)[:1000],
                                        filled=[{"label": p["label"], "value": p["answer"], "source": p["source"]} for p in plan.get("plan") or [] if p.get("answer")],
+                                       # the Phase-2 grounded-draft report rides on `drafts` for audit + shadow-mode measurement
+                                       drafts={"_shadow": plan.get("_shadow") or {}},
                                        open_questions=[{"label": p["label"], "kind": p["kind"], "required": p["required"], "options": p.get("options") or [],
                                                         "voluntary": p.get("policy") == "identity_sensitive", "profile_key": ""} for p in plan.get("plan") or [] if not p.get("answer") and p.get("policy") not in ("skip", "never")])
         if plan.get("title") and not body.title:
             pass
         return {"id": rec["id"], "status": plan.get("status"), "reason": plan.get("reason") or "", "summary": sm, "form_url": plan.get("form_url") or url,
-                "ats": plan.get("ats"), "n_questions": len(plan.get("plan") or []), "blocking": sm.get("blocking") or []}
+                "ats": plan.get("ats"), "n_questions": len(plan.get("plan") or []), "blocking": sm.get("blocking") or [], "reused": reused}
 
     @app.get("/me/applications")
     async def me_applications(x_roster_token: str = Header(default="")) -> dict:
@@ -8061,6 +8097,25 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
     async def me_application_delete(app_id: int, x_roster_token: str = Header(default="")) -> dict:
         store, user = await _require_user(x_roster_token)
         return {"ok": await store.delete_application(user["id"], app_id)}
+
+    @app.get("/me/apply-blacklist")
+    async def me_apply_blacklist_get(x_roster_token: str = Header(default="")) -> dict:
+        """The user's personal 'never apply here' list (company names or site hosts). A planned application
+        to any of these is refused (403) before anything is fetched or drafted."""
+        store, user = await _require_user(x_roster_token)
+        try:
+            raw = await store.get_pref(user["id"], "apply_blacklist")
+            items = json.loads(raw) if raw else []
+        except Exception:   # noqa: BLE001
+            items = []
+        return {"blacklist": items if isinstance(items, list) else []}
+
+    @app.put("/me/apply-blacklist")
+    async def me_apply_blacklist_put(body: BlacklistIn, x_roster_token: str = Header(default="")) -> dict:
+        store, user = await _require_user(x_roster_token)
+        items = sorted({str(x).strip()[:120] for x in (body.blacklist or []) if str(x).strip()})[:200]
+        await _safe_set_pref(store, user["id"], "apply_blacklist", json.dumps(items))
+        return {"blacklist": items}
 
     @app.get("/extension.zip")
     async def extension_zip():
@@ -8337,6 +8392,11 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         if not a:
             raise HTTPException(status_code=400,
                 detail="Add or parse a résumé first, and make sure the job link/description is readable.")
+        # KNOCK-OUT PRE-SCAN (deterministic, no model): hard eligibility mismatches the JD states outright
+        # (no sponsorship / citizenship-only / on-site) vs the profile — a warning surfaced before the user
+        # invests in applying. Never inferred: fires only on an explicit JD bar + a conflicting profile fact.
+        from api.apply_safety import knockout_reasons
+        a["knockouts"] = knockout_reasons(jd, profile)
         # JOB AT A GLANCE rides along: the posting was already fetched for the fit analysis, so its
         # summary (location / work mode / pay / type) is built from the SAME text — cached per URL,
         # one extra read only the first time; the FE shows it above the fit table (no second fetch)
