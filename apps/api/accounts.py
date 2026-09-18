@@ -721,6 +721,16 @@ class AccountStore:
                 user_id, job_ref[:300], company[:160], title[:200], url[:1000], ats[:40])
         return {"id": int(r["id"]), "status": r["status"], "created_at": str(r["created_at"])}
 
+    async def find_application_by_url(self, user_id: str, url: str) -> dict | None:
+        """The application already on file for this POSTING (dedup by stable posting identity, not exact
+        URL), so re-planning the same role reuses the record instead of piling up duplicates. Prefers a
+        still-open plan to reuse; else the most recent submitted one so the caller can warn 'already
+        applied'. None when the posting is new."""
+        from api.apply_adapters import pick_existing_application
+        if not (url or "").strip():
+            return None
+        return pick_existing_application(await self.list_applications(user_id), url)
+
     async def update_application(self, user_id: str, app_id: int, **fields) -> bool:
         """Set any of: status, reason, filled, open_questions, answers, drafts, screenshot (bytes), submitted_at."""
         await self._ensure()

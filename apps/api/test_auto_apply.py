@@ -1,6 +1,21 @@
 """Controlled auto-apply: the CODE-OWNED parts (ATS detection, label → profile-field mapping, the fill
 plan) — no browser here."""
-from api.auto_apply import detect_ats, map_label, plan_fill, value_for
+from api.auto_apply import AUTHORITATIVE_FACT_KEYS, detect_ats, is_authoritative_fact, map_label, plan_fill, value_for
+
+
+def test_authoritative_facts_cover_eligibility_and_identity_never_narrative():
+    # hard facts a model must never generate/override
+    for k in ("us_authorized_to_work", "requires_sponsorship", "visa_status", "years_experience",
+              "desired_salary", "highest_degree", "email", "veteran_status", "ack_certify"):
+        assert is_authoritative_fact(k), k
+    # drafted narrative / unknown keys are NOT authoritative (the model may write these)
+    for k in ("cover_letter", "why_this_role", "summary", ""):
+        assert not is_authoritative_fact(k), k
+    # consistency: every knock-out fact reachable via the eligibility FORM-policy is also an authoritative
+    # profile key, so the two walls (form question + free-text fact) never disagree
+    for key in ("us_authorized_to_work", "requires_sponsorship", "us_citizen_or_permanent_resident",
+                "visa_status", "willing_to_relocate", "can_work_onsite", "desired_salary", "years_experience"):
+        assert key in AUTHORITATIVE_FACT_KEYS, key
 
 
 def test_ats_detection():

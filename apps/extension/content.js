@@ -1,7 +1,8 @@
 // Roster Apply — content script (runs in every frame of Greenhouse / Lever / Ashby pages).
 // Executes a reviewed PLAN: sets each field by the selector the planner derived from the ATS's own
-// form definition, attaches the résumé, highlights what it set, reports field by field. It contains no
-// submit call and never clicks a submit button — the user submits.
+// form definition, attaches the résumé, highlights what it set, reports field by field. It never submits
+// on its own: submission happens only when the person clicks the opt-in "Submit application" button in
+// the banner (their single explicit tap), and never while a required/eligibility field is still flagged.
 (() => {
   if (window.__rosterApplyLoaded) return;
   window.__rosterApplyLoaded = true;
@@ -57,6 +58,45 @@
           if (c === COLOUR.entered) el.title = "Roster entered this but the form did not confirm it — check it"; } catch (e) {}
   };
   const visible = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+
+  // ── UNCERTAINTY / REVIEW SURFACE (Phase 4) ──────────────────────────────────────────────────────
+  // Which planned answers a human must EYEBALL before submitting — separate from "did the fill stick".
+  //   "needs"  an eligibility / knock-out fact the profile did not hold (needs_confirmation): never guessed.
+  //   "draft"  a model-DRAFTED free-text answer (source 'agent draft'): grounded, but a person hasn't
+  //            confirmed it, so it is flagged amber for review before an irreversible submit.
+  // A deterministic profile answer ("profile" / "your answer" / "saved answer") is trusted → "".
+  function reviewState(q) {
+    if (!q) return "";
+    if (q.needs_confirmation) return "needs";
+    if (q.source === "agent draft") return "draft";
+    return "";
+  }
+  // The labels the reader must check before submitting, most-important first (eligibility gaps, then drafts).
+  function reviewFields(plan) {
+    const needs = [], drafts = [];
+    for (const q of plan || []) {
+      const s = reviewState(q);
+      if (s === "needs") needs.push(q.label);
+      else if (s === "draft") drafts.push(q.label);
+    }
+    return { needs, drafts, all: needs.concat(drafts) };
+  }
+  // The form's own submit control (for one-tap submit): a real submit button / input, never a "save draft",
+  // "back", or "cancel". Returned so the human can tap ONE thing; the extension never auto-clicks it.
+  function findSubmitButton(doc) {
+    const d = doc || document;
+    const cand = [...d.querySelectorAll("button, input[type=submit], [role=button]")].filter(el => {
+      try { if (el.disabled) return false; } catch (e) {}
+      const t = norm((el.value || "") + " " + (el.textContent || "") + " " + (el.getAttribute && (el.getAttribute("aria-label") || "") || ""));
+      if (!t) return false;
+      if (/\b(save (a )?draft|cancel|back|previous|clear|reset|log ?in|sign ?in|search)\b/.test(t)) return false;
+      return /\b(submit|apply|send application|send|finish|complete application)\b/.test(t);
+    });
+    // prefer an explicit submit type, then the shortest label (the primary button, not a paragraph)
+    cand.sort((a, b) => ((b.type === "submit") - (a.type === "submit")) || (norm(a.textContent).length - norm(b.textContent).length));
+    return cand[0] || null;
+  }
+  const REVIEW_COLOUR = "#e1a100";
 
   // ── VERIFICATION ────────────────────────────────────────────────────────────────────────────────
   // Setting a value and seeing it in the box is NOT proof the form accepted it. Measured against the
@@ -356,6 +396,25 @@
     DIAG.push(rec);
   }
 
+  // Outline the fields a human must review before submitting (eligibility gaps + model drafts) with a
+  // DASHED amber box, distinct from the solid fill-verification outlines. Additive; never blocks.
+  function markReview(plan) {
+    for (const q of plan || []) {
+      const s = reviewState(q);
+      if (!s) continue;
+      try {
+        const box = fieldBox(q);
+        if (box && box.style) {
+          box.style.outline = "2px dashed " + REVIEW_COLOUR;
+          box.style.outlineOffset = "2px";
+          box.title = s === "needs"
+            ? "Roster left this for you — a work-eligibility fact it will not guess. Answer it before submitting."
+            : "Roster drafted this from your résumé — read it before submitting.";
+        }
+      } catch (e) {}
+    }
+  }
+
   async function run(application, resume) {
     const plan = application.plan || [];
     const filled = [], unconfirmed = [], missing = [];
@@ -370,9 +429,10 @@
         else if (r === NONE) missing.push(q.label);
       } catch (e) { missing.push(q.label); }
     }
+    markReview(plan);
     // `missing` stays the field the caller already understands: everything the reader must handle.
     return { filled, unconfirmed, missing, needs_you: unconfirmed.concat(missing),
-             diag: DIAG.slice(0, 60), frame: location.href.slice(0, 120) };
+             review: reviewFields(plan), diag: DIAG.slice(0, 60), frame: location.href.slice(0, 120) };
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -389,12 +449,34 @@
         // NAME the fields the reader has to handle. "3 not found" sends someone hunting a 40-field
         // form; the amber outlines plus these names send them straight to the three that need them.
         const need = res.needs_you;
+        const rv = res.review || { all: [] };
+        const oneTap = !!msg.application.one_tap_submit;   // server-gated; default off until browser-verified
         const banner = document.createElement("div");
         banner.innerHTML = `<b>Roster filled ${res.filled.length} field${res.filled.length === 1 ? "" : "s"}.</b>`
           + (need.length ? `<br><span style="color:#ffd479">${need.length} need${need.length === 1 ? "s" : ""} you (outlined amber/red): ${need.slice(0, 6).map(x => String(x).slice(0, 40)).join(" · ")}${need.length > 6 ? " …" : ""}</span>` : "")
+          + (rv.all.length ? `<br><span style="color:#ffd479">Review before submitting (${rv.all.length}, dashed amber): ${rv.all.slice(0, 6).map(x => String(x).slice(0, 40)).join(" · ")}${rv.all.length > 6 ? " …" : ""}</span>` : "")
           + `<br><span style="opacity:.75">Review the page, then submit it yourself.</span>`;
         banner.style.cssText = "position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:2147483647;background:#111;color:#fff;padding:10px 16px;border-radius:10px;font:14px/1.5 system-ui;max-width:min(90vw,560px);box-shadow:0 6px 24px rgba(0,0,0,.3);";
-        document.body.appendChild(banner); setTimeout(() => banner.remove(), 15000);
+        // ONE-TAP SUBMIT (opt-in): the human still triggers it with a single explicit click here — the
+        // extension never submits on its own. The button reveals the form's real submit control, scrolls to
+        // it and (only on this tap) clicks it. Hidden when unavailable or when fields still need the reader.
+        if (oneTap) {
+          const sb = findSubmitButton(document);
+          const btn = document.createElement("button");
+          const blocked = need.length || rv.needs.length;   // never one-tap over an unanswered required/eligibility field
+          btn.textContent = blocked ? "Resolve the flagged fields first" : (sb ? "Submit application ↦" : "Submit button not found — submit on the page");
+          btn.disabled = !!blocked || !sb;
+          btn.style.cssText = "margin-top:10px;width:100%;padding:8px 12px;border:0;border-radius:8px;font:600 14px system-ui;cursor:pointer;background:" + (btn.disabled ? "#444" : "#6c5ce7") + ";color:#fff;";
+          btn.addEventListener("click", () => {
+            const b = findSubmitButton(document);
+            if (!b) return;
+            try { b.scrollIntoView({ block: "center" }); } catch (e) {}
+            b.click();   // the human's single, explicit tap → the form's own submit
+          });
+          banner.appendChild(document.createElement("br"));
+          banner.appendChild(btn);
+        }
+        document.body.appendChild(banner); setTimeout(() => banner.remove(), oneTap ? 60000 : 15000);
         // observe the submission: a thank-you / confirmation appearing later → record it (never claimed otherwise)
         const obs = new MutationObserver(() => {
           const t = document.body.innerText || "";

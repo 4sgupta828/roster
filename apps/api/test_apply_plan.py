@@ -1,5 +1,5 @@
 """Definition-driven application plans: ATS form definitions → plan → policy classes (no browser, no network)."""
-from api.apply_adapters import detect, policy_for
+from api.apply_adapters import application_dedup_key, detect, pick_existing_application, policy_for
 from api.apply_adapters.ashby import definition_to_form as ashby_form
 from api.apply_adapters.greenhouse import definition_to_form as gh_form, parse_url as gh_parse
 from api.apply_adapters.lever import html_to_form as lever_form
@@ -36,7 +36,7 @@ def test_ashby_definition_keeps_boolean_questions_the_dom_never_showed():
         {"isRequired": False, "field": {"path": "def-456", "title": "Gender", "type": "ValueSelect", "selectableValues": [{"label": "Male"}, {"label": "Decline to self-identify"}]}}]}]}}
     f = ashby_form(jp, org="d-matrix", job_id="x")
     kinds = {q["id"]: (q["kind"], q["policy"], q["options"]) for q in f["questions"]}
-    assert kinds["abc-123"] == ("boolean", "open", ["Yes", "No"])
+    assert kinds["abc-123"] == ("boolean", "eligibility", ["Yes", "No"])   # work authorization is a knock-out fact
     assert kinds["def-456"][1] == "identity_sensitive"
     assert kinds["_systemfield_resume"] == ("file", "file", [])
 
@@ -125,6 +125,72 @@ def test_policy_and_detection():
     assert policy_for("I certify the above is true", "checkbox") == "legal"
     assert policy_for("Resume", "file") == "file" and policy_for("Why us?", "textarea") == "open"
     assert detect("https://acme.wd5.myworkdayjobs.com/x") == "workday" and detect("https://careers.acme.com/jobs/1") == ""
+
+
+def test_knock_out_and_quantitative_questions_are_eligibility_not_open():
+    # hard facts an LLM would fabricate: filled from the profile or handed to the candidate, NEVER drafted
+    for label in ("Are you legally authorized to work in the US?", "Will you now or in the future require sponsorship?",
+                  "What is your visa status?", "Are you a US citizen or permanent resident?",
+                  "Do you have an active security clearance?", "How many years of experience do you have with Python?",
+                  "What are your salary expectations?", "Are you willing to relocate?",
+                  "Do you have a Bachelor's degree?"):
+        assert policy_for(label, "text") == "eligibility", label
+    # narrowly targeted: open free-text the model SHOULD write stays 'open'
+    for label in ("Why do you want to work here?", "Describe your experience with distributed systems.",
+                  "Tell us about a hard problem you solved.", "What excites you about this role?"):
+        assert policy_for(label, "textarea") == "open", label
+    # EEO / legal still win over eligibility (checked first)
+    assert policy_for("What is your gender?", "select") == "identity_sensitive"
+
+
+def test_eligibility_is_never_drafted_and_flags_the_candidate_when_unsourced():
+    from api.apply_adapters import question
+    form = {"ats": "greenhouse", "questions": [
+        question(id="auth", label="Are you legally authorized to work in the US?", kind="boolean", options=["Yes", "No"], required=True),
+        question(id="clear", label="Do you have an active security clearance?", kind="boolean", options=["Yes", "No"], required=True),
+        question(id="why", label="Why do you want to work here?", kind="textarea", required=True)]}
+    # profile answers work-auth but says nothing about clearance
+    plan = bind_plan(form, {"us_authorized_to_work": "Yes"}, {}, {})
+    by = {p["id"]: p for p in plan["plan"]}
+    assert by["auth"]["answer"] == "Yes" and by["auth"]["source"] == "profile" and not by["auth"]["needs_confirmation"]
+    # the unsourced knock-out fact is flagged + blocking, and is NOT offered to the drafter
+    assert by["clear"]["answer"] == "" and by["clear"]["needs_confirmation"] and by["clear"]["blocking"]
+    assert [d["id"] for d in draftable(plan)] == ["why"]   # only the open free-text is draftable
+    # even a draft explicitly targeting the clearance field can never fill it
+    apply_drafts(plan, {"Do you have an active security clearance?": "Yes"})
+    assert by["clear"]["answer"] == ""
+    # the unsourced knock-out fact is surfaced for the candidate to confirm (not just silently blocking)
+    assert summary(plan)["needs_confirmation"] == ["Do you have an active security clearance?"]
+
+
+def test_dedup_key_collapses_the_same_posting_linked_different_ways():
+    # Greenhouse: the embed apply form, the public page (?gh_jid=), and a tracking-tagged link are ONE posting
+    gh = "greenhouse:7948318"
+    assert application_dedup_key("https://job-boards.greenhouse.io/gusto/jobs/7948318") == gh
+    assert application_dedup_key("https://boards.greenhouse.io/embed/job_app?for=gusto&token=7948318") == gh
+    assert application_dedup_key("https://www.gusto.com/careers/job/?gh_jid=7948318&utm_source=linkedin&gh_src=abc") == gh
+    # Lever / Ashby key off the posting UUID regardless of an /apply suffix
+    uid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    assert application_dedup_key(f"https://jobs.lever.co/acme/{uid}") == f"lever:{uid}"
+    assert application_dedup_key(f"https://jobs.lever.co/acme/{uid}/apply") == f"lever:{uid}"
+    assert application_dedup_key(f"https://jobs.ashbyhq.com/acme/{uid}") == f"ashby:{uid}"
+    # unknown host: normalized URL (www + tracking params dropped, trailing slash trimmed)
+    assert application_dedup_key("https://www.acme.com/careers/eng/?utm_campaign=x") == \
+           application_dedup_key("https://acme.com/careers/eng")
+    # distinct postings do NOT collide
+    assert application_dedup_key("https://boards.greenhouse.io/x/jobs/111111") != application_dedup_key("https://boards.greenhouse.io/x/jobs/222222")
+
+
+def test_pick_existing_application_reuses_open_and_flags_submitted():
+    url = "https://job-boards.greenhouse.io/gusto/jobs/7948318"
+    other = {"id": 1, "url": "https://boards.greenhouse.io/x/jobs/999999", "status": "planned"}
+    assert pick_existing_application([other], url) is None                         # different posting → new
+    # newest-first: an open plan for this posting is reused
+    apps = [{"id": 5, "url": "https://www.gusto.com/careers/job/?gh_jid=7948318", "status": "filled"}, other]
+    assert pick_existing_application(apps, url)["id"] == 5
+    # only a submitted one exists → returned so the caller can warn "already applied"
+    submitted = [{"id": 7, "url": "https://boards.greenhouse.io/embed/job_app?for=gusto&token=7948318", "status": "submitted"}]
+    assert pick_existing_application(submitted, url)["id"] == 7
 
 
 # ── what the card says after a fill ───────────────────────────────────────────────────────────────
