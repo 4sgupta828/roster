@@ -8134,6 +8134,27 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
                     z.write(fp, arcname="roster-apply/" + os.path.relpath(fp, root))
         return _Resp(content=buf.getvalue(), media_type="application/zip", headers={"Content-Disposition": 'attachment; filename="roster-apply-extension.zip"'})
 
+    @app.get("/apply-cli.zip")
+    async def apply_cli_zip():
+        """The Roster Apply LOCAL RUNNER (Playwright CLI): a zip of apps/apply-cli. The user unzips, runs
+        `npm install` (pulls Playwright) then `node apply.mjs …` — it fills forms in a real browser on
+        their own machine (own IP/session), which the server-side headless path can't. Never bundles
+        node_modules."""
+        import io as _io
+        import zipfile
+        from fastapi.responses import Response as _Resp
+        root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "apply-cli")
+        if not os.path.isdir(root):
+            raise HTTPException(status_code=404, detail="apply-cli not bundled")
+        buf = _io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for dp, dirs, files in os.walk(root):
+                dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "__pycache__")]
+                for fn in sorted(files):
+                    fp = os.path.join(dp, fn)
+                    z.write(fp, arcname="roster-apply-cli/" + os.path.relpath(fp, root))
+        return _Resp(content=buf.getvalue(), media_type="application/zip", headers={"Content-Disposition": 'attachment; filename="roster-apply-cli.zip"'})
+
     @app.post("/me/resume")
     async def me_upload_resume(body: ResumeIn, x_roster_token: str = Header(default="")) -> dict:
         store, user = await _require_user(x_roster_token)
