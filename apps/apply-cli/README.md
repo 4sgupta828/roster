@@ -10,8 +10,12 @@ sponsorship, visa, salary, years, degree) are filled from your profile only and 
 drafted free-text is span-checked against your résumé; a blacklist, per-ATS rate limits and a knock-out
 pre-scan run before anything is prepared. This runner only *executes* that plan.
 
-**It never submits unless you pass `--submit`, and never while a required or eligibility field is still
-open.** By default it fills, tells you what needs you, and leaves Chrome open for you to review + submit.
+**It never submits unless you ask, and never while a required or eligibility field is still open.** By
+default it fills, tells you what needs you, and leaves Chrome open for you to review + submit.
+
+**Easiest: double-click it** (or run it with no arguments) → it opens a small control panel in your
+browser: your prepared applications with **Fill** / **Fill all** / **Submit** buttons. No terminal needed.
+The commands below are the same thing for people who prefer a CLI.
 
 - **No runtime dependencies** and **no bundled browser** — it uses your installed Chrome.
 - Ships as one file (Node SEA). You need Node **only to build** it, never to run it.

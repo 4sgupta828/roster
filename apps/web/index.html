@@ -2397,13 +2397,13 @@
         <p class="acctcardsub">The extension only fills what you reviewed and attaches your résumé. It has no submit button — you submit on the job site.</p>
       </section>
       <section class="acctcard">
-        <h3>Roster Apply — desktop runner <span class="acctmuted">auto-fills &amp; batch-applies in your own Chrome</span></h3>
-        <p class="acctcardsub">A standalone app that fills applications in the Chrome you already have — one at a time or <b>batch-filling everything you've prepared</b>. More reliable than the extension on complex forms. No Node, no install — download and run.</p>
+        <h3>Roster Apply — desktop app <span class="acctmuted">auto-fills &amp; batch-applies in your own Chrome</span></h3>
+        <p class="acctcardsub">A standalone app that fills the applications you've prepared into the Chrome you already have — one at a time or <b>all at once</b>. More reliable than the extension on complex forms. No Node, no install.</p>
         <p class="acctcardsub"><a class="idgo" style="display:inline-block;width:auto;text-decoration:none;padding:.4rem .8rem;" href="https://github.com/4sgupta828/roster/releases/latest/download/roster-apply-macos-arm64">⬇ Download for macOS (Apple Silicon)</a> <span class="acctmuted">Other OSes: <a href="/apply-cli.zip">source</a> + <code>npm run build</code>.</span></p>
         <p class="acctcardsub" style="overflow-x:auto;">First run (one time, it's unsigned): <code>xattr -dr com.apple.quarantine roster-apply-macos-arm64 &amp;&amp; chmod +x roster-apply-macos-arm64</code></p>
-        <p class="acctcardsub">Then connect with your token:</p>
+        <p class="acctcardsub"><b>Double-click it</b> — it opens a small control panel in your browser with your prepared applications and <b>Fill</b> / <b>Fill all</b> / <b>Submit</b> buttons. Paste this token the first time:</p>
         <div class="acctrow"><input id="clitoken" type="password" readonly value="" /><button type="button" class="idgo" id="clitokencopy" style="width:auto;">Copy token</button></div>
-        <p class="acctcardsub" style="overflow-x:auto;"><code>./roster-apply-macos-arm64 login &lt;token&gt;</code> · <code>./roster-apply-macos-arm64 batch</code> (fill all prepared) · <code>./roster-apply-macos-arm64 fill &lt;id&gt;</code>. It never submits unless you add <code>--submit</code>, and never while a field still needs you.</p>
+        <p class="acctcardsub">It fills what you review; it never submits unless you tick Submit, and never while a field still needs you. (Prefer a terminal? <code>./roster-apply-macos-arm64 batch</code> does the same.)</p>
       </section>
       <section class="acctcard acctwide">
         <h3>Applications <span class="acctmuted">planned by the agent · you review · you submit</span></h3>
