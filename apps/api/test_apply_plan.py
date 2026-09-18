@@ -28,6 +28,19 @@ def test_greenhouse_definition_becomes_addressable_questions():
     assert f["form_url"] == "https://job-boards.greenhouse.io/embed/job_app?for=gusto&token=7948318"
 
 
+def test_greenhouse_location_targets_the_real_autocomplete_dom_id():
+    # REGRESSION (scaleai embed): the Job Board API names it `location`, but the hosted/embed form renders
+    # #candidate-location — without this the value landed nowhere / in the wrong box ("not mapped to position").
+    d = {"title": "Eng", "company_name": "Scale",
+         "questions": [{"label": "First Name", "fields": [{"name": "first_name", "type": "input_text"}]}],
+         "location_questions": [{"label": "Location", "required": True, "fields": [{"name": "location", "type": "input_text"}]},
+                                {"label": "Country", "fields": [{"name": "country", "type": "multi_value_single_select", "values": [{"label": "United States"}]}]}]}
+    f = gh_form(d, board="scale", job_id="1")
+    by = {q["id"]: q for q in f["questions"]}
+    assert by["location"]["selector"].startswith("#candidate-location, ") and by["location"]["group"] == "location"
+    assert by["country"]["selector"] == '[name="country"], #country'   # country keeps its own id (matches the live form)
+
+
 def test_ashby_definition_keeps_boolean_questions_the_dom_never_showed():
     jp = {"title": "DS Engineer", "applicationForm": {"sections": [{"title": "", "fieldEntries": [
         {"isRequired": True, "field": {"path": "_systemfield_name", "title": "Full Legal Name", "type": "String"}},
@@ -133,6 +146,7 @@ def test_knock_out_and_quantitative_questions_are_eligibility_not_open():
                   "What is your visa status?", "Are you a US citizen or permanent resident?",
                   "Do you have an active security clearance?", "How many years of experience do you have with Python?",
                   "What are your salary expectations?", "Are you willing to relocate?",
+                  "Are you open to working in person in our San Francisco office?",
                   "Do you have a Bachelor's degree?"):
         assert policy_for(label, "text") == "eligibility", label
     # narrowly targeted: open free-text the model SHOULD write stays 'open'

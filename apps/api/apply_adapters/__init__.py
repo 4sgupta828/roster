@@ -41,7 +41,7 @@ _ELIGIBILITY_RX = re.compile(
     r"|salary (expectation|requirement|range)|compensation expectation|desired (salary|pay|compensation)"
     r"|expected (salary|compensation|pay)|pay expectation"
     r"|willing to relocate|able to relocate|open to relocat"
-    r"|(able|willing) to (work|commute).{0,20}(on-?site|in.person|in the office|the office)"
+    r"|(able|willing|open) to (work|working|commute|be).{0,20}(on-?site|in.person|in the office|the office)"
     r"|notice period|earliest (start|available)|when can you start|available to start"
     r"|do you (have|hold).{0,20}(degree|bachelor|master|phd|diploma)|highest (level of )?(education|degree)|minimum (education|degree)")
 

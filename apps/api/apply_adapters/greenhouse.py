@@ -66,8 +66,16 @@ def definition_to_form(d: dict, *, board: str, job_id: str) -> dict:
                 continue
             seen.add(name)
             opts = [str(v.get("label") or v.get("value") or "") for v in (f.get("values") or [])]
+            safe = re.sub(r"[^A-Za-z0-9_-]", "_", name)
+            selector = f'[name="{name}"], #{safe}'
+            # THE LOCATION AUTOCOMPLETE. The Job Board API names this field `location`, but the hosted /
+            # embed application form renders it as the Places autocomplete input `#candidate-location`
+            # (with a separate `#country`) — neither name="location" nor #location exists on the page, so
+            # the value was landing nowhere / in the wrong box. Target the real DOM id first.
+            if group == "location" and name in ("location", "candidate_location"):
+                selector = f"#candidate-location, {selector}"
             qs.append(question(id=name, label=q.get("label") or name, kind=kind, options=opts, required=bool(q.get("required")),
-                               group=group, selector=f"[name=\"{name}\"], #{re.sub(r'[^A-Za-z0-9_-]', '_', name)}"))
+                               group=group, selector=selector))
     for q in d.get("questions") or []:
         add(q)
     for q in d.get("location_questions") or []:
