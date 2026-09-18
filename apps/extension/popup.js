@@ -1,14 +1,30 @@
 const $ = s => document.querySelector(s);
 const send = msg => new Promise(res => chrome.runtime.sendMessage(msg, res));
 
+function showConnect(connected) {
+  $("#connect").style.display = connected ? "none" : "block";
+  const cn = $("#connected"); if (cn) cn.style.display = connected ? "flex" : "none";
+}
+
 async function refresh() {
   const s = await chrome.storage.local.get(["roster_token"]);
-  $("#connect").style.display = s.roster_token ? "none" : "block";
+  showConnect(!!s.roster_token);
   if (!s.roster_token) return;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const here = (tab && tab.url) || "";
   const r = await send({ type: "list" });
-  if (!r || !r.ok) { $("#note").textContent = (r && r.error) || "Couldn't reach Roster."; return; }
+  if (!r || !r.ok) {
+    // A dead/rotated token 401s here. Before this, the token box was hidden once anything was saved, so
+    // the user was stuck with a stale token and "no way to reset". Reveal the box and say what to do.
+    if (/\b401\b|\b403\b|sign in|not connected/i.test((r && r.error) || "")) {
+      showConnect(false);
+      $("#token").value = "";
+      $("#note").textContent = "Your token expired or was reset. Copy a fresh one from Roster → Account → “Roster Apply extension”, paste it above, and Connect.";
+    } else {
+      $("#note").textContent = (r && r.error) || "Couldn't reach Roster.";
+    }
+    return;
+  }
   const apps = (r.applications || []).filter(a => a.status !== "submitted").slice(0, 12);
   const host = u => { try { return new URL(u).host; } catch (e) { return ""; } };
   const match = a => here && (here.startsWith((a.form_url || "").split("?")[0].slice(0, 60)) || (host(a.form_url || a.url) && here.includes(host(a.form_url || a.url))));
@@ -43,5 +59,13 @@ if (dbg) dbg.addEventListener("click", async () => {
         $("#note").textContent = `Copied the last fill (${(d.fields || []).length} fields) — paste it into the bug report.`; }
   catch (e) { $("#note").textContent = "Couldn't copy: " + (e && e.message || e); }
 });
-$("#save").addEventListener("click", async () => { const t = $("#token").value.trim(); if (!t) return; await chrome.storage.local.set({ roster_token: t }); refresh(); });
+$("#save").addEventListener("click", async () => { const t = $("#token").value.trim(); if (!t) return; await chrome.storage.local.set({ roster_token: t }); $("#note").textContent = ""; refresh(); });
+// RESET: always reachable once connected, so a stale token is never a dead end.
+$("#reset") && $("#reset").addEventListener("click", async () => {
+  await chrome.storage.local.remove("roster_token");
+  $("#token").value = "";
+  $("#apps").innerHTML = "";
+  $("#note").textContent = "Disconnected. Paste a fresh token (Account → “Roster Apply extension” → Copy token) and Connect.";
+  showConnect(false);
+});
 refresh();

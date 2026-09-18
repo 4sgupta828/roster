@@ -11,9 +11,10 @@
 <body>
   <h1>Roster Apply</h1>
   <div id="connect">
-    <div class="muted">Paste your Roster token once (Roster → Account → “Roster Apply extension” → Copy token).</div>
+    <div class="muted">Paste your Roster token (Roster → Account → “Roster Apply extension” → Copy token).</div>
     <div class="row"><input id="token" type="password" placeholder="Roster token"><button id="save">Connect</button></div>
   </div>
+  <div id="connected" class="row" style="display:none"><span class="muted">Connected to Roster.</span><button id="reset" style="margin-left:auto">Change token</button></div>
   <div id="apps"></div>
   <div class="muted" style="margin-top:8px">The extension fills the form on the page you have open. It never submits — you review and click submit.</div>
   <div class="row" style="margin-top:6px"><button id="diag" title="Copy exactly what happened to each field in the last fill — paste it into a bug report">Copy diagnostics</button></div>

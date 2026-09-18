@@ -8514,8 +8514,19 @@ async function uploadConnections(file){
     const del = $("#conndel"); if(del) del.hidden = false;
   }catch(e){ if(st) st.textContent = "Upload failed — try again."; }
 }
-function refreshExtToken(){ const t = $("#exttoken"); if(t) t.value = (USER && USER.token) || ""; }
-$("#exttokencopy") && $("#exttokencopy").addEventListener("click", async () => { try{ await navigator.clipboard.writeText((USER && USER.token) || ""); $("#exttokencopy").textContent = "Copied ✓"; setTimeout(()=>{ $("#exttokencopy").textContent = "Copy token"; }, 1500); }catch(e){} });
+function refreshExtToken(){
+  const t = $("#exttoken"); if(!t) return;
+  const tok = (USER && USER.token) || "";
+  t.value = tok;
+  // after a session refresh the token is cleared until the next sign-in; say so rather than showing an
+  // empty box the Copy button silently copies nothing from (the "no way to reset token" trap)
+  if(!tok) t.placeholder = "Sign out and back in to generate a fresh token";
+}
+$("#exttokencopy") && $("#exttokencopy").addEventListener("click", async () => {
+  const tok = (USER && USER.token) || "";
+  if(!tok){ $("#exttokencopy").textContent = "Sign in again first"; setTimeout(()=>{ $("#exttokencopy").textContent = "Copy token"; }, 2000); return; }
+  try{ await navigator.clipboard.writeText(tok); $("#exttokencopy").textContent = "Copied ✓"; setTimeout(()=>{ $("#exttokencopy").textContent = "Copy token"; }, 1500); }catch(e){}
+});
 $("#connfile") && $("#connfile").addEventListener("change", e => { if(e.target.files && e.target.files[0]) uploadConnections(e.target.files[0]); e.target.value = ""; });
 $("#conndel") && $("#conndel").addEventListener("click", async () => { try{ await fetch("/me/connections", {method:"DELETE", headers: authHeaders()}); }catch(e){} refreshConnStatus(); });
 async function logout(){
