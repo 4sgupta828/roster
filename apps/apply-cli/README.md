@@ -1,53 +1,50 @@
-# Roster Apply — local runner (CLI)
+# Roster Apply — local runner (single binary)
 
-Fills a reviewed Roster application **plan** in a real browser on **your own machine**, using
-[Playwright](https://playwright.dev). Because it runs locally — your own IP, your own browser session —
-it works on ATS forms that block a datacenter/headless browser, and it drives fields with real
-keystrokes, real file uploads and proper waiting (far more reliably than a page-injected script).
+Fills a reviewed Roster application **plan** in the **Chrome you already have**, driven over the Chrome
+DevTools Protocol. It runs on **your** machine — your IP, your session — so it works on ATS forms that
+block a datacenter/headless browser, and it drives fields with the proven React-aware fill logic (native
+setter + value-tracker reset, combobox pick, real file upload).
 
-The plan itself is built and **safety-gated on the Roster server**: eligibility facts (work
-authorization, sponsorship, visa, salary, years, degree) are filled from your profile only and never
-model-guessed; drafted free-text is span-checked against your résumé; a blacklist, per-ATS rate limits
-and a knock-out pre-scan run before anything is prepared. This runner only *executes* that plan.
+The plan is built and **safety-gated on the Roster server**: eligibility facts (work authorization,
+sponsorship, visa, salary, years, degree) are filled from your profile only and never model-guessed;
+drafted free-text is span-checked against your résumé; a blacklist, per-ATS rate limits and a knock-out
+pre-scan run before anything is prepared. This runner only *executes* that plan.
 
 **It never submits unless you pass `--submit`, and never while a required or eligibility field is still
-open.** By default it fills, tells you what needs you, and leaves the browser open for you to review and
-submit.
+open.** By default it fills, tells you what needs you, and leaves Chrome open for you to review + submit.
 
-## Install
+- **No runtime dependencies** and **no bundled browser** — it uses your installed Chrome.
+- Ships as one file (Node SEA). You need Node **only to build** it, never to run it.
+
+## Get the binary
 
 ```bash
 unzip roster-apply-cli.zip && cd roster-apply-cli
-npm install            # also downloads the Chromium Playwright uses (postinstall)
+npm install        # dev-only: esbuild + postject (the build tools) — nothing at runtime
+npm run build      # → dist/roster-apply  (build once per OS; needs Node 21+)
 ```
 
-Requires Node 18+.
-
-## Connect
-
-Copy your token from Roster → **Account → Roster Apply → Copy token**, then:
-
-```bash
-node apply.mjs login <token>
-```
-
-(Or set `ROSTER_TOKEN` in the environment. `ROSTER_BASE` overrides the server URL.)
+Then it's a standalone file — copy `dist/roster-apply` anywhere and run it (no Node needed).
+(You can also just run the source with `node apply.mjs …` — also zero runtime deps.)
 
 ## Use
 
 ```bash
-node apply.mjs list                 # your prepared applications
-node apply.mjs fill <id>            # open the form, fill it, STOP before submit
-node apply.mjs fill <id> --submit   # fill, then submit (only if nothing is flagged)
-node apply.mjs plan <apply-url>     # ask Roster to plan a URL first (add --fill to fill right away)
+./dist/roster-apply login <token>        # Roster → Account → Roster Apply → Copy token
+./dist/roster-apply list                 # your prepared applications
+./dist/roster-apply fill <id>            # open the form in Chrome, fill it, STOP before submit
+./dist/roster-apply fill <id> --submit   # fill, then submit (only if nothing is flagged)
+./dist/roster-apply batch                # fill EVERY prepared application (a tab each)
+./dist/roster-apply batch 12 15 --submit # fill+submit a specific set
+./dist/roster-apply plan <url> --fill    # ask Roster to plan a URL and fill it now
 ```
 
-A Chromium window opens, the runner fills each field (`.` = filled, `!` = needs you), prints what still
-needs you, and leaves the window open. Review it, then submit — or re-run with `--submit`.
+Chrome opens (a throwaway profile), each field is filled, the runner prints what still needs you, and the
+window stays open for your review. `batch` fills them all in separate tabs.
 
 ## What it will not do
 
-- Touch CAPTCHA/password fields, or any eligibility fact your profile didn't state (those are left for
-  you — the runner never guesses "authorized to work" or "8 years of X").
+- Touch CAPTCHA/password fields, or any eligibility fact your profile didn't state (left for you — never
+  a guessed "authorized to work" / "8 years of X").
 - Submit while a required field is empty or an eligibility field is unconfirmed.
 - Send anything anywhere except Roster (to fetch your plan + résumé) and the ATS form you open.

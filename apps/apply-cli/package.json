@@ -1,15 +1,16 @@
 {
   "name": "roster-apply-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Roster Apply — a local runner that fills a reviewed application plan in a real browser (Playwright) on your own machine. It never submits unless you pass --submit.",
+  "description": "Roster Apply — a single-binary local runner (zero runtime deps) that fills a reviewed application plan in the Chrome you already have, over the DevTools Protocol. Never submits unless you pass --submit.",
   "bin": { "roster-apply": "apply.mjs" },
   "scripts": {
-    "postinstall": "playwright install chromium",
-    "test": "node --test"
+    "test": "node --test",
+    "build": "node build.mjs"
   },
-  "dependencies": {
-    "playwright": "^1.48.0"
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "postject": "^1.0.0-alpha.6"
   },
-  "engines": { "node": ">=18" }
+  "engines": { "node": ">=21" }
 }

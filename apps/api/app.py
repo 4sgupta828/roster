@@ -8149,7 +8149,7 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
         buf = _io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             for dp, dirs, files in os.walk(root):
-                dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "__pycache__")]
+                dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "__pycache__", "dist")]
                 for fn in sorted(files):
                     fp = os.path.join(dp, fn)
                     z.write(fp, arcname="roster-apply-cli/" + os.path.relpath(fp, root))
