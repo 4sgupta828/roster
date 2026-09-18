@@ -47,8 +47,10 @@ async function main() {
   const args = rest.filter(a => !a.startsWith("--"));
   const c = await cfg();
   try {
-    // no command + not launched from a terminal (double-clicked) → open the GUI
-    if ((!cmd && !process.stdin.isTTY) || cmd === "gui") { const { startGui } = await import("./lib/gui.mjs"); await startGui(); return; }
+    // no command → open the GUI (this is the friendly default, incl. double-click, which on macOS runs
+    // the binary inside Terminal — a TTY — so we must NOT gate the GUI on the absence of a TTY)
+    if (!cmd || cmd === "gui") { const { startGui } = await import("./lib/gui.mjs"); await startGui(); return; }
+    if (cmd === "help" || cmd === "--help" || cmd === "-h") { console.log("Roster Apply — run with no arguments (or double-click) for the app, or:\n  login <token> | list | fill <id> [--submit] | batch [id...] [--submit] | plan <url> [--fill] | gui"); return; }
     if (cmd === "login") { if (!args[0]) throw new Error("Usage: roster-apply login <token>"); await saveCfg({ token: args[0] }); console.log("Saved. Try: roster-apply list  (or run with no arguments for the app)"); }
     else if (cmd === "list") {
       const apps = (await (await api("/me/applications", c)).json()).applications || [];
