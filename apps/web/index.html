@@ -2396,6 +2396,12 @@
         <div class="acctrow"><input id="exttoken" type="password" readonly value="" /><button type="button" class="idgo" id="exttokencopy" style="width:auto;">Copy token</button></div>
         <p class="acctcardsub">The extension only fills what you reviewed and attaches your résumé. It has no submit button — you submit on the job site.</p>
       </section>
+      <section class="acctcard">
+        <h3>Roster Apply — desktop runner <span class="acctmuted">auto-fills &amp; batch-applies in your own Chrome</span></h3>
+        <p class="acctcardsub">A local command-line runner that fills applications in the Chrome you already have — one at a time or <b>batch-filling everything you've prepared</b>. It's more reliable than the extension on complex forms. Setup: 1. <a href="/apply-cli.zip">Download the runner</a> and unzip. 2. In a terminal: <code>cd roster-apply-cli &amp;&amp; npm install &amp;&amp; npm run build</code> — needs <a href="https://nodejs.org" target="_blank" rel="noopener noreferrer">Node 21+</a> once, only to build (the built binary needs nothing). 3. Connect with your token:</p>
+        <div class="acctrow"><input id="clitoken" type="password" readonly value="" /><button type="button" class="idgo" id="clitokencopy" style="width:auto;">Copy token</button></div>
+        <p class="acctcardsub" style="overflow-x:auto;"><code>./dist/roster-apply login &lt;token&gt;</code> · <code>./dist/roster-apply batch</code> (fill all prepared) · <code>./dist/roster-apply fill &lt;id&gt;</code>. It never submits unless you add <code>--submit</code>, and never while a field still needs you.</p>
+      </section>
       <section class="acctcard acctwide">
         <h3>Applications <span class="acctmuted">planned by the agent · you review · you submit</span></h3>
         <p class="acctcardsub">"🚀 Apply" on a job card shows your fit, reads the job site's own form definition and plans every answer from your Apply profile, your saved answers, and the agent's best drafts. Review the plan here, then fill the live form with the extension and submit it yourself. Sign-in portals (Workday) can't be planned.</p>
@@ -8515,17 +8521,25 @@ async function uploadConnections(file){
   }catch(e){ if(st) st.textContent = "Upload failed — try again."; }
 }
 function refreshExtToken(){
-  const t = $("#exttoken"); if(!t) return;
   const tok = (USER && USER.token) || "";
-  t.value = tok;
-  // after a session refresh the token is cleared until the next sign-in; say so rather than showing an
-  // empty box the Copy button silently copies nothing from (the "no way to reset token" trap)
-  if(!tok) t.placeholder = "Sign out and back in to generate a fresh token";
+  // the extension AND the desktop runner use the same account token
+  for(const id of ["#exttoken","#clitoken"]){
+    const t = $(id); if(!t) continue;
+    t.value = tok;
+    // after a session refresh the token is cleared until the next sign-in; say so rather than showing an
+    // empty box the Copy button silently copies nothing from (the "no way to reset token" trap)
+    if(!tok) t.placeholder = "Sign out and back in to generate a fresh token";
+  }
 }
 $("#exttokencopy") && $("#exttokencopy").addEventListener("click", async () => {
   const tok = (USER && USER.token) || "";
   if(!tok){ $("#exttokencopy").textContent = "Sign in again first"; setTimeout(()=>{ $("#exttokencopy").textContent = "Copy token"; }, 2000); return; }
   try{ await navigator.clipboard.writeText(tok); $("#exttokencopy").textContent = "Copied ✓"; setTimeout(()=>{ $("#exttokencopy").textContent = "Copy token"; }, 1500); }catch(e){}
+});
+$("#clitokencopy") && $("#clitokencopy").addEventListener("click", async () => {
+  const tok = (USER && USER.token) || "";
+  if(!tok){ $("#clitokencopy").textContent = "Sign in again first"; setTimeout(()=>{ $("#clitokencopy").textContent = "Copy token"; }, 2000); return; }
+  try{ await navigator.clipboard.writeText(tok); $("#clitokencopy").textContent = "Copied ✓"; setTimeout(()=>{ $("#clitokencopy").textContent = "Copy token"; }, 1500); }catch(e){}
 });
 $("#connfile") && $("#connfile").addEventListener("change", e => { if(e.target.files && e.target.files[0]) uploadConnections(e.target.files[0]); e.target.value = ""; });
 $("#conndel") && $("#conndel").addEventListener("click", async () => { try{ await fetch("/me/connections", {method:"DELETE", headers: authHeaders()}); }catch(e){} refreshConnStatus(); });
