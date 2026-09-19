@@ -3495,7 +3495,7 @@ function jobsMarkup(d){
     const dept = j.department?`<span class="ppl-tag">${esc(j.department)}</span>`:"";
     const jref = j.id || ((j.company||"")+"|"+(j.title||"")+"|"+(j.location||""));
     window.JOBS_INDEX = window.JOBS_INDEX || {}; window.JOBS_INDEX[String(jref)] = j;
-    const apply = j.url?`<button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="One flow, right here: your fit, every application answer planned from your profile, résumé & cover letter, then fill it in your browser — you submit">🚀 Apply</button><a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer" title="Go straight to the company's apply page">Apply directly ↗</a>`:"";
+    const apply = j.url?`<button type="button" class="ppl-lnk aa-apply" data-ref="${esc(String(jref))}" title="One flow, right here: your fit, every application answer planned from your profile, résumé & cover letter, then fill it in your browser — you submit">🚀 Apply</button><button type="button" class="ppl-lnk job-quickprep" data-ref="${esc(String(jref))}" title="Prepare this application for the desktop app / extension to fill — no modal, adds it to your fill queue">📥 Prep for desktop</button><a class="ppl-lnk lnk-linkedin" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer" title="Go straight to the company's apply page">Apply directly ↗</a>`:"";
     const intro = j.company ? `<button type="button" class="ppl-lnk job-intro" data-ref="${esc(String(jref))}" title="Who you know at this company (your LinkedIn export) and likely hiring managers from public data">🤝 Intro path</button>` : "";
     // PREPARE FOR THIS ONE (voices): what practitioners say about a role like this. Lazy — one
     // request per card, only when a reader asks, because most cards are never opened.
@@ -9392,7 +9392,24 @@ async function markSubmitted(id){
   try{ const r = await fetch(`/me/applications/${id}/mark-submitted`, {method:"POST", headers: authHeaders()}); if(r.ok){ const n = $("#apsubnote"); if(n) n.textContent = "Recorded as submitted by you."; renderApplications(); if(typeof refreshApplied === "function") refreshApplied(); APPLY.appId = id; setTimeout(apLoadPlan, 300); } }catch(e){}
 }
 async function saveApplicationAnswers(id){ return apSaveNow(id); }   // kept: answers now save themselves
+// ONE-CLICK PREPARE for the desktop app / extension: build the plan server-side (no modal) and add it to
+// the fill queue the desktop app reads. Feedback lands in the card's own prep box.
+async function quickPrepare(ref){
+  const j = (window.JOBS_INDEX||{})[ref]; if(!j || !j.url) return;
+  const box = document.querySelector('.js-prepbox[data-ref="'+CSS.escape(String(ref))+'"]');
+  if(box) box.innerHTML = '<div class="ppl-cov" style="margin-top:.45rem;">Preparing…</div>';
+  try{
+    const r = await fetch("/me/applications", {method:"POST", headers:{"content-type":"application/json", ...authHeaders()}, body: JSON.stringify({job_url:j.url, job_ref:String(ref), company:(j.company||"").replace(/_/g," "), title:j.title||""})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ if(box) box.innerHTML = '<div class="ppl-cov" style="margin-top:.45rem;">'+esc(d.detail||"Couldn't prepare.")+(/résumé|resume|profile/i.test(d.detail||"")?' <a href="#" onclick="event.preventDefault(); $(\'#appmodal\').hidden=true; openAccount&&openAccount();">Set up your Apply profile</a>':"")+'</div>'; return; }
+    const msg = d.already_applied ? "Already applied to this posting." : (d.status==="needs_you" ? (d.reason||"This posting can't be auto-prepared — apply on the site.") : "✓ Ready to fill — open the Roster Apply desktop app (or extension) and it's in your queue.");
+    if(box) box.innerHTML = '<div class="ppl-cov" style="margin-top:.45rem;border-left-color:var(--gold);">'+esc(msg)+'</div>';
+    if(typeof refreshApplied === "function") refreshApplied();
+  }catch(e){ if(box) box.innerHTML = '<div class="ppl-cov" style="margin-top:.45rem;">Couldn\'t prepare — try again.</div>'; }
+}
 document.addEventListener("click", (e)=>{
+  const qp = e.target.closest(".job-quickprep");
+  if(qp){ e.preventDefault(); e.stopPropagation(); quickPrepare(qp.dataset.ref); return; }
   const pb = e.target.closest(".job-prep, .job-apply");
   if(pb){ e.preventDefault(); e.stopPropagation(); openApplyFlow({ref: pb.dataset.ref}); return; }
   const tb = e.target.closest("#aptabs .aptab");

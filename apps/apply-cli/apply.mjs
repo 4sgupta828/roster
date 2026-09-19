@@ -12,28 +12,28 @@
 //   roster-apply plan <apply-url> [--fill]  ask Roster to plan a URL, optionally fill it now
 // Env: ROSTER_TOKEN, ROSTER_BASE (default prod).
 import { cfg, saveCfg, api, getResume } from "./lib/api.mjs";
-import { connectBrowser, fillApp } from "./lib/drive.mjs";
+import { connectBrowser, fillApp, readyToFill } from "./lib/drive.mjs";
 
 async function fillFlow(id, c, flags) {
   const app = await (await api(`/me/applications/${id}`, c)).json();
   const resume = await getResume(c);
   const cdp = await connectBrowser();
-  try { await fillApp(cdp, app, resume, { submit: flags.has("--submit") }, console.log); }
+  try { await fillApp(cdp, app, resume, { submit: flags.has("--submit") }, console.log, c); }
   finally { cdp.close(); console.log("\nThe browser stays open — review and submit. Close it when you're done."); }
 }
 
 async function batchFlow(ids, c, flags) {
   const all = (await (await api("/me/applications", c)).json()).applications || [];
-  const open = all.filter(a => a.status !== "submitted");
+  const open = readyToFill(all);
   const want = ids.length ? open.filter(a => ids.includes(String(a.id))) : open;
-  if (!want.length) { console.log(ids.length ? "None of those ids are prepared/unsubmitted." : 'Nothing prepared. Click 🚀 Apply on jobs in Roster first.'); return; }
+  if (!want.length) { console.log(ids.length ? "None of those ids are ready to fill." : 'Nothing ready to fill. Click 🚀 Apply on jobs in Roster to prepare them first.'); return; }
   console.log(`Batch: ${want.length} application(s)${flags.has("--submit") ? " (submitting each unless flagged)" : " — fill only, you submit"}.`);
   const resume = await getResume(c);
   const cdp = await connectBrowser();
   try {
     let filled = 0, needs = 0;
     for (const row of want) {
-      try { const app = await (await api(`/me/applications/${row.id}`, c)).json(); const r = await fillApp(cdp, app, resume, { submit: flags.has("--submit") }, console.log); filled += r.filled; needs += r.needs; }
+      try { const app = await (await api(`/me/applications/${row.id}`, c)).json(); const r = await fillApp(cdp, app, resume, { submit: flags.has("--submit") }, console.log, c); filled += r.filled; needs += r.needs; }
       catch (e) { console.log(`  [#${row.id}] error: ${e.message}`); }
       await new Promise(r => setTimeout(r, 900));
     }
@@ -54,8 +54,8 @@ async function main() {
     if (cmd === "login") { if (!args[0]) throw new Error("Usage: roster-apply login <token>"); await saveCfg({ token: args[0] }); console.log("Saved. Try: roster-apply list  (or run with no arguments for the app)"); }
     else if (cmd === "list") {
       const apps = (await (await api("/me/applications", c)).json()).applications || [];
-      const open = apps.filter(a => a.status !== "submitted");
-      if (!open.length) { console.log('No prepared applications. In Roster, click 🚀 Apply on a job first.'); return; }
+      const open = readyToFill(apps);
+      if (!open.length) { console.log('Nothing ready to fill. In Roster, click 🚀 Apply on a job to prepare it first.'); return; }
       for (const a of open) console.log(`  ${a.id}\t${a.status}\t${a.title || "role"} @ ${a.company || ""}`);
       console.log("\nFill one: roster-apply fill <id>   ·   fill all: roster-apply batch   ·   or run with no args for the app");
     }

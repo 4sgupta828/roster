@@ -8,7 +8,7 @@ import { createServer } from "node:http";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { cfg, saveCfg, api, getResume } from "./api.mjs";
-import { connectBrowser, fillApp } from "./drive.mjs";
+import { connectBrowser, fillApp, readyToFill } from "./drive.mjs";
 
 const PAGE = (key) => `<!doctype html><html><head><meta charset="utf-8"><title>Roster Apply</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -52,8 +52,8 @@ async function refresh(){try{const d=await call("/api/state");render(d);}catch(e
 function render(d){
  $("#connect").hidden=d.connected; $("#panel").hidden=!d.connected;
  if(!d.connected)return;
- $("#count").textContent=(d.apps||[]).length+" prepared application"+((d.apps||[]).length===1?"":"s");
- $("#apps").innerHTML=(d.apps||[]).length?"":'<div class="muted" style="padding:8px 0">Nothing prepared yet. In Roster, click 🚀 Apply on a job, then Refresh.</div>';
+ $("#count").textContent=(d.apps||[]).length+" ready to fill";
+ $("#apps").innerHTML=(d.apps||[]).length?"":'<div class="muted" style="padding:8px 0">Nothing ready to fill. In Roster, click 🚀 Apply on a job to prepare it, then Refresh.</div>';
  for(const a of d.apps||[]){const el=document.createElement("div");el.className="app";
    el.innerHTML='<div><b>'+esc(a.title||"role")+'</b> <span class="muted">@ '+esc(a.company||"")+' · '+esc(a.status)+'</span></div>';
    const b=document.createElement("button");b.textContent="Fill";b.onclick=()=>fill(a.id);el.appendChild(b);$("#apps").appendChild(el);}
@@ -78,7 +78,7 @@ export async function startGui() {
   const browser = async () => { if (!cdp) { cdp = await connectBrowser(); } return cdp; };
   const state = async () => {
     if (!c.token) return { connected: false };
-    try { const apps = (await (await api("/me/applications", c)).json()).applications || []; return { connected: true, apps: apps.filter(a => a.status !== "submitted") }; }
+    try { const apps = (await (await api("/me/applications", c)).json()).applications || []; return { connected: true, apps: readyToFill(apps) }; }
     catch (e) { return { connected: false, error: e.message }; }
   };
   const json = (res, code, obj) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
@@ -102,12 +102,12 @@ export async function startGui() {
           const cdpc = await browser();
           if (url === "/api/fill") {
             const app = await (await api(`/me/applications/${body.id}`, c)).json();
-            return json(res, 200, await fillApp(cdpc, app, resume, { submit: !!body.submit }));
+            return json(res, 200, await fillApp(cdpc, app, resume, { submit: !!body.submit }, () => {}, c));
           }
           const apps = (await (await api("/me/applications", c)).json()).applications || [];
-          const open = apps.filter(a => a.status !== "submitted");
+          const open = readyToFill(apps);
           const t = { total: 0, needs: 0 };
-          for (const row of open) { const app = await (await api(`/me/applications/${row.id}`, c)).json(); const r = await fillApp(cdpc, app, resume, { submit: !!body.submit }); t.total += r.filled; t.needs += r.needs; await new Promise(r => setTimeout(r, 900)); }
+          for (const row of open) { const app = await (await api(`/me/applications/${row.id}`, c)).json(); const r = await fillApp(cdpc, app, resume, { submit: !!body.submit }, () => {}, c); t.total += r.filled; t.needs += r.needs; await new Promise(r => setTimeout(r, 900)); }
           return json(res, 200, t);
         } finally { busy = false; }
       }
