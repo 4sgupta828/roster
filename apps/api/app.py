@@ -5652,63 +5652,6 @@ h1{{font-family:var(--display);font-weight:700;font-size:30px;margin:.2rem 0 .1r
             await conn.close()
         return {"entity_id": eid, "vector": v, "facets": f, "entity": e, "status": "removed from search"}
 
-    @app.post("/admin/db/minimize")
-    async def admin_db_minimize(body: dict, x_admin_token: str = Header(default="")) -> dict:
-        """TEMPORARY maintenance (admin token): strip the DB down to the live-only app.
-
-        DRY by default — returns a full public-table inventory (approx rows + total size) + FK edges so
-        the caller can decide what to drop. To TRUNCATE, pass {"confirm":"MINIMIZE-NOW","truncate":[...]}
-        with an EXPLICIT table list. Fail-safe: account/saved-map tables + alembic_version are hard-
-        PROTECTED and can never be truncated here; unknown table names abort; no CASCADE (an unlisted
-        FK-referencer aborts the whole statement → nothing deleted). Truncate runs in one transaction."""
-        if not _admin_ok(x_admin_token):
-            raise HTTPException(status_code=401, detail="admin token required")
-        dsn = os.environ.get("ROSTER_CORPUS_DSN")
-        if not dsn:
-            raise HTTPException(status_code=503, detail="needs ROSTER_CORPUS_DSN")
-        PROTECTED = {"alembic_version", "roster_user", "roster_user_token", "roster_user_pref",
-                     "roster_feedback", "roster_research_session",
-                     "rs_map", "rs_map_revision", "rs_map_review"}
-        import asyncpg
-        conn = await asyncpg.connect(dsn)
-        try:
-            inv_rows = await conn.fetch(
-                "SELECT c.relname AS table, c.reltuples::bigint AS approx_rows, "
-                "       pg_total_relation_size(c.oid) AS bytes, "
-                "       pg_size_pretty(pg_total_relation_size(c.oid)) AS size "
-                "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
-                "WHERE n.nspname='public' AND c.relkind='r' "
-                "ORDER BY pg_total_relation_size(c.oid) DESC")
-            inventory = [dict(r) for r in inv_rows]
-            existing = {r["table"] for r in inventory}
-            fk_rows = await conn.fetch(
-                "SELECT conrelid::regclass::text AS child, confrelid::regclass::text AS parent "
-                "FROM pg_constraint WHERE contype='f' ORDER BY 2,1")
-            fk_edges = [dict(r) for r in fk_rows]
-            confirm = str(body.get("confirm") or "")
-            want = [str(t).strip() for t in (body.get("truncate") or []) if str(t).strip()]
-            if confirm != "MINIMIZE-NOW" or not want:
-                return {"mode": "dry", "inventory": inventory, "fk_edges": fk_edges,
-                        "protected": sorted(PROTECTED),
-                        "note": "pass {'confirm':'MINIMIZE-NOW','truncate':[...]} to execute"}
-            bad_protected = [t for t in want if t in PROTECTED]
-            missing = [t for t in want if t not in existing]
-            if bad_protected or missing:
-                raise HTTPException(status_code=400, detail={"protected_refused": bad_protected,
-                                                             "not_found": missing})
-            quoted = ", ".join('"' + t.replace('"', '""') + '"' for t in want)
-            before = {r["table"]: r["approx_rows"] for r in inventory}
-            async with conn.transaction():
-                await conn.execute(f"TRUNCATE {quoted} RESTART IDENTITY")  # noqa: S608 — validated idents
-            after_rows = await conn.fetch(
-                "SELECT relname AS table, n_live_tup AS approx_rows FROM pg_stat_user_tables "
-                "WHERE relname = ANY($1::text[]) ORDER BY relname", sorted(PROTECTED))
-            return {"mode": "executed", "truncated": want,
-                    "approx_rows_before": {t: before.get(t) for t in want},
-                    "kept_tables_after": [dict(r) for r in after_rows]}
-        finally:
-            await conn.close()
-
     @app.get("/admin/schema/{table}")
     async def admin_schema(table: str, x_admin_token: str = Header(default="")) -> dict:
         """READ-ONLY schema introspection (admin token) — columns + indexes for one allowlisted table.
