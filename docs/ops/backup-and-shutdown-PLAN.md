@@ -1,6 +1,12 @@
 # PLAN: Slim Roster to a single-server, minimal-DB app (no backup)
 
-**Status: PLAN — awaiting DB access to execute. Revised 2026-09-23.**
+**Status: ✅ DONE 2026-09-23.** Worker service deleted; API set lean (`ROSTER_INGEST_IN_API=false`);
+DB truncated (20 tables) from ~44 GB of tables to **68.9 MB** (disk 48 GB → **1.29 GB** via
+`railway metrics`); accounts + saved Talent Maps + apply/product tables all kept. Executed via a
+temporary token-guarded `POST /admin/db/minimize` endpoint (commits cf2da61 add / 52b109d remove),
+since `railway ssh` and TCP-proxy are blocked for the agent on this account. Details in memory
+`roster-minimized-live-only`. Verify a live people/jobs search when convenient; `railway volume list`
+gauge lags (~48 GB) — trust `railway metrics` disk (1.29 GB).
 
 Owner's decision (2026-09-23): search is now served **live by Exa/PDL**, so the downloaded index is
 disposable. Goal: **one server, minimal DB.** Drop the async worker; **delete the downloaded people +
